@@ -9,34 +9,30 @@ import (
 	"time"
 
 	arrowpb "github.com/open-telemetry/otel-arrow/api/experimental/arrow/v1"
-	"google.golang.org/grpc"
-
 	"github.com/open-telemetry/otel-arrow/collector/compression/zstd"
-	"github.com/open-telemetry/otel-arrow/collector/exporter/otelarrowexporter/internal/arrow"
 	"github.com/open-telemetry/otel-arrow/collector/netstats"
 	"go.opentelemetry.io/collector/component"
 	"go.opentelemetry.io/collector/config/configcompression"
 	"go.opentelemetry.io/collector/config/configgrpc"
-	"go.opentelemetry.io/collector/config/configretry"
 	"go.opentelemetry.io/collector/config/configopaque"
+	"go.opentelemetry.io/collector/config/configretry"
 	"go.opentelemetry.io/collector/consumer"
 	"go.opentelemetry.io/collector/exporter"
 	"go.opentelemetry.io/collector/exporter/exporterhelper"
-)
+	"google.golang.org/grpc"
 
-const (
-	// The value of "type" key in configuration.
-	typeStr = "otelarrow"
+	"github.com/open-telemetry/otel-arrow/collector/exporter/otelarrowexporter/internal/arrow"
+	"github.com/open-telemetry/otel-arrow/collector/exporter/otelarrowexporter/internal/metadata"
 )
 
 // NewFactory creates a factory for OTLP exporter.
 func NewFactory() exporter.Factory {
 	return exporter.NewFactory(
-		typeStr,
+		metadata.Type,
 		createDefaultConfig,
-		exporter.WithTraces(createTracesExporter, component.StabilityLevelStable),
-		exporter.WithMetrics(createMetricsExporter, component.StabilityLevelStable),
-		exporter.WithLogs(createLogsExporter, component.StabilityLevelBeta),
+		exporter.WithTraces(createTracesExporter, metadata.TracesStability),
+		exporter.WithMetrics(createMetricsExporter, metadata.MetricsStability),
+		exporter.WithLogs(createLogsExporter, metadata.LogsStability),
 	)
 }
 
@@ -57,11 +53,12 @@ func createDefaultConfig() component.Config {
 			// destination.
 			BalancerName: "round_robin",
 		},
-		Arrow: ArrowSettings{
+		Arrow: ArrowConfig{
 			NumStreams:        runtime.NumCPU(),
 			MaxStreamLifetime: time.Hour,
 
-			Zstd: zstd.DefaultEncoderConfig(),
+			Zstd:        zstd.DefaultEncoderConfig(),
+			Prioritizer: arrow.DefaultPrioritizer,
 
 			// PayloadCompression is off by default because gRPC
 			// compression is on by default, above.
@@ -70,14 +67,14 @@ func createDefaultConfig() component.Config {
 	}
 }
 
-func (oce *baseExporter) helperOptions() []exporterhelper.Option {
+func (exp *baseExporter) helperOptions() []exporterhelper.Option {
 	return []exporterhelper.Option{
 		exporterhelper.WithCapabilities(consumer.Capabilities{MutatesData: false}),
-		exporterhelper.WithTimeout(oce.config.TimeoutSettings),
-		exporterhelper.WithRetry(oce.config.RetryConfig),
-		exporterhelper.WithQueue(oce.config.QueueSettings),
-		exporterhelper.WithStart(oce.start),
-		exporterhelper.WithShutdown(oce.shutdown),
+		exporterhelper.WithTimeout(exp.config.TimeoutSettings),
+		exporterhelper.WithRetry(exp.config.RetryConfig),
+		exporterhelper.WithQueue(exp.config.QueueSettings),
+		exporterhelper.WithStart(exp.start),
+		exporterhelper.WithShutdown(exp.shutdown),
 	}
 }
 
@@ -91,7 +88,7 @@ var (
 	arrowLogsMethod    = gRPCName(arrowpb.ArrowLogsService_ServiceDesc)
 )
 
-func createArrowTracesStream(cfg *Config, conn *grpc.ClientConn) arrow.StreamClientFunc {
+func createArrowTracesStream(conn *grpc.ClientConn) arrow.StreamClientFunc {
 	return arrow.MakeAnyStreamClient(arrowTracesMethod, arrowpb.NewArrowTracesServiceClient(conn).ArrowTraces)
 }
 
@@ -100,17 +97,17 @@ func createTracesExporter(
 	set exporter.CreateSettings,
 	cfg component.Config,
 ) (exporter.Traces, error) {
-	oce, err := newExporter(cfg, set, createArrowTracesStream)
+	exp, err := newExporter(cfg, set, createArrowTracesStream)
 	if err != nil {
 		return nil, err
 	}
-	return exporterhelper.NewTracesExporter(ctx, oce.settings, oce.config,
-		oce.pushTraces,
-		oce.helperOptions()...,
+	return exporterhelper.NewTracesExporter(ctx, exp.settings, exp.config,
+		exp.pushTraces,
+		exp.helperOptions()...,
 	)
 }
 
-func createArrowMetricsStream(cfg *Config, conn *grpc.ClientConn) arrow.StreamClientFunc {
+func createArrowMetricsStream(conn *grpc.ClientConn) arrow.StreamClientFunc {
 	return arrow.MakeAnyStreamClient(arrowMetricsMethod, arrowpb.NewArrowMetricsServiceClient(conn).ArrowMetrics)
 }
 
@@ -119,17 +116,17 @@ func createMetricsExporter(
 	set exporter.CreateSettings,
 	cfg component.Config,
 ) (exporter.Metrics, error) {
-	oce, err := newExporter(cfg, set, createArrowMetricsStream)
+	exp, err := newExporter(cfg, set, createArrowMetricsStream)
 	if err != nil {
 		return nil, err
 	}
-	return exporterhelper.NewMetricsExporter(ctx, oce.settings, oce.config,
-		oce.pushMetrics,
-		oce.helperOptions()...,
+	return exporterhelper.NewMetricsExporter(ctx, exp.settings, exp.config,
+		exp.pushMetrics,
+		exp.helperOptions()...,
 	)
 }
 
-func createArrowLogsStream(cfg *Config, conn *grpc.ClientConn) arrow.StreamClientFunc {
+func createArrowLogsStream(conn *grpc.ClientConn) arrow.StreamClientFunc {
 	return arrow.MakeAnyStreamClient(arrowLogsMethod, arrowpb.NewArrowLogsServiceClient(conn).ArrowLogs)
 }
 
@@ -138,12 +135,12 @@ func createLogsExporter(
 	set exporter.CreateSettings,
 	cfg component.Config,
 ) (exporter.Logs, error) {
-	oce, err := newExporter(cfg, set, createArrowLogsStream)
+	exp, err := newExporter(cfg, set, createArrowLogsStream)
 	if err != nil {
 		return nil, err
 	}
-	return exporterhelper.NewLogsExporter(ctx, oce.settings, oce.config,
-		oce.pushLogs,
-		oce.helperOptions()...,
+	return exporterhelper.NewLogsExporter(ctx, exp.settings, exp.config,
+		exp.pushLogs,
+		exp.helperOptions()...,
 	)
 }

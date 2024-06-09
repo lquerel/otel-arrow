@@ -9,16 +9,9 @@ import (
 	"sync"
 
 	arrowpb "github.com/open-telemetry/otel-arrow/api/experimental/arrow/v1"
-	arrowRecord "github.com/open-telemetry/otel-arrow/pkg/otel/arrow_record"
-	"go.uber.org/zap"
-	"google.golang.org/grpc"
-
 	"github.com/open-telemetry/otel-arrow/collector/compression/zstd"
 	"github.com/open-telemetry/otel-arrow/collector/netstats"
-	"github.com/open-telemetry/otel-arrow/collector/receiver/otelarrowreceiver/internal/arrow"
-	"github.com/open-telemetry/otel-arrow/collector/receiver/otelarrowreceiver/internal/logs"
-	"github.com/open-telemetry/otel-arrow/collector/receiver/otelarrowreceiver/internal/metrics"
-	"github.com/open-telemetry/otel-arrow/collector/receiver/otelarrowreceiver/internal/trace"
+	arrowRecord "github.com/open-telemetry/otel-arrow/pkg/otel/arrow_record"
 	"go.opentelemetry.io/collector/component"
 	"go.opentelemetry.io/collector/config/configgrpc"
 	"go.opentelemetry.io/collector/consumer"
@@ -28,6 +21,14 @@ import (
 	"go.opentelemetry.io/collector/pdata/ptrace/ptraceotlp"
 	"go.opentelemetry.io/collector/receiver"
 	"go.opentelemetry.io/collector/receiver/receiverhelper"
+	"go.uber.org/zap"
+	"google.golang.org/grpc"
+
+	"github.com/open-telemetry/otel-arrow/collector/admission"
+	"github.com/open-telemetry/otel-arrow/collector/receiver/otelarrowreceiver/internal/arrow"
+	"github.com/open-telemetry/otel-arrow/collector/receiver/otelarrowreceiver/internal/logs"
+	"github.com/open-telemetry/otel-arrow/collector/receiver/otelarrowreceiver/internal/metrics"
+	"github.com/open-telemetry/otel-arrow/collector/receiver/otelarrowreceiver/internal/trace"
 )
 
 // otelArrowReceiver is the type that exposes Trace and Metrics reception.
@@ -76,7 +77,7 @@ func newOTelArrowReceiver(cfg *Config, set receiver.CreateSettings) (*otelArrowR
 	return r, nil
 }
 
-func (r *otelArrowReceiver) startGRPCServer(cfg configgrpc.ServerConfig, host component.Host) error {
+func (r *otelArrowReceiver) startGRPCServer(cfg configgrpc.ServerConfig, _ component.Host) error {
 	r.settings.Logger.Info("Starting GRPC server", zap.String("endpoint", cfg.NetAddr.Endpoint))
 
 	gln, err := cfg.NetAddr.Listen(context.Background())
@@ -101,7 +102,7 @@ func (r *otelArrowReceiver) startProtocolServers(host component.Host) error {
 	if r.netReporter != nil {
 		serverOpts = append(serverOpts, grpc.StatsHandler(r.netReporter.Handler()))
 	}
-	r.serverGRPC, err = r.cfg.GRPC.ToServer(host, r.settings.TelemetrySettings, serverOpts...)
+	r.serverGRPC, err = r.cfg.GRPC.ToServer(context.Background(), host, r.settings.TelemetrySettings, serverOpts...)
 	if err != nil {
 		return err
 	}
@@ -113,6 +114,7 @@ func (r *otelArrowReceiver) startProtocolServers(host component.Host) error {
 			return err
 		}
 	}
+	bq :=  admission.NewBoundedQueue(int64(r.cfg.Arrow.AdmissionLimitMiB<<20), r.cfg.Arrow.WaiterLimit)
 
 	r.arrowReceiver, err = arrow.New(arrow.Consumers(r), r.settings, r.obsrepGRPC, r.cfg.GRPC, authServer, func() arrowRecord.ConsumerAPI {
 		var opts []arrowRecord.Option
@@ -124,7 +126,7 @@ func (r *otelArrowReceiver) startProtocolServers(host component.Host) error {
 			opts = append(opts, arrowRecord.WithMeterProvider(r.settings.TelemetrySettings.MeterProvider, r.settings.TelemetrySettings.MetricsLevel))
 		}
 		return arrowRecord.NewConsumer(opts...)
-	}, r.netReporter)
+	}, bq, r.netReporter)
 
 	if err != nil {
 		return err
@@ -163,7 +165,7 @@ func (r *otelArrowReceiver) Start(_ context.Context, host component.Host) error 
 }
 
 // Shutdown is a method to turn off receiving.
-func (r *otelArrowReceiver) Shutdown(ctx context.Context) error {
+func (r *otelArrowReceiver) Shutdown(_ context.Context) error {
 	var err error
 
 	if r.serverGRPC != nil {
@@ -174,28 +176,16 @@ func (r *otelArrowReceiver) Shutdown(ctx context.Context) error {
 	return err
 }
 
-func (r *otelArrowReceiver) registerTraceConsumer(tc consumer.Traces) error {
-	if tc == nil {
-		return component.ErrNilNextConsumer
-	}
+func (r *otelArrowReceiver) registerTraceConsumer(tc consumer.Traces) {
 	r.tracesReceiver = trace.New(tc, r.obsrepGRPC)
-	return nil
 }
 
-func (r *otelArrowReceiver) registerMetricsConsumer(mc consumer.Metrics) error {
-	if mc == nil {
-		return component.ErrNilNextConsumer
-	}
+func (r *otelArrowReceiver) registerMetricsConsumer(mc consumer.Metrics) {
 	r.metricsReceiver = metrics.New(mc, r.obsrepGRPC)
-	return nil
 }
 
-func (r *otelArrowReceiver) registerLogsConsumer(lc consumer.Logs) error {
-	if lc == nil {
-		return component.ErrNilNextConsumer
-	}
+func (r *otelArrowReceiver) registerLogsConsumer(lc consumer.Logs) {
 	r.logsReceiver = logs.New(lc, r.obsrepGRPC)
-	return nil
 }
 
 var _ arrow.Consumers = &otelArrowReceiver{}

@@ -6,6 +6,7 @@ package otelarrowexporter
 import (
 	"context"
 	"fmt"
+	"io"
 	"net"
 	"net/http"
 	"path/filepath"
@@ -17,22 +18,10 @@ import (
 
 	arrowpb "github.com/open-telemetry/otel-arrow/api/experimental/arrow/v1"
 	arrowpbMock "github.com/open-telemetry/otel-arrow/api/experimental/arrow/v1/mock"
+	"github.com/open-telemetry/otel-arrow/collector/testdata"
 	arrowRecord "github.com/open-telemetry/otel-arrow/pkg/otel/arrow_record"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
-	"go.uber.org/mock/gomock"
-	"go.uber.org/zap/zaptest"
-	"golang.org/x/net/http2/hpack"
-	"google.golang.org/genproto/googleapis/rpc/errdetails"
-	"google.golang.org/grpc"
-	"google.golang.org/grpc/codes"
-	"google.golang.org/grpc/credentials"
-	"google.golang.org/grpc/metadata"
-	"google.golang.org/grpc/status"
-	"google.golang.org/protobuf/types/known/durationpb"
-
-	"github.com/open-telemetry/otel-arrow/collector/exporter/otelarrowexporter/internal/arrow/grpcmock"
-	"github.com/open-telemetry/otel-arrow/collector/testdata"
 	"go.opentelemetry.io/collector/client"
 	"go.opentelemetry.io/collector/component"
 	"go.opentelemetry.io/collector/component/componenttest"
@@ -50,6 +39,18 @@ import (
 	"go.opentelemetry.io/collector/pdata/pmetric/pmetricotlp"
 	"go.opentelemetry.io/collector/pdata/ptrace"
 	"go.opentelemetry.io/collector/pdata/ptrace/ptraceotlp"
+	"go.uber.org/mock/gomock"
+	"go.uber.org/zap/zaptest"
+	"golang.org/x/net/http2/hpack"
+	"google.golang.org/genproto/googleapis/rpc/errdetails"
+	"google.golang.org/grpc"
+	"google.golang.org/grpc/codes"
+	"google.golang.org/grpc/credentials"
+	"google.golang.org/grpc/metadata"
+	"google.golang.org/grpc/status"
+	"google.golang.org/protobuf/types/known/durationpb"
+
+	"github.com/open-telemetry/otel-arrow/collector/exporter/otelarrowexporter/internal/arrow/grpcmock"
 )
 
 type mockReceiver struct {
@@ -294,7 +295,7 @@ func TestSendTraces(t *testing.T) {
 
 	// Start an OTLP exporter and point to the receiver.
 	factory := NewFactory()
-	authID := component.NewID("testauth")
+	authID := component.NewID(component.MustNewType("testauth"))
 	expectedHeader := []string{"header-value"}
 
 	cfg := factory.CreateDefaultConfig().(*Config)
@@ -303,7 +304,7 @@ func TestSendTraces(t *testing.T) {
 	cfg.QueueSettings.Enabled = false
 	cfg.ClientConfig = configgrpc.ClientConfig{
 		Endpoint: ln.Addr().String(),
-		TLSSetting: configtls.TLSClientSetting{
+		TLSSetting: configtls.ClientConfig{
 			Insecure: true,
 		},
 		Headers: map[string]configopaque.String{
@@ -435,7 +436,7 @@ func TestSendTracesWhenEndpointHasHttpScheme(t *testing.T) {
 			useTLS: false,
 			scheme: "http://",
 			gRPCClientSettings: configgrpc.ClientConfig{
-				TLSSetting: configtls.TLSClientSetting{
+				TLSSetting: configtls.ClientConfig{
 					Insecure: true,
 				},
 			},
@@ -506,9 +507,10 @@ func TestSendMetrics(t *testing.T) {
 	// Disable queuing to ensure that we execute the request when calling ConsumeMetrics
 	// otherwise we will not see any errors.
 	cfg.QueueSettings.Enabled = false
+	cfg.RetryConfig.Enabled = false
 	cfg.ClientConfig = configgrpc.ClientConfig{
 		Endpoint: ln.Addr().String(),
-		TLSSetting: configtls.TLSClientSetting{
+		TLSSetting: configtls.ClientConfig{
 			Insecure: true,
 		},
 		Headers: map[string]configopaque.String{
@@ -559,8 +561,8 @@ func TestSendMetrics(t *testing.T) {
 	expectedHeader := []string{"header-value"}
 
 	// Verify received metrics.
-	assert.EqualValues(t, 2, rcv.requestCount.Load())
-	assert.EqualValues(t, 4, rcv.totalItems.Load())
+	assert.EqualValues(t, uint32(2), rcv.requestCount.Load())
+	assert.EqualValues(t, uint32(4), rcv.totalItems.Load())
 	assert.EqualValues(t, md, rcv.getLastRequest())
 
 	mdata := rcv.getMetadata()
@@ -607,7 +609,7 @@ func TestSendTraceDataServerDownAndUp(t *testing.T) {
 	cfg.QueueSettings.Enabled = false
 	cfg.ClientConfig = configgrpc.ClientConfig{
 		Endpoint: ln.Addr().String(),
-		TLSSetting: configtls.TLSClientSetting{
+		TLSSetting: configtls.ClientConfig{
 			Insecure: true,
 		},
 		// Need to wait for every request blocking until either request timeouts or succeed.
@@ -668,7 +670,7 @@ func TestSendTraceDataServerStartWhileRequest(t *testing.T) {
 	cfg := factory.CreateDefaultConfig().(*Config)
 	cfg.ClientConfig = configgrpc.ClientConfig{
 		Endpoint: ln.Addr().String(),
-		TLSSetting: configtls.TLSClientSetting{
+		TLSSetting: configtls.ClientConfig{
 			Insecure: true,
 		},
 	}
@@ -722,7 +724,7 @@ func TestSendTracesOnResourceExhaustion(t *testing.T) {
 	cfg.RetryConfig.InitialInterval = 0
 	cfg.ClientConfig = configgrpc.ClientConfig{
 		Endpoint: ln.Addr().String(),
-		TLSSetting: configtls.TLSClientSetting{
+		TLSSetting: configtls.ClientConfig{
 			Insecure: true,
 		},
 	}
@@ -805,7 +807,7 @@ func TestSendLogData(t *testing.T) {
 	cfg.QueueSettings.Enabled = false
 	cfg.ClientConfig = configgrpc.ClientConfig{
 		Endpoint: ln.Addr().String(),
-		TLSSetting: configtls.TLSClientSetting{
+		TLSSetting: configtls.ClientConfig{
 			Insecure: true,
 		},
 	}
@@ -905,12 +907,12 @@ func testSendArrowTraces(t *testing.T, clientWaitForReady, streamServiceAvailabl
 
 	// Start an OTel-Arrow exporter and point to the receiver.
 	factory := NewFactory()
-	authID := component.NewID("testauth")
+	authID := component.NewID(component.MustNewType("testauth"))
 	expectedHeader := []string{"arrow-ftw"}
 	cfg := factory.CreateDefaultConfig().(*Config)
 	cfg.ClientConfig = configgrpc.ClientConfig{
 		Endpoint: ln.Addr().String(),
-		TLSSetting: configtls.TLSClientSetting{
+		TLSSetting: configtls.ClientConfig{
 			Insecure: true,
 		},
 		WaitForReady: clientWaitForReady,
@@ -922,7 +924,7 @@ func testSendArrowTraces(t *testing.T, clientWaitForReady, streamServiceAvailabl
 		},
 	}
 	// Arrow client is enabled, but the server doesn't support it.
-	cfg.Arrow = ArrowSettings{
+	cfg.Arrow = ArrowConfig{
 		NumStreams:        1,
 		MaxStreamLifetime: 100 * time.Second,
 	}
@@ -932,10 +934,6 @@ func testSendArrowTraces(t *testing.T, clientWaitForReady, streamServiceAvailabl
 	exp, err := factory.CreateTracesExporter(context.Background(), set, cfg)
 	require.NoError(t, err)
 	require.NotNil(t, exp)
-
-	defer func() {
-		assert.NoError(t, exp.Shutdown(context.Background()))
-	}()
 
 	type isUserCall struct{}
 
@@ -954,6 +952,15 @@ func testSendArrowTraces(t *testing.T, clientWaitForReady, streamServiceAvailabl
 	assert.NoError(t, exp.Start(context.Background(), host))
 
 	rcv, _ := otelArrowTracesReceiverOnGRPCServer(ln, false)
+
+	defer func() {
+		// Shutdown before GracefulStop, because otherwise we
+		// wait for a full stream lifetime instead of closing
+		// after requests are served.
+		assert.NoError(t, exp.Shutdown(context.Background()))
+		rcv.srv.GracefulStop()
+	}()
+
 	if streamServiceAvailable {
 		rcv.startStreamMockArrowTraces(t, okStatusFor)
 	}
@@ -1023,7 +1030,12 @@ func (r *mockTracesReceiver) startStreamMockArrowTraces(t *testing.T, statusFor 
 			if status, ok := status.FromError(err); ok && status.Code() == codes.Canceled {
 				break
 			}
-			require.NoError(t, err)
+			if err != nil {
+				// No errors are allowed, except EOF.
+				require.Equal(t, io.EOF, err)
+				break
+			}
+
 			got, err := consumer.TracesFrom(records)
 			require.NoError(t, err)
 
@@ -1075,13 +1087,13 @@ func TestSendArrowFailedTraces(t *testing.T) {
 	cfg := factory.CreateDefaultConfig().(*Config)
 	cfg.ClientConfig = configgrpc.ClientConfig{
 		Endpoint: ln.Addr().String(),
-		TLSSetting: configtls.TLSClientSetting{
+		TLSSetting: configtls.ClientConfig{
 			Insecure: true,
 		},
 		WaitForReady: true,
 	}
 	// Arrow client is enabled, but the server doesn't support it.
-	cfg.Arrow = ArrowSettings{
+	cfg.Arrow = ArrowConfig{
 		NumStreams:        1,
 		MaxStreamLifetime: 100 * time.Second,
 	}
@@ -1093,15 +1105,16 @@ func TestSendArrowFailedTraces(t *testing.T) {
 	require.NoError(t, err)
 	require.NotNil(t, exp)
 
-	defer func() {
-		assert.NoError(t, exp.Shutdown(context.Background()))
-	}()
-
 	host := componenttest.NewNopHost()
 	assert.NoError(t, exp.Start(context.Background(), host))
 
 	rcv, _ := otelArrowTracesReceiverOnGRPCServer(ln, false)
 	rcv.startStreamMockArrowTraces(t, failedStatusFor)
+
+	defer func() {
+		assert.NoError(t, exp.Shutdown(context.Background()))
+		rcv.srv.GracefulStop()
+	}()
 
 	// Delay the server start, slightly.
 	go func() {
@@ -1136,7 +1149,7 @@ func TestUserDialOptions(t *testing.T) {
 	cfg := factory.CreateDefaultConfig().(*Config)
 	cfg.ClientConfig = configgrpc.ClientConfig{
 		Endpoint: ln.Addr().String(),
-		TLSSetting: configtls.TLSClientSetting{
+		TLSSetting: configtls.ClientConfig{
 			Insecure: true,
 		},
 		WaitForReady: true,

@@ -6,22 +6,25 @@ package otelarrowreceiver // import "github.com/open-telemetry/otel-arrow/collec
 import (
 	"context"
 
-	"github.com/open-telemetry/otel-arrow/collector/receiver/otelarrowreceiver/internal/metadata"
 	"github.com/open-telemetry/otel-arrow/collector/sharedcomponent"
 	"go.opentelemetry.io/collector/component"
 	"go.opentelemetry.io/collector/config/configgrpc"
 	"go.opentelemetry.io/collector/config/confignet"
 	"go.opentelemetry.io/collector/consumer"
 	"go.opentelemetry.io/collector/receiver"
+
+	"github.com/open-telemetry/otel-arrow/collector/receiver/otelarrowreceiver/internal/metadata"
 )
 
 const (
 	defaultGRPCEndpoint = "0.0.0.0:4317"
 
-	defaultMemoryLimitMiB = 128
+	defaultMemoryLimitMiB    = 128
+	defaultAdmissionLimitMiB = defaultMemoryLimitMiB / 2
+	defaultWaiterLimit       = 1000
 )
 
-// NewFactory creates a new OTLP receiver factory.
+// NewFactory creates a new OTel-Arrow receiver factory.
 func NewFactory() receiver.Factory {
 	return receiver.NewFactory(
 		metadata.Type,
@@ -38,13 +41,15 @@ func createDefaultConfig() component.Config {
 			GRPC: configgrpc.ServerConfig{
 				NetAddr: confignet.AddrConfig{
 					Endpoint:  defaultGRPCEndpoint,
-					Transport: "tcp",
+					Transport: confignet.TransportTypeTCP,
 				},
 				// We almost write 0 bytes, so no need to tune WriteBufferSize.
 				ReadBufferSize: 512 * 1024,
 			},
-			Arrow: ArrowSettings{
-				MemoryLimitMiB: defaultMemoryLimitMiB,
+			Arrow: ArrowConfig{
+				MemoryLimitMiB:    defaultMemoryLimitMiB,
+				AdmissionLimitMiB: defaultAdmissionLimitMiB,
+				WaiterLimit:       defaultWaiterLimit,
 			},
 		},
 	}
@@ -65,9 +70,7 @@ func createTraces(
 		return nil, err
 	}
 
-	if err = r.Unwrap().registerTraceConsumer(nextConsumer); err != nil {
-		return nil, err
-	}
+	r.Unwrap().registerTraceConsumer(nextConsumer)
 	return r, nil
 }
 
@@ -86,9 +89,7 @@ func createMetrics(
 		return nil, err
 	}
 
-	if err = r.Unwrap().registerMetricsConsumer(consumer); err != nil {
-		return nil, err
-	}
+	r.Unwrap().registerMetricsConsumer(consumer)
 	return r, nil
 }
 
@@ -107,13 +108,11 @@ func createLog(
 		return nil, err
 	}
 
-	if err = r.Unwrap().registerLogsConsumer(consumer); err != nil {
-		return nil, err
-	}
+	r.Unwrap().registerLogsConsumer(consumer)
 	return r, nil
 }
 
-// This is the map of already created OTLP receivers for particular configurations.
+// This is the map of already created OTel-Arrow receivers for particular configurations.
 // We maintain this map because the Factory is asked trace and metric receivers separately
 // when it gets CreateTracesReceiver() and CreateMetricsReceiver() but they must not
 // create separate objects, they must use one otelArrowReceiver object per configuration.

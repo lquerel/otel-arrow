@@ -5,32 +5,21 @@ package otelarrowreceiver
 
 import (
 	"bytes"
-	"compress/gzip"
 	"context"
 	"errors"
 	"fmt"
 	"net"
+	"strconv"
 	"sync"
 	"testing"
 	"time"
 
-	"github.com/klauspost/compress/zstd"
 	arrowpb "github.com/open-telemetry/otel-arrow/api/experimental/arrow/v1"
+	"github.com/open-telemetry/otel-arrow/collector/testdata"
+	"github.com/open-telemetry/otel-arrow/collector/testutil"
 	arrowRecord "github.com/open-telemetry/otel-arrow/pkg/otel/arrow_record"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
-	"go.uber.org/mock/gomock"
-	"golang.org/x/net/http2/hpack"
-	"google.golang.org/grpc"
-	"google.golang.org/grpc/codes"
-	"google.golang.org/grpc/credentials/insecure"
-	"google.golang.org/grpc/metadata"
-	"google.golang.org/grpc/status"
-
-	"github.com/open-telemetry/otel-arrow/collector/receiver/otelarrowreceiver/internal/arrow/mock"
-	componentMetadata "github.com/open-telemetry/otel-arrow/collector/receiver/otelarrowreceiver/internal/metadata"
-	"github.com/open-telemetry/otel-arrow/collector/testdata"
-	"github.com/open-telemetry/otel-arrow/collector/testutil"
 	"go.opentelemetry.io/collector/client"
 	"go.opentelemetry.io/collector/component"
 	"go.opentelemetry.io/collector/component/componenttest"
@@ -42,94 +31,26 @@ import (
 	"go.opentelemetry.io/collector/consumer"
 	"go.opentelemetry.io/collector/consumer/consumertest"
 	"go.opentelemetry.io/collector/extension/auth"
-	"go.opentelemetry.io/collector/obsreport/obsreporttest"
 	"go.opentelemetry.io/collector/pdata/pmetric"
 	"go.opentelemetry.io/collector/pdata/ptrace"
 	"go.opentelemetry.io/collector/pdata/ptrace/ptraceotlp"
 	"go.opentelemetry.io/collector/receiver"
 	"go.opentelemetry.io/collector/receiver/receivertest"
-	semconv "go.opentelemetry.io/collector/semconv/v1.5.0"
+	"go.uber.org/mock/gomock"
+	"golang.org/x/net/http2/hpack"
+	"google.golang.org/grpc"
+	"google.golang.org/grpc/codes"
+	"google.golang.org/grpc/credentials/insecure"
+	"google.golang.org/grpc/metadata"
+	"google.golang.org/grpc/status"
+
+	"github.com/open-telemetry/otel-arrow/collector/receiver/otelarrowreceiver/internal/arrow/mock"
+	componentMetadata "github.com/open-telemetry/otel-arrow/collector/receiver/otelarrowreceiver/internal/metadata"
 )
 
 const otlpReceiverName = "receiver_test"
 
 var testReceiverID = component.NewIDWithName(componentMetadata.Type, otlpReceiverName)
-
-var traceJSON = []byte(`
-	{
-	  "resource_spans": [
-		{
-		  "resource": {
-			"attributes": [
-			  {
-				"key": "host.name",
-				"value": { "stringValue": "testHost" }
-			  }
-			]
-		  },
-		  "scope_spans": [
-			{
-			  "spans": [
-				{
-				  "trace_id": "5B8EFFF798038103D269B633813FC60C",
-				  "span_id": "EEE19B7EC3C1B174",
-				  "parent_span_id": "EEE19B7EC3C1B173",
-				  "name": "testSpan",
-				  "start_time_unix_nano": 1544712660300000000,
-				  "end_time_unix_nano": 1544712660600000000,
-				  "kind": 2,
-				  "attributes": [
-					{
-					  "key": "attr1",
-					  "value": { "intValue": 55 }
-					}
-				  ]
-				},
-				{
-				  "trace_id": "5B8EFFF798038103D269B633813FC60C",
-				  "span_id": "EEE19B7EC3C1B173",
-				  "name": "testSpan",
-				  "start_time_unix_nano": 1544712660000000000,
-				  "end_time_unix_nano": 1544712661000000000,
-				  "kind": "SPAN_KIND_CLIENT",
-				  "attributes": [
-					{
-					  "key": "attr1",
-					  "value": { "intValue": 55 }
-					}
-				  ]
-				}
-			  ]
-			}
-		  ]
-		}
-	  ]
-	}`)
-
-var traceOtlp = func() ptrace.Traces {
-	td := ptrace.NewTraces()
-	rs := td.ResourceSpans().AppendEmpty()
-	rs.Resource().Attributes().PutStr(semconv.AttributeHostName, "testHost")
-	spans := rs.ScopeSpans().AppendEmpty().Spans()
-	span1 := spans.AppendEmpty()
-	span1.SetTraceID([16]byte{0x5B, 0x8E, 0xFF, 0xF7, 0x98, 0x3, 0x81, 0x3, 0xD2, 0x69, 0xB6, 0x33, 0x81, 0x3F, 0xC6, 0xC})
-	span1.SetSpanID([8]byte{0xEE, 0xE1, 0x9B, 0x7E, 0xC3, 0xC1, 0xB1, 0x74})
-	span1.SetParentSpanID([8]byte{0xEE, 0xE1, 0x9B, 0x7E, 0xC3, 0xC1, 0xB1, 0x73})
-	span1.SetName("testSpan")
-	span1.SetStartTimestamp(1544712660300000000)
-	span1.SetEndTimestamp(1544712660600000000)
-	span1.SetKind(ptrace.SpanKindServer)
-	span1.Attributes().PutInt("attr1", 55)
-	span2 := spans.AppendEmpty()
-	span2.SetTraceID([16]byte{0x5B, 0x8E, 0xFF, 0xF7, 0x98, 0x3, 0x81, 0x3, 0xD2, 0x69, 0xB6, 0x33, 0x81, 0x3F, 0xC6, 0xC})
-	span2.SetSpanID([8]byte{0xEE, 0xE1, 0x9B, 0x7E, 0xC3, 0xC1, 0xB1, 0x73})
-	span2.SetName("testSpan")
-	span2.SetStartTimestamp(1544712660000000000)
-	span2.SetEndTimestamp(1544712661000000000)
-	span2.SetKind(ptrace.SpanKindClient)
-	span2.Attributes().PutInt("attr1", 55)
-	return td
-}()
 
 func TestGRPCNewPortAlreadyUsed(t *testing.T) {
 	addr := testutil.GetAvailableLocalAddress(t)
@@ -145,13 +66,13 @@ func TestGRPCNewPortAlreadyUsed(t *testing.T) {
 	require.Error(t, r.Start(context.Background(), componenttest.NewNopHost()))
 }
 
-// TestOTLPReceiverGRPCTracesIngestTest checks that the gRPC trace receiver
+// TestOTelArrowReceiverGRPCTracesIngestTest checks that the gRPC trace receiver
 // is returning the proper response (return and metrics) when the next consumer
 // in the pipeline reports error. The test changes the responses returned by the
 // next trace consumer, checks if data was passed down the pipeline and if
 // proper metrics were recorded. It also uses all endpoints supported by the
 // trace receiver.
-func TestOTLPReceiverGRPCTracesIngestTest(t *testing.T) {
+func TestOTelArrowReceiverGRPCTracesIngestTest(t *testing.T) {
 	type ingestionStateTest struct {
 		okToIngest   bool
 		expectedCode codes.Code
@@ -176,7 +97,7 @@ func TestOTLPReceiverGRPCTracesIngestTest(t *testing.T) {
 	addr := testutil.GetAvailableLocalAddress(t)
 	td := testdata.GenerateTraces(1)
 
-	tt, err := obsreporttest.SetupTelemetry(testReceiverID)
+	tt, err := componenttest.SetupTelemetry(testReceiverID)
 	require.NoError(t, err)
 	t.Cleanup(func() { require.NoError(t, tt.Shutdown(context.Background())) })
 
@@ -218,10 +139,10 @@ func TestGRPCInvalidTLSCredentials(t *testing.T) {
 			GRPC: configgrpc.ServerConfig{
 				NetAddr: confignet.AddrConfig{
 					Endpoint:  testutil.GetAvailableLocalAddress(t),
-					Transport: "tcp",
+					Transport: confignet.TransportTypeTCP,
 				},
-				TLSSetting: &configtls.TLSServerSetting{
-					TLSSetting: configtls.TLSSetting{
+				TLSSetting: &configtls.ServerConfig{
+					Config: configtls.Config{
 						CertFile: "willfail",
 					},
 				},
@@ -309,38 +230,6 @@ func newReceiver(t *testing.T, factory receiver.Factory, settings component.Tele
 	return r
 }
 
-func compressGzip(body []byte) (*bytes.Buffer, error) {
-	var buf bytes.Buffer
-
-	gw := gzip.NewWriter(&buf)
-	defer gw.Close()
-
-	_, err := gw.Write(body)
-	if err != nil {
-		return nil, err
-	}
-
-	return &buf, nil
-}
-
-func compressZstd(body []byte) (*bytes.Buffer, error) {
-	var buf bytes.Buffer
-
-	zw, err := zstd.NewWriter(&buf)
-	if err != nil {
-		return nil, err
-	}
-
-	defer zw.Close()
-
-	_, err = zw.Write(body)
-	if err != nil {
-		return nil, err
-	}
-
-	return &buf, nil
-}
-
 type senderFunc func(td ptrace.Traces)
 
 func TestShutdown(t *testing.T) {
@@ -348,7 +237,7 @@ func TestShutdown(t *testing.T) {
 
 	nextSink := new(consumertest.TracesSink)
 
-	// Create OTLP receiver
+	// Create OTelArrow receiver
 	factory := NewFactory()
 	cfg := factory.CreateDefaultConfig().(*Config)
 	cfg.GRPC.NetAddr.Endpoint = endpointGrpc
@@ -492,13 +381,23 @@ func (esc *errOrSinkConsumer) Reset() {
 
 type tracesSinkWithMetadata struct {
 	consumertest.TracesSink
-	MDs []client.Metadata
+
+	lock sync.Mutex
+	mds  []client.Metadata
 }
 
 func (ts *tracesSinkWithMetadata) ConsumeTraces(ctx context.Context, td ptrace.Traces) error {
 	info := client.FromContext(ctx)
-	ts.MDs = append(ts.MDs, info.Metadata)
+	ts.lock.Lock()
+	defer ts.lock.Unlock()
+	ts.mds = append(ts.mds, info.Metadata)
 	return ts.TracesSink.ConsumeTraces(ctx, td)
+}
+
+func (ts *tracesSinkWithMetadata) Metadatas() []client.Metadata {
+	ts.lock.Lock()
+	defer ts.lock.Unlock()
+	return ts.mds
 }
 
 type anyStreamClient interface {
@@ -515,7 +414,7 @@ func TestGRPCArrowReceiver(t *testing.T) {
 	cfg := factory.CreateDefaultConfig().(*Config)
 	cfg.GRPC.NetAddr.Endpoint = addr
 	cfg.GRPC.IncludeMetadata = true
-	id := component.NewID("arrow")
+	id := component.NewID(component.MustNewType("arrow"))
 	tt := componenttest.NewNopTelemetrySettings()
 	ocr := newReceiver(t, factory, tt, cfg, id, sink, nil)
 
@@ -582,12 +481,12 @@ func TestGRPCArrowReceiver(t *testing.T) {
 
 	assert.Equal(t, expectTraces, sink.AllTraces())
 
-	assert.Equal(t, len(expectMDs), len(sink.MDs))
+	assert.Equal(t, len(expectMDs), len(sink.Metadatas()))
 	// gRPC adds its own metadata keys, so we check for only the
 	// expected ones below:
 	for idx := range expectMDs {
 		for key, vals := range expectMDs[idx] {
-			require.Equal(t, vals, sink.MDs[idx].Get(key), "for key %s", key)
+			require.Equal(t, vals, sink.Metadatas()[idx].Get(key), "for key %s", key)
 		}
 	}
 }
@@ -619,7 +518,7 @@ func TestGRPCArrowReceiverAuth(t *testing.T) {
 	addr := testutil.GetAvailableLocalAddress(t)
 	sink := new(tracesSinkWithMetadata)
 
-	authID := component.NewID("testauth")
+	authID := component.NewID(component.MustNewType("testauth"))
 
 	factory := NewFactory()
 	cfg := factory.CreateDefaultConfig().(*Config)
@@ -628,7 +527,7 @@ func TestGRPCArrowReceiverAuth(t *testing.T) {
 	cfg.GRPC.Auth = &configauth.Authentication{
 		AuthenticatorID: authID,
 	}
-	id := component.NewID("arrow")
+	id := component.NewID(component.MustNewType("arrow"))
 	tt := componenttest.NewNopTelemetrySettings()
 	ocr := newReceiver(t, factory, tt, cfg, id, sink, nil)
 
@@ -640,7 +539,7 @@ func TestGRPCArrowReceiverAuth(t *testing.T) {
 
 	host := newHostWithExtensions(
 		map[component.ID]component.Component{
-			authID: newTestAuthExtension(t, func(ctx context.Context, hdrs map[string][]string) (context.Context, error) {
+			authID: newTestAuthExtension(t, func(ctx context.Context, _ map[string][]string) (context.Context, error) {
 				if ctx.Value(inStreamCtx{}) != nil {
 					return ctx, fmt.Errorf(errorString)
 				}
@@ -677,12 +576,101 @@ func TestGRPCArrowReceiverAuth(t *testing.T) {
 		// The stream has to be successful to get this far.  The
 		// authenticator fails every data item:
 		require.Equal(t, batch.BatchId, resp.BatchId)
-		require.Equal(t, arrowpb.StatusCode_UNAVAILABLE, resp.StatusCode)
-		require.Equal(t, errorString, resp.StatusMessage)
+		require.Equal(t, arrowpb.StatusCode_UNAUTHENTICATED, resp.StatusCode)
+		require.Contains(t, resp.StatusMessage, errorString)
 	}
 
 	assert.NoError(t, cc.Close())
 	require.NoError(t, ocr.Shutdown(context.Background()))
 
 	assert.Equal(t, 0, len(sink.AllTraces()))
+}
+
+func TestConcurrentArrowReceiver(t *testing.T) {
+	addr := testutil.GetAvailableLocalAddress(t)
+	sink := new(tracesSinkWithMetadata)
+
+	factory := NewFactory()
+	cfg := factory.CreateDefaultConfig().(*Config)
+	cfg.GRPC.NetAddr.Endpoint = addr
+	cfg.GRPC.IncludeMetadata = true
+	id := component.NewID(component.MustNewType("arrow"))
+	tt := componenttest.NewNopTelemetrySettings()
+	ocr := newReceiver(t, factory, tt, cfg, id, sink, nil)
+
+	require.NotNil(t, ocr)
+	require.NoError(t, ocr.Start(context.Background(), componenttest.NewNopHost()))
+
+	cc, err := grpc.Dial(addr, grpc.WithTransportCredentials(insecure.NewCredentials()), grpc.WithBlock())
+	require.NoError(t, err)
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	const itemsPerStream = 10
+	const numStreams = 5
+
+	var wg sync.WaitGroup
+	wg.Add(numStreams)
+
+	for j := 0; j < numStreams; j++ {
+		go func() {
+			defer wg.Done()
+
+			client := arrowpb.NewArrowTracesServiceClient(cc)
+			stream, err := client.ArrowTraces(ctx, grpc.WaitForReady(true))
+			require.NoError(t, err)
+			producer := arrowRecord.NewProducer()
+
+			var headerBuf bytes.Buffer
+			hpd := hpack.NewEncoder(&headerBuf)
+
+			// Repeatedly send traces via arrow. Set the expected traces
+			// metadata to receive.
+			for i := 0; i < itemsPerStream; i++ {
+				td := testdata.GenerateTraces(2)
+
+				headerBuf.Reset()
+				err := hpd.WriteField(hpack.HeaderField{
+					Name:  "seq",
+					Value: fmt.Sprint(i),
+				})
+				require.NoError(t, err)
+
+				batch, err := producer.BatchArrowRecordsFromTraces(td)
+				require.NoError(t, err)
+
+				batch.Headers = headerBuf.Bytes()
+
+				err = stream.Send(batch)
+
+				require.NoError(t, err)
+
+				resp, err := stream.Recv()
+				require.NoError(t, err)
+				require.Equal(t, batch.BatchId, resp.BatchId)
+				require.Equal(t, arrowpb.StatusCode_OK, resp.StatusCode)
+			}
+		}()
+	}
+	wg.Wait()
+
+	assert.NoError(t, cc.Close())
+	require.NoError(t, ocr.Shutdown(context.Background()))
+
+	counts := make([]int, itemsPerStream)
+
+	// Two spans per stream/item.
+	require.Equal(t, itemsPerStream*numStreams*2, sink.SpanCount())
+	require.Equal(t, itemsPerStream*numStreams, len(sink.Metadatas()))
+
+	for _, md := range sink.Metadatas() {
+		val, err := strconv.Atoi(md.Get("seq")[0])
+		require.NoError(t, err)
+		counts[val]++
+	}
+
+	for i := 0; i < itemsPerStream; i++ {
+		require.Equal(t, numStreams, counts[i])
+	}
 }

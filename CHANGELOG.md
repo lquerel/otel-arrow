@@ -8,6 +8,63 @@ This project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
 
 ## Unreleased
 
+## [0.24.0](https://github.com/open-telemetry/otel-arrow/releases/tag/v0.24.0) - 2024-06-05
+
+- Jitter is applied to once per process, not once per stream. [#199](https://github.com/open-telemetry/otel-arrow/pull/199)
+- Network statistics tracing instrumentation simplified. [#201](https://github.com/open-telemetry/otel-arrow/pull/201)
+- Protocol includes use of more gRPC codes. [#202](https://github.com/open-telemetry/otel-arrow/pull/202)
+- Receiver concurrency bugfix. [#205](https://github.com/open-telemetry/otel-arrow/pull/205)
+- Concurrent batch processor size==0 bugfix. [#208](https://github.com/open-telemetry/otel-arrow/pull/208)
+- New integration testing. [#210](https://github.com/open-telemetry/otel-arrow/pull/210)
+- Use gRPC Status codes in the Arrow exporter. [#211](https://github.com/open-telemetry/otel-arrow/pull/211)
+- Fix stream-shutdown race in Arrow receiver. [#212](https://github.com/open-telemetry/otel-arrow/pull/212)
+- Avoid work for already-canceled requests. [#213](https://github.com/open-telemetry/otel-arrow/pull/213)
+- Call IPCReader.Err() after reader loop. [#215](https://github.com/open-telemetry/otel-arrow/pull/215)
+- Update to Arrow-Go v16.1.0. [#218](https://github.com/open-telemetry/otel-arrow/pull/218)
+- Update to OpenTelemetry Collector v0.102.x. [#219](https://github.com/open-telemetry/otel-arrow/pull/219)
+
+## [0.23.0](https://github.com/open-telemetry/otel-arrow/releases/tag/v0.23.0) - 2024-05-09
+
+- Remove the OTel-Arrow exporter FIFO prioritizer.  Let "leastloaded" imply least-loaded
+  over all streams and use this behavior by default. [#186](https://github.com/open-telemetry/otel-arrow/pull/186)
+
+- Fix concurrentbatchproccessor bug to correctly propagate metadataKeys for multi shard batching. [#184](https://github.com/open-telemetry/otel-arrow/pull/184)
+
+- Refactor otelarrowreceiver to do stream.Recv, request processing, and stream.Send in separate goroutines. [#181](https://github.com/open-telemetry/otel-arrow/pull/181)
+
+- Add a semaphore package to limit bytes admitted and total number of waiters. [#174](https://github.com/open-telemetry/otel-arrow/pull/174)
+
+## [0.22.0](https://github.com/open-telemetry/otel-arrow/releases/tag/v0.22.0) - 2024-04-16
+
+- Add load prioritization mechanism and "leastloaded" policy. [#178](https://github.com/open-telemetry/otel-arrow/pull/178)
+
+## [0.21.0](https://github.com/open-telemetry/otel-arrow/releases/tag/v0.21.0) - 2024-04-10
+
+- Bump versions to latest 0.98.0 1.25.0 [#175](https://github.com/open-telemetry/otel-arrow/pull/175)
+
+- Update examples; add "shutdown", remove generator [#171](https://github.com/open-telemetry/otel-arrow/pull/171)
+
+- Improve logging at Arrow stream shutdown; avoid the explicit Canceled message at stream lifetime [#170](https://github.com/open-telemetry/otel-arrow/pull/170)
+
+- More lint from opentelemetry-collector-contrib PR 32015 [#168](https://github.com/open-telemetry/otel-arrow/pull/168)
+
+- Lint fixes for OTel-Arrow receiver in OTel-Collector-Contrib [#167](https://github.com/open-telemetry/otel-arrow/pull/167)
+
+- Enable ci/cd build and test [#166](https://github.com/open-telemetry/otel-arrow/pull/166)
+
+
+## [0.20.0](https://github.com/open-telemetry/otel-arrow/releases/tag/v0.20.0) - 2024-03-27
+
+- Lint fixes, renames, and validation update to follow conventions of otel-collector-contrib repository. [#163](https://github.com/open-telemetry/otel-arrow/pull/163)
+
+- Update Otel Collector core dependency from `v0.96.0` to `v0.97.0` [#164](https://github.com/open-telemetry/otel-arrow/pull/164)
+
+## [0.19.0](https://github.com/open-telemetry/otel-arrow/releases/tag/v0.19.0) - 2024-03-26
+
+- Fix arrow log encoder panic caused by empty attribute values. [#159](https://github.com/open-telemetry/otel-arrow/pull/159)
+
+- Remove deprecated obsreporttest package. [#161](https://github.com/open-telemetry/otel-arrow/pull/161)
+
 ## [0.18.0](https://github.com/open-telemetry/otel-arrow/releases/tag/v0.18.0) - 2024-03-06
 
 - Update Otel Collector core dependency from `v0.94.1` to `v0.96.0`. [#155](https://github.com/open-telemetry/otel-arrow/pull/155)

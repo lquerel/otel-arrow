@@ -374,8 +374,7 @@ func (b *shard) sendItems(trigger trigger) {
 		} else {
 			var sp trace.Span
 			links := buildLinks(contexts)
-			parent = context.Background()
-			parent, sp = b.tracer.Tracer("otel").Start(context.Background(), "concurrent_batch_processor/export", trace.WithLinks(links...))
+			parent, sp = b.tracer.Tracer("otel").Start(b.exportCtx, "concurrent_batch_processor/export", trace.WithLinks(links...))
 			sp.End()
 		}
 		err = b.batch.export(parent, req)
@@ -442,22 +441,28 @@ func (bp *batchProcessor) countRelease(bytes int64) {
 }
 
 func (b *shard) consumeAndWait(ctx context.Context, data any) error {
+
+	var itemCount int
+	switch telem := data.(type) {
+	case ptrace.Traces:
+		itemCount = telem.SpanCount()
+	case pmetric.Metrics:
+		itemCount = telem.DataPointCount()
+	case plog.Logs:
+		itemCount = telem.LogRecordCount()
+	}
+
+	if itemCount == 0 {
+		return nil
+	}
+
 	respCh := make(chan error, 1)
 	item := dataItem{
 		parentCtx:  ctx,
 		data:       data,
 		responseCh: respCh,
+		count:      itemCount,
 	}
-
-	switch telem := data.(type) {
-	case ptrace.Traces:
-		item.count = telem.SpanCount()
-	case pmetric.Metrics:
-		item.count = telem.DataPointCount()
-	case plog.Logs:
-		item.count = telem.LogRecordCount()
-	}
-
 	bytes := int64(b.batch.sizeBytes(data))
 
 	if bytes > b.processor.limitBytes {
@@ -476,7 +481,6 @@ func (b *shard) consumeAndWait(ctx context.Context, data any) error {
 			b.processor.countRelease(bytes)
 			return
 		}
-
 		// context may have timed out before we received all
 		// responses. Start goroutine to wait and release
 		// all acquired bytes after the parent thread returns.
@@ -520,7 +524,6 @@ func (b *shard) consumeAndWait(ctx context.Context, data any) error {
 			return err
 		}
 	}
-	return nil
 }
 
 // singleShardBatcher is used when metadataKeys is empty, to avoid the

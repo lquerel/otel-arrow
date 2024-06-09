@@ -10,7 +10,6 @@ import (
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
-
 	"go.opentelemetry.io/collector/component"
 	"go.opentelemetry.io/collector/config/configgrpc"
 	"go.opentelemetry.io/collector/config/confignet"
@@ -51,10 +50,10 @@ func TestUnmarshalConfig(t *testing.T) {
 				GRPC: configgrpc.ServerConfig{
 					NetAddr: confignet.AddrConfig{
 						Endpoint:  "0.0.0.0:4317",
-						Transport: "tcp",
+						Transport: confignet.TransportTypeTCP,
 					},
-					TLSSetting: &configtls.TLSServerSetting{
-						TLSSetting: configtls.TLSSetting{
+					TLSSetting: &configtls.ServerConfig{
+						Config: configtls.Config{
 							CertFile: "test.crt",
 							KeyFile:  "test.key",
 						},
@@ -77,8 +76,10 @@ func TestUnmarshalConfig(t *testing.T) {
 						},
 					},
 				},
-				Arrow: ArrowSettings{
-					MemoryLimitMiB: 123,
+				Arrow: ArrowConfig{
+					MemoryLimitMiB:    123,
+					AdmissionLimitMiB: 80,
+					WaiterLimit:       100,
 				},
 			},
 		}, cfg)
@@ -97,12 +98,14 @@ func TestUnmarshalConfigUnix(t *testing.T) {
 				GRPC: configgrpc.ServerConfig{
 					NetAddr: confignet.AddrConfig{
 						Endpoint:  "/tmp/grpc_otlp.sock",
-						Transport: "unix",
+						Transport: confignet.TransportTypeUnix,
 					},
 					ReadBufferSize: 512 * 1024,
 				},
-				Arrow: ArrowSettings{
-					MemoryLimitMiB: defaultMemoryLimitMiB,
+				Arrow: ArrowConfig{
+					MemoryLimitMiB:    defaultMemoryLimitMiB,
+					AdmissionLimitMiB: defaultAdmissionLimitMiB,
+					WaiterLimit:       defaultWaiterLimit,
 				},
 			},
 		}, cfg)
@@ -126,5 +129,7 @@ func TestUnmarshalConfigInvalidProtocol(t *testing.T) {
 
 func TestUnmarshalConfigNoProtocols(t *testing.T) {
 	cfg := Config{}
-	assert.NoError(t, component.ValidateConfig(cfg))
+	// This now produces an error due to breaking change.
+	// https://github.com/open-telemetry/opentelemetry-collector/pull/9385
+	assert.ErrorContains(t, component.ValidateConfig(cfg), "invalid transport type")
 }
