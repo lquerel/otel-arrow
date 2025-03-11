@@ -190,6 +190,19 @@ This prioritization enhances system robustness but introduces complexity in main
 and it may lead to starvation of low-priority messages under sustained high load. [ToDo: This is something we need to
 discuss further.]
 
+Well-known mechanisms for admission control include:
+
+- Simple Token Bucket: Limits message acceptance based on a fixed rate or memory usage threshold.
+- Weighted Token Bucket: Assigns tokens proportionally based on message memory footprint, prioritizing efficient memory
+  utilization.
+- PID-Based Feedback Controller: Uses real-time system metrics to dynamically adjust admission rates through a feedback 
+  loop.
+- Adaptive Rate Limiter: Dynamically adjusts acceptance rates based on observed system metrics, combining simplicity
+  with responsiveness.
+
+[ToDo: We need to evaluate some of this mechanisms and decide which one to implement. A pluggable mechanism would be
+ideal.]
+
 > Note:
 > The AC may generate distinct REB signals for individual receivers, depending on specific metrics and the downstream
 > paths following each receiver. Analysis of the dataflow DAG during deployment can provide information to determine
