@@ -180,6 +180,21 @@ The admission control mechanism is illustrated below:
 
 ![Admission Control](./images/admission-control.svg)
 
+Optionally, a priority-based admission mechanism can be implemented to preserve high-value telemetry data under resource
+constraints. With this approach:
+
+- Higher-priority messages (e.g. essential telemetry) are queued separately or prioritized.
+- Lower-priority messages (e.g. debug or non-critical logs) are dropped first during resource constraints.
+
+This prioritization enhances system robustness but introduces complexity in maintaining and tuning priority levels,
+and it may lead to starvation of low-priority messages under sustained high load. [ToDo: This is something we need to
+discuss further.]
+
+> Note:
+> The AC may generate distinct REB signals for individual receivers, depending on specific metrics and the downstream
+> paths following each receiver. Analysis of the dataflow DAG during deployment can provide information to determine
+> these differentiated signals.
+
 ### Configuration Management
 
 ### Error Handling
