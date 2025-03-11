@@ -145,14 +145,57 @@ four main data processors are:
 - **Sampling Processor** (`SP`): A processor that preserves a subset of input data based on a sampling strategy.
 - **Converter Processor** (`CP`): A processor that transforms telemetry data from one type to another.
 
-## Dataflow Optimizations
+## Dataflow Controller
 
-### Partial Dataflow Path Elimination
+### Admission Control
+
+The Admission Controller (`AC`) manages the acceptance of incoming telemetry messages based on the current state of the
+system. Its primary purpose is to ensure system stability and prevent resource exhaustion.
+
+The `AC` continuously monitors critical dataflow metrics, generating Resource Budget (`REB`) signals to control the
+admission of telemetry data at receiver nodes. Key monitored metrics include:
+
+- Memory usage (e.g. via custom allocators such as jemalloc or mimalloc)
+- Message queue depth
+- Processing latency per component
+- Throughput per component (messages in/out)
+- Average message size (memory footprint)
+
+Receivers utilize these `REB` signals through an `admit_message` function, which determines whether incoming telemetry
+messages should be accepted or rejected. Receivers maintain the most recent `REB` state locally, updating their
+admission behavior dynamically and independently of the controller logic.
+
+Rejection policies configurable via the Admission Controller include:
+
+- Dropping messages silently (with optional logging and metric increments).
+- Redirecting rejected messages to a Dead Letter Queue (`DLQ`).
+- Returning explicit errors to telemetry sources, accompanied by a defined retry recommendation that the source is
+  expected to honor.
+
+Each channel connecting components includes a bounded message queue with a configurable size limit. When this queue
+reaches capacity, receivers pause acceptance of new telemetry messages until space becomes available. This built-in
+backpressure mechanism complements the Admission Controller in maintaining system integrity.
+
+The admission control mechanism is illustrated below:
+
+![Admission Control](./images/admission-control.svg)
+
+### Configuration Management
+
+### Error Handling
+
+## Dataflow Data Path Runtime
+
+The dataflow runtime is responsible for running the dataflow DAG.
+
+### Dataflow Optimizations
+
+#### Partial Dataflow Path Elimination
 
 Receivers or exporters without at least one active connected path are considered inactive. During the compilation of the
 dataflow, inactive nodes are automatically removed from the DAG.
 
-### Channel Elimination
+#### Channel Elimination
 
 Processors forming a chain without intermediate branches can be logically grouped together to form an aggregated
 processor. The dataflow runtime is free to optimize such chains, for example, by removing intermediate channels.
@@ -164,17 +207,6 @@ processor. The dataflow runtime is free to optimize such chains, for example, by
 **It is important to note that the following scenarios or functionalities can be achieved by simply composing standard
 components provided by the dataflow runtime. These are not features that depend on specific exporter implementations
 or their individual capabilities.**
-
-## Admission Control
-
-Key metrics:
-- Memory usage (via custom allocator, e.g. jemalloc or mimalloc)
-- Message queue depths
-- Processing latency on each node
-- Throughput at each node (message in/out)
-- Message size/Memory footprint
-
-Idea of having a backpressure signal
 
 ## Acknowledgment on Ingress
 
