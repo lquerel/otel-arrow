@@ -80,8 +80,30 @@ pub struct Quota {
     /// If set to a value greater than 0, it will use that many cores.
     #[serde(default = "default_num_cores")]
     pub num_cores: usize,
+    /// NUMA core selection strategy.
+    /// spread: round-robin cores across allowed/preferred nodes.
+    /// pack: fill one node completely before moving to the next.
+    /// auto: currently an alias for spread (reserved for future heuristics).
+    #[serde(default = "default_numa_strategy")]
+    pub numa_strategy: NumaStrategy,
+    /// Preferred NUMA nodes (by numeric id). Empty means all discovered nodes are eligible.
+    /// Values outside discovered range are ignored.
+    #[serde(default)]
+    pub preferred_numa_nodes: Vec<usize>,
 }
 
-fn default_num_cores() -> usize {
-    0 // Default to using all available cores
+/// NUMA core selection strategy enumeration.
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, JsonSchema, Default, PartialEq, Eq)]
+#[serde(rename_all = "lowercase")]
+pub enum NumaStrategy {
+    /// Spread cores across NUMA nodes (round-robin) to maximize memory bandwidth and reduce contention.
+    #[default]
+    Spread,
+    /// Pack cores into as few NUMA nodes as possible to maximize locality and leave other nodes idle.
+    Pack,
+    /// Placeholder for adaptive strategy that may select pack or spread based on pipeline characteristics.
+    Auto,
 }
+
+fn default_num_cores() -> usize { 0 }
+fn default_numa_strategy() -> NumaStrategy { NumaStrategy::Spread }

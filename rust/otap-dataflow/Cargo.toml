@@ -25,6 +25,12 @@ license.workspace = true
 keywords = ["OpenTelemetry", "OTLP", "OTAP", "Dataflow", "Engine"]
 categories = ["asynchronous", "network-programming"]
 
+[features]
+# Single user-facing switch: `numa` (always uses vendored hwloc internally for simplicity).
+# Legacy alias `vendored-hwloc` retained.
+numa = ["otap-df-controller/numa", "dep:hwlocality", "dep:core_affinity", "hwlocality/vendored", "hwlocality/hwloc-latest"]
+vendored-hwloc = ["numa"]
+
 [[bin]]
 name = "df_engine"
 path = "src/main.rs"
@@ -33,10 +39,14 @@ path = "src/main.rs"
 otap-df-config = { path = "crates/config" }
 otap-df-controller = { path = "crates/controller" }
 otap-df-otap = { path = "crates/otap" }
+otap-df-cli-core = { path = "crates/cli-core" }
 thiserror.workspace = true
 serde_json.workspace = true
 clap = { version = "4.5.42", features = ["derive"] }
 mimalloc-rust = "0.2.1"
+# Optional for NUMA system_info; pulled in when feature `numa` active.
+hwlocality = { version = "1.0.0-alpha.10", optional = true, default-features = false, features = ["hwloc-latest"] }
+core_affinity = { version = "0.8", optional = true }
 
 [workspace.dependencies]
 arrow = "56.0"

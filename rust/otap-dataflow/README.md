@@ -29,6 +29,18 @@ TBD
 
 TBD
 
+### Optional NUMA Optimization (Controller)
+
+Enable with a single feature (vendored hwloc automatically built):
+
+```bash
+cargo build --features numa
+```
+
+`vendored-hwloc` is a deprecated alias kept for backward compatibility.
+
+See `crates/controller/README.md` for details.
+
 ## Use Cases
 
 Some examples of use cases include:

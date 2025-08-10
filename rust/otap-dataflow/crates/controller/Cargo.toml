@@ -13,6 +13,16 @@ rust-version.workspace = true
 workspace = true
 
 [features]
+# Default build: NUMA support disabled.
+# Enable with: cargo build -p otap-df-controller --features numa
+# Enabling `numa` now automatically uses a vendored (static) hwloc for simplicity.
+# If later a system hwloc option is desired, a separate feature can be (re)introduced.
+default = []
+# Opt-in NUMA (now implies vendored hwloc build under the hood)
+numa = ["hwlocality", "hwlocality/vendored", "hwlocality/hwloc-latest"]
+# Deprecated alias retained for backward compatibility.
+vendored-hwloc = ["numa"]
+# testing unchanged
 testing = []
 
 [dependencies]
@@ -22,3 +32,5 @@ otap-df-engine = { path = "../engine" }
 thiserror = { workspace = true }
 miette = { workspace = true }
 core_affinity = "0.8.3"
+# Optional hwloc binding; only compiled when the `numa` feature is enabled.
+hwlocality = { version = "1.0.0-alpha.10", optional = true, default-features = false, features = ["hwloc-latest"] }
