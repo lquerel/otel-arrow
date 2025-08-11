@@ -1,0 +1,23 @@
+[package]
+name = "otap-df-cli-core"
+description = "CLI core utilities"
+version.workspace = true
+authors.workspace = true
+repository.workspace = true
+license.workspace = true
+publish.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+
+[lints]
+workspace = true
+
+[features]
+numa = ["otap-df-controller/numa", "dep:core_affinity"]
+
+[dependencies]
+clap = { version = "4.5.42", features = ["std"] }
+otap-df-config = { path = "../config" }
+otap-df-controller = { path = "../controller" }
+otap-df-engine = { path = "../engine" }
+core_affinity = { version = "0.8", optional = true }
