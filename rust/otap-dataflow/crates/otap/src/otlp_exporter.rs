@@ -2,8 +2,9 @@
 // SPDX-License-Identifier: Apache-2.0
 
 use crate::OTAP_EXPORTER_FACTORIES;
-use crate::grpc::otlp::client::{LogsServiceClient, MetricsServiceClient, TraceServiceClient};
+use crate::compression::CompressionMethod;
 use crate::metrics::ExporterPDataMetrics;
+use crate::otap_grpc::otlp::client::{LogsServiceClient, MetricsServiceClient, TraceServiceClient};
 use crate::pdata::{OtapPdata, OtlpProtoBytes};
 use async_trait::async_trait;
 use linkme::distributed_slice;
@@ -17,7 +18,6 @@ use otap_df_engine::exporter::ExporterWrapper;
 use otap_df_engine::local::exporter::{EffectHandler, Exporter};
 use otap_df_engine::message::{Message, MessageChannel};
 use otap_df_engine::node::NodeId;
-use otap_df_otlp::compression::CompressionMethod;
 use otap_df_telemetry::metrics::MetricSet;
 use serde::Deserialize;
 use std::sync::Arc;
@@ -28,6 +28,7 @@ pub const OTLP_EXPORTER_URN: &str = "urn:otel:otlp:exporter";
 
 /// Configuration for the OTLP Exporter
 #[derive(Debug, Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct Config {
     /// The gRPC endpoint to connect to
     pub grpc_endpoint: String,
@@ -145,8 +146,11 @@ impl Exporter<OtapPdata> for OTLPExporter {
                     // Capture signal type before moving pdata into try_from
                     let signal_type = pdata.signal_type();
 
+                    // TODO(#1098): Note context is dropped.
+                    let (_context, payload) = pdata.into_parts();
+
                     self.pdata_metrics.inc_consumed(signal_type);
-                    let service_req: OtlpProtoBytes = pdata
+                    let service_req: OtlpProtoBytes = payload
                         .try_into()
                         .inspect_err(|_| self.pdata_metrics.inc_failed(signal_type))?;
 
@@ -197,6 +201,13 @@ impl Exporter<OtapPdata> for OTLPExporter {
 mod tests {
     use super::*;
 
+    use crate::otlp_grpc::OTLPData;
+    use crate::otlp_mock::{LogsServiceMock, MetricsServiceMock, TraceServiceMock};
+    use crate::proto::opentelemetry::collector::{
+        logs::v1::{ExportLogsServiceRequest, logs_service_server::LogsServiceServer},
+        metrics::v1::{ExportMetricsServiceRequest, metrics_service_server::MetricsServiceServer},
+        trace::v1::{ExportTraceServiceRequest, trace_service_server::TraceServiceServer},
+    };
     use otap_df_config::node::NodeUserConfig;
     use otap_df_engine::context::ControllerContext;
     use otap_df_engine::error::Error;
@@ -204,13 +215,6 @@ mod tests {
     use otap_df_engine::testing::{
         exporter::{TestContext, TestRuntime},
         test_node,
-    };
-    use otap_df_otlp::grpc::OTLPData;
-    use otap_df_otlp::mock::{LogsServiceMock, MetricsServiceMock, TraceServiceMock};
-    use otap_df_otlp::proto::opentelemetry::collector::{
-        logs::v1::{ExportLogsServiceRequest, logs_service_server::LogsServiceServer},
-        metrics::v1::{ExportMetricsServiceRequest, metrics_service_server::MetricsServiceServer},
-        trace::v1::{ExportTraceServiceRequest, trace_service_server::TraceServiceServer},
     };
     use otap_df_telemetry::registry::MetricsRegistryHandle;
     use prost::Message;
@@ -231,23 +235,29 @@ mod tests {
                 let req = ExportLogsServiceRequest::default();
                 let mut req_bytes = vec![];
                 req.encode(&mut req_bytes).unwrap();
-                ctx.send_pdata(OtlpProtoBytes::ExportLogsRequest(req_bytes).into())
-                    .await
-                    .expect("Failed to send log message");
+                ctx.send_pdata(OtapPdata::new_default(
+                    OtlpProtoBytes::ExportLogsRequest(req_bytes).into(),
+                ))
+                .await
+                .expect("Failed to send log message");
 
                 let req = ExportMetricsServiceRequest::default();
                 let mut req_bytes = vec![];
                 req.encode(&mut req_bytes).unwrap();
-                ctx.send_pdata(OtlpProtoBytes::ExportMetricsRequest(req_bytes).into())
-                    .await
-                    .expect("Failed to send metric message");
+                ctx.send_pdata(OtapPdata::new_default(
+                    OtlpProtoBytes::ExportMetricsRequest(req_bytes).into(),
+                ))
+                .await
+                .expect("Failed to send metric message");
 
                 let req = ExportTraceServiceRequest::default();
                 let mut req_bytes = vec![];
                 req.encode(&mut req_bytes).unwrap();
-                ctx.send_pdata(OtlpProtoBytes::ExportTracesRequest(req_bytes).into())
-                    .await
-                    .expect("Failed to send metric message");
+                ctx.send_pdata(OtapPdata::new_default(
+                    OtlpProtoBytes::ExportTracesRequest(req_bytes).into(),
+                ))
+                .await
+                .expect("Failed to send metric message");
 
                 // Send shutdown
                 ctx.send_shutdown(Duration::from_millis(200), "test complete")
