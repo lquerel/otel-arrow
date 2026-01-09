@@ -110,7 +110,8 @@ impl local::Exporter<OtapPdata> for OTAPExporter {
         effect_handler: local::EffectHandler<OtapPdata>,
     ) -> Result<TerminalState, Error> {
         otel_info!(
-            "Exporter.Start",
+            /* todo the current node entity should be attached here */
+            "start",
             grpc_endpoint = self.config.grpc.grpc_endpoint.as_str(),
             message = "Starting OTAP Exporter"
         );

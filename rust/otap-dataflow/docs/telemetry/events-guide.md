@@ -131,6 +131,8 @@ The following verbs are recommended for event names:
 - `stop`: The beginning of a stop or shutdown process.
 - `pause`: The pausing of an operation or process.
 - `resume`: The resumption of an operation or process.
+- `enable`: The activation of a feature, limit, or behavior.
+- `disable`: The deactivation of a feature, limit, or behavior.
 - `apply`: An application of configuration or state.
 - `flush`: A batch or buffer flush.
 - `drop`: A drop occurrence.

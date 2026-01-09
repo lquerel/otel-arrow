@@ -131,7 +131,8 @@ impl local::Exporter<OtapPdata> for PerfExporter {
         // let mut average_pipeline_latency: f64 = 0.0;
 
         otel_info!(
-            "Exporter.Start",
+            /* todo the current node entity should be attached here */
+            "start",
             frequency_ms = self.config.frequency(),
             message = "Starting Perf Exporter"
         );

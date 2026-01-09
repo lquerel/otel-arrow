@@ -234,7 +234,14 @@ impl ProxyConfig {
 
         // Check if host should bypass proxy
         if self.should_bypass(host, port) {
-            otap_df_telemetry::otel_debug!("Proxy.Bypass", host = host, port = port);
+            otap_df_telemetry::otel_debug!(
+                /* todo the current node entity should be attached here */
+                "proxy.route.apply",
+                proxy_route = "direct",
+                proxy_reason = "no_proxy_rule",
+                host = host,    // Should that be server.address?
+                port = port     // Should that be server.port?
+            );
             return None;
         }
 
@@ -247,13 +254,23 @@ impl ProxyConfig {
         if let Some(url) = proxy {
             if log::log_enabled!(log::Level::Debug) {
                 otap_df_telemetry::otel_debug!(
-                    "Proxy.Using",
+                    /* todo the current node entity should be attached here */
+                    "proxy.route.apply",
+                    proxy_route = "proxy",
+                    proxy_reason = "configured",
+                    // Todo Should we instead report the proxy host and port separately?
                     proxy = url.to_string(),
                     target = uri.to_string()
                 );
             }
         } else {
-            otap_df_telemetry::otel_debug!("Proxy.None", target = uri.to_string());
+            otap_df_telemetry::otel_debug!(
+                /* todo the current node entity should be attached here */
+                "proxy.route.apply",
+                proxy_route = "direct",
+                proxy_reason = "not configured",
+                target = uri.to_string()
+            );
         }
 
         proxy.map(|u| u.expose())
@@ -356,7 +373,12 @@ impl ProxyConfig {
                         }
                     }
                 } else {
-                    otap_df_telemetry::otel_warn!("Proxy.InvalidCidr", pattern = pattern_host);
+                    otap_df_telemetry::otel_warn!(
+                        /* todo the current node entity should be attached here */
+                        "proxy.config.fail",
+                        exception_type = "invalid_cidr",
+                        proxy_pattern = pattern_host
+                    );
                 }
                 continue;
             }
@@ -485,9 +507,11 @@ async fn http_connect_tunnel_on_stream(
 
     // Avoid logging the raw request to reduce the risk of leaking headers or internal targets.
     otap_df_telemetry::otel_debug!(
-        "Proxy.ConnectRequest",
-        target = format!("{formatted_target}:{target_port}"),
-        has_auth = proxy_auth.is_some()
+        /* todo the current node entity should be attached here */
+        "proxy.tunnel.start",
+        server_address = formatted_target,
+        server_port = target_port,
+        proxy_has_auth = proxy_auth.is_some()
     );
 
     let (reader, mut writer) = stream.into_split();
@@ -502,7 +526,11 @@ async fn http_connect_tunnel_on_stream(
         ));
     }
 
-    otap_df_telemetry::otel_debug!("Proxy.ConnectResponse", status_line = status_line.trim());
+    otap_df_telemetry::otel_debug!(
+        /* todo the current node entity should be attached here */
+        "proxy.tunnel.complete",
+        status_line = status_line.trim()
+    );
 
     // Parse "HTTP/1.1 200 Connection established".
     // Be robust to multiple ASCII spaces/tabs between tokens.
@@ -608,7 +636,9 @@ fn apply_socket_options(
         #[cfg(target_os = "windows")]
         if tcp_keepalive_retries.is_some() {
             otap_df_telemetry::otel_warn!(
-                "Proxy.KeepaliveRetriesIgnored",
+                "proxy.socket.option.apply",
+                socket_option="tcp_keepalive_retries",
+                socket_option_outcome="ignored",
                 platform = "windows",
                 message = "tcp_keepalive_retries is configured but ignored on Windows: TcpKeepalive::with_retries is not available on this platform"
             );
@@ -651,20 +681,26 @@ pub(crate) async fn connect_tcp_stream_with_proxy_config(
     if let Some(proxy_url) = proxy_config.get_proxy_for_uri(target_uri) {
         let (proxy_host, proxy_port, proxy_auth) = parse_proxy_url(proxy_url)?;
 
-        otap_df_telemetry::otel_debug!("Proxy.Connecting", host = proxy_host, port = proxy_port);
+        otap_df_telemetry::otel_debug!(
+            "proxy.connect.start",
+            server_host = proxy_host, server_port = proxy_port
+        );
         let stream = TcpStream::connect((proxy_host.as_str(), proxy_port))
             .await
             .map_err(|e| {
                 otap_df_telemetry::otel_warn!(
-                    "Proxy.ConnectFailed",
-                    host = proxy_host,
-                    port = proxy_port,
-                    error_kind = format!("{:?}", e.kind()),
-                    raw_os_error = e.raw_os_error().map(|c| c.to_string()).unwrap_or_default()
+                    "proxy.connect.fail",
+                    server_address = proxy_host.clone(),
+                    server_port = proxy_port,
+                    exception_type = format!("{:?}", e.kind()),
+                    exception_message = e.raw_os_error().map(|c| c.to_string()).unwrap_or_default()
                 );
                 ProxyError::ProxyConnectionFailed(e)
             })?;
-        otap_df_telemetry::otel_debug!("Proxy.Connected");
+        otap_df_telemetry::otel_debug!(
+            "proxy.connect.complete",
+            server_host = proxy_host, server_port = proxy_port
+        );
 
         // Apply socket options to the proxy connection
         let stream = apply_socket_options(

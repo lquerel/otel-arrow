@@ -39,7 +39,7 @@ use otap_df_pdata::otlp::{ProtoBuffer, ProtoBytesEncoder};
 use otap_df_pdata::{OtapArrowRecords, OtapPayload, OtapPayloadHelpers, OtlpProtoBytes};
 use otap_df_telemetry::instrument::Counter;
 use otap_df_telemetry::metrics::MetricSet;
-use otap_df_telemetry::{otel_debug, otel_info};
+use otap_df_telemetry::otel_info;
 use serde::Deserialize;
 use std::future::Future;
 use std::sync::Arc;
@@ -119,7 +119,8 @@ impl Exporter<OtapPdata> for OTLPExporter {
         effect_handler: EffectHandler<OtapPdata>,
     ) -> Result<TerminalState, Error> {
         otel_info!(
-            "Exporter.Start",
+            /* todo the current node entity should be attached here */
+            "start",
             grpc_endpoint = self.config.grpc.grpc_endpoint.as_str(),
             message = "Starting OTLP Exporter"
         );
@@ -194,12 +195,7 @@ impl Exporter<OtapPdata> for OTLPExporter {
             let msg = if let Some(msg) = pending_msg.take() {
                 msg
             } else if inflight_exports.is_empty() {
-                let msg = msg_chan.recv().await?;
-                otel_debug!(
-                    "Exporter.Receive",
-                    message = "Received message from pipeline"
-                );
-                msg
+                msg_chan.recv().await?
             } else {
                 let completion_fut = inflight_exports.next_completion().fuse();
                 let recv_fut = msg_chan.recv().fuse();
@@ -219,9 +215,7 @@ impl Exporter<OtapPdata> for OTLPExporter {
                         continue;
                     }
                     msg = recv_fut => {
-                        let msg = msg?;
-                        otel_debug!("Exporter.Receive", message = "Received message from pipeline");
-                        msg
+                        msg?
                     },
                 }
             };
