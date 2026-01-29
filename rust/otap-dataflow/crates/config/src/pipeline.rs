@@ -9,7 +9,9 @@ use crate::error::{Context, Error, HyperEdgeSpecDetails};
 use crate::health::HealthPolicy;
 use crate::node::{DispatchStrategy, HyperEdgeConfig, NodeKind, NodeUserConfig};
 use crate::pipeline::service::ServiceConfig;
+use crate::topic::TopicConfig;
 use crate::{Description, NodeId, NodeUrn, PipelineGroupId, PipelineId, PortName};
+use crate::TopicName;
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
@@ -45,6 +47,10 @@ pub struct PipelineConfig {
     /// Quota for this pipeline.
     #[serde(default)]
     quota: Quota,
+
+    /// Topics visible only within this pipeline.
+    #[serde(default, skip_serializing_if = "HashMap::is_empty")]
+    topics: HashMap<TopicName, TopicConfig>,
 
     /// All nodes in this pipeline, keyed by node ID.
     #[serde(default)]
@@ -564,6 +570,11 @@ impl PipelineConfig {
         self.internal.iter()
     }
 
+    /// Returns an iterator visiting all topics declared in this pipeline.
+    pub fn topic_iter(&self) -> impl Iterator<Item = (&TopicName, &TopicConfig)> {
+        self.topics.iter()
+    }
+
     /// Extracts the internal telemetry pipeline as a separate PipelineConfig.
     #[must_use]
     pub fn extract_internal_config(&self) -> Option<PipelineConfig> {
@@ -575,6 +586,7 @@ impl PipelineConfig {
             r#type: self.r#type.clone(),
             settings: Self::internal_pipeline_settings(),
             quota: Quota::default(),
+            topics: HashMap::new(),
             nodes: self.internal.clone(),
             internal: PipelineNodes::default(),
             service: ServiceConfig::default(),
@@ -906,6 +918,7 @@ impl PipelineConfigBuilder {
                 internal: PipelineNodes(HashMap::new()),
                 settings: PipelineSettings::default(),
                 quota: Quota::default(),
+                topics: HashMap::new(),
                 r#type: pipeline_type,
                 service: ServiceConfig::default(),
             };

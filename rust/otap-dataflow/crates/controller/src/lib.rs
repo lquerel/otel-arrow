@@ -54,6 +54,7 @@ use otap_df_engine::control::{
 };
 use otap_df_engine::entity_context::set_pipeline_entity_key;
 use otap_df_engine::error::{Error as EngineError, error_summary_from};
+use otap_df_engine::topic::{TopicRegistry, TopicRegistryHandle};
 use otap_df_state::store::ObservedStateStore;
 use otap_df_telemetry::event::{EngineEvent, ErrorSummary, ObservedEventReporter};
 use otap_df_telemetry::reporter::MetricsReporter;
@@ -89,9 +90,15 @@ impl<PData: 'static + Clone + Send + Sync + std::fmt::Debug> Controller<PData> {
 
     /// Starts the controller with the given engine configurations.
     pub fn run_forever(&self, engine_config: EngineConfig) -> Result<(), Error> {
+        let topic_registry = Arc::new(
+            TopicRegistry::from_engine_config(&engine_config)
+                .map_err(|e| Error::InvalidConfiguration { errors: vec![e] })?,
+        );
+
         let EngineConfig {
             settings: engine_settings,
             pipeline_groups,
+            ..
         } = engine_config;
         let admin_settings = engine_settings.http_admin.clone().unwrap_or_default();
         // Initialize metrics system and observed event store.
@@ -127,7 +134,8 @@ impl<PData: 'static + Clone + Send + Sync + std::fmt::Debug> Controller<PData> {
 
         let metrics_dispatcher = telemetry_system.dispatcher();
         let metrics_reporter = telemetry_system.reporter();
-        let controller_ctx = ControllerContext::new(telemetry_system.registry());
+        let controller_ctx = ControllerContext::new(telemetry_system.registry())
+            .with_topic_registry(TopicRegistryHandle::new(topic_registry.clone()));
 
         for (pipeline_group_id, pipeline_group) in pipeline_groups.iter() {
             for (pipeline_id, pipeline) in pipeline_group.pipelines.iter() {

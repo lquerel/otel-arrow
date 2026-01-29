@@ -21,6 +21,11 @@ pub mod otlp_receiver;
 /// Implementation of OTLP exporter that implements the exporter trait
 pub mod otlp_exporter;
 
+/// Topic receiver for in-memory inter-pipeline communication.
+pub mod topic_receiver;
+/// Topic exporter for in-memory inter-pipeline communication.
+pub mod topic_exporter;
+
 /// Batch processor
 pub mod batch_processor;
 

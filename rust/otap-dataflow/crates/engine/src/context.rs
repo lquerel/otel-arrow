@@ -7,12 +7,14 @@ use crate::attributes::{
     ChannelAttributeSet, EngineAttributeSet, NodeAttributeSet, PipelineAttributeSet,
 };
 use crate::entity_context::{current_node_telemetry_handle, node_entity_key};
+use crate::topic::{TopicRegistry, TopicRegistryHandle};
 use otap_df_config::node::NodeKind;
 use otap_df_config::{NodeId, NodeUrn, PipelineGroupId, PipelineId};
 use otap_df_telemetry::InternalTelemetrySettings;
 use otap_df_telemetry::metrics::{MetricSet, MetricSetHandler};
 use otap_df_telemetry::registry::{EntityKey, TelemetryRegistryHandle};
 use std::fmt::Debug;
+use std::sync::Arc;
 
 // Generate a stable, unique identifier per process instance (base32-encoded UUID v7)
 // Choose UUID v7 for better sortability in telemetry signals
@@ -90,6 +92,7 @@ pub struct ControllerContext {
     host_id: Cow<'static, str>,
     container_id: Cow<'static, str>,
     numa_node_id: usize,
+    topic_registry: Option<TopicRegistryHandle>,
 }
 
 /// A lightweight/cloneable pipeline context.
@@ -117,7 +120,25 @@ impl ControllerContext {
             host_id: HOST_ID.clone(),
             container_id: CONTAINER_ID.clone(),
             numa_node_id: 0, // ToDo(LQ): Set NUMA node ID if available
+            topic_registry: None,
         }
+    }
+
+    /// Attach a topic registry handle to this controller context.
+    #[must_use]
+    pub fn with_topic_registry(mut self, topic_registry: TopicRegistryHandle) -> Self {
+        self.topic_registry = Some(topic_registry);
+        self
+    }
+
+    /// Returns the topic registry for the given pdata type, if configured.
+    #[must_use]
+    pub fn topic_registry<PData: 'static + Send + Sync>(
+        &self,
+    ) -> Option<Arc<TopicRegistry<PData>>> {
+        self.topic_registry
+            .as_ref()
+            .and_then(|registry| registry.downcast::<TopicRegistry<PData>>())
     }
 
     /// Returns a new pipeline context with the given identifiers and the current controller context
@@ -203,6 +224,14 @@ impl PipelineContext {
     #[must_use]
     pub fn take_internal_telemetry(&mut self) -> Option<InternalTelemetrySettings> {
         self.internal_telemetry.take()
+    }
+
+    /// Returns the topic registry for the given pdata type, if configured.
+    #[must_use]
+    pub fn topic_registry<PData: 'static + Send + Sync>(
+        &self,
+    ) -> Option<Arc<TopicRegistry<PData>>> {
+        self.controller_context.topic_registry::<PData>()
     }
 
     /// Registers a metric set for the given entity key and tracks it in node telemetry if present.

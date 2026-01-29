@@ -5,7 +5,8 @@
 
 use crate::error::Error;
 use crate::pipeline::PipelineConfig;
-use crate::{PipelineGroupId, PipelineId};
+use crate::topic::TopicConfig;
+use crate::{PipelineGroupId, PipelineId, TopicName};
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
@@ -15,6 +16,10 @@ use std::collections::HashMap;
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
 pub struct PipelineGroupConfig {
+    /// Topics visible to pipelines in this group.
+    #[serde(default, skip_serializing_if = "HashMap::is_empty")]
+    pub topics: HashMap<TopicName, TopicConfig>,
+
     /// All pipelines belonging to this pipeline group, keyed by pipeline ID.
     pub pipelines: HashMap<PipelineId, PipelineConfig>,
 }
@@ -24,6 +29,7 @@ impl PipelineGroupConfig {
     #[must_use]
     pub fn new() -> Self {
         Self {
+            topics: HashMap::new(),
             pipelines: HashMap::new(),
         }
     }

@@ -45,6 +45,36 @@ where
     Ok(Some(bytes as u32))
 }
 
+/// Deserialize an optional byte size into a u64.
+pub fn deserialize_u64<'de, D>(deserializer: D) -> Result<Option<u64>, D::Error>
+where
+    D: Deserializer<'de>,
+{
+    let value = Option::<Value>::deserialize(deserializer)?;
+    let Some(value) = value else {
+        return Ok(None);
+    };
+
+    let (bytes, repr) = match value {
+        Value::Number(value) => (value as u128, value.to_string()),
+        Value::String(text) => {
+            let parsed: Byte = text.parse().map_err(DeError::custom)?;
+            (parsed.as_u64() as u128, text)
+        }
+    };
+
+    if bytes > u64::MAX as u128 {
+        return Err(DeError::custom(format!(
+            "byte size '{}' ({} bytes) exceeds u64::MAX ({} bytes)",
+            repr,
+            bytes,
+            u64::MAX
+        )));
+    }
+
+    Ok(Some(bytes as u64))
+}
+
 #[cfg(test)]
 mod tests {
     use super::deserialize;

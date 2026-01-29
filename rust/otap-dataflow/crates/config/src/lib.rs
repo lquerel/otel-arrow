@@ -24,6 +24,7 @@ pub mod node;
 pub mod observed_state;
 pub mod pipeline;
 pub mod pipeline_group;
+pub mod topic;
 /// TLS configuration.
 pub mod tls;
 pub mod urn;
@@ -64,6 +65,9 @@ pub type NodeUrn = Cow<'static, str>;
 
 /// The name of a node out port in the pipeline.
 pub type PortName = Cow<'static, str>;
+
+/// The name of a topic.
+pub type TopicName = Cow<'static, str>;
 
 /// The description of a pipeline or a node.
 pub type Description = Cow<'static, str>;

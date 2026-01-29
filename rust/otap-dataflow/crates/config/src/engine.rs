@@ -8,7 +8,8 @@ use crate::observed_state::ObservedStateSettings;
 use crate::pipeline::PipelineConfig;
 use crate::pipeline::service::telemetry::TelemetryConfig;
 use crate::pipeline_group::PipelineGroupConfig;
-use crate::{PipelineGroupId, PipelineId};
+use crate::topic::TopicConfig;
+use crate::{PipelineGroupId, PipelineId, TopicName};
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
@@ -21,6 +22,10 @@ use std::path::Path;
 pub struct EngineConfig {
     /// Settings that apply to the entire engine instance.
     pub settings: EngineSettings,
+
+    /// Global topics visible to all pipeline groups.
+    #[serde(default, skip_serializing_if = "HashMap::is_empty")]
+    pub topics: HashMap<TopicName, TopicConfig>,
 
     /// All pipeline group managed by this engine, keyed by pipeline group ID.
     pub pipeline_groups: HashMap<PipelineGroupId, PipelineGroupConfig>,
@@ -147,6 +152,7 @@ impl EngineConfig {
         let _ = pipeline_groups.insert(pipeline_group_id, pipeline_group);
         let config = EngineConfig {
             settings,
+            topics: HashMap::new(),
             pipeline_groups,
         };
         config.validate()?;

@@ -61,6 +61,7 @@ pub mod runtime_pipeline;
 pub mod shared;
 pub mod terminal_state;
 pub mod testing;
+pub mod topic;
 
 /// Trait for factory types that expose a name.
 ///
