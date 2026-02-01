@@ -5,13 +5,13 @@
 
 pub mod service;
 
+use crate::TopicName;
 use crate::error::{Context, Error, HyperEdgeSpecDetails};
 use crate::health::HealthPolicy;
 use crate::node::{DispatchStrategy, HyperEdgeConfig, NodeKind, NodeUserConfig};
 use crate::pipeline::service::ServiceConfig;
 use crate::topic::TopicConfig;
 use crate::{Description, NodeId, NodeUrn, PipelineGroupId, PipelineId, PortName};
-use crate::TopicName;
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 use serde_json::Value;

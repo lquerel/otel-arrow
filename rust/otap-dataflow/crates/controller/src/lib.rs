@@ -91,7 +91,7 @@ impl<PData: 'static + Clone + Send + Sync + std::fmt::Debug> Controller<PData> {
     /// Starts the controller with the given engine configurations.
     pub fn run_forever(&self, engine_config: EngineConfig) -> Result<(), Error> {
         let topic_registry = Arc::new(
-            TopicRegistry::from_engine_config(&engine_config)
+            TopicRegistry::<PData>::from_engine_config(&engine_config)
                 .map_err(|e| Error::InvalidConfiguration { errors: vec![e] })?,
         );
 

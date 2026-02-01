@@ -72,11 +72,11 @@ impl TopicExporter {
             });
         }
 
-        let registry = pipeline_ctx
-            .topic_registry::<OtapPdata>()
-            .ok_or_else(|| otap_df_config::error::Error::InvalidUserConfig {
+        let registry = pipeline_ctx.topic_registry::<OtapPdata>().ok_or_else(|| {
+            otap_df_config::error::Error::InvalidUserConfig {
                 error: "topic registry is not configured".to_string(),
-            })?;
+            }
+        })?;
 
         let topic_key = registry.resolve(
             &pipeline_ctx.pipeline_group_id(),
@@ -84,7 +84,10 @@ impl TopicExporter {
             topic,
         )?;
 
-        Ok(Self { registry, topic_key })
+        Ok(Self {
+            registry,
+            topic_key,
+        })
     }
 }
 

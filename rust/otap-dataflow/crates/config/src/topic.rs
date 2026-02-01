@@ -23,7 +23,7 @@ pub struct TopicConfig {
 }
 
 /// Topic policy definitions.
-#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, Default)]
 #[serde(deny_unknown_fields)]
 pub struct TopicPolicy {
     /// Buffer behavior for the topic.
@@ -37,16 +37,6 @@ pub struct TopicPolicy {
     /// Persistence settings (not yet enforced).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub persistence: Option<TopicPersistencePolicy>,
-}
-
-impl Default for TopicPolicy {
-    fn default() -> Self {
-        Self {
-            buffer: TopicBufferPolicy::default(),
-            slow_consumer: None,
-            persistence: None,
-        }
-    }
 }
 
 /// Buffer policy for a topic.
@@ -76,7 +66,7 @@ fn default_topic_buffer_capacity() -> usize {
 }
 
 /// Buffer overflow behavior.
-#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, Default)]
 #[serde(rename_all = "snake_case")]
 pub enum TopicOverflowPolicy {
     /// Discard the oldest signals in the buffer.
@@ -84,15 +74,10 @@ pub enum TopicOverflowPolicy {
     /// Discard the incoming signal.
     DropNewest,
     /// Block the publisher until space is available.
+    #[default]
     Block,
     /// Return an error to the publisher.
     Error,
-}
-
-impl Default for TopicOverflowPolicy {
-    fn default() -> Self {
-        TopicOverflowPolicy::Block
-    }
 }
 
 /// Slow consumer policy (parsed but not enforced yet).

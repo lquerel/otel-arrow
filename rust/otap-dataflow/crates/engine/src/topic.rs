@@ -29,6 +29,7 @@ impl TopicRegistryHandle {
     }
 
     /// Downcast to the concrete registry type.
+    #[must_use]
     pub fn downcast<T: Any + Send + Sync>(&self) -> Option<Arc<T>> {
         Arc::downcast(self.inner.clone()).ok()
     }
@@ -70,6 +71,7 @@ pub struct TopicKey {
 
 impl TopicKey {
     /// Create a global topic key.
+    #[must_use]
     pub fn global(name: TopicName) -> Self {
         Self {
             scope: TopicScope::Global,
@@ -78,6 +80,7 @@ impl TopicKey {
     }
 
     /// Create a group-scoped topic key.
+    #[must_use]
     pub fn group(pipeline_group_id: PipelineGroupId, name: TopicName) -> Self {
         Self {
             scope: TopicScope::Group { pipeline_group_id },
@@ -86,6 +89,7 @@ impl TopicKey {
     }
 
     /// Create a pipeline-scoped topic key.
+    #[must_use]
     pub fn pipeline(
         pipeline_group_id: PipelineGroupId,
         pipeline_id: PipelineId,
@@ -232,11 +236,8 @@ impl<PData: Clone + Send + Sync + 'static> TopicRegistry<PData> {
             for (pipeline_id, pipeline) in &group.pipelines {
                 for (name, topic) in pipeline.topic_iter() {
                     validate_topic_config(topic)?;
-                    let key = TopicKey::pipeline(
-                        group_id.clone(),
-                        pipeline_id.clone(),
-                        name.clone(),
-                    );
+                    let key =
+                        TopicKey::pipeline(group_id.clone(), pipeline_id.clone(), name.clone());
                     let _ = topics.insert(key, Arc::new(TopicEntry::new(topic.clone())));
                 }
             }
@@ -255,11 +256,8 @@ impl<PData: Clone + Send + Sync + 'static> TopicRegistry<PData> {
         name: &str,
     ) -> Result<TopicKey, ConfigError> {
         let name: TopicName = name.to_string().into();
-        let pipeline_key = TopicKey::pipeline(
-            pipeline_group_id.clone(),
-            pipeline_id.clone(),
-            name.clone(),
-        );
+        let pipeline_key =
+            TopicKey::pipeline(pipeline_group_id.clone(), pipeline_id.clone(), name.clone());
         let group_key = TopicKey::group(pipeline_group_id.clone(), name.clone());
         let global_key = TopicKey::global(name.clone());
 
@@ -308,26 +306,21 @@ impl<PData: Clone + Send + Sync + 'static> TopicRegistry<PData> {
     }
 
     /// Publish data to all active balanced groups for this topic.
-    pub async fn publish(
-        &self,
-        key: &TopicKey,
-        data: PData,
-    ) -> Result<(), TopicPublishError> {
-        let entry = self.entry(key).map_err(|_| TopicPublishError::Disconnected {
-            topic: key.clone(),
-            group: "<unknown>".to_string(),
-        })?;
+    pub async fn publish(&self, key: &TopicKey, data: PData) -> Result<(), TopicPublishError> {
+        let entry = self
+            .entry(key)
+            .map_err(|_| TopicPublishError::Disconnected {
+                topic: key.clone(),
+                group: "<unknown>".to_string(),
+            })?;
         let overflow = entry.config.policy.buffer.overflow.clone();
 
         let groups = {
             let groups = entry.groups.read().expect("topic group lock poisoned");
             groups
                 .iter()
-                .filter_map(|(name, group)| {
-                    group
-                        .has_subscribers()
-                        .then(|| (name.clone(), group.clone()))
-                })
+                .filter(|(_, group)| group.has_subscribers())
+                .map(|(name, group)| (name.clone(), group.clone()))
                 .collect::<Vec<_>>()
         };
 
@@ -339,24 +332,19 @@ impl<PData: Clone + Send + Sync + 'static> TopicRegistry<PData> {
         let mut iter = groups.into_iter().peekable();
         while let Some((group_name, group)) = iter.next() {
             let data = if iter.peek().is_some() {
-                payload
-                    .as_ref()
-                    .expect("payload missing")
-                    .clone()
+                payload.as_ref().expect("payload missing").clone()
             } else {
                 payload.take().expect("payload missing")
             };
 
             match &overflow {
                 TopicOverflowPolicy::Block => {
-                    group
-                        .sender
-                        .send_async(data)
-                        .await
-                        .map_err(|_| TopicPublishError::Disconnected {
+                    group.sender.send_async(data).await.map_err(|_| {
+                        TopicPublishError::Disconnected {
                             topic: key.clone(),
                             group: group_name.clone(),
-                        })?;
+                        }
+                    })?;
                 }
                 TopicOverflowPolicy::DropNewest => {
                     if let Err(err) = group.sender.try_send(data) {
@@ -368,28 +356,26 @@ impl<PData: Clone + Send + Sync + 'static> TopicRegistry<PData> {
                         }
                     }
                 }
-                TopicOverflowPolicy::DropOldest => {
-                    match group.sender.try_send(data) {
-                        Ok(()) => {}
-                        Err(flume::TrySendError::Full(data)) => {
-                            let _ = group.receiver.try_recv();
-                            if let Err(err) = group.sender.try_send(data) {
-                                if matches!(err, flume::TrySendError::Disconnected(_)) {
-                                    return Err(TopicPublishError::Disconnected {
-                                        topic: key.clone(),
-                                        group: group_name.clone(),
-                                    });
-                                }
+                TopicOverflowPolicy::DropOldest => match group.sender.try_send(data) {
+                    Ok(()) => {}
+                    Err(flume::TrySendError::Full(data)) => {
+                        let _ = group.receiver.try_recv();
+                        if let Err(err) = group.sender.try_send(data) {
+                            if matches!(err, flume::TrySendError::Disconnected(_)) {
+                                return Err(TopicPublishError::Disconnected {
+                                    topic: key.clone(),
+                                    group: group_name.clone(),
+                                });
                             }
                         }
-                        Err(flume::TrySendError::Disconnected(_)) => {
-                            return Err(TopicPublishError::Disconnected {
-                                topic: key.clone(),
-                                group: group_name.clone(),
-                            });
-                        }
                     }
-                }
+                    Err(flume::TrySendError::Disconnected(_)) => {
+                        return Err(TopicPublishError::Disconnected {
+                            topic: key.clone(),
+                            group: group_name.clone(),
+                        });
+                    }
+                },
                 TopicOverflowPolicy::Error => {
                     if let Err(err) = group.sender.try_send(data) {
                         return match err {
@@ -414,11 +400,12 @@ impl<PData: Clone + Send + Sync + 'static> TopicRegistry<PData> {
 
     fn entry(&self, key: &TopicKey) -> Result<Arc<TopicEntry<PData>>, ConfigError> {
         let topics = self.topics.read().expect("topic registry lock poisoned");
-        topics.get(key).cloned().ok_or_else(|| {
-            ConfigError::InvalidUserConfig {
+        topics
+            .get(key)
+            .cloned()
+            .ok_or_else(|| ConfigError::InvalidUserConfig {
                 error: format!("topic '{}' is not declared", key),
-            }
-        })
+            })
     }
 }
 
@@ -435,17 +422,22 @@ fn validate_topic_config(topic: &TopicConfig) -> Result<(), ConfigError> {
 mod tests {
     use super::*;
     use otap_df_config::engine::{EngineConfig, EngineSettings};
-    use otap_df_config::pipeline::{PipelineConfigBuilder, PipelineType};
+    use otap_df_config::pipeline::{PipelineConfig, PipelineConfigBuilder, PipelineType};
     use otap_df_config::pipeline_group::PipelineGroupConfig;
-    use otap_df_config::topic::{TopicBufferPolicy, TopicConfig, TopicPolicy, TopicOverflowPolicy};
+    use otap_df_config::topic::{TopicBufferPolicy, TopicConfig, TopicOverflowPolicy, TopicPolicy};
     use otap_df_config::{PipelineGroupId, PipelineId};
+    use std::collections::HashSet;
 
     #[tokio::test]
     async fn balanced_topic_delivers_once() {
         let pipeline_group_id: PipelineGroupId = "test-group".into();
         let pipeline_id: PipelineId = "test-pipeline".into();
         let pipeline = PipelineConfigBuilder::new()
-            .build(PipelineType::Otap, pipeline_group_id.clone(), pipeline_id.clone())
+            .build(
+                PipelineType::Otap,
+                pipeline_group_id.clone(),
+                pipeline_id.clone(),
+            )
             .expect("pipeline config");
 
         let mut group = PipelineGroupConfig::new();
@@ -453,10 +445,12 @@ mod tests {
             .add_pipeline(pipeline_id.clone(), pipeline)
             .expect("pipeline insert");
 
-        let mut policy = TopicPolicy::default();
-        policy.buffer = TopicBufferPolicy {
-            capacity: 4,
-            overflow: TopicOverflowPolicy::Block,
+        let policy = TopicPolicy {
+            buffer: TopicBufferPolicy {
+                capacity: 4,
+                overflow: TopicOverflowPolicy::Block,
+            },
+            ..TopicPolicy::default()
         };
 
         let mut engine_config = EngineConfig {
@@ -496,5 +490,245 @@ mod tests {
         values.sort_unstable();
         assert_eq!(values, vec![10, 20]);
         assert!(matches!(sub_b.try_recv(), Err(flume::TryRecvError::Empty)));
+    }
+
+    #[tokio::test]
+    async fn balanced_topic_delivers_each_message_once() {
+        // Two balanced subscribers should collectively see each message exactly once.
+        let pipeline_group_id: PipelineGroupId = "test-group".into();
+        let pipeline_id: PipelineId = "test-pipeline".into();
+        let pipeline = PipelineConfigBuilder::new()
+            .build(
+                PipelineType::Otap,
+                pipeline_group_id.clone(),
+                pipeline_id.clone(),
+            )
+            .expect("pipeline config");
+
+        let mut group = PipelineGroupConfig::new();
+        group
+            .add_pipeline(pipeline_id.clone(), pipeline)
+            .expect("pipeline insert");
+
+        let policy = TopicPolicy {
+            buffer: TopicBufferPolicy {
+                capacity: 128,
+                overflow: TopicOverflowPolicy::Block,
+            },
+            ..TopicPolicy::default()
+        };
+
+        let mut engine_config = EngineConfig {
+            settings: EngineSettings::default(),
+            topics: HashMap::new(),
+            pipeline_groups: HashMap::new(),
+        };
+        let _ = engine_config.topics.insert(
+            "shared".into(),
+            TopicConfig {
+                description: None,
+                policy,
+            },
+        );
+        let _ = engine_config
+            .pipeline_groups
+            .insert(pipeline_group_id.clone(), group);
+
+        let registry = TopicRegistry::<u32>::from_engine_config(&engine_config).expect("registry");
+        let key = registry
+            .resolve(&pipeline_group_id, &pipeline_id, "shared")
+            .expect("topic resolve");
+        let sub_a = registry
+            .subscribe_balanced(&key, "workers")
+            .expect("subscription a");
+        let sub_b = registry
+            .subscribe_balanced(&key, "workers")
+            .expect("subscription b");
+
+        let message_count = 100u32;
+        for value in 0..message_count {
+            registry.publish(&key, value).await.expect("publish");
+        }
+
+        let mut seen = HashSet::new();
+        for _ in 0..message_count {
+            tokio::select! {
+                msg = sub_a.recv() => {
+                    let value = msg.expect("recv a");
+                    assert!(seen.insert(value), "duplicate message {value}");
+                }
+                msg = sub_b.recv() => {
+                    let value = msg.expect("recv b");
+                    assert!(seen.insert(value), "duplicate message {value}");
+                }
+            }
+        }
+        assert_eq!(seen.len(), message_count as usize);
+        assert!(matches!(sub_a.try_recv(), Err(flume::TryRecvError::Empty)));
+        assert!(matches!(sub_b.try_recv(), Err(flume::TryRecvError::Empty)));
+    }
+
+    #[test]
+    fn topic_resolution_prefers_pipeline_over_group_over_global() {
+        // Resolution order: pipeline-scoped overrides group overrides global.
+        let pipeline_group_id: PipelineGroupId = "test-group".into();
+        let pipeline_id: PipelineId = "test-pipeline".into();
+
+        let pipeline_yaml = r#"
+topics:
+  shared:
+    policy:
+      buffer:
+        capacity: 3
+"#;
+        let pipeline = PipelineConfig::from_yaml(
+            pipeline_group_id.clone(),
+            pipeline_id.clone(),
+            pipeline_yaml,
+        )
+        .expect("pipeline config");
+
+        let mut group = PipelineGroupConfig::new();
+        let _ = group.topics.insert(
+            "shared".into(),
+            TopicConfig {
+                description: None,
+                policy: TopicPolicy {
+                    buffer: TopicBufferPolicy {
+                        capacity: 2,
+                        overflow: TopicOverflowPolicy::Block,
+                    },
+                    ..TopicPolicy::default()
+                },
+            },
+        );
+        let _ = group.topics.insert(
+            "group_only".into(),
+            TopicConfig {
+                description: None,
+                policy: TopicPolicy {
+                    buffer: TopicBufferPolicy {
+                        capacity: 2,
+                        overflow: TopicOverflowPolicy::Block,
+                    },
+                    ..TopicPolicy::default()
+                },
+            },
+        );
+        group
+            .add_pipeline(pipeline_id.clone(), pipeline)
+            .expect("pipeline insert");
+
+        let mut engine_config = EngineConfig {
+            settings: EngineSettings::default(),
+            topics: HashMap::new(),
+            pipeline_groups: HashMap::new(),
+        };
+        let _ = engine_config.topics.insert(
+            "shared".into(),
+            TopicConfig {
+                description: None,
+                policy: TopicPolicy {
+                    buffer: TopicBufferPolicy {
+                        capacity: 1,
+                        overflow: TopicOverflowPolicy::Block,
+                    },
+                    ..TopicPolicy::default()
+                },
+            },
+        );
+        let _ = engine_config.topics.insert(
+            "global_only".into(),
+            TopicConfig {
+                description: None,
+                policy: TopicPolicy {
+                    buffer: TopicBufferPolicy {
+                        capacity: 1,
+                        overflow: TopicOverflowPolicy::Block,
+                    },
+                    ..TopicPolicy::default()
+                },
+            },
+        );
+        let _ = engine_config
+            .pipeline_groups
+            .insert(pipeline_group_id.clone(), group);
+
+        let registry = TopicRegistry::<u32>::from_engine_config(&engine_config).expect("registry");
+
+        let shared_key = registry
+            .resolve(&pipeline_group_id, &pipeline_id, "shared")
+            .expect("resolve shared");
+        assert!(matches!(
+            shared_key.scope,
+            TopicScope::Pipeline {
+                pipeline_group_id: ref group_id,
+                pipeline_id: ref pipe_id
+            } if group_id == &pipeline_group_id && pipe_id == &pipeline_id
+        ));
+
+        let group_key = registry
+            .resolve(&pipeline_group_id, &pipeline_id, "group_only")
+            .expect("resolve group");
+        assert!(matches!(
+            group_key.scope,
+            TopicScope::Group { pipeline_group_id: ref group_id } if group_id == &pipeline_group_id
+        ));
+
+        let global_key = registry
+            .resolve(&pipeline_group_id, &pipeline_id, "global_only")
+            .expect("resolve global");
+        assert!(matches!(global_key.scope, TopicScope::Global));
+    }
+
+    #[test]
+    fn topic_registry_rejects_zero_capacity() {
+        // Buffer capacity must be > 0 at any scope.
+        let pipeline_group_id: PipelineGroupId = "test-group".into();
+        let pipeline_id: PipelineId = "test-pipeline".into();
+        let pipeline = PipelineConfigBuilder::new()
+            .build(
+                PipelineType::Otap,
+                pipeline_group_id.clone(),
+                pipeline_id.clone(),
+            )
+            .expect("pipeline config");
+
+        let mut group = PipelineGroupConfig::new();
+        group
+            .add_pipeline(pipeline_id.clone(), pipeline)
+            .expect("pipeline insert");
+
+        let policy = TopicPolicy {
+            buffer: TopicBufferPolicy {
+                capacity: 0,
+                overflow: TopicOverflowPolicy::Block,
+            },
+            ..TopicPolicy::default()
+        };
+
+        let mut engine_config = EngineConfig {
+            settings: EngineSettings::default(),
+            topics: HashMap::new(),
+            pipeline_groups: HashMap::new(),
+        };
+        let _ = engine_config.topics.insert(
+            "invalid".into(),
+            TopicConfig {
+                description: None,
+                policy,
+            },
+        );
+        let _ = engine_config
+            .pipeline_groups
+            .insert(pipeline_group_id.clone(), group);
+
+        let err = TopicRegistry::<u32>::from_engine_config(&engine_config)
+            .err()
+            .expect("expected invalid capacity");
+        assert!(
+            err.to_string()
+                .contains("capacity must be greater than zero")
+        );
     }
 }

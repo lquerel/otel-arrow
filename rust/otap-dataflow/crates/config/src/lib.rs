@@ -24,9 +24,9 @@ pub mod node;
 pub mod observed_state;
 pub mod pipeline;
 pub mod pipeline_group;
-pub mod topic;
 /// TLS configuration.
 pub mod tls;
+pub mod topic;
 pub mod urn;
 
 /// Signal types
