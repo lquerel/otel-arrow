@@ -10,6 +10,38 @@
 //!   to persistent/distributed implementations without changing node code.
 //! - This backend intentionally fails fast on unsupported policies through the
 //!   runtime capability contract (for example `broadcast_on_lag=disconnect`).
+//!
+//! Ack/Nack behavior:
+//! - Transport contract:
+//!   - Receiver-side `ack()/nack()` acts on the delivery handle returned by
+//!     `TopicSubscriber::recv()`.
+//!   - In this in-memory backend, ack/nack does not produce a direct signal back
+//!     to `TopicPublisher::publish()` or to the exporter node.
+//!   - Exporter-side visibility is currently limited to `TopicPublishReport`,
+//!     which is an enqueue-time snapshot (attempted/delivered/dropped).
+//!   - Any higher-level nack reporting/retry policy toward exporter/effect
+//!     handlers must be orchestrated by the caller layer, not by this backend.
+//! - Balanced mode:
+//!   - `ack()` is a no-op.
+//!   - `nack()` is a no-op in this backend (no implicit requeue). Retry/backoff
+//!     is expected to be handled by the caller (effect handler path).
+//! - Broadcast mode:
+//!   - `ack()` is a no-op.
+//!   - `nack()` is subscriber-local: payload is pushed into that subscriber retry
+//!     queue and redelivered on the next `recv()` for that same subscriber only.
+//!
+//! Backpressure behavior:
+//! - Balanced mode (per-group bounded queue):
+//!   - `balanced_on_full=block`: publish awaits free space (`send_async`).
+//!   - `balanced_on_full=drop_newest`: publish is non-blocking (`try_send`) and
+//!     drops the new message when the queue is full.
+//! - Broadcast mode (Tokio broadcast ring):
+//!   - Publisher does not block on slow subscribers.
+//!   - When subscribers lag past ring capacity, Tokio reports `Lagged` on recv;
+//!     with `broadcast_on_lag=drop_oldest`, receiver skips lost messages and
+//!     continues with newer ones.
+//!   - `broadcast_on_lag=disconnect` is currently unsupported and rejected at
+//!     topic creation by the runtime capability contract.
 
 use super::{
     DeliveryAckHandler, TopicDelivery, TopicPublishReport, TopicPublisher, TopicRuntime,
