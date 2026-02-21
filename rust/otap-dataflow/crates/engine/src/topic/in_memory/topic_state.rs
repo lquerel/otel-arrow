@@ -4,7 +4,7 @@
 use super::balanced::{
     BalancedEnvelope, BalancedGroupState, SendAttemptOutcome, send_balanced_with_policy,
 };
-use super::broadcast::InMemoryBroadcastSubscriber;
+use super::broadcast::{BroadcastSubscriberState, InMemoryBroadcastSubscriber};
 use super::outcome_tracker::{
     PublishOutcomeTracker, immediate_outcome_future, tracker_outcome_future,
 };
@@ -14,9 +14,15 @@ use crate::topic::{
 };
 use otap_df_config::TopicName;
 use otap_df_config::topic::{SubscriptionGroupName, TopicBalancedOnFullPolicy, TopicPolicies};
-use std::collections::{HashMap, VecDeque};
+use std::collections::HashMap;
 use std::sync::{Arc, Mutex};
 use tokio::sync::broadcast;
+
+#[derive(Default)]
+struct BroadcastRegistry {
+    next_subscriber_id: u64,
+    subscribers: HashMap<u64, Arc<BroadcastSubscriberState>>,
+}
 
 pub(super) struct InMemoryTopic<T> {
     name: TopicName,
@@ -25,6 +31,47 @@ pub(super) struct InMemoryTopic<T> {
     balanced_groups: Mutex<HashMap<SubscriptionGroupName, Arc<BalancedGroupState<T>>>>,
     // One shared ring for all broadcast subscribers in this topic.
     broadcast_sender: broadcast::Sender<T>,
+    // Registry of active broadcast subscribers and their settlement state.
+    broadcast_registry: Mutex<BroadcastRegistry>,
+}
+
+impl<T> InMemoryTopic<T> {
+    fn lock_broadcast_registry(
+        &self,
+    ) -> Result<std::sync::MutexGuard<'_, BroadcastRegistry>, TopicRuntimeError> {
+        self.broadcast_registry
+            .lock()
+            .map_err(|_| TopicRuntimeError::Internal {
+                message: format!("topic `{}` broadcast-registry lock poisoned", self.name),
+            })
+    }
+
+    fn snapshot_broadcast_subscribers(
+        &self,
+    ) -> Result<Vec<Arc<BroadcastSubscriberState>>, TopicRuntimeError> {
+        let registry = self.lock_broadcast_registry()?;
+        Ok(registry.subscribers.values().cloned().collect())
+    }
+
+    fn register_broadcast_subscriber(
+        &self,
+        state: Arc<BroadcastSubscriberState>,
+    ) -> Result<u64, TopicRuntimeError> {
+        let mut registry = self.lock_broadcast_registry()?;
+        let id = registry.next_subscriber_id;
+        registry.next_subscriber_id = registry.next_subscriber_id.wrapping_add(1);
+        let previous = registry.subscribers.insert(id, state);
+        debug_assert!(previous.is_none());
+        Ok(id)
+    }
+
+    pub(super) fn unregister_broadcast_subscriber(
+        &self,
+        subscriber_id: u64,
+    ) -> Result<Option<Arc<BroadcastSubscriberState>>, TopicRuntimeError> {
+        let mut registry = self.lock_broadcast_registry()?;
+        Ok(registry.subscribers.remove(&subscriber_id))
+    }
 }
 
 impl<T> InMemoryTopic<T>
@@ -42,6 +89,7 @@ where
             policies,
             balanced_groups: Mutex::new(HashMap::new()),
             broadcast_sender,
+            broadcast_registry: Mutex::new(BroadcastRegistry::default()),
         }
     }
 
@@ -93,8 +141,9 @@ where
             let groups = self.lock_balanced_groups()?;
             groups.values().map(|group| group.sender.clone()).collect()
         };
-        // Number of currently attached broadcast subscribers.
-        let broadcast_receivers = self.broadcast_sender.receiver_count();
+        // Snapshot currently attached broadcast subscribers.
+        let broadcast_subscribers = self.snapshot_broadcast_subscribers()?;
+        let broadcast_receivers = broadcast_subscribers.len();
 
         let mut report = TopicPublishReport {
             // For balanced mode, this is "number of groups", not number of subscribers.
@@ -166,6 +215,13 @@ where
         }
 
         if broadcast_receivers > 0 {
+            for subscriber in &broadcast_subscribers {
+                if let Some(tracker) = &outcome_tracker {
+                    tracker.reserve_delivery();
+                }
+                subscriber.enqueue(outcome_tracker.clone())?;
+            }
+
             let msg = if destination_index + 1 == total_destinations {
                 payload_slot.take().expect(
                     "payload must still exist before delivering to the last destination queue",
@@ -206,11 +262,18 @@ where
     pub(super) fn subscribe_broadcast(
         self: &Arc<Self>,
     ) -> Result<InMemoryBroadcastSubscriber<T>, TopicRuntimeError> {
+        let state = Arc::new(BroadcastSubscriberState::new(
+            self.policies.broadcast_subscriber_queue_capacity,
+        ));
+        let subscriber_id = self.register_broadcast_subscriber(state.clone())?;
+
         Ok(InMemoryBroadcastSubscriber {
             topic_name: self.name.clone(),
             receiver: self.broadcast_sender.subscribe(),
             on_lag: self.policies.broadcast_on_lag.clone(),
-            retry_queue: Arc::new(Mutex::new(VecDeque::new())),
+            topic: Arc::clone(self),
+            subscriber_id,
+            state,
         })
     }
 }

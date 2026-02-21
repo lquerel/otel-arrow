@@ -59,10 +59,10 @@ Current explicit capability gate:
 - Stable backend-agnostic API for publishers/subscribers.
 - Explicit failure for unsupported policies/backends (`UnsupportedTopicPolicy`, `UnsupportedTopicBackend`).
 - Ack/nack integration point exists in the shared API and does not leak backend internals.
+- Outcome tracking can be implemented per-subscription semantic (balanced, broadcast) while preserving the same publisher/subscriber API.
 
 ## Non-Goals (Current Scope)
 
 - No guarantee that all backends provide identical internal behavior for every policy.
 - No persistence/distributed semantics in this abstraction layer itself.
 - No exactly-once semantics promised by this module.
-

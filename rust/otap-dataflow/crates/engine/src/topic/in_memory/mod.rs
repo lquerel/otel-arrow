@@ -17,16 +17,16 @@
 //!     `TopicSubscriber::recv()`.
 //!   - For balanced mode, when publisher outcome interest is enabled, downstream
 //!     `ack()/nack()` resolves publisher-side `TopicPublishOutcome`.
-//!   - For broadcast mode, `ack()/nack()` stays subscriber-local and does not
-//!     currently resolve publisher outcomes.
+//!   - For broadcast mode, `ack()/nack()` resolves publisher-side
+//!     `TopicPublishOutcome` for subscribers included in the publish snapshot.
 //! - Balanced mode:
 //!   - `ack()` resolves publisher outcome when outcome interest is enabled.
 //!   - `nack()` has no implicit requeue; it resolves publisher outcome as Nack
 //!     when outcome interest is enabled.
 //! - Broadcast mode:
-//!   - `ack()` is a no-op.
-//!   - `nack()` is subscriber-local: payload is pushed into that subscriber retry
-//!     queue and redelivered on the next `recv()` for that same subscriber only.
+//!   - `ack()` resolves that subscriber's settlement for the publish.
+//!   - `nack()` resolves that subscriber's settlement as Nack for the publish.
+//!   - There is no subscriber-local redelivery queue.
 //!
 //! Backpressure behavior:
 //! - Balanced mode (per-group bounded queue):
@@ -36,8 +36,8 @@
 //! - Broadcast mode (Tokio broadcast ring):
 //!   - Publisher does not block on slow subscribers.
 //!   - When subscribers lag past ring capacity, Tokio reports `Lagged` on recv;
-//!     with `broadcast_on_lag=drop_oldest`, receiver skips lost messages and
-//!     continues with newer ones.
+//!     with `broadcast_on_lag=drop_oldest`, settlement entries are nacked for
+//!     dropped messages and receiver continues with newer ones.
 //!   - `broadcast_on_lag=disconnect` is currently unsupported and rejected at
 //!     topic creation by the runtime capability contract.
 

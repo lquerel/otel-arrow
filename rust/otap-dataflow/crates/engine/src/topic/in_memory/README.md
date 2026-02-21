@@ -22,8 +22,8 @@ Main files:
 - `runtime.rs`: topic registry and runtime API implementation.
 - `topic_state.rs`: publish fan-out orchestration and per-topic state.
 - `balanced.rs`: balanced queue semantics and balanced ack handler.
-- `broadcast.rs`: broadcast receive/lag semantics and local retry queue.
-- `outcome_tracker.rs`: publisher outcome tracking for balanced mode.
+- `broadcast.rs`: broadcast receive/lag semantics and broadcast settlement handling.
+- `outcome_tracker.rs`: publisher outcome tracking and settlement resolution.
 
 ## Contracts and Semantics
 
@@ -61,9 +61,9 @@ Lag behavior (`broadcast_on_lag`):
 - `disconnect`: currently unsupported in this backend and rejected at create time.
 
 Ack/nack behavior:
-- `ack()` is a no-op,
-- `nack(...)` is subscriber-local redelivery only (payload is placed in that subscriber retry queue),
-- broadcast nack does not currently resolve publisher outcomes.
+- `ack()` resolves this subscriber's settlement for the publish,
+- `nack(...)` resolves this subscriber's settlement as Nack for the publish,
+- no subscriber-local redelivery queue exists for broadcast.
 
 ## Guarantees
 
@@ -71,11 +71,10 @@ Ack/nack behavior:
 - Backpressure semantics for balanced `block` are enforced.
 - Fast-fail on unsupported policy/backend combinations at creation time.
 - No hidden requeue in balanced mode on nack.
+- Broadcast settlement tracking is bounded per subscriber and respects `drop_oldest`.
 
 ## Important Limitations
 
 - Ephemeral backend: no persistence and no recovery across process restart.
 - Delivery report is a snapshot at publish time, not an end-to-end delivery guarantee.
-- Publisher outcomes are currently driven by balanced-path settlements only.
-- Broadcast lag handling is receive-side behavior (Tokio `Lagged`), not publisher-side blocking.
-
+- Broadcast lag handling is receive-side behavior (Tokio `Lagged`) with settlement nacks for dropped entries.
