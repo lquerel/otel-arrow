@@ -62,6 +62,7 @@ The topic abstraction enables decoupled inter-pipeline communication through:
 ### 1) Ingest Pipeline (N cores) -> Balanced Processing+Egress Pipeline (M cores)
 
 ```mermaid
+%%{init: {"theme":"base","themeVariables":{"fontFamily":"ui-sans-serif,system-ui,-apple-system,'Segoe UI',Roboto,'Helvetica Neue',Arial","primaryTextColor":"#0f172a","lineColor":"#64748b","background":"#ffffff"},"flowchart":{"curve":"basis","nodeSpacing":36,"rankSpacing":52}}}%%
 flowchart LR
     subgraph ING["Ingest Pipeline (N cores)"]
       IR1["receiver/ingest"] --> IE1["topic:exporter raw_signals"]
@@ -76,11 +77,25 @@ flowchart LR
     end
 
     T1 --> PR1
+
+    classDef topic fill:#0b2a52,stroke:#0b2a52,color:#ffffff,stroke-width:1.5px;
+    classDef receiver fill:#eafff2,stroke:#22a06b,color:#0f172a,stroke-width:1.2px;
+    classDef exporter fill:#fff4e8,stroke:#d9822b,color:#0f172a,stroke-width:1.2px;
+    classDef processor fill:#e9f1ff,stroke:#3b82f6,color:#0f172a,stroke-width:1.2px;
+    classDef egress fill:#fef2f2,stroke:#ef4444,color:#0f172a,stroke-width:1.2px;
+    class IR1,PR1 receiver;
+    class IE1 exporter;
+    class PP1 processor;
+    class PE1 egress;
+    class T1 topic;
+    style ING fill:#f8fafc,stroke:#cbd5e1,stroke-width:1px,color:#0f172a;
+    style PROC fill:#f8fafc,stroke:#cbd5e1,stroke-width:1px,color:#0f172a;
 ```
 
 ### 2) Multi-Tenant Deployment (One Topic Per Tenant)
 
 ```mermaid
+%%{init: {"theme":"base","themeVariables":{"fontFamily":"ui-sans-serif,system-ui,-apple-system,'Segoe UI',Roboto,'Helvetica Neue',Arial","primaryTextColor":"#0f172a","lineColor":"#64748b","background":"#ffffff"},"flowchart":{"curve":"basis","nodeSpacing":36,"rankSpacing":56}}}%%
 flowchart TB
     subgraph ING["Ingest Pipeline (N cores)"]
         I["ingest/router pipeline"] --> R["tenant router processor"]
@@ -105,26 +120,67 @@ flowchart TB
         A1["tenant_a pipeline"]
     end
 
-    subgraph TENANT_B["Tenant B (2 core)"]
+    subgraph TENANT_B["Tenant B (2 cores)"]
         B1["tenant_b pipeline"]
     end
     
     subgraph TENANT_C["Tenant C (1 core)"]
         C1["tenant_c pipeline"]
     end
+
+    classDef topic fill:#0b2a52,stroke:#0b2a52,color:#ffffff,stroke-width:1.5px;
+    classDef exporter fill:#fff4e8,stroke:#d9822b,color:#0f172a,stroke-width:1.2px;
+    classDef processor fill:#e9f1ff,stroke:#3b82f6,color:#0f172a,stroke-width:1.2px;
+    classDef tenant fill:#eafff2,stroke:#22a06b,color:#0f172a,stroke-width:1.2px;
+    class E1,E2,E3 exporter;
+    class R processor;
+    class TA,TB,TC topic;
+    class A1,B1,C1 tenant;
+    style ING fill:#f8fafc,stroke:#cbd5e1,stroke-width:1px,color:#0f172a;
+    style TENANT_A fill:#f8fafc,stroke:#cbd5e1,stroke-width:1px,color:#0f172a;
+    style TENANT_B fill:#f8fafc,stroke:#cbd5e1,stroke-width:1px,color:#0f172a;
+    style TENANT_C fill:#f8fafc,stroke:#cbd5e1,stroke-width:1px,color:#0f172a;
 ```
 
 ### 3) One Ingress Feeding Multiple Independent Purposes
 
 ```mermaid
+%%{init: {"theme":"base","themeVariables":{"fontFamily":"ui-sans-serif,system-ui,-apple-system,'Segoe UI',Roboto,'Helvetica Neue',Arial","primaryTextColor":"#0f172a","lineColor":"#64748b","background":"#ffffff"},"flowchart":{"curve":"basis","nodeSpacing":36,"rankSpacing":52}}}%%
 flowchart LR
-    I["ingest pipeline"] --> EX["topic:exporter raw_signals"]
+    subgraph ING["Ingest Pipeline (3 cores)"]
+        I["ingest receiver"] --> EX["topic:exporter raw_signals"]
+    end
+
     EX --> T[(Topic: raw_signals)]
 
-    T --> AR["topic:receiver mode=broadcast"] --> AP["archive pipeline"]
-    T --> LR["topic:receiver mode=broadcast"] --> AL["alerting pipeline"]
-    T --> WR1["topic:receiver mode=balanced group=workers"] --> W1["worker pipeline #1"]
-    T --> WR2["topic:receiver mode=balanced group=workers"] --> W2["worker pipeline #2"]
+    subgraph ARCH["Archive Pipeline (1 core)"]
+        AR["topic:receiver mode=broadcast"] --> AP["archive flow"]
+    end
+
+    subgraph ALERT["Alerting Pipeline (3 cores)"]
+        LR["topic:receiver mode=broadcast"] --> AL["alerting flow"]
+    end
+
+    subgraph WORK["Worker Pipeline (5 cores)"]
+        WR["topic:receiver mode=balanced group=workers"] --> WP["worker flow"]
+    end
+
+    T --> AR
+    T --> LR
+    T --> WR
+
+    classDef topic fill:#0b2a52,stroke:#0b2a52,color:#ffffff,stroke-width:1.5px;
+    classDef receiver fill:#eafff2,stroke:#22a06b,color:#0f172a,stroke-width:1.2px;
+    classDef exporter fill:#fff4e8,stroke:#d9822b,color:#0f172a,stroke-width:1.2px;
+    classDef pipeline fill:#e9f1ff,stroke:#3b82f6,color:#0f172a,stroke-width:1.2px;
+    class I,AR,LR,WR receiver;
+    class EX exporter;
+    class AP,AL,WP pipeline;
+    class T topic;
+    style ING fill:#f8fafc,stroke:#cbd5e1,stroke-width:1px,color:#0f172a;
+    style ARCH fill:#f8fafc,stroke:#cbd5e1,stroke-width:1px,color:#0f172a;
+    style ALERT fill:#f8fafc,stroke:#cbd5e1,stroke-width:1px,color:#0f172a;
+    style WORK fill:#f8fafc,stroke:#cbd5e1,stroke-width:1px,color:#0f172a;
 ```
 
 These patterns can be combined in one process, allowing isolation per pipeline
