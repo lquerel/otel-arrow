@@ -22,6 +22,7 @@ use otap_df_engine::local::exporter::{EffectHandler, Exporter};
 use otap_df_engine::message::{Message, MessageChannel};
 use otap_df_engine::node::NodeId;
 use otap_df_engine::terminal_state::TerminalState;
+use otap_df_engine::topic::TopicOutcomeInterest;
 use otap_df_engine::{ConsumerEffectHandlerExtension, ExporterFactory};
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
@@ -40,6 +41,35 @@ pub struct TopicExporterConfig {
     /// group queue is full. If omitted, runtime falls back to the topic declaration.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub balanced_on_full: Option<TopicBalancedOnFullPolicy>,
+    /// Publisher interest for downstream topic delivery outcomes.
+    #[serde(default)]
+    pub outcome_interest: TopicOutcomeInterestConfig,
+}
+
+/// Topic outcome interest declared in exporter configuration.
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq, Default)]
+#[serde(rename_all = "snake_case")]
+pub enum TopicOutcomeInterestConfig {
+    /// No downstream Ack/Nack outcome requested.
+    #[default]
+    None,
+    /// Request Ack outcome.
+    Ack,
+    /// Request Nack outcome.
+    Nack,
+    /// Request either Ack or Nack outcome.
+    AckOrNack,
+}
+
+impl From<TopicOutcomeInterestConfig> for TopicOutcomeInterest {
+    fn from(value: TopicOutcomeInterestConfig) -> Self {
+        match value {
+            TopicOutcomeInterestConfig::None => Self::None,
+            TopicOutcomeInterestConfig::Ack => Self::Ack,
+            TopicOutcomeInterestConfig::Nack => Self::Nack,
+            TopicOutcomeInterestConfig::AckOrNack => Self::AckOrNack,
+        }
+    }
 }
 
 /// Exporter for topic publishing.
@@ -100,7 +130,7 @@ impl Exporter<OtapPdata> for TopicExporter {
 
 #[cfg(test)]
 mod tests {
-    use super::TopicExporter;
+    use super::{TopicExporter, TopicOutcomeInterestConfig};
     use otap_df_config::topic::TopicBalancedOnFullPolicy;
     use serde_json::json;
 
@@ -109,6 +139,7 @@ mod tests {
         let cfg = TopicExporter::parse_config(&json!({"topic": "raw"})).expect("valid config");
         assert_eq!(cfg.topic.as_ref(), "raw");
         assert!(cfg.balanced_on_full.is_none());
+        assert_eq!(cfg.outcome_interest, TopicOutcomeInterestConfig::None);
     }
 
     #[test]
@@ -123,6 +154,17 @@ mod tests {
             cfg.balanced_on_full,
             Some(TopicBalancedOnFullPolicy::DropNewest)
         );
+        assert_eq!(cfg.outcome_interest, TopicOutcomeInterestConfig::None);
+    }
+
+    #[test]
+    fn parse_config_accepts_outcome_interest() {
+        let cfg = TopicExporter::parse_config(&json!({
+            "topic": "raw",
+            "outcome_interest": "ack_or_nack"
+        }))
+        .expect("valid config");
+        assert_eq!(cfg.outcome_interest, TopicOutcomeInterestConfig::AckOrNack);
     }
 
     #[test]
