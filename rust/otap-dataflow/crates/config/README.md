@@ -125,21 +125,26 @@ Topics can be declared in two scopes:
 
 Current topic policy support:
 
-- `policies.queue_capacity` (default: `128`, must be > 0)
-- `policies.queue_on_full`:
+- `policies.balanced_group_queue_capacity` (default: `128`, must be > 0)
+- `policies.balanced_on_full`:
   - `block` (default)
   - `drop_newest`
+- `policies.broadcast_subscriber_queue_capacity` (default: `128`, must be > 0)
+- `policies.broadcast_on_lag`:
+  - `drop_oldest` (default)
+  - `disconnect`
 
 Topic declaration precedence (for a pipeline in a given group):
 
 - `groups.<group>.topics.<name>` -> `topics.<name>`
 
-`topic:exporter` node config can optionally override `queue_on_full` locally:
+`topic:exporter` node config can optionally override `balanced_on_full` locally:
 
-- `config.queue_on_full`: `block` | `drop_newest`
+- `config.balanced_on_full`: `block` | `drop_newest`
 - effective precedence:
-  `topic:exporter.config.queue_on_full` -> `topic.policies.queue_on_full` -> `block`
-- `queue_capacity` remains topic-scope only
+  `topic:exporter.config.balanced_on_full` ->
+  `topic.policies.balanced_on_full` -> `block`
+- queue capacities remain topic-scope only
 
 ## Engine Observability Pipeline
 

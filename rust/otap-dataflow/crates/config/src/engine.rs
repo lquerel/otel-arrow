@@ -514,7 +514,7 @@ groups:
     }
 
     #[test]
-    fn from_yaml_parses_topic_declarations_with_queue_policy() {
+    fn from_yaml_parses_topic_declarations_with_mode_specific_policies() {
         let yaml = r#"
 version: otel_dataflow/v1
 topics:
@@ -522,15 +522,19 @@ topics:
     description: "global topic"
   global_queue:
     policies:
-      queue_capacity: 42
-      queue_on_full: drop_newest
+      balanced_group_queue_capacity: 42
+      balanced_on_full: drop_newest
+      broadcast_subscriber_queue_capacity: 24
+      broadcast_on_lag: disconnect
 groups:
   g1:
     topics:
       local_queue:
         policies:
-          queue_capacity: 7
-          queue_on_full: drop_newest
+          balanced_group_queue_capacity: 7
+          balanced_on_full: drop_newest
+          broadcast_subscriber_queue_capacity: 3
+          broadcast_on_lag: disconnect
     pipelines:
       main:
         nodes:
@@ -551,20 +555,36 @@ groups:
             .topics
             .get("global_default")
             .expect("global_default topic should exist");
-        assert_eq!(global_default.policies.queue_capacity, 128);
+        assert_eq!(global_default.policies.balanced_group_queue_capacity, 128);
         assert_eq!(
-            global_default.policies.queue_on_full,
-            crate::topic::TopicQueueOnFullPolicy::Block
+            global_default.policies.broadcast_subscriber_queue_capacity,
+            128
+        );
+        assert_eq!(
+            global_default.policies.balanced_on_full,
+            crate::topic::TopicBalancedOnFullPolicy::Block
+        );
+        assert_eq!(
+            global_default.policies.broadcast_on_lag,
+            crate::topic::TopicBroadcastOnLagPolicy::DropOldest
         );
 
         let global_queue = config
             .topics
             .get("global_queue")
             .expect("global_queue topic should exist");
-        assert_eq!(global_queue.policies.queue_capacity, 42);
+        assert_eq!(global_queue.policies.balanced_group_queue_capacity, 42);
         assert_eq!(
-            global_queue.policies.queue_on_full,
-            crate::topic::TopicQueueOnFullPolicy::DropNewest
+            global_queue.policies.broadcast_subscriber_queue_capacity,
+            24
+        );
+        assert_eq!(
+            global_queue.policies.balanced_on_full,
+            crate::topic::TopicBalancedOnFullPolicy::DropNewest
+        );
+        assert_eq!(
+            global_queue.policies.broadcast_on_lag,
+            crate::topic::TopicBroadcastOnLagPolicy::Disconnect
         );
 
         let group = config.groups.get("g1").expect("group g1 should exist");
@@ -572,10 +592,15 @@ groups:
             .topics
             .get("local_queue")
             .expect("local_queue topic should exist");
-        assert_eq!(local_queue.policies.queue_capacity, 7);
+        assert_eq!(local_queue.policies.balanced_group_queue_capacity, 7);
+        assert_eq!(local_queue.policies.broadcast_subscriber_queue_capacity, 3);
         assert_eq!(
-            local_queue.policies.queue_on_full,
-            crate::topic::TopicQueueOnFullPolicy::DropNewest
+            local_queue.policies.balanced_on_full,
+            crate::topic::TopicBalancedOnFullPolicy::DropNewest
+        );
+        assert_eq!(
+            local_queue.policies.broadcast_on_lag,
+            crate::topic::TopicBroadcastOnLagPolicy::Disconnect
         );
     }
 
@@ -586,23 +611,23 @@ version: otel_dataflow/v1
 topics:
   shared:
     policies:
-      queue_capacity: 100
-      queue_on_full: block
+      balanced_group_queue_capacity: 100
+      balanced_on_full: block
   global_only:
     policies:
-      queue_capacity: 101
-      queue_on_full: drop_newest
+      balanced_group_queue_capacity: 101
+      balanced_on_full: drop_newest
 groups:
   g1:
     topics:
       shared:
         policies:
-          queue_capacity: 10
-          queue_on_full: drop_newest
+          balanced_group_queue_capacity: 10
+          balanced_on_full: drop_newest
       group_only:
         policies:
-          queue_capacity: 11
-          queue_on_full: drop_newest
+          balanced_group_queue_capacity: 11
+          balanced_on_full: drop_newest
     pipelines:
       p1:
         nodes:
@@ -635,25 +660,25 @@ groups:
         let g1_shared = config
             .resolve_topic_spec(&"g1".into(), &"shared".into())
             .expect("g1 shared topic should resolve");
-        assert_eq!(g1_shared.policies.queue_capacity, 10);
+        assert_eq!(g1_shared.policies.balanced_group_queue_capacity, 10);
         assert_eq!(
-            g1_shared.policies.queue_on_full,
-            crate::topic::TopicQueueOnFullPolicy::DropNewest
+            g1_shared.policies.balanced_on_full,
+            crate::topic::TopicBalancedOnFullPolicy::DropNewest
         );
 
         let g2_shared = config
             .resolve_topic_spec(&"g2".into(), &"shared".into())
             .expect("g2 shared topic should resolve from global");
-        assert_eq!(g2_shared.policies.queue_capacity, 100);
+        assert_eq!(g2_shared.policies.balanced_group_queue_capacity, 100);
         assert_eq!(
-            g2_shared.policies.queue_on_full,
-            crate::topic::TopicQueueOnFullPolicy::Block
+            g2_shared.policies.balanced_on_full,
+            crate::topic::TopicBalancedOnFullPolicy::Block
         );
 
         let g1_group_only = config
             .resolve_topic_spec(&"g1".into(), &"group_only".into())
             .expect("g1 group_only topic should resolve");
-        assert_eq!(g1_group_only.policies.queue_capacity, 11);
+        assert_eq!(g1_group_only.policies.balanced_group_queue_capacity, 11);
 
         let g2_group_only = config.resolve_topic_spec(&"g2".into(), &"group_only".into());
         assert!(g2_group_only.is_none(), "g2 should not see g1-local topics");
@@ -832,19 +857,21 @@ groups:
     }
 
     #[test]
-    fn from_yaml_rejects_zero_topic_queue_capacity() {
+    fn from_yaml_rejects_zero_topic_queue_capacities() {
         let yaml = r#"
 version: otel_dataflow/v1
 topics:
   global_topic:
     policies:
-      queue_capacity: 0
+      balanced_group_queue_capacity: 0
+      broadcast_subscriber_queue_capacity: 0
 groups:
   g1:
     topics:
       group_topic:
         policies:
-          queue_capacity: 0
+          balanced_group_queue_capacity: 0
+          broadcast_subscriber_queue_capacity: 0
     pipelines:
       main:
         nodes:
@@ -862,8 +889,19 @@ groups:
         let err =
             OtelDataflowSpec::from_yaml(yaml).expect_err("zero topic queue capacity should fail");
         let rendered = err.to_string();
-        assert!(rendered.contains("topics.global_topic.policies.queue_capacity"));
-        assert!(rendered.contains("groups.g1.topics.group_topic.policies.queue_capacity"));
+        assert!(rendered.contains("topics.global_topic.policies.balanced_group_queue_capacity"));
+        assert!(
+            rendered.contains("topics.global_topic.policies.broadcast_subscriber_queue_capacity")
+        );
+        assert!(
+            rendered
+                .contains("groups.g1.topics.group_topic.policies.balanced_group_queue_capacity")
+        );
+        assert!(
+            rendered.contains(
+                "groups.g1.topics.group_topic.policies.broadcast_subscriber_queue_capacity"
+            )
+        );
     }
 
     #[test]

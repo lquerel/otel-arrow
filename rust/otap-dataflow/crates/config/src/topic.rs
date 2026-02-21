@@ -165,19 +165,28 @@ impl TopicSpec {
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, PartialEq, Eq)]
 #[serde(deny_unknown_fields)]
 pub struct TopicPolicies {
-    /// Maximum number of messages retained in-memory for this topic queue.
-    #[serde(default = "default_topic_queue_capacity")]
-    pub queue_capacity: usize,
-    /// Behavior when `queue_capacity` is reached while publishing a new message.
+    /// Maximum number of queued messages for balanced subscriptions (per group).
+    #[serde(default = "default_topic_balanced_group_queue_capacity")]
+    pub balanced_group_queue_capacity: usize,
+    /// Behavior when a balanced group queue reaches `balanced_group_queue_capacity`.
     #[serde(default)]
-    pub queue_on_full: TopicQueueOnFullPolicy,
+    pub balanced_on_full: TopicBalancedOnFullPolicy,
+    /// Maximum number of queued messages for each broadcast subscriber.
+    #[serde(default = "default_topic_broadcast_subscriber_queue_capacity")]
+    pub broadcast_subscriber_queue_capacity: usize,
+    /// Behavior for lagging broadcast subscribers when `broadcast_subscriber_queue_capacity` is reached.
+    #[serde(default)]
+    pub broadcast_on_lag: TopicBroadcastOnLagPolicy,
 }
 
 impl Default for TopicPolicies {
     fn default() -> Self {
         Self {
-            queue_capacity: default_topic_queue_capacity(),
-            queue_on_full: TopicQueueOnFullPolicy::default(),
+            balanced_group_queue_capacity: default_topic_balanced_group_queue_capacity(),
+            balanced_on_full: TopicBalancedOnFullPolicy::default(),
+            broadcast_subscriber_queue_capacity: default_topic_broadcast_subscriber_queue_capacity(
+            ),
+            broadcast_on_lag: TopicBroadcastOnLagPolicy::default(),
         }
     }
 }
@@ -187,19 +196,24 @@ impl TopicPolicies {
     #[must_use]
     pub fn validation_errors(&self, path_prefix: &str) -> Vec<String> {
         let mut errors = Vec::new();
-        if self.queue_capacity == 0 {
+        if self.balanced_group_queue_capacity == 0 {
             errors.push(format!(
-                "{path_prefix}.queue_capacity must be greater than 0"
+                "{path_prefix}.balanced_group_queue_capacity must be greater than 0"
+            ));
+        }
+        if self.broadcast_subscriber_queue_capacity == 0 {
+            errors.push(format!(
+                "{path_prefix}.broadcast_subscriber_queue_capacity must be greater than 0"
             ));
         }
         errors
     }
 }
 
-/// Behavior when queue reaches `queue_capacity`.
+/// Behavior when a balanced queue reaches `balanced_group_queue_capacity`.
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, PartialEq, Eq, Default)]
 #[serde(rename_all = "snake_case")]
-pub enum TopicQueueOnFullPolicy {
+pub enum TopicBalancedOnFullPolicy {
     /// Drop the incoming item and keep queued items untouched.
     DropNewest,
     /// Block the publisher until queue space is available.
@@ -207,45 +221,87 @@ pub enum TopicQueueOnFullPolicy {
     Block,
 }
 
-const fn default_topic_queue_capacity() -> usize {
+/// Behavior for lagging broadcast subscribers.
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, PartialEq, Eq, Default)]
+#[serde(rename_all = "snake_case")]
+pub enum TopicBroadcastOnLagPolicy {
+    /// Drop oldest queued items for this subscriber to keep newer traffic.
+    #[default]
+    DropOldest,
+    /// Disconnect the lagging subscriber.
+    Disconnect,
+}
+
+const fn default_topic_balanced_group_queue_capacity() -> usize {
+    128
+}
+
+const fn default_topic_broadcast_subscriber_queue_capacity() -> usize {
     128
 }
 
 #[cfg(test)]
 mod tests {
-    use super::{SubscriptionGroupName, TopicName, TopicQueueOnFullPolicy, TopicSpec};
+    use super::{
+        SubscriptionGroupName, TopicBalancedOnFullPolicy, TopicBroadcastOnLagPolicy, TopicName,
+        TopicSpec,
+    };
     use serde::Deserialize;
     use std::collections::HashMap;
 
     #[test]
     fn defaults_match_expected_values() {
         let topic = TopicSpec::default();
-        assert_eq!(topic.policies.queue_capacity, 128);
-        assert_eq!(topic.policies.queue_on_full, TopicQueueOnFullPolicy::Block);
+        assert_eq!(topic.policies.balanced_group_queue_capacity, 128);
+        assert_eq!(
+            topic.policies.balanced_on_full,
+            TopicBalancedOnFullPolicy::Block
+        );
+        assert_eq!(topic.policies.broadcast_subscriber_queue_capacity, 128);
+        assert_eq!(
+            topic.policies.broadcast_on_lag,
+            TopicBroadcastOnLagPolicy::DropOldest
+        );
     }
 
     #[test]
-    fn validates_non_zero_queue_capacity() {
+    fn validates_non_zero_queue_capacities() {
         let mut topic = TopicSpec::default();
-        topic.policies.queue_capacity = 0;
+        topic.policies.balanced_group_queue_capacity = 0;
+        topic.policies.broadcast_subscriber_queue_capacity = 0;
 
         let errors = topic.validation_errors("topics.raw");
-        assert_eq!(errors.len(), 1);
-        assert!(errors[0].contains(".queue_capacity"));
+        assert_eq!(errors.len(), 2);
+        assert!(
+            errors
+                .iter()
+                .any(|error| error.contains(".balanced_group_queue_capacity"))
+        );
+        assert!(
+            errors
+                .iter()
+                .any(|error| error.contains(".broadcast_subscriber_queue_capacity"))
+        );
     }
 
     #[test]
-    fn deserializes_queue_on_full_policy_values() {
+    fn deserializes_mode_specific_policy_values() {
         let yaml = r#"
 policies:
-  queue_capacity: 1
-  queue_on_full: drop_newest
+  balanced_group_queue_capacity: 1
+  balanced_on_full: drop_newest
+  broadcast_subscriber_queue_capacity: 2
+  broadcast_on_lag: disconnect
 "#;
 
         let topic: TopicSpec = serde_yaml::from_str(yaml).expect("topic should parse");
         assert_eq!(
-            topic.policies.queue_on_full,
-            TopicQueueOnFullPolicy::DropNewest
+            topic.policies.balanced_on_full,
+            TopicBalancedOnFullPolicy::DropNewest
+        );
+        assert_eq!(
+            topic.policies.broadcast_on_lag,
+            TopicBroadcastOnLagPolicy::Disconnect
         );
     }
 
@@ -272,7 +328,7 @@ policies:
 topics:
   raw:
     policies:
-      queue_capacity: 1
+      balanced_group_queue_capacity: 1
 "#;
 
         let doc: TopicsDoc = serde_yaml::from_str(yaml).expect("topics should parse");

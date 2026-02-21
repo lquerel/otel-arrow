@@ -259,21 +259,30 @@ topics:
   raw_signals:
     description: "raw ingest stream"
     policies:
-      queue_capacity: 1000
-      queue_on_full: drop_newest
+      balanced_group_queue_capacity: 1000
+      balanced_on_full: drop_newest
+      broadcast_subscriber_queue_capacity: 1000
+      broadcast_on_lag: drop_oldest
 ```
 
-Supported `queue_on_full` values:
+Supported `balanced_on_full` values:
 
 - `block`
 - `drop_newest`
 
+Supported `broadcast_on_lag` values:
+
+- `drop_oldest`
+- `disconnect`
+
 Topic defaults:
 
-- `policies.queue_capacity = 128`
-- `policies.queue_on_full = block`
+- `policies.balanced_group_queue_capacity = 128`
+- `policies.balanced_on_full = block`
+- `policies.broadcast_subscriber_queue_capacity = 128`
+- `policies.broadcast_on_lag = drop_oldest`
 
-`topic:exporter` may locally override full-queue behavior:
+`topic:exporter` may locally override balanced full-queue behavior:
 
 ```yaml
 nodes:
@@ -281,15 +290,16 @@ nodes:
     type: topic:exporter
     config:
       topic: raw_signals
-      queue_on_full: drop_newest
+      balanced_on_full: drop_newest
 ```
 
-Exporter-local `queue_on_full` behavior:
+Exporter-local `balanced_on_full` behavior:
 
 - optional (`block` or `drop_newest`)
-- precedence: exporter `config.queue_on_full` -> topic `policies.queue_on_full`
-  -> default `block`
-- `queue_capacity` remains topic-declaration-only (no exporter-local override)
+- precedence:
+  exporter `config.balanced_on_full` -> topic `policies.balanced_on_full` ->
+  default `block`
+- queue capacities remain topic-declaration-only (no exporter-local override)
 
 ## Output Ports
 
@@ -378,7 +388,9 @@ Config loading validates:
 - Graph cycles.
 - Source output selector validity when node `outputs` is declared.
 - Non-zero channel capacities (`control.node`, `control.pipeline`, `pdata`).
-- Non-zero topic queue capacity (`topics.*.policies.queue_capacity`).
+- Non-zero topic queue capacities:
+  `topics.*.policies.balanced_group_queue_capacity` and
+  `topics.*.policies.broadcast_subscriber_queue_capacity`.
 - Root schema version compatibility (`version: otel_dataflow/v1`).
 - Observability constraints (`engine.observability.pipeline.policies.resources`
   is rejected).

@@ -12,7 +12,7 @@ use linkme::distributed_slice;
 use otap_df_config::TopicName;
 use otap_df_config::error::Error as ConfigError;
 use otap_df_config::node::NodeUserConfig;
-use otap_df_config::topic::TopicQueueOnFullPolicy;
+use otap_df_config::topic::TopicBalancedOnFullPolicy;
 use otap_df_engine::config::ExporterConfig;
 use otap_df_engine::context::PipelineContext;
 use otap_df_engine::control::{AckMsg, NodeControlMsg};
@@ -36,10 +36,10 @@ pub const TOPIC_EXPORTER_URN: &str = "urn:otel:topic:exporter";
 pub struct TopicExporterConfig {
     /// Topic name to publish to.
     pub topic: TopicName,
-    /// Optional local override for publish behavior when topic queue is full.
-    /// If omitted, runtime falls back to the topic declaration policy.
+    /// Optional local override for balanced publish behavior when a balanced
+    /// group queue is full. If omitted, runtime falls back to the topic declaration.
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub queue_on_full: Option<TopicQueueOnFullPolicy>,
+    pub balanced_on_full: Option<TopicBalancedOnFullPolicy>,
 }
 
 /// Exporter for topic publishing.
@@ -101,34 +101,37 @@ impl Exporter<OtapPdata> for TopicExporter {
 #[cfg(test)]
 mod tests {
     use super::TopicExporter;
-    use otap_df_config::topic::TopicQueueOnFullPolicy;
+    use otap_df_config::topic::TopicBalancedOnFullPolicy;
     use serde_json::json;
 
     #[test]
     fn parse_config_accepts_minimal_topic() {
         let cfg = TopicExporter::parse_config(&json!({"topic": "raw"})).expect("valid config");
         assert_eq!(cfg.topic.as_ref(), "raw");
-        assert!(cfg.queue_on_full.is_none());
+        assert!(cfg.balanced_on_full.is_none());
     }
 
     #[test]
-    fn parse_config_accepts_local_queue_on_full_override() {
+    fn parse_config_accepts_local_balanced_on_full_override() {
         let cfg = TopicExporter::parse_config(&json!({
             "topic": "raw",
-            "queue_on_full": "drop_newest"
+            "balanced_on_full": "drop_newest"
         }))
         .expect("valid config");
         assert_eq!(cfg.topic.as_ref(), "raw");
-        assert_eq!(cfg.queue_on_full, Some(TopicQueueOnFullPolicy::DropNewest));
+        assert_eq!(
+            cfg.balanced_on_full,
+            Some(TopicBalancedOnFullPolicy::DropNewest)
+        );
     }
 
     #[test]
-    fn parse_config_rejects_unknown_queue_on_full_variant() {
+    fn parse_config_rejects_unknown_balanced_on_full_variant() {
         let err = TopicExporter::parse_config(&json!({
             "topic": "raw",
-            "queue_on_full": "unknown_variant"
+            "balanced_on_full": "unknown_variant"
         }))
-        .expect_err("unknown queue_on_full should fail");
+        .expect_err("unknown balanced_on_full should fail");
         assert!(err.to_string().contains("unknown variant"));
     }
 
