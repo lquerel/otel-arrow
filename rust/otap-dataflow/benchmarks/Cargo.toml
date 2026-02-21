@@ -97,3 +97,7 @@ harness = false
 [[bench]]
 name = "self_tracing"
 harness = false
+
+[[bench]]
+name = "topic"
+harness = false
