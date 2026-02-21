@@ -140,6 +140,29 @@ impl From<SubscriptionGroupName> for String {
     }
 }
 
+/// Backend selector used by a topic declaration.
+///
+/// Only `in_memory` is implemented by the runtime at this stage.
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, PartialEq, Eq, Default)]
+#[serde(rename_all = "snake_case")]
+pub enum TopicBackend {
+    /// Process-local in-memory runtime backend.
+    #[default]
+    InMemory,
+    /// Quiver backend selector (reserved for future implementation).
+    Quiver,
+}
+
+impl std::fmt::Display for TopicBackend {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        let value = match self {
+            Self::InMemory => "in_memory",
+            Self::Quiver => "quiver",
+        };
+        f.write_str(value)
+    }
+}
+
 /// A named topic specification.
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, PartialEq, Eq, Default)]
 #[serde(deny_unknown_fields)]
@@ -147,6 +170,9 @@ pub struct TopicSpec {
     /// Optional human-readable description of the topic.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub description: Option<Description>,
+    /// Runtime backend selector for this topic.
+    #[serde(default)]
+    pub backend: TopicBackend,
     /// Topic behavior policies.
     #[serde(default)]
     pub policies: TopicPolicies,
@@ -243,8 +269,8 @@ const fn default_topic_broadcast_subscriber_queue_capacity() -> usize {
 #[cfg(test)]
 mod tests {
     use super::{
-        SubscriptionGroupName, TopicBalancedOnFullPolicy, TopicBroadcastOnLagPolicy, TopicName,
-        TopicSpec,
+        SubscriptionGroupName, TopicBackend, TopicBalancedOnFullPolicy, TopicBroadcastOnLagPolicy,
+        TopicName, TopicSpec,
     };
     use serde::Deserialize;
     use std::collections::HashMap;
@@ -252,6 +278,7 @@ mod tests {
     #[test]
     fn defaults_match_expected_values() {
         let topic = TopicSpec::default();
+        assert_eq!(topic.backend, TopicBackend::InMemory);
         assert_eq!(topic.policies.balanced_group_queue_capacity, 128);
         assert_eq!(
             topic.policies.balanced_on_full,
@@ -287,6 +314,7 @@ mod tests {
     #[test]
     fn deserializes_mode_specific_policy_values() {
         let yaml = r#"
+backend: quiver
 policies:
   balanced_group_queue_capacity: 1
   balanced_on_full: drop_newest
@@ -295,6 +323,7 @@ policies:
 "#;
 
         let topic: TopicSpec = serde_yaml::from_str(yaml).expect("topic should parse");
+        assert_eq!(topic.backend, TopicBackend::Quiver);
         assert_eq!(
             topic.policies.balanced_on_full,
             TopicBalancedOnFullPolicy::DropNewest
@@ -333,5 +362,11 @@ topics:
 
         let doc: TopicsDoc = serde_yaml::from_str(yaml).expect("topics should parse");
         assert!(doc.topics.contains_key("raw"));
+    }
+
+    #[test]
+    fn backend_selector_accepts_quiver() {
+        let topic: TopicSpec = serde_yaml::from_str("backend: quiver").expect("topic should parse");
+        assert_eq!(topic.backend, TopicBackend::Quiver);
     }
 }

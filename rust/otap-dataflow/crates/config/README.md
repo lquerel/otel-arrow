@@ -125,6 +125,9 @@ Topics can be declared in two scopes:
 
 Current topic policy support:
 
+- `backend` (default: `in_memory`)
+  - `in_memory` (currently implemented by runtime backends)
+  - `quiver` (reserved selector for future implementation)
 - `policies.balanced_group_queue_capacity` (default: `128`, must be > 0)
 - `policies.balanced_on_full`:
   - `block` (default)

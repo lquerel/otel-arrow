@@ -52,6 +52,84 @@ maintaining stable performance. Finally, limiting external dependencies reduces
 complexity, security risks, and maintenance effort, further streamlining the
 gateway's operation and reliability.
 
+## Topic Use Cases
+
+The topic abstraction enables decoupled inter-pipeline communication through:
+
+- `topic:exporter` for publishing to a topic
+- `topic:receiver` for consuming from a topic with `balanced` or `broadcast` semantics
+
+### 1) Ingest Pipeline (N cores) -> Balanced Processing+Egress Pipeline (M cores)
+
+```mermaid
+flowchart LR
+    subgraph ING["Ingest Pipeline (N cores)"]
+      IR1["receiver/ingest"] --> IE1["topic:exporter raw_signals"]
+    end
+
+    T1[(Topic: raw_signals)]
+
+    IE1 --> T1
+
+    subgraph PROC["Processing + Egress Pipeline (M cores)"]
+      PR1["topic:receiver mode=balanced group=workers"] --> PP1["processor chain"] --> PE1["exporter/egress"]
+    end
+
+    T1 --> PR1
+```
+
+### 2) Multi-Tenant Deployment (One Topic Per Tenant)
+
+```mermaid
+flowchart TB
+    subgraph ING["Ingest Pipeline (N cores)"]
+        I["ingest/router pipeline"] --> R["tenant router processor"]
+
+        R --> E1["topic:exporter tenant_a"]
+        R --> E2["topic:exporter tenant_b"]
+        R --> E3["topic:exporter tenant_c"]
+    end
+
+    TA[(Topic: tenant_a)]
+    TB[(Topic: tenant_b)]
+    TC[(Topic: tenant_c)]
+
+    E1 --> TA
+    E2 --> TB
+    E3 --> TC
+    TA --> A1
+    TB --> B1
+    TC --> C1
+    
+    subgraph TENANT_A["Tenant A (1 core)"]
+        A1["tenant_a pipeline"]
+    end
+
+    subgraph TENANT_B["Tenant B (2 core)"]
+        B1["tenant_b pipeline"]
+    end
+    
+    subgraph TENANT_C["Tenant C (1 core)"]
+        C1["tenant_c pipeline"]
+    end
+```
+
+### 3) One Ingress Feeding Multiple Independent Purposes
+
+```mermaid
+flowchart LR
+    I["ingest pipeline"] --> EX["topic:exporter raw_signals"]
+    EX --> T[(Topic: raw_signals)]
+
+    T --> AR["topic:receiver mode=broadcast"] --> AP["archive pipeline"]
+    T --> LR["topic:receiver mode=broadcast"] --> AL["alerting pipeline"]
+    T --> WR1["topic:receiver mode=balanced group=workers"] --> W1["worker pipeline #1"]
+    T --> WR2["topic:receiver mode=balanced group=workers"] --> W2["worker pipeline #2"]
+```
+
+These patterns can be combined in one process, allowing isolation per pipeline
+while keeping dataflow topology explicit and decoupled.
+
 ## Control Messages
 
 The pipeline engine supports two types of control messages:

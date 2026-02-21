@@ -258,6 +258,7 @@ Current topic policy support:
 topics:
   raw_signals:
     description: "raw ingest stream"
+    backend: in_memory   # in_memory (default) | quiver | ...
     policies:
       balanced_group_queue_capacity: 1000
       balanced_on_full: drop_newest
@@ -277,10 +278,16 @@ Supported `broadcast_on_lag` values:
 
 Topic defaults:
 
+- `backend = in_memory`
 - `policies.balanced_group_queue_capacity = 128`
 - `policies.balanced_on_full = block`
 - `policies.broadcast_subscriber_queue_capacity = 128`
 - `policies.broadcast_on_lag = drop_oldest`
+
+Backend selectors:
+
+- `in_memory` (currently implemented)
+- `quiver` (reserved for future implementation)
 
 `topic:exporter` may locally override balanced full-queue behavior:
 

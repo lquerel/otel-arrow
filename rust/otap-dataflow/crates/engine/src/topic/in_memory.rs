@@ -19,7 +19,8 @@ use super::{
 use async_trait::async_trait;
 use otap_df_config::TopicName;
 use otap_df_config::topic::{
-    SubscriptionGroupName, TopicBalancedOnFullPolicy, TopicBroadcastOnLagPolicy, TopicPolicies,
+    SubscriptionGroupName, TopicBackend, TopicBalancedOnFullPolicy, TopicBroadcastOnLagPolicy,
+    TopicPolicies,
 };
 use std::collections::{HashMap, VecDeque};
 use std::sync::{Arc, Mutex, RwLock};
@@ -101,8 +102,16 @@ where
     async fn create_topic(
         &self,
         topic_name: TopicName,
+        backend: TopicBackend,
         policies: TopicPolicies,
     ) -> Result<(), TopicRuntimeError> {
+        if backend != TopicBackend::InMemory {
+            return Err(TopicRuntimeError::UnsupportedTopicBackend {
+                topic: topic_name,
+                runtime: self.capabilities().backend_name,
+                backend,
+            });
+        }
         if policies.balanced_group_queue_capacity == 0 {
             return Err(TopicRuntimeError::InvalidTopicConfig {
                 topic: topic_name,
@@ -569,6 +578,10 @@ mod tests {
         }
     }
 
+    /// Scenario:
+    /// 1. Given an empty runtime and a valid topic specification.
+    /// 2. When the same topic is created twice.
+    /// 3. Then the second create call returns `TopicAlreadyExists`.
     #[tokio::test(flavor = "current_thread")]
     async fn rejects_duplicate_topic_creation() {
         let runtime = InMemoryTopicRuntime::<u64>::new();
@@ -581,16 +594,20 @@ mod tests {
         );
 
         runtime
-            .create_topic(topic.clone(), policies.clone())
+            .create_topic(topic.clone(), TopicBackend::InMemory, policies.clone())
             .await
             .expect("first create should succeed");
         let err = runtime
-            .create_topic(topic.clone(), policies)
+            .create_topic(topic.clone(), TopicBackend::InMemory, policies)
             .await
             .expect_err("second create should fail");
         assert_eq!(err, TopicRuntimeError::TopicAlreadyExists { topic });
     }
 
+    /// Scenario:
+    /// 1. Given one balanced subscriber that receives a message.
+    /// 2. When that delivery is NACKed.
+    /// 3. Then the topic runtime does not implicitly requeue/redeliver it.
     #[tokio::test(flavor = "current_thread")]
     async fn balanced_nack_does_not_implicitly_requeue() {
         let runtime = InMemoryTopicRuntime::<u64>::new();
@@ -598,6 +615,7 @@ mod tests {
         runtime
             .create_topic(
                 topic.clone(),
+                TopicBackend::InMemory,
                 policies(
                     8,
                     TopicBalancedOnFullPolicy::Block,
@@ -638,6 +656,10 @@ mod tests {
         );
     }
 
+    /// Scenario:
+    /// 1. Given two balanced subscribers in the same group.
+    /// 2. When two messages are published.
+    /// 3. Then the shared group queue distributes one message to each subscriber.
     #[tokio::test(flavor = "current_thread")]
     async fn balanced_group_is_shared_across_subscribers() {
         let runtime = InMemoryTopicRuntime::<u64>::new();
@@ -645,6 +667,7 @@ mod tests {
         runtime
             .create_topic(
                 topic.clone(),
+                TopicBackend::InMemory,
                 policies(
                     8,
                     TopicBalancedOnFullPolicy::Block,
@@ -698,6 +721,10 @@ mod tests {
         delivery_2.ack().await.expect("ack should succeed");
     }
 
+    /// Scenario:
+    /// 1. Given two broadcast subscribers on the same topic.
+    /// 2. When a message is published and one subscriber NACKs it.
+    /// 3. Then both subscribers receive the original message, and only the NACKing subscriber sees redelivery.
     #[tokio::test(flavor = "current_thread")]
     async fn broadcast_delivers_to_all_and_nack_is_subscriber_local() {
         let runtime = InMemoryTopicRuntime::<u64>::new();
@@ -705,6 +732,7 @@ mod tests {
         runtime
             .create_topic(
                 topic.clone(),
+                TopicBackend::InMemory,
                 policies(
                     8,
                     TopicBalancedOnFullPolicy::Block,
@@ -753,6 +781,10 @@ mod tests {
         );
     }
 
+    /// Scenario:
+    /// 1. Given a balanced group queue with capacity 1 and `drop_newest`.
+    /// 2. When a second message is published while the first is still queued.
+    /// 3. Then the second message is dropped and only the first is delivered.
     #[tokio::test(flavor = "current_thread")]
     async fn drop_newest_drops_when_balanced_queue_is_full() {
         let runtime = InMemoryTopicRuntime::<u64>::new();
@@ -760,6 +792,7 @@ mod tests {
         runtime
             .create_topic(
                 topic.clone(),
+                TopicBackend::InMemory,
                 policies(
                     1,
                     TopicBalancedOnFullPolicy::DropNewest,
@@ -813,6 +846,10 @@ mod tests {
         );
     }
 
+    /// Scenario:
+    /// 1. Given a balanced group queue with capacity 1 and `block`.
+    /// 2. When a second publish occurs while the queue is full.
+    /// 3. Then publish blocks until the subscriber drains one item, then succeeds.
     #[tokio::test(flavor = "current_thread")]
     async fn block_policy_applies_backpressure_until_space_is_available() {
         let runtime = InMemoryTopicRuntime::<u64>::new();
@@ -820,6 +857,7 @@ mod tests {
         runtime
             .create_topic(
                 topic.clone(),
+                TopicBackend::InMemory,
                 policies(
                     1,
                     TopicBalancedOnFullPolicy::Block,
@@ -881,6 +919,10 @@ mod tests {
         second.ack().await.expect("ack should succeed");
     }
 
+    /// Scenario:
+    /// 1. Given broadcast subscribers with per-subscriber capacity 1 and `drop_oldest`.
+    /// 2. When one subscriber lags and a newer message arrives.
+    /// 3. Then the lagging subscriber drops its oldest queued item and receives the latest message.
     #[tokio::test(flavor = "current_thread")]
     async fn broadcast_drop_oldest_keeps_newest_for_lagging_subscriber() {
         let runtime = InMemoryTopicRuntime::<u64>::new();
@@ -888,6 +930,7 @@ mod tests {
         runtime
             .create_topic(
                 topic.clone(),
+                TopicBackend::InMemory,
                 policies(
                     8,
                     TopicBalancedOnFullPolicy::Block,
@@ -945,6 +988,10 @@ mod tests {
         slow_latest.ack().await.expect("ack should succeed");
     }
 
+    /// Scenario:
+    /// 1. Given topic creation targeting the in-memory backend.
+    /// 2. When `broadcast_on_lag=disconnect` is configured.
+    /// 3. Then creation fails fast with `UnsupportedTopicPolicy`.
     #[tokio::test(flavor = "current_thread")]
     async fn create_topic_rejects_unsupported_broadcast_disconnect_policy() {
         let runtime = InMemoryTopicRuntime::<u64>::new();
@@ -952,6 +999,7 @@ mod tests {
         let err = runtime
             .create_topic(
                 topic.clone(),
+                TopicBackend::InMemory,
                 policies(
                     8,
                     TopicBalancedOnFullPolicy::Block,
@@ -969,6 +1017,39 @@ mod tests {
                 backend: "in_memory_tokio_broadcast",
                 policy: "broadcast_on_lag",
                 ..
+            }
+        ));
+    }
+
+    /// Scenario:
+    /// 1. Given the in-memory topic runtime.
+    /// 2. When a topic is created with a different backend selector.
+    /// 3. Then creation fails fast with `UnsupportedTopicBackend`.
+    #[tokio::test(flavor = "current_thread")]
+    async fn create_topic_rejects_non_in_memory_backend() {
+        let runtime = InMemoryTopicRuntime::<u64>::new();
+        let topic = topic_name("quiver-topic");
+
+        let err = runtime
+            .create_topic(
+                topic.clone(),
+                TopicBackend::Quiver,
+                policies(
+                    8,
+                    TopicBalancedOnFullPolicy::Block,
+                    8,
+                    TopicBroadcastOnLagPolicy::DropOldest,
+                ),
+            )
+            .await
+            .expect_err("non-in-memory backend selector should be rejected");
+
+        assert!(matches!(
+            err,
+            TopicRuntimeError::UnsupportedTopicBackend {
+                topic: _,
+                runtime: "in_memory_tokio_broadcast",
+                backend: TopicBackend::Quiver,
             }
         ));
     }

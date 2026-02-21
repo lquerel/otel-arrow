@@ -521,6 +521,7 @@ topics:
   global_default:
     description: "global topic"
   global_queue:
+    backend: quiver
     policies:
       balanced_group_queue_capacity: 42
       balanced_on_full: drop_newest
@@ -530,6 +531,7 @@ groups:
   g1:
     topics:
       local_queue:
+        backend: quiver
         policies:
           balanced_group_queue_capacity: 7
           balanced_on_full: drop_newest
@@ -555,6 +557,7 @@ groups:
             .topics
             .get("global_default")
             .expect("global_default topic should exist");
+        assert_eq!(global_default.backend, crate::topic::TopicBackend::InMemory);
         assert_eq!(global_default.policies.balanced_group_queue_capacity, 128);
         assert_eq!(
             global_default.policies.broadcast_subscriber_queue_capacity,
@@ -573,6 +576,7 @@ groups:
             .topics
             .get("global_queue")
             .expect("global_queue topic should exist");
+        assert_eq!(global_queue.backend, crate::topic::TopicBackend::Quiver);
         assert_eq!(global_queue.policies.balanced_group_queue_capacity, 42);
         assert_eq!(
             global_queue.policies.broadcast_subscriber_queue_capacity,
@@ -592,6 +596,7 @@ groups:
             .topics
             .get("local_queue")
             .expect("local_queue topic should exist");
+        assert_eq!(local_queue.backend, crate::topic::TopicBackend::Quiver);
         assert_eq!(local_queue.policies.balanced_group_queue_capacity, 7);
         assert_eq!(local_queue.policies.broadcast_subscriber_queue_capacity, 3);
         assert_eq!(

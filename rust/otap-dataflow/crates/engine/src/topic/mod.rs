@@ -5,12 +5,13 @@
 //!
 //! This module defines the public abstraction layer used by topic-aware nodes.
 //! Backends can be in-memory (for single-process deployments) or persistent/distributed
-//! (for example Kafka/Quiver in future work).
+//! (for example Quiver in future work).
 
 use async_trait::async_trait;
 use otap_df_config::TopicName;
 use otap_df_config::topic::{
-    SubscriptionGroupName, TopicBalancedOnFullPolicy, TopicBroadcastOnLagPolicy, TopicPolicies,
+    SubscriptionGroupName, TopicBackend, TopicBalancedOnFullPolicy, TopicBroadcastOnLagPolicy,
+    TopicPolicies,
 };
 use std::sync::Arc;
 
@@ -129,6 +130,16 @@ pub enum TopicRuntimeError {
         /// Unsupported policy value.
         value: String,
     },
+    /// Topic backend selector is not supported by this runtime.
+    #[error("unsupported topic backend for `{topic}` on runtime `{runtime}`: `{backend}`")]
+    UnsupportedTopicBackend {
+        /// Topic name where backend is unsupported.
+        topic: TopicName,
+        /// Runtime name handling this request.
+        runtime: &'static str,
+        /// Backend selector from topic declaration.
+        backend: TopicBackend,
+    },
     /// Runtime channel for the topic was unexpectedly closed.
     #[error("topic runtime channel unexpectedly closed for `{topic}`")]
     ChannelClosed {
@@ -166,10 +177,11 @@ where
     /// Returns backend capability declarations.
     fn capabilities(&self) -> TopicRuntimeCapabilities;
 
-    /// Creates a runtime topic.
+    /// Creates a runtime topic for the given backend selector.
     async fn create_topic(
         &self,
         topic_name: TopicName,
+        backend: TopicBackend,
         policies: TopicPolicies,
     ) -> Result<(), TopicRuntimeError>;
 
