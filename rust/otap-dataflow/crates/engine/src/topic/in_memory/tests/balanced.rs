@@ -2,7 +2,6 @@
 // SPDX-License-Identifier: Apache-2.0
 
 use super::*;
-use std::sync::Arc;
 use std::time::Duration;
 use tokio::time::{sleep, timeout};
 
@@ -229,7 +228,7 @@ async fn block_policy_applies_backpressure_until_space_is_available() {
         .await
         .expect("first publish should fit into queue");
 
-    let publisher_for_task = Arc::clone(&publisher);
+    let publisher_for_task = publisher.clone();
     let publish_task = tokio::spawn(async move { publisher_for_task.publish(2).await });
 
     sleep(Duration::from_millis(25)).await;

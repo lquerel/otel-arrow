@@ -5,7 +5,8 @@ use crate::topic::{
     TopicOutcomeInterest, TopicOutcomeNack, TopicPublishOutcome, TopicPublishOutcomeFuture,
     TopicRuntimeError,
 };
-use std::sync::{Arc, Mutex};
+use parking_lot::Mutex;
+use std::sync::Arc;
 use tokio::sync::oneshot;
 
 pub(super) struct PublishOutcomeTracker {
@@ -39,25 +40,37 @@ impl PublishOutcomeTracker {
     }
 
     pub(super) fn interest(&self) -> TopicOutcomeInterest {
-        match self.state.lock() {
-            Ok(state) => state.interest,
-            Err(_) => TopicOutcomeInterest::None,
-        }
+        let state = self.state.lock();
+        state.interest
     }
 
     pub(super) fn reserve_delivery(&self) {
-        if let Ok(mut state) = self.state.lock() {
-            if !state.completed {
-                state.pending_deliveries += 1;
-            }
+        let mut state = self.state.lock();
+        if !state.completed {
+            state.pending_deliveries += 1;
         }
     }
 
     pub(super) fn complete_if_idle(&self) {
-        if let Ok(mut state) = self.state.lock() {
-            if state.completed || state.pending_deliveries != 0 {
-                return;
-            }
+        let mut state = self.state.lock();
+        if state.completed || state.pending_deliveries != 0 {
+            return;
+        }
+        if let Some(tx) = state.tx.take() {
+            let _ignore_closed = tx.send(TopicPublishOutcome::Ack);
+        }
+        state.completed = true;
+    }
+
+    pub(super) fn on_ack(&self) {
+        let mut state = self.state.lock();
+        if state.completed {
+            return;
+        }
+        if state.pending_deliveries > 0 {
+            state.pending_deliveries -= 1;
+        }
+        if state.pending_deliveries == 0 {
             if let Some(tx) = state.tx.take() {
                 let _ignore_closed = tx.send(TopicPublishOutcome::Ack);
             }
@@ -65,34 +78,16 @@ impl PublishOutcomeTracker {
         }
     }
 
-    pub(super) fn on_ack(&self) {
-        if let Ok(mut state) = self.state.lock() {
-            if state.completed {
-                return;
-            }
-            if state.pending_deliveries > 0 {
-                state.pending_deliveries -= 1;
-            }
-            if state.pending_deliveries == 0 {
-                if let Some(tx) = state.tx.take() {
-                    let _ignore_closed = tx.send(TopicPublishOutcome::Ack);
-                }
-                state.completed = true;
-            }
-        }
-    }
-
     pub(super) fn on_nack(&self, nack: TopicOutcomeNack) {
-        if let Ok(mut state) = self.state.lock() {
-            if state.completed {
-                return;
-            }
-            if let Some(tx) = state.tx.take() {
-                let _ignore_closed = tx.send(TopicPublishOutcome::Nack(nack));
-            }
-            state.completed = true;
-            state.pending_deliveries = 0;
+        let mut state = self.state.lock();
+        if state.completed {
+            return;
         }
+        if let Some(tx) = state.tx.take() {
+            let _ignore_closed = tx.send(TopicPublishOutcome::Nack(nack));
+        }
+        state.completed = true;
+        state.pending_deliveries = 0;
     }
 
     pub(super) fn on_publish_drop(&self, reason: impl Into<String>) {

@@ -1,10 +1,11 @@
 // Copyright The OpenTelemetry Authors
 // SPDX-License-Identifier: Apache-2.0
 
-use super::balanced::InMemoryTopicPublisher;
+use super::balanced::{InMemoryBalancedSubscriber, InMemoryTopicPublisher};
+use super::broadcast::InMemoryBroadcastSubscriber;
 use super::topic_state::InMemoryTopic;
 use crate::topic::{
-    TopicPublisher, TopicPublisherOptions, TopicRuntime, TopicRuntimeCapabilities,
+    TopicDelivery, TopicPublisher, TopicPublisherOptions, TopicRuntime, TopicRuntimeCapabilities,
     TopicRuntimeError, TopicSubscriber, TopicSubscription, validate_topic_policy_support,
 };
 use async_trait::async_trait;
@@ -12,6 +13,65 @@ use otap_df_config::TopicName;
 use otap_df_config::topic::{TopicBackend, TopicPolicies};
 use std::collections::HashMap;
 use std::sync::{Arc, RwLock};
+
+/// Concrete in-memory publisher handle using static dispatch.
+pub struct InMemoryPublisher<T> {
+    inner: Arc<InMemoryTopicPublisher<T>>,
+}
+
+impl<T> Clone for InMemoryPublisher<T> {
+    fn clone(&self) -> Self {
+        Self {
+            inner: self.inner.clone(),
+        }
+    }
+}
+
+impl<T> InMemoryPublisher<T>
+where
+    T: Clone + Send + 'static,
+{
+    /// Publishes one payload to the target topic.
+    pub async fn publish(
+        &self,
+        payload: T,
+    ) -> Result<crate::topic::TopicPublishResult, TopicRuntimeError> {
+        self.inner.publish(payload).await
+    }
+}
+
+/// Concrete in-memory subscriber handle using static dispatch.
+pub struct InMemorySubscriber<T> {
+    inner: InMemorySubscriberInner<T>,
+}
+
+enum InMemorySubscriberInner<T> {
+    Balanced(InMemoryBalancedSubscriber<T>),
+    Broadcast(InMemoryBroadcastSubscriber<T>),
+}
+
+impl<T> InMemorySubscriber<T>
+where
+    T: Clone + Send + 'static,
+{
+    /// Receives the next available topic delivery.
+    pub async fn recv(&mut self) -> Result<TopicDelivery<T>, TopicRuntimeError> {
+        match &mut self.inner {
+            InMemorySubscriberInner::Balanced(subscriber) => subscriber.recv().await,
+            InMemorySubscriberInner::Broadcast(subscriber) => subscriber.recv().await,
+        }
+    }
+}
+
+#[async_trait]
+impl<T> TopicSubscriber<T> for InMemorySubscriber<T>
+where
+    T: Clone + Send + 'static,
+{
+    async fn recv(&mut self) -> Result<TopicDelivery<T>, TopicRuntimeError> {
+        InMemorySubscriber::recv(self).await
+    }
+}
 
 #[derive(Default)]
 struct InMemoryTopicRuntimeState<T> {
@@ -67,6 +127,77 @@ impl<T> InMemoryTopicRuntime<T> {
         self.state.write().map_err(|_| TopicRuntimeError::Internal {
             message: "topic runtime state lock poisoned".to_owned(),
         })
+    }
+}
+
+impl<T> InMemoryTopicRuntime<T>
+where
+    T: Clone + Send + 'static,
+{
+    fn build_publisher(
+        &self,
+        topic_name: &TopicName,
+        options: TopicPublisherOptions,
+    ) -> Result<Arc<InMemoryTopicPublisher<T>>, TopicRuntimeError> {
+        let state = self.read_state()?;
+        let topic = state.topics.get(topic_name).cloned().ok_or_else(|| {
+            TopicRuntimeError::TopicNotFound {
+                topic: topic_name.clone(),
+            }
+        })?;
+
+        let balanced_on_full = options
+            .balanced_on_full_override
+            .unwrap_or_else(|| topic.balanced_on_full());
+
+        Ok(Arc::new(InMemoryTopicPublisher {
+            topic,
+            balanced_on_full,
+            outcome_interest: options.outcome_interest,
+        }))
+    }
+
+    fn build_subscriber(
+        &self,
+        topic_name: &TopicName,
+        subscription: TopicSubscription,
+    ) -> Result<InMemorySubscriber<T>, TopicRuntimeError> {
+        let state = self.read_state()?;
+        let topic = state.topics.get(topic_name).cloned().ok_or_else(|| {
+            TopicRuntimeError::TopicNotFound {
+                topic: topic_name.clone(),
+            }
+        })?;
+        drop(state);
+
+        match subscription {
+            TopicSubscription::Broadcast => Ok(InMemorySubscriber {
+                inner: InMemorySubscriberInner::Broadcast(topic.subscribe_broadcast()?),
+            }),
+            TopicSubscription::Balanced { group } => Ok(InMemorySubscriber {
+                inner: InMemorySubscriberInner::Balanced(topic.subscribe_balanced(group)?),
+            }),
+        }
+    }
+
+    /// Creates a concrete publisher handle for the in-memory backend.
+    pub async fn publisher(
+        &self,
+        topic_name: &TopicName,
+        options: TopicPublisherOptions,
+    ) -> Result<InMemoryPublisher<T>, TopicRuntimeError> {
+        Ok(InMemoryPublisher {
+            inner: self.build_publisher(topic_name, options)?,
+        })
+    }
+
+    /// Creates a concrete subscriber handle for the in-memory backend.
+    pub async fn subscribe(
+        &self,
+        topic_name: &TopicName,
+        subscription: TopicSubscription,
+    ) -> Result<InMemorySubscriber<T>, TopicRuntimeError> {
+        self.build_subscriber(topic_name, subscription)
     }
 }
 
@@ -132,22 +263,7 @@ where
         topic_name: &TopicName,
         options: TopicPublisherOptions,
     ) -> Result<Arc<dyn TopicPublisher<T>>, TopicRuntimeError> {
-        let state = self.read_state()?;
-        let topic = state.topics.get(topic_name).cloned().ok_or_else(|| {
-            TopicRuntimeError::TopicNotFound {
-                topic: topic_name.clone(),
-            }
-        })?;
-
-        let balanced_on_full = options
-            .balanced_on_full_override
-            .unwrap_or_else(|| topic.balanced_on_full());
-
-        Ok(Arc::new(InMemoryTopicPublisher {
-            topic,
-            balanced_on_full,
-            outcome_interest: options.outcome_interest,
-        }))
+        Ok(self.build_publisher(topic_name, options)? as Arc<dyn TopicPublisher<T>>)
     }
 
     async fn subscribe(
@@ -155,17 +271,6 @@ where
         topic_name: &TopicName,
         subscription: TopicSubscription,
     ) -> Result<Box<dyn TopicSubscriber<T>>, TopicRuntimeError> {
-        let state = self.read_state()?;
-        let topic = state.topics.get(topic_name).cloned().ok_or_else(|| {
-            TopicRuntimeError::TopicNotFound {
-                topic: topic_name.clone(),
-            }
-        })?;
-        drop(state);
-
-        match subscription {
-            TopicSubscription::Broadcast => Ok(Box::new(topic.subscribe_broadcast()?)),
-            TopicSubscription::Balanced { group } => Ok(Box::new(topic.subscribe_balanced(group)?)),
-        }
+        Ok(Box::new(self.build_subscriber(topic_name, subscription)?))
     }
 }

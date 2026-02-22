@@ -4,7 +4,7 @@
 use super::balanced::{
     BalancedEnvelope, BalancedGroupState, SendAttemptOutcome, send_balanced_with_policy,
 };
-use super::broadcast::{BroadcastSubscriberState, InMemoryBroadcastSubscriber};
+use super::broadcast::{BroadcastEnvelope, BroadcastSubscriberState, InMemoryBroadcastSubscriber};
 use super::outcome_tracker::{
     PublishOutcomeTracker, immediate_outcome_future, tracker_outcome_future,
 };
@@ -12,9 +12,11 @@ use crate::topic::{
     TopicOutcomeInterest, TopicPublishOutcome, TopicPublishReport, TopicPublishResult,
     TopicRuntimeError,
 };
+use arc_swap::ArcSwap;
 use otap_df_config::TopicName;
 use otap_df_config::topic::{SubscriptionGroupName, TopicBalancedOnFullPolicy, TopicPolicies};
 use std::collections::HashMap;
+use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Arc, Mutex};
 use tokio::sync::broadcast;
 
@@ -29,10 +31,16 @@ pub(super) struct InMemoryTopic<T> {
     policies: TopicPolicies,
     // One queue per balanced consumer group. Group members compete for the same queue.
     balanced_groups: Mutex<HashMap<SubscriptionGroupName, Arc<BalancedGroupState<T>>>>,
+    // Cached sender snapshot rebuilt only when the balanced group set changes.
+    balanced_sender_snapshot: ArcSwap<Vec<flume::Sender<BalancedEnvelope<T>>>>,
     // One shared ring for all broadcast subscribers in this topic.
-    broadcast_sender: broadcast::Sender<T>,
+    broadcast_sender: broadcast::Sender<BroadcastEnvelope<T>>,
+    // Global sequence for broadcast deliveries.
+    broadcast_sequence: AtomicU64,
     // Registry of active broadcast subscribers and their settlement state.
     broadcast_registry: Mutex<BroadcastRegistry>,
+    // Cached broadcast subscriber settlement-state snapshot rebuilt on subscribe/unsubscribe.
+    broadcast_subscriber_snapshot: ArcSwap<Vec<Arc<BroadcastSubscriberState>>>,
 }
 
 impl<T> InMemoryTopic<T> {
@@ -46,11 +54,30 @@ impl<T> InMemoryTopic<T> {
             })
     }
 
-    fn snapshot_broadcast_subscribers(
+    fn read_balanced_sender_snapshot(&self) -> Arc<Vec<flume::Sender<BalancedEnvelope<T>>>> {
+        self.balanced_sender_snapshot.load_full()
+    }
+
+    pub(super) fn rebuild_balanced_sender_snapshot(
         &self,
-    ) -> Result<Vec<Arc<BroadcastSubscriberState>>, TopicRuntimeError> {
-        let registry = self.lock_broadcast_registry()?;
-        Ok(registry.subscribers.values().cloned().collect())
+        groups: &HashMap<SubscriptionGroupName, Arc<BalancedGroupState<T>>>,
+    ) {
+        let snapshot = Arc::new(
+            groups
+                .values()
+                .map(|group| group.sender.clone())
+                .collect::<Vec<_>>(),
+        );
+        self.balanced_sender_snapshot.store(snapshot);
+    }
+
+    fn read_broadcast_subscriber_snapshot(&self) -> Arc<Vec<Arc<BroadcastSubscriberState>>> {
+        self.broadcast_subscriber_snapshot.load_full()
+    }
+
+    fn rebuild_broadcast_subscriber_snapshot(&self, registry: &BroadcastRegistry) {
+        let snapshot = Arc::new(registry.subscribers.values().cloned().collect::<Vec<_>>());
+        self.broadcast_subscriber_snapshot.store(snapshot);
     }
 
     fn register_broadcast_subscriber(
@@ -62,6 +89,7 @@ impl<T> InMemoryTopic<T> {
         registry.next_subscriber_id = registry.next_subscriber_id.wrapping_add(1);
         let previous = registry.subscribers.insert(id, state);
         debug_assert!(previous.is_none());
+        self.rebuild_broadcast_subscriber_snapshot(&registry);
         Ok(id)
     }
 
@@ -70,7 +98,9 @@ impl<T> InMemoryTopic<T> {
         subscriber_id: u64,
     ) -> Result<Option<Arc<BroadcastSubscriberState>>, TopicRuntimeError> {
         let mut registry = self.lock_broadcast_registry()?;
-        Ok(registry.subscribers.remove(&subscriber_id))
+        let removed = registry.subscribers.remove(&subscriber_id);
+        self.rebuild_broadcast_subscriber_snapshot(&registry);
+        Ok(removed)
     }
 }
 
@@ -88,8 +118,11 @@ where
             name,
             policies,
             balanced_groups: Mutex::new(HashMap::new()),
+            balanced_sender_snapshot: ArcSwap::from_pointee(Vec::new()),
             broadcast_sender,
+            broadcast_sequence: AtomicU64::new(0),
             broadcast_registry: Mutex::new(BroadcastRegistry::default()),
+            broadcast_subscriber_snapshot: ArcSwap::from_pointee(Vec::new()),
         }
     }
 
@@ -103,6 +136,10 @@ where
 
     pub(super) fn balanced_on_full(&self) -> TopicBalancedOnFullPolicy {
         self.policies.balanced_on_full.clone()
+    }
+
+    fn next_broadcast_sequence(&self) -> u64 {
+        self.broadcast_sequence.fetch_add(1, Ordering::Relaxed)
     }
 
     /// Returns the balanced-group map lock guard.
@@ -136,13 +173,169 @@ where
     where
         T: Clone + Send + 'static,
     {
-        // Snapshot current destinations up front so publish is lock-free while sending.
-        let balanced_senders: Vec<flume::Sender<BalancedEnvelope<T>>> = {
-            let groups = self.lock_balanced_groups()?;
-            groups.values().map(|group| group.sender.clone()).collect()
+        if !outcome_interest.is_enabled() {
+            return self
+                .publish_without_outcome(payload, balanced_on_full)
+                .await;
+        }
+
+        self.publish_with_outcome(payload, balanced_on_full, outcome_interest)
+            .await
+    }
+
+    async fn publish_without_outcome(
+        &self,
+        payload: T,
+        balanced_on_full: &TopicBalancedOnFullPolicy,
+    ) -> Result<TopicPublishResult, TopicRuntimeError>
+    where
+        T: Clone + Send + 'static,
+    {
+        let balanced_senders = self.read_balanced_sender_snapshot();
+        let broadcast_subscribers = self.read_broadcast_subscriber_snapshot();
+        let broadcast_receivers = broadcast_subscribers.len();
+
+        let mut report = TopicPublishReport {
+            attempted_subscribers: balanced_senders.len() + broadcast_receivers,
+            delivered_subscribers: 0,
+            dropped_subscribers: 0,
         };
+
+        if report.attempted_subscribers == 0 {
+            return Ok(TopicPublishResult {
+                report,
+                outcome: None,
+            });
+        }
+
+        // Fast path: single balanced destination and no broadcast subscribers.
+        if broadcast_receivers == 0 && balanced_senders.len() == 1 {
+            match send_balanced_with_policy(
+                &balanced_senders[0],
+                BalancedEnvelope {
+                    payload,
+                    outcome_tracker: None,
+                },
+                balanced_on_full,
+            )
+            .await
+            {
+                SendAttemptOutcome::Delivered => report.delivered_subscribers = 1,
+                SendAttemptOutcome::Dropped => report.dropped_subscribers = 1,
+                SendAttemptOutcome::Closed => {
+                    return Err(TopicRuntimeError::ChannelClosed {
+                        topic: self.name.clone(),
+                    });
+                }
+            }
+
+            return Ok(TopicPublishResult {
+                report,
+                outcome: None,
+            });
+        }
+
+        // Fast path: broadcast-only publish.
+        if balanced_senders.is_empty() && broadcast_receivers > 0 {
+            let delivered = match self.broadcast_sender.send(BroadcastEnvelope {
+                sequence: self.next_broadcast_sequence(),
+                payload,
+            }) {
+                Ok(receiver_count) => receiver_count,
+                Err(_send_error) => 0,
+            };
+            report.delivered_subscribers = delivered;
+            report.dropped_subscribers = broadcast_receivers.saturating_sub(delivered);
+            return Ok(TopicPublishResult {
+                report,
+                outcome: None,
+            });
+        }
+
+        let mut payload_slot = Some(payload);
+        let total_destinations = report.attempted_subscribers;
+        let mut destination_index = 0usize;
+
+        for sender in balanced_senders.iter() {
+            let msg = if destination_index + 1 == total_destinations {
+                payload_slot.take().expect(
+                    "payload must still exist before delivering to the last destination queue",
+                )
+            } else {
+                payload_slot
+                    .as_ref()
+                    .expect("payload must exist before reaching the last destination queue")
+                    .clone()
+            };
+            destination_index += 1;
+
+            match send_balanced_with_policy(
+                sender,
+                BalancedEnvelope {
+                    payload: msg,
+                    outcome_tracker: None,
+                },
+                balanced_on_full,
+            )
+            .await
+            {
+                SendAttemptOutcome::Delivered => {
+                    report.delivered_subscribers += 1;
+                }
+                SendAttemptOutcome::Dropped => {
+                    report.dropped_subscribers += 1;
+                }
+                SendAttemptOutcome::Closed => {
+                    return Err(TopicRuntimeError::ChannelClosed {
+                        topic: self.name.clone(),
+                    });
+                }
+            }
+        }
+
+        if broadcast_receivers > 0 {
+            let sequence = self.next_broadcast_sequence();
+
+            let msg = if destination_index + 1 == total_destinations {
+                payload_slot.take().expect(
+                    "payload must still exist before delivering to the last destination queue",
+                )
+            } else {
+                payload_slot
+                    .as_ref()
+                    .expect("payload must exist before reaching the last destination queue")
+                    .clone()
+            };
+            let delivered = match self.broadcast_sender.send(BroadcastEnvelope {
+                sequence,
+                payload: msg,
+            }) {
+                Ok(receiver_count) => receiver_count,
+                Err(_send_error) => 0,
+            };
+            report.delivered_subscribers += delivered;
+            report.dropped_subscribers += broadcast_receivers.saturating_sub(delivered);
+        }
+
+        Ok(TopicPublishResult {
+            report,
+            outcome: None,
+        })
+    }
+
+    async fn publish_with_outcome(
+        &self,
+        payload: T,
+        balanced_on_full: &TopicBalancedOnFullPolicy,
+        outcome_interest: TopicOutcomeInterest,
+    ) -> Result<TopicPublishResult, TopicRuntimeError>
+    where
+        T: Clone + Send + 'static,
+    {
+        // Snapshot current destinations up front so publish is lock-free while sending.
+        let balanced_senders = self.read_balanced_sender_snapshot();
         // Snapshot currently attached broadcast subscribers.
-        let broadcast_subscribers = self.snapshot_broadcast_subscribers()?;
+        let broadcast_subscribers = self.read_broadcast_subscriber_snapshot();
         let broadcast_receivers = broadcast_subscribers.len();
 
         let mut report = TopicPublishReport {
@@ -153,20 +346,14 @@ where
         };
 
         if report.attempted_subscribers == 0 {
-            let outcome = if outcome_interest.is_enabled() {
-                Some(immediate_outcome_future(TopicPublishOutcome::Ack))
-            } else {
-                None
-            };
-            return Ok(TopicPublishResult { report, outcome });
+            return Ok(TopicPublishResult {
+                report,
+                outcome: Some(immediate_outcome_future(TopicPublishOutcome::Ack)),
+            });
         }
 
-        let (outcome_tracker, mut outcome) = if outcome_interest.is_enabled() {
-            let (tracker, receiver) = PublishOutcomeTracker::new(outcome_interest);
-            (Some(tracker), Some(tracker_outcome_future(receiver)))
-        } else {
-            (None, None)
-        };
+        let (outcome_tracker, receiver) = PublishOutcomeTracker::new(outcome_interest);
+        let outcome = Some(tracker_outcome_future(receiver));
 
         let mut delivered_balanced = 0usize;
         // Avoid an extra clone by moving the original payload into the final destination.
@@ -174,7 +361,7 @@ where
         let total_destinations = report.attempted_subscribers;
         let mut destination_index = 0usize;
 
-        for sender in &balanced_senders {
+        for sender in balanced_senders.iter() {
             let envelope = if destination_index + 1 == total_destinations {
                 payload_slot.take().expect(
                     "payload must still exist before delivering to the last destination queue",
@@ -187,13 +374,11 @@ where
             };
             let envelope = BalancedEnvelope {
                 payload: envelope,
-                outcome_tracker: outcome_tracker.clone(),
+                outcome_tracker: Some(outcome_tracker.clone()),
             };
             destination_index += 1;
 
-            if let Some(tracker) = &outcome_tracker {
-                tracker.reserve_delivery();
-            }
+            outcome_tracker.reserve_delivery();
 
             match send_balanced_with_policy(sender, envelope, balanced_on_full).await {
                 SendAttemptOutcome::Delivered => {
@@ -202,9 +387,7 @@ where
                 }
                 SendAttemptOutcome::Dropped => {
                     report.dropped_subscribers += 1;
-                    if let Some(tracker) = &outcome_tracker {
-                        tracker.on_publish_drop("balanced queue full: drop_newest");
-                    }
+                    outcome_tracker.on_publish_drop("balanced queue full: drop_newest");
                 }
                 SendAttemptOutcome::Closed => {
                     return Err(TopicRuntimeError::ChannelClosed {
@@ -215,11 +398,10 @@ where
         }
 
         if broadcast_receivers > 0 {
-            for subscriber in &broadcast_subscribers {
-                if let Some(tracker) = &outcome_tracker {
-                    tracker.reserve_delivery();
-                }
-                subscriber.enqueue(outcome_tracker.clone())?;
+            let sequence = self.next_broadcast_sequence();
+            for subscriber in broadcast_subscribers.iter() {
+                outcome_tracker.reserve_delivery();
+                subscriber.enqueue(sequence, outcome_tracker.clone());
             }
 
             let msg = if destination_index + 1 == total_destinations {
@@ -232,7 +414,10 @@ where
                     .expect("payload must exist before reaching the last destination queue")
                     .clone()
             };
-            let delivered = match self.broadcast_sender.send(msg) {
+            let delivered = match self.broadcast_sender.send(BroadcastEnvelope {
+                sequence,
+                payload: msg,
+            }) {
                 Ok(receiver_count) => receiver_count,
                 Err(_send_error) => 0,
             };
@@ -242,16 +427,10 @@ where
             report.dropped_subscribers += broadcast_receivers.saturating_sub(delivered);
         }
 
-        if let Some(tracker) = &outcome_tracker {
-            // No balanced deliveries were accepted for this publish, and no drop-triggered
-            // Nack completed the tracker: resolve as Ack to avoid dangling outcomes.
-            if delivered_balanced == 0 {
-                tracker.complete_if_idle();
-            }
-        }
-
-        if outcome_interest.is_enabled() && outcome.is_none() {
-            outcome = Some(immediate_outcome_future(TopicPublishOutcome::Ack));
+        // No balanced deliveries were accepted for this publish, and no drop-triggered
+        // Nack completed the tracker: resolve as Ack to avoid dangling outcomes.
+        if delivered_balanced == 0 {
+            outcome_tracker.complete_if_idle();
         }
 
         Ok(TopicPublishResult { report, outcome })

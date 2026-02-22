@@ -10,13 +10,25 @@ use crate::topic::{
 use async_trait::async_trait;
 use otap_df_config::TopicName;
 use otap_df_config::topic::TopicBroadcastOnLagPolicy;
+use parking_lot::Mutex;
 use std::collections::VecDeque;
-use std::sync::{Arc, Mutex};
+use std::sync::Arc;
 use tokio::sync::broadcast;
 
 const BROADCAST_LAG_NACK_REASON: &str = "broadcast subscriber lagged: drop_oldest";
 const BROADCAST_SUBSCRIBER_DROPPED_NACK_REASON: &str = "broadcast subscriber dropped";
 const BROADCAST_CHANNEL_CLOSED_NACK_REASON: &str = "broadcast channel closed";
+
+#[derive(Clone)]
+pub(super) struct BroadcastEnvelope<T> {
+    pub(super) sequence: u64,
+    pub(super) payload: T,
+}
+
+struct TrackedSettlement {
+    sequence: u64,
+    tracker: Arc<PublishOutcomeTracker>,
+}
 
 /// Per-subscriber settlement queue for broadcast deliveries.
 ///
@@ -24,7 +36,7 @@ const BROADCAST_CHANNEL_CLOSED_NACK_REASON: &str = "broadcast channel closed";
 /// broadcast message for that subscriber. Entries carry optional publisher
 /// outcome trackers.
 pub(super) struct BroadcastSubscriberState {
-    pending_trackers: Mutex<VecDeque<Option<Arc<PublishOutcomeTracker>>>>,
+    pending_trackers: Mutex<VecDeque<TrackedSettlement>>,
     capacity: usize,
 }
 
@@ -40,59 +52,69 @@ impl BroadcastSubscriberState {
     ///
     /// When queue capacity is exceeded, the oldest pending entry is dropped and
     /// nacked to reflect `broadcast_on_lag=drop_oldest`.
-    pub(super) fn enqueue(
-        &self,
-        outcome_tracker: Option<Arc<PublishOutcomeTracker>>,
-    ) -> Result<(), TopicRuntimeError> {
-        let mut pending =
-            self.pending_trackers
-                .lock()
-                .map_err(|_| TopicRuntimeError::Internal {
-                    message: "broadcast pending-settlement queue lock poisoned".to_owned(),
-                })?;
+    pub(super) fn enqueue(&self, sequence: u64, outcome_tracker: Arc<PublishOutcomeTracker>) {
+        let mut pending = self.pending_trackers.lock();
 
         if pending.len() >= self.capacity {
-            if let Some(Some(dropped_tracker)) = pending.pop_front() {
-                dropped_tracker.on_nack(TopicOutcomeNack::transient(BROADCAST_LAG_NACK_REASON));
+            if let Some(dropped) = pending.pop_front() {
+                dropped
+                    .tracker
+                    .on_nack(TopicOutcomeNack::transient(BROADCAST_LAG_NACK_REASON));
             }
         }
-        pending.push_back(outcome_tracker);
-        Ok(())
+        pending.push_back(TrackedSettlement {
+            sequence,
+            tracker: outcome_tracker,
+        });
     }
 
-    /// Pops settlement metadata for the next successfully received payload.
-    pub(super) fn pop_next_tracker(
+    /// Resolves settlement metadata for one successfully received payload.
+    ///
+    /// Tracked entries older than `received_sequence` are considered lag-dropped
+    /// for this subscriber and nacked.
+    pub(super) fn resolve_tracker_for_sequence(
         &self,
+        received_sequence: u64,
         topic_name: &TopicName,
     ) -> Result<Option<Arc<PublishOutcomeTracker>>, TopicRuntimeError> {
-        let mut pending =
-            self.pending_trackers
-                .lock()
-                .map_err(|_| TopicRuntimeError::Internal {
-                    message: "broadcast pending-settlement queue lock poisoned".to_owned(),
-                })?;
-        pending
-            .pop_front()
-            .ok_or_else(|| TopicRuntimeError::Internal {
+        let mut pending = self.pending_trackers.lock();
+        while let Some(front) = pending.front() {
+            if front.sequence >= received_sequence {
+                break;
+            }
+            let dropped = pending.pop_front().expect("front was present");
+            dropped
+                .tracker
+                .on_nack(TopicOutcomeNack::transient(BROADCAST_LAG_NACK_REASON));
+        }
+
+        match pending.front() {
+            Some(front) if front.sequence == received_sequence => {
+                let settlement = pending.pop_front().expect("front was present");
+                Ok(Some(settlement.tracker))
+            }
+            Some(front) if front.sequence < received_sequence => Err(TopicRuntimeError::Internal {
                 message: format!(
-                    "broadcast pending-settlement entry missing for topic `{topic_name}`"
+                    "broadcast tracked settlement out-of-order for topic `{topic_name}`: front_seq={} recv_seq={received_sequence}",
+                    front.sequence
                 ),
-            })
+            }),
+            _ => Ok(None),
+        }
     }
 
     /// Nacks all currently pending settlement entries for this subscriber.
     pub(super) fn nack_all_pending(&self, reason: &'static str) {
-        if let Ok(mut pending) = self.pending_trackers.lock() {
-            for tracker in pending.drain(..).flatten() {
-                tracker.on_nack(TopicOutcomeNack::transient(reason));
-            }
+        let mut pending = self.pending_trackers.lock();
+        for tracked in pending.drain(..) {
+            tracked.tracker.on_nack(TopicOutcomeNack::transient(reason));
         }
     }
 }
 
 pub(super) struct InMemoryBroadcastSubscriber<T> {
     pub(super) topic_name: TopicName,
-    pub(super) receiver: broadcast::Receiver<T>,
+    pub(super) receiver: broadcast::Receiver<BroadcastEnvelope<T>>,
     // Copied from topic policy at subscription time.
     pub(super) on_lag: TopicBroadcastOnLagPolicy,
     pub(super) topic: Arc<InMemoryTopic<T>>,
@@ -110,15 +132,14 @@ impl<T> Drop for InMemoryBroadcastSubscriber<T> {
     }
 }
 
-#[async_trait]
-impl<T> TopicSubscriber<T> for InMemoryBroadcastSubscriber<T>
+impl<T> InMemoryBroadcastSubscriber<T>
 where
     T: Clone + Send + 'static,
 {
-    async fn recv(&mut self) -> Result<TopicDelivery<T>, TopicRuntimeError> {
-        let payload = loop {
+    pub(super) async fn recv(&mut self) -> Result<TopicDelivery<T>, TopicRuntimeError> {
+        let envelope = loop {
             match self.receiver.recv().await {
-                Ok(payload) => break payload,
+                Ok(envelope) => break envelope,
                 Err(broadcast::error::RecvError::Closed) => {
                     self.state
                         .nack_all_pending(BROADCAST_CHANNEL_CLOSED_NACK_REASON);
@@ -142,16 +163,31 @@ where
             }
         };
 
-        let outcome_tracker = self.state.pop_next_tracker(&self.topic_name)?;
-        Ok(TopicDelivery::new(
-            payload,
-            Box::new(BroadcastAckHandler { outcome_tracker }),
-        ))
+        let outcome_tracker = self
+            .state
+            .resolve_tracker_for_sequence(envelope.sequence, &self.topic_name)?;
+        match outcome_tracker {
+            Some(outcome_tracker) => Ok(TopicDelivery::new(
+                envelope.payload,
+                Box::new(BroadcastAckHandler { outcome_tracker }),
+            )),
+            None => Ok(TopicDelivery::new_without_ack(envelope.payload)),
+        }
+    }
+}
+
+#[async_trait]
+impl<T> TopicSubscriber<T> for InMemoryBroadcastSubscriber<T>
+where
+    T: Clone + Send + 'static,
+{
+    async fn recv(&mut self) -> Result<TopicDelivery<T>, TopicRuntimeError> {
+        InMemoryBroadcastSubscriber::recv(self).await
     }
 }
 
 struct BroadcastAckHandler {
-    outcome_tracker: Option<Arc<PublishOutcomeTracker>>,
+    outcome_tracker: Arc<PublishOutcomeTracker>,
 }
 
 #[async_trait]
@@ -160,15 +196,11 @@ where
     T: Send + 'static,
 {
     fn outcome_interest(&self) -> TopicOutcomeInterest {
-        self.outcome_tracker
-            .as_ref()
-            .map_or(TopicOutcomeInterest::None, |tracker| tracker.interest())
+        self.outcome_tracker.interest()
     }
 
     async fn ack(self: Box<Self>, _payload: T) -> Result<(), TopicRuntimeError> {
-        if let Some(tracker) = &self.outcome_tracker {
-            tracker.on_ack();
-        }
+        self.outcome_tracker.on_ack();
         Ok(())
     }
 
@@ -177,9 +209,7 @@ where
         _payload: T,
         nack: TopicOutcomeNack,
     ) -> Result<(), TopicRuntimeError> {
-        if let Some(tracker) = &self.outcome_tracker {
-            tracker.on_nack(nack);
-        }
+        self.outcome_tracker.on_nack(nack);
         Ok(())
     }
 }

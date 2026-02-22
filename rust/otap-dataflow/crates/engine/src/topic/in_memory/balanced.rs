@@ -10,6 +10,7 @@ use crate::topic::{
 use async_trait::async_trait;
 use otap_df_config::TopicName;
 use otap_df_config::topic::{SubscriptionGroupName, TopicBalancedOnFullPolicy};
+use std::collections::hash_map::Entry;
 use std::sync::Arc;
 
 #[derive(Clone)]
@@ -71,15 +72,27 @@ pub(super) struct InMemoryTopicPublisher<T> {
     pub(super) outcome_interest: TopicOutcomeInterest,
 }
 
+impl<T> InMemoryTopicPublisher<T>
+where
+    T: Clone + Send + 'static,
+{
+    pub(super) async fn publish(
+        &self,
+        payload: T,
+    ) -> Result<TopicPublishResult, TopicRuntimeError> {
+        self.topic
+            .publish(payload, &self.balanced_on_full, self.outcome_interest)
+            .await
+    }
+}
+
 #[async_trait]
 impl<T> TopicPublisher<T> for InMemoryTopicPublisher<T>
 where
     T: Clone + Send + 'static,
 {
     async fn publish(&self, payload: T) -> Result<TopicPublishResult, TopicRuntimeError> {
-        self.topic
-            .publish(payload, &self.balanced_on_full, self.outcome_interest)
-            .await
+        InMemoryTopicPublisher::publish(self, payload).await
     }
 }
 
@@ -88,12 +101,11 @@ pub(super) struct InMemoryBalancedSubscriber<T> {
     pub(super) receiver: flume::Receiver<BalancedEnvelope<T>>,
 }
 
-#[async_trait]
-impl<T> TopicSubscriber<T> for InMemoryBalancedSubscriber<T>
+impl<T> InMemoryBalancedSubscriber<T>
 where
     T: Send + 'static,
 {
-    async fn recv(&mut self) -> Result<TopicDelivery<T>, TopicRuntimeError> {
+    pub(super) async fn recv(&mut self) -> Result<TopicDelivery<T>, TopicRuntimeError> {
         let envelope =
             self.receiver
                 .recv_async()
@@ -102,17 +114,28 @@ where
                     topic: self.topic_name.clone(),
                 })?;
 
-        Ok(TopicDelivery::new(
-            envelope.payload,
-            Box::new(BalancedAckHandler {
-                outcome_tracker: envelope.outcome_tracker,
-            }),
-        ))
+        match envelope.outcome_tracker {
+            Some(outcome_tracker) => Ok(TopicDelivery::new(
+                envelope.payload,
+                Box::new(BalancedAckHandler { outcome_tracker }),
+            )),
+            None => Ok(TopicDelivery::new_without_ack(envelope.payload)),
+        }
+    }
+}
+
+#[async_trait]
+impl<T> TopicSubscriber<T> for InMemoryBalancedSubscriber<T>
+where
+    T: Send + 'static,
+{
+    async fn recv(&mut self) -> Result<TopicDelivery<T>, TopicRuntimeError> {
+        InMemoryBalancedSubscriber::recv(self).await
     }
 }
 
 struct BalancedAckHandler {
-    outcome_tracker: Option<Arc<PublishOutcomeTracker>>,
+    outcome_tracker: Arc<PublishOutcomeTracker>,
 }
 
 #[async_trait]
@@ -121,15 +144,11 @@ where
     T: Send + 'static,
 {
     fn outcome_interest(&self) -> TopicOutcomeInterest {
-        self.outcome_tracker
-            .as_ref()
-            .map_or(TopicOutcomeInterest::None, |tracker| tracker.interest())
+        self.outcome_tracker.interest()
     }
 
     async fn ack(self: Box<Self>, _payload: T) -> Result<(), TopicRuntimeError> {
-        if let Some(tracker) = &self.outcome_tracker {
-            tracker.on_ack();
-        }
+        self.outcome_tracker.on_ack();
         Ok(())
     }
 
@@ -138,9 +157,7 @@ where
         _payload: T,
         nack: TopicOutcomeNack,
     ) -> Result<(), TopicRuntimeError> {
-        if let Some(tracker) = &self.outcome_tracker {
-            tracker.on_nack(nack);
-        }
+        self.outcome_tracker.on_nack(nack);
         Ok(())
     }
 }
@@ -159,14 +176,18 @@ where
     ) -> Result<InMemoryBalancedSubscriber<T>, TopicRuntimeError> {
         let group_state = {
             let mut groups = self.lock_balanced_groups()?;
-            groups
-                .entry(group)
-                .or_insert_with(|| {
-                    Arc::new(BalancedGroupState::new(
-                        self.policies().balanced_group_queue_capacity,
-                    ))
-                })
-                .clone()
+            match groups.entry(group) {
+                Entry::Occupied(entry) => entry.get().clone(),
+                Entry::Vacant(entry) => {
+                    let group_state = entry
+                        .insert(Arc::new(BalancedGroupState::new(
+                            self.policies().balanced_group_queue_capacity,
+                        )))
+                        .clone();
+                    self.rebuild_balanced_sender_snapshot(&groups);
+                    group_state
+                }
+            }
         };
 
         Ok(InMemoryBalancedSubscriber {

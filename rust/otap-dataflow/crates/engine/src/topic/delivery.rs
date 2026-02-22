@@ -22,52 +22,56 @@ pub(crate) trait DeliveryAckHandler<T>: Send {
     ) -> Result<(), TopicRuntimeError>;
 }
 
+enum DeliveryAckHandlerSlot<T> {
+    None,
+    Handler(Box<dyn DeliveryAckHandler<T>>),
+}
+
 /// Delivery-side outcome handle that can be stored independently from payload flow.
 pub struct TopicDeliveryOutcomeHandle<T> {
-    ack_handler: Option<Box<dyn DeliveryAckHandler<T>>>,
+    ack_handler: DeliveryAckHandlerSlot<T>,
 }
 
 impl<T> TopicDeliveryOutcomeHandle<T> {
     pub(crate) fn new(ack_handler: Box<dyn DeliveryAckHandler<T>>) -> Self {
         Self {
-            ack_handler: Some(ack_handler),
+            ack_handler: DeliveryAckHandlerSlot::Handler(ack_handler),
+        }
+    }
+
+    fn none() -> Self {
+        Self {
+            ack_handler: DeliveryAckHandlerSlot::None,
         }
     }
 
     /// Returns publisher interest for this delivery.
     #[must_use]
     pub fn publisher_outcome_interest(&self) -> TopicOutcomeInterest {
-        self.ack_handler
-            .as_ref()
-            .map_or(TopicOutcomeInterest::None, |handler| {
-                handler.outcome_interest()
-            })
+        match &self.ack_handler {
+            DeliveryAckHandlerSlot::None => TopicOutcomeInterest::None,
+            DeliveryAckHandlerSlot::Handler(handler) => handler.outcome_interest(),
+        }
     }
 
     /// Resolves this delivery as acknowledged using the provided payload.
-    pub async fn ack(mut self, payload: T) -> Result<(), TopicRuntimeError> {
-        let handler = self
-            .ack_handler
-            .take()
-            .ok_or_else(|| TopicRuntimeError::Internal {
-                message: "delivery ack handler missing during ack".to_owned(),
-            })?;
-        handler.ack(payload).await
+    pub async fn ack(self, payload: T) -> Result<(), TopicRuntimeError> {
+        match self.ack_handler {
+            DeliveryAckHandlerSlot::None => Ok(()),
+            DeliveryAckHandlerSlot::Handler(handler) => handler.ack(payload).await,
+        }
     }
 
     /// Resolves this delivery as rejected using the provided payload and details.
     pub async fn nack_with_reason(
-        mut self,
+        self,
         payload: T,
         nack: TopicOutcomeNack,
     ) -> Result<(), TopicRuntimeError> {
-        let handler = self
-            .ack_handler
-            .take()
-            .ok_or_else(|| TopicRuntimeError::Internal {
-                message: "delivery ack handler missing during nack".to_owned(),
-            })?;
-        handler.nack(payload, nack).await
+        match self.ack_handler {
+            DeliveryAckHandlerSlot::None => Ok(()),
+            DeliveryAckHandlerSlot::Handler(handler) => handler.nack(payload, nack).await,
+        }
     }
 
     /// Resolves this delivery as rejected using a default transient reason.
@@ -82,92 +86,80 @@ impl<T> TopicDeliveryOutcomeHandle<T> {
 
 /// Delivered message wrapper that carries acknowledgement operations.
 pub struct TopicDelivery<T> {
-    payload: Option<T>,
-    ack_handler: Option<Box<dyn DeliveryAckHandler<T>>>,
+    payload: T,
+    ack_handler: DeliveryAckHandlerSlot<T>,
 }
 
 impl<T> TopicDelivery<T> {
     /// Creates a runtime delivery object.
     pub(crate) fn new(payload: T, ack_handler: Box<dyn DeliveryAckHandler<T>>) -> Self {
         Self {
-            payload: Some(payload),
-            ack_handler: Some(ack_handler),
+            payload,
+            ack_handler: DeliveryAckHandlerSlot::Handler(ack_handler),
+        }
+    }
+
+    /// Creates a runtime delivery object without Ack/Nack settlement handling.
+    pub(crate) fn new_without_ack(payload: T) -> Self {
+        Self {
+            payload,
+            ack_handler: DeliveryAckHandlerSlot::None,
         }
     }
 
     /// Returns the delivered payload.
     #[must_use]
     pub fn payload(&self) -> &T {
-        self.payload
-            .as_ref()
-            .expect("payload should be present until ack/nack consumes the delivery")
+        &self.payload
     }
 
     /// Returns publisher outcome interest for this delivery.
     #[must_use]
     pub fn publisher_outcome_interest(&self) -> TopicOutcomeInterest {
-        self.ack_handler
-            .as_ref()
-            .map_or(TopicOutcomeInterest::None, |handler| {
-                handler.outcome_interest()
-            })
+        match &self.ack_handler {
+            DeliveryAckHandlerSlot::None => TopicOutcomeInterest::None,
+            DeliveryAckHandlerSlot::Handler(handler) => handler.outcome_interest(),
+        }
     }
 
     /// Splits this delivery into payload + outcome handle.
     ///
     /// Useful when payload forwarding and Ack/Nack resolution happen in different
     /// stages (for example through pipeline control messages).
-    pub fn into_parts(mut self) -> Result<(T, TopicDeliveryOutcomeHandle<T>), TopicRuntimeError> {
-        let payload = self
-            .payload
-            .take()
-            .ok_or_else(|| TopicRuntimeError::Internal {
-                message: "delivery payload missing during split".to_owned(),
-            })?;
-        let handler = self
-            .ack_handler
-            .take()
-            .ok_or_else(|| TopicRuntimeError::Internal {
-                message: "delivery ack handler missing during split".to_owned(),
-            })?;
-        Ok((payload, TopicDeliveryOutcomeHandle::new(handler)))
+    pub fn into_parts(self) -> (T, TopicDeliveryOutcomeHandle<T>) {
+        let TopicDelivery {
+            payload,
+            ack_handler,
+        } = self;
+        let outcome_handle = match ack_handler {
+            DeliveryAckHandlerSlot::None => TopicDeliveryOutcomeHandle::none(),
+            DeliveryAckHandlerSlot::Handler(handler) => TopicDeliveryOutcomeHandle::new(handler),
+        };
+        (payload, outcome_handle)
     }
 
     /// Resolves this delivery as acknowledged.
-    pub async fn ack(mut self) -> Result<(), TopicRuntimeError> {
-        let payload = self
-            .payload
-            .take()
-            .ok_or_else(|| TopicRuntimeError::Internal {
-                message: "delivery payload missing during ack".to_owned(),
-            })?;
-        let handler = self
-            .ack_handler
-            .take()
-            .ok_or_else(|| TopicRuntimeError::Internal {
-                message: "delivery ack handler missing during ack".to_owned(),
-            })?;
-        handler.ack(payload).await
+    pub async fn ack(self) -> Result<(), TopicRuntimeError> {
+        let TopicDelivery {
+            payload,
+            ack_handler,
+        } = self;
+        match ack_handler {
+            DeliveryAckHandlerSlot::None => Ok(()),
+            DeliveryAckHandlerSlot::Handler(handler) => handler.ack(payload).await,
+        }
     }
 
     /// Resolves this delivery as rejected with explicit reason.
-    pub async fn nack_with_reason(
-        mut self,
-        nack: TopicOutcomeNack,
-    ) -> Result<(), TopicRuntimeError> {
-        let payload = self
-            .payload
-            .take()
-            .ok_or_else(|| TopicRuntimeError::Internal {
-                message: "delivery payload missing during nack".to_owned(),
-            })?;
-        let handler = self
-            .ack_handler
-            .take()
-            .ok_or_else(|| TopicRuntimeError::Internal {
-                message: "delivery ack handler missing during nack".to_owned(),
-            })?;
-        handler.nack(payload, nack).await
+    pub async fn nack_with_reason(self, nack: TopicOutcomeNack) -> Result<(), TopicRuntimeError> {
+        let TopicDelivery {
+            payload,
+            ack_handler,
+        } = self;
+        match ack_handler {
+            DeliveryAckHandlerSlot::None => Ok(()),
+            DeliveryAckHandlerSlot::Handler(handler) => handler.nack(payload, nack).await,
+        }
     }
 
     /// Resolves this delivery as rejected.

@@ -47,7 +47,7 @@ mod outcome_tracker;
 mod runtime;
 mod topic_state;
 
-pub use runtime::InMemoryTopicRuntime;
+pub use runtime::{InMemoryPublisher, InMemorySubscriber, InMemoryTopicRuntime};
 
 #[cfg(test)]
 mod tests;

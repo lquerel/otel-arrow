@@ -34,6 +34,7 @@ linkme = { workspace = true }
 async-trait = { workspace = true }
 futures = { workspace = true }
 flume = { workspace = true }
+arc-swap = { workspace = true }
 bitflags = { workspace = true }
 bytemuck = { workspace = true }
 bytes = { workspace = true }
@@ -41,6 +42,7 @@ smallvec = { workspace = true }
 socket2 = { workspace = true }
 uuid = { workspace = true }
 once_cell = { workspace = true }
+parking_lot = { workspace = true }
 data-encoding = { workspace = true }
 prost = { workspace = true }
 byte-unit = { workspace = true }
