@@ -9,8 +9,8 @@ use super::outcome_tracker::{
     PublishOutcomeTracker, immediate_outcome_future, tracker_outcome_future,
 };
 use crate::topic::{
-    TopicOutcomeInterest, TopicPublishOutcome, TopicPublishReport, TopicPublishResult,
-    TopicRuntimeError,
+    TopicOutcomeInterest, TopicPublishOutcome, TopicPublishReport, TopicPublishReportMode,
+    TopicPublishResult, TopicRuntimeError,
 };
 use arc_swap::ArcSwap;
 use otap_df_config::TopicName;
@@ -56,6 +56,10 @@ impl<T> InMemoryTopic<T> {
 
     fn read_balanced_sender_snapshot(&self) -> Arc<Vec<flume::Sender<BalancedEnvelope<T>>>> {
         self.balanced_sender_snapshot.load_full()
+    }
+
+    pub(super) fn balanced_sender_snapshot(&self) -> Arc<Vec<flume::Sender<BalancedEnvelope<T>>>> {
+        self.read_balanced_sender_snapshot()
     }
 
     pub(super) fn rebuild_balanced_sender_snapshot(
@@ -169,43 +173,36 @@ where
         payload: T,
         balanced_on_full: &TopicBalancedOnFullPolicy,
         outcome_interest: TopicOutcomeInterest,
+        report_mode: TopicPublishReportMode,
     ) -> Result<TopicPublishResult, TopicRuntimeError>
     where
         T: Clone + Send + 'static,
     {
         if !outcome_interest.is_enabled() {
             return self
-                .publish_without_outcome(payload, balanced_on_full)
+                .publish_without_outcome(payload, balanced_on_full, report_mode)
                 .await;
         }
 
-        self.publish_with_outcome(payload, balanced_on_full, outcome_interest)
+        self.publish_with_outcome(payload, balanced_on_full, outcome_interest, report_mode)
             .await
     }
 
-    async fn publish_without_outcome(
+    /// Publishes one payload on the low-overhead path used by concrete
+    /// in-memory publishers when no outcome/report information is requested.
+    pub(super) async fn publish_fast(
         &self,
         payload: T,
         balanced_on_full: &TopicBalancedOnFullPolicy,
-    ) -> Result<TopicPublishResult, TopicRuntimeError>
+    ) -> Result<(), TopicRuntimeError>
     where
         T: Clone + Send + 'static,
     {
         let balanced_senders = self.read_balanced_sender_snapshot();
-        let broadcast_subscribers = self.read_broadcast_subscriber_snapshot();
-        let broadcast_receivers = broadcast_subscribers.len();
+        let broadcast_receivers = self.broadcast_sender.receiver_count();
 
-        let mut report = TopicPublishReport {
-            attempted_subscribers: balanced_senders.len() + broadcast_receivers,
-            delivered_subscribers: 0,
-            dropped_subscribers: 0,
-        };
-
-        if report.attempted_subscribers == 0 {
-            return Ok(TopicPublishResult {
-                report,
-                outcome: None,
-            });
+        if balanced_senders.is_empty() && broadcast_receivers == 0 {
+            return Ok(());
         }
 
         // Fast path: single balanced destination and no broadcast subscribers.
@@ -220,13 +217,145 @@ where
             )
             .await
             {
-                SendAttemptOutcome::Delivered => report.delivered_subscribers = 1,
-                SendAttemptOutcome::Dropped => report.dropped_subscribers = 1,
+                SendAttemptOutcome::Delivered | SendAttemptOutcome::Dropped => return Ok(()),
                 SendAttemptOutcome::Closed => {
                     return Err(TopicRuntimeError::ChannelClosed {
                         topic: self.name.clone(),
                     });
                 }
+            }
+        }
+
+        // Fast path: broadcast-only publish.
+        if balanced_senders.is_empty() && broadcast_receivers > 0 {
+            let _ = self.broadcast_sender.send(BroadcastEnvelope {
+                sequence: self.next_broadcast_sequence(),
+                payload,
+            });
+            return Ok(());
+        }
+
+        let mut payload_slot = Some(payload);
+        let total_destinations = balanced_senders.len() + usize::from(broadcast_receivers > 0);
+        let mut destination_index = 0usize;
+
+        for sender in balanced_senders.iter() {
+            let msg = if destination_index + 1 == total_destinations {
+                payload_slot.take().expect(
+                    "payload must still exist before delivering to the last destination queue",
+                )
+            } else {
+                payload_slot
+                    .as_ref()
+                    .expect("payload must exist before reaching the last destination queue")
+                    .clone()
+            };
+            destination_index += 1;
+
+            match send_balanced_with_policy(
+                sender,
+                BalancedEnvelope {
+                    payload: msg,
+                    outcome_tracker: None,
+                },
+                balanced_on_full,
+            )
+            .await
+            {
+                SendAttemptOutcome::Delivered | SendAttemptOutcome::Dropped => {}
+                SendAttemptOutcome::Closed => {
+                    return Err(TopicRuntimeError::ChannelClosed {
+                        topic: self.name.clone(),
+                    });
+                }
+            }
+        }
+
+        if broadcast_receivers > 0 {
+            let msg = if destination_index + 1 == total_destinations {
+                payload_slot.take().expect(
+                    "payload must still exist before delivering to the last destination queue",
+                )
+            } else {
+                payload_slot
+                    .as_ref()
+                    .expect("payload must exist before reaching the last destination queue")
+                    .clone()
+            };
+            let _ = self.broadcast_sender.send(BroadcastEnvelope {
+                sequence: self.next_broadcast_sequence(),
+                payload: msg,
+            });
+        }
+
+        Ok(())
+    }
+
+    async fn publish_without_outcome(
+        &self,
+        payload: T,
+        balanced_on_full: &TopicBalancedOnFullPolicy,
+        report_mode: TopicPublishReportMode,
+    ) -> Result<TopicPublishResult, TopicRuntimeError>
+    where
+        T: Clone + Send + 'static,
+    {
+        let full_report = matches!(report_mode, TopicPublishReportMode::Full);
+        let balanced_senders = self.read_balanced_sender_snapshot();
+        let broadcast_receivers = self.broadcast_sender.receiver_count();
+        let attempted_subscribers = balanced_senders.len() + broadcast_receivers;
+        let mut report = if full_report {
+            TopicPublishReport {
+                attempted_subscribers,
+                delivered_subscribers: 0,
+                dropped_subscribers: 0,
+            }
+        } else {
+            TopicPublishReport::default()
+        };
+
+        if attempted_subscribers == 0 {
+            return Ok(TopicPublishResult {
+                report,
+                outcome: None,
+            });
+        }
+
+        let mut dropped_any = false;
+
+        // Fast path: single balanced destination and no broadcast subscribers.
+        if broadcast_receivers == 0 && balanced_senders.len() == 1 {
+            match send_balanced_with_policy(
+                &balanced_senders[0],
+                BalancedEnvelope {
+                    payload,
+                    outcome_tracker: None,
+                },
+                balanced_on_full,
+            )
+            .await
+            {
+                SendAttemptOutcome::Delivered => {
+                    if full_report {
+                        report.delivered_subscribers = 1;
+                    }
+                }
+                SendAttemptOutcome::Dropped => {
+                    if full_report {
+                        report.dropped_subscribers = 1;
+                    } else {
+                        dropped_any = true;
+                    }
+                }
+                SendAttemptOutcome::Closed => {
+                    return Err(TopicRuntimeError::ChannelClosed {
+                        topic: self.name.clone(),
+                    });
+                }
+            }
+
+            if !full_report {
+                report.dropped_subscribers = usize::from(dropped_any);
             }
 
             return Ok(TopicPublishResult {
@@ -244,8 +373,16 @@ where
                 Ok(receiver_count) => receiver_count,
                 Err(_send_error) => 0,
             };
-            report.delivered_subscribers = delivered;
-            report.dropped_subscribers = broadcast_receivers.saturating_sub(delivered);
+            let dropped = broadcast_receivers.saturating_sub(delivered);
+            if full_report {
+                report.delivered_subscribers = delivered;
+                report.dropped_subscribers = dropped;
+            } else if dropped > 0 {
+                dropped_any = true;
+            }
+            if !full_report {
+                report.dropped_subscribers = usize::from(dropped_any);
+            }
             return Ok(TopicPublishResult {
                 report,
                 outcome: None,
@@ -253,7 +390,7 @@ where
         }
 
         let mut payload_slot = Some(payload);
-        let total_destinations = report.attempted_subscribers;
+        let total_destinations = balanced_senders.len() + usize::from(broadcast_receivers > 0);
         let mut destination_index = 0usize;
 
         for sender in balanced_senders.iter() {
@@ -280,10 +417,16 @@ where
             .await
             {
                 SendAttemptOutcome::Delivered => {
-                    report.delivered_subscribers += 1;
+                    if full_report {
+                        report.delivered_subscribers += 1;
+                    }
                 }
                 SendAttemptOutcome::Dropped => {
-                    report.dropped_subscribers += 1;
+                    if full_report {
+                        report.dropped_subscribers += 1;
+                    } else {
+                        dropped_any = true;
+                    }
                 }
                 SendAttemptOutcome::Closed => {
                     return Err(TopicRuntimeError::ChannelClosed {
@@ -313,8 +456,17 @@ where
                 Ok(receiver_count) => receiver_count,
                 Err(_send_error) => 0,
             };
-            report.delivered_subscribers += delivered;
-            report.dropped_subscribers += broadcast_receivers.saturating_sub(delivered);
+            let dropped = broadcast_receivers.saturating_sub(delivered);
+            if full_report {
+                report.delivered_subscribers += delivered;
+                report.dropped_subscribers += dropped;
+            } else if dropped > 0 {
+                dropped_any = true;
+            }
+        }
+
+        if !full_report {
+            report.dropped_subscribers = usize::from(dropped_any);
         }
 
         Ok(TopicPublishResult {
@@ -328,24 +480,31 @@ where
         payload: T,
         balanced_on_full: &TopicBalancedOnFullPolicy,
         outcome_interest: TopicOutcomeInterest,
+        report_mode: TopicPublishReportMode,
     ) -> Result<TopicPublishResult, TopicRuntimeError>
     where
         T: Clone + Send + 'static,
     {
+        let full_report = matches!(report_mode, TopicPublishReportMode::Full);
         // Snapshot current destinations up front so publish is lock-free while sending.
         let balanced_senders = self.read_balanced_sender_snapshot();
         // Snapshot currently attached broadcast subscribers.
         let broadcast_subscribers = self.read_broadcast_subscriber_snapshot();
         let broadcast_receivers = broadcast_subscribers.len();
 
-        let mut report = TopicPublishReport {
-            // For balanced mode, this is "number of groups", not number of subscribers.
-            attempted_subscribers: balanced_senders.len() + broadcast_receivers,
-            delivered_subscribers: 0,
-            dropped_subscribers: 0,
+        let attempted_subscribers = balanced_senders.len() + broadcast_receivers;
+        let mut report = if full_report {
+            TopicPublishReport {
+                // For balanced mode, this is "number of groups", not number of subscribers.
+                attempted_subscribers,
+                delivered_subscribers: 0,
+                dropped_subscribers: 0,
+            }
+        } else {
+            TopicPublishReport::default()
         };
 
-        if report.attempted_subscribers == 0 {
+        if attempted_subscribers == 0 {
             return Ok(TopicPublishResult {
                 report,
                 outcome: Some(immediate_outcome_future(TopicPublishOutcome::Ack)),
@@ -356,9 +515,10 @@ where
         let outcome = Some(tracker_outcome_future(receiver));
 
         let mut delivered_balanced = 0usize;
+        let mut dropped_any = false;
         // Avoid an extra clone by moving the original payload into the final destination.
         let mut payload_slot = Some(payload);
-        let total_destinations = report.attempted_subscribers;
+        let total_destinations = balanced_senders.len() + usize::from(broadcast_receivers > 0);
         let mut destination_index = 0usize;
 
         for sender in balanced_senders.iter() {
@@ -382,11 +542,17 @@ where
 
             match send_balanced_with_policy(sender, envelope, balanced_on_full).await {
                 SendAttemptOutcome::Delivered => {
-                    report.delivered_subscribers += 1;
+                    if full_report {
+                        report.delivered_subscribers += 1;
+                    }
                     delivered_balanced += 1;
                 }
                 SendAttemptOutcome::Dropped => {
-                    report.dropped_subscribers += 1;
+                    if full_report {
+                        report.dropped_subscribers += 1;
+                    } else {
+                        dropped_any = true;
+                    }
                     outcome_tracker.on_publish_drop("balanced queue full: drop_newest");
                 }
                 SendAttemptOutcome::Closed => {
@@ -423,14 +589,23 @@ where
             };
             // Note: this is a send-time snapshot only. Later lag handling on recv
             // (Tokio `Lagged`) is not reflected in this publish report.
-            report.delivered_subscribers += delivered;
-            report.dropped_subscribers += broadcast_receivers.saturating_sub(delivered);
+            let dropped = broadcast_receivers.saturating_sub(delivered);
+            if full_report {
+                report.delivered_subscribers += delivered;
+                report.dropped_subscribers += dropped;
+            } else if dropped > 0 {
+                dropped_any = true;
+            }
         }
 
         // No balanced deliveries were accepted for this publish, and no drop-triggered
         // Nack completed the tracker: resolve as Ack to avoid dangling outcomes.
         if delivered_balanced == 0 {
             outcome_tracker.complete_if_idle();
+        }
+
+        if !full_report {
+            report.dropped_subscribers = usize::from(dropped_any);
         }
 
         Ok(TopicPublishResult { report, outcome })

@@ -12,11 +12,14 @@ mod contract;
 mod delivery;
 mod error;
 pub mod in_memory;
+pub mod in_memory_v2;
+pub mod in_memory_v3;
 
 pub use contract::{
     TopicOutcomeInterest, TopicOutcomeNack, TopicPublishOutcome, TopicPublishOutcomeFuture,
-    TopicPublishReport, TopicPublishResult, TopicPublisher, TopicPublisherOptions, TopicRuntime,
-    TopicSubscriber, TopicSubscription,
+    TopicPublishReport, TopicPublishReportMode, TopicPublishResult, TopicPublisher,
+    TopicPublisherOptions, TopicPublisherRouteMode, TopicRuntime, TopicSubscriber,
+    TopicSubscription,
 };
 pub use delivery::{TopicDelivery, TopicDeliveryOutcomeHandle};
 pub use error::TopicRuntimeError;
@@ -25,3 +28,5 @@ pub use capabilities::TopicRuntimeCapabilities;
 pub(crate) use capabilities::validate_topic_policy_support;
 pub(crate) use delivery::DeliveryAckHandler;
 pub use in_memory::InMemoryTopicRuntime;
+pub use in_memory_v2::InMemoryTopicRuntimeV2;
+pub use in_memory_v3::InMemoryTopicRuntimeV3;

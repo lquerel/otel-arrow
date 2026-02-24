@@ -16,7 +16,8 @@ use otap_df_config::topic::{
     TopicPolicies,
 };
 use otap_df_engine::topic::{
-    InMemoryTopicRuntime, TopicOutcomeInterest, TopicPublishOutcome, TopicPublisherOptions,
+    InMemoryTopicRuntime, InMemoryTopicRuntimeV2, InMemoryTopicRuntimeV3, TopicOutcomeInterest,
+    TopicPublishOutcome, TopicPublishReportMode, TopicPublisherOptions, TopicPublisherRouteMode,
     TopicRuntime, TopicSubscription,
 };
 use std::hint::black_box;
@@ -73,7 +74,11 @@ async fn run_flume_mpmc_balanced(msg_count: usize, capacity: usize) {
     consumer.await.expect("consumer task should complete");
 }
 
-async fn run_topic_balanced(msg_count: usize, with_outcome: bool) {
+async fn run_topic_balanced(
+    msg_count: usize,
+    with_outcome: bool,
+    route_mode: TopicPublisherRouteMode,
+) {
     let runtime = InMemoryTopicRuntime::<u64>::new();
     let topic = topic_name("bench-balanced");
     runtime
@@ -85,21 +90,6 @@ async fn run_topic_balanced(msg_count: usize, with_outcome: bool) {
         .await
         .expect("topic should be created");
 
-    let publisher = runtime
-        .publisher(
-            &topic,
-            TopicPublisherOptions {
-                outcome_interest: if with_outcome {
-                    TopicOutcomeInterest::AckOrNack
-                } else {
-                    TopicOutcomeInterest::None
-                },
-                ..TopicPublisherOptions::default()
-            },
-        )
-        .await
-        .expect("publisher should be created");
-
     let mut subscriber = runtime
         .subscribe(
             &topic,
@@ -109,6 +99,27 @@ async fn run_topic_balanced(msg_count: usize, with_outcome: bool) {
         )
         .await
         .expect("subscriber should be created");
+
+    let publisher = runtime
+        .publisher(
+            &topic,
+            TopicPublisherOptions {
+                outcome_interest: if with_outcome {
+                    TopicOutcomeInterest::AckOrNack
+                } else {
+                    TopicOutcomeInterest::None
+                },
+                report_mode: if with_outcome {
+                    TopicPublishReportMode::Full
+                } else {
+                    TopicPublishReportMode::Minimal
+                },
+                route_mode,
+                ..TopicPublisherOptions::default()
+            },
+        )
+        .await
+        .expect("publisher should be created");
 
     let consumer = tokio::spawn(async move {
         let mut checksum = 0u64;
@@ -123,11 +134,11 @@ async fn run_topic_balanced(msg_count: usize, with_outcome: bool) {
     });
 
     for i in 0..msg_count {
-        let publish = publisher
-            .publish(i as u64)
-            .await
-            .expect("publish should succeed");
         if with_outcome {
+            let publish = publisher
+                .publish(i as u64)
+                .await
+                .expect("publish should succeed");
             let outcome = publish
                 .outcome
                 .expect("outcome future should exist when requested");
@@ -138,8 +149,149 @@ async fn run_topic_balanced(msg_count: usize, with_outcome: bool) {
             );
             _ = black_box(resolved);
         } else {
-            _ = black_box(publish.report.delivered_subscribers);
+            publisher
+                .publish_fast(i as u64)
+                .await
+                .expect("fast publish should succeed");
+            _ = black_box(i);
         }
+    }
+
+    consumer.await.expect("consumer task should complete");
+}
+
+async fn run_topic_balanced_v2(msg_count: usize, with_outcome: bool) {
+    let runtime = InMemoryTopicRuntimeV2::<u64>::new();
+    let topic = topic_name("bench-balanced-v2");
+    runtime
+        .create_topic(
+            topic.clone(),
+            TopicBackend::InMemory,
+            topic_policies(BALANCED_CHANNEL_CAPACITY, 1),
+        )
+        .await
+        .expect("topic should be created");
+
+    let mut subscriber = runtime
+        .subscribe(
+            &topic,
+            TopicSubscription::Balanced {
+                group: subscription_group("workers"),
+            },
+        )
+        .await
+        .expect("subscriber should be created");
+
+    let publisher = runtime
+        .publisher(
+            &topic,
+            TopicPublisherOptions {
+                outcome_interest: if with_outcome {
+                    TopicOutcomeInterest::AckOrNack
+                } else {
+                    TopicOutcomeInterest::None
+                },
+                report_mode: if with_outcome {
+                    TopicPublishReportMode::Full
+                } else {
+                    TopicPublishReportMode::Minimal
+                },
+                route_mode: TopicPublisherRouteMode::Dynamic,
+                ..TopicPublisherOptions::default()
+            },
+        )
+        .await
+        .expect("publisher should be created");
+
+    let consumer = tokio::spawn(async move {
+        let mut checksum = 0u64;
+        for _ in 0..msg_count {
+            let delivery = subscriber.recv().await.expect("receive should succeed");
+            checksum ^= *delivery.payload();
+            if with_outcome {
+                delivery.ack().await.expect("ack should succeed");
+            }
+        }
+        _ = black_box(checksum);
+    });
+
+    for i in 0..msg_count {
+        if with_outcome {
+            let publish = publisher
+                .publish(i as u64)
+                .await
+                .expect("publish should succeed");
+            let outcome = publish
+                .outcome
+                .expect("outcome future should exist when requested");
+            let resolved = outcome.await.expect("outcome should resolve");
+            assert!(
+                matches!(resolved, TopicPublishOutcome::Ack),
+                "balanced benchmark expects ack outcomes only"
+            );
+            _ = black_box(resolved);
+        } else {
+            publisher
+                .publish_fast(i as u64)
+                .await
+                .expect("fast publish should succeed");
+            _ = black_box(i);
+        }
+    }
+
+    consumer.await.expect("consumer task should complete");
+}
+
+async fn run_topic_balanced_v3(msg_count: usize) {
+    let runtime = InMemoryTopicRuntimeV3::<u64>::new();
+    let topic = topic_name("bench-balanced-v3");
+    runtime
+        .create_topic(
+            topic.clone(),
+            TopicBackend::InMemory,
+            topic_policies(BALANCED_CHANNEL_CAPACITY, 1),
+        )
+        .await
+        .expect("topic should be created");
+
+    let mut subscriber = runtime
+        .subscribe(
+            &topic,
+            TopicSubscription::Balanced {
+                group: subscription_group("workers"),
+            },
+        )
+        .await
+        .expect("subscriber should be created");
+
+    let publisher = runtime
+        .publisher(
+            &topic,
+            TopicPublisherOptions {
+                outcome_interest: TopicOutcomeInterest::None,
+                report_mode: TopicPublishReportMode::Minimal,
+                route_mode: TopicPublisherRouteMode::Dynamic,
+                ..TopicPublisherOptions::default()
+            },
+        )
+        .await
+        .expect("publisher should be created");
+
+    let consumer = tokio::spawn(async move {
+        let mut checksum = 0u64;
+        for _ in 0..msg_count {
+            let delivery = subscriber.recv().await.expect("receive should succeed");
+            checksum ^= *delivery.payload();
+        }
+        _ = black_box(checksum);
+    });
+
+    for i in 0..msg_count {
+        publisher
+            .publish_fast(i as u64)
+            .await
+            .expect("fast publish should succeed");
+        _ = black_box(i);
     }
 
     consumer.await.expect("consumer task should complete");
@@ -193,6 +345,12 @@ async fn run_topic_broadcast(msg_count: usize, subscriber_count: usize, with_out
                 } else {
                     TopicOutcomeInterest::None
                 },
+                report_mode: if with_outcome {
+                    TopicPublishReportMode::Full
+                } else {
+                    TopicPublishReportMode::Minimal
+                },
+                route_mode: TopicPublisherRouteMode::Dynamic,
                 ..TopicPublisherOptions::default()
             },
         )
@@ -220,11 +378,11 @@ async fn run_topic_broadcast(msg_count: usize, subscriber_count: usize, with_out
     }
 
     for i in 0..msg_count {
-        let publish = publisher
-            .publish(i as u64)
-            .await
-            .expect("publish should succeed");
         if with_outcome {
+            let publish = publisher
+                .publish(i as u64)
+                .await
+                .expect("publish should succeed");
             let outcome = publish
                 .outcome
                 .expect("outcome future should exist when requested");
@@ -235,8 +393,67 @@ async fn run_topic_broadcast(msg_count: usize, subscriber_count: usize, with_out
             );
             _ = black_box(resolved);
         } else {
-            _ = black_box(publish.report.delivered_subscribers);
+            publisher
+                .publish_fast(i as u64)
+                .await
+                .expect("fast publish should succeed");
+            _ = black_box(i);
         }
+    }
+
+    for consumer in consumers {
+        consumer.await.expect("consumer task should complete");
+    }
+}
+
+async fn run_topic_broadcast_v3(msg_count: usize, subscriber_count: usize) {
+    let runtime = InMemoryTopicRuntimeV3::<u64>::new();
+    let topic = topic_name("bench-broadcast-v3");
+    runtime
+        .create_topic(
+            topic.clone(),
+            TopicBackend::InMemory,
+            topic_policies(1, BROADCAST_CHANNEL_CAPACITY),
+        )
+        .await
+        .expect("topic should be created");
+
+    let publisher = runtime
+        .publisher(
+            &topic,
+            TopicPublisherOptions {
+                outcome_interest: TopicOutcomeInterest::None,
+                report_mode: TopicPublishReportMode::Minimal,
+                route_mode: TopicPublisherRouteMode::Dynamic,
+                ..TopicPublisherOptions::default()
+            },
+        )
+        .await
+        .expect("publisher should be created");
+
+    let mut consumers = Vec::with_capacity(subscriber_count);
+    for idx in 0..subscriber_count {
+        let mut subscriber = runtime
+            .subscribe(&topic, TopicSubscription::Broadcast)
+            .await
+            .expect("subscriber should be created");
+
+        consumers.push(tokio::spawn(async move {
+            let mut checksum = 0u64;
+            for _ in 0..msg_count {
+                let delivery = subscriber.recv().await.expect("receive should succeed");
+                checksum ^= *delivery.payload();
+            }
+            _ = black_box((idx, checksum));
+        }));
+    }
+
+    for i in 0..msg_count {
+        publisher
+            .publish_fast(i as u64)
+            .await
+            .expect("fast publish should succeed");
+        _ = black_box(i);
     }
 
     for consumer in consumers {
@@ -259,13 +476,40 @@ fn bench_topic_balanced_ack_vs_flume_vs_no_ack(c: &mut Criterion) {
     });
 
     _ = group.bench_function("topic_no_outcome", |b| {
+        b.to_async(&rt).iter(|| {
+            run_topic_balanced(BALANCED_MSG_COUNT, false, TopicPublisherRouteMode::Dynamic)
+        });
+    });
+
+    _ = group.bench_function("topic_no_outcome_frozen_balanced_only", |b| {
+        b.to_async(&rt).iter(|| {
+            run_topic_balanced(
+                BALANCED_MSG_COUNT,
+                false,
+                TopicPublisherRouteMode::FrozenBalancedOnly,
+            )
+        });
+    });
+
+    _ = group.bench_function("topic_v2_no_outcome", |b| {
         b.to_async(&rt)
-            .iter(|| run_topic_balanced(BALANCED_MSG_COUNT, false));
+            .iter(|| run_topic_balanced_v2(BALANCED_MSG_COUNT, false));
+    });
+
+    _ = group.bench_function("topic_v3_no_outcome", |b| {
+        b.to_async(&rt)
+            .iter(|| run_topic_balanced_v3(BALANCED_MSG_COUNT));
     });
 
     _ = group.bench_function("topic_with_outcome", |b| {
+        b.to_async(&rt).iter(|| {
+            run_topic_balanced(BALANCED_MSG_COUNT, true, TopicPublisherRouteMode::Dynamic)
+        });
+    });
+
+    _ = group.bench_function("topic_v2_with_outcome", |b| {
         b.to_async(&rt)
-            .iter(|| run_topic_balanced(BALANCED_MSG_COUNT, true));
+            .iter(|| run_topic_balanced_v2(BALANCED_MSG_COUNT, true));
     });
 
     group.finish();
@@ -293,6 +537,11 @@ fn bench_topic_broadcast_ack_vs_tokio_vs_no_ack(c: &mut Criterion) {
     _ = group.bench_function("topic_no_outcome", |b| {
         b.to_async(&rt)
             .iter(|| run_topic_broadcast(BROADCAST_MSG_COUNT, BROADCAST_SUBSCRIBERS, false));
+    });
+
+    _ = group.bench_function("topic_v3_no_outcome", |b| {
+        b.to_async(&rt)
+            .iter(|| run_topic_broadcast_v3(BROADCAST_MSG_COUNT, BROADCAST_SUBSCRIBERS));
     });
 
     _ = group.bench_function("topic_with_outcome", |b| {

@@ -5,8 +5,9 @@ use super::balanced::{InMemoryBalancedSubscriber, InMemoryTopicPublisher};
 use super::broadcast::InMemoryBroadcastSubscriber;
 use super::topic_state::InMemoryTopic;
 use crate::topic::{
-    TopicDelivery, TopicPublisher, TopicPublisherOptions, TopicRuntime, TopicRuntimeCapabilities,
-    TopicRuntimeError, TopicSubscriber, TopicSubscription, validate_topic_policy_support,
+    TopicDelivery, TopicPublisher, TopicPublisherOptions, TopicPublisherRouteMode, TopicRuntime,
+    TopicRuntimeCapabilities, TopicRuntimeError, TopicSubscriber, TopicSubscription,
+    validate_topic_policy_support,
 };
 use async_trait::async_trait;
 use otap_df_config::TopicName;
@@ -37,6 +38,14 @@ where
         payload: T,
     ) -> Result<crate::topic::TopicPublishResult, TopicRuntimeError> {
         self.inner.publish(payload).await
+    }
+
+    /// Publishes on the low-overhead path when publisher options allow it.
+    ///
+    /// If this publisher was not configured for fast mode, this method falls
+    /// back to regular publish and discards the report.
+    pub async fn publish_fast(&self, payload: T) -> Result<(), TopicRuntimeError> {
+        self.inner.publish_fast(payload).await
     }
 }
 
@@ -150,10 +159,22 @@ where
             .balanced_on_full_override
             .unwrap_or_else(|| topic.balanced_on_full());
 
+        let frozen_balanced_senders = if matches!(
+            options.route_mode,
+            TopicPublisherRouteMode::FrozenBalancedOnly
+        ) {
+            Some(topic.balanced_sender_snapshot())
+        } else {
+            None
+        };
+
         Ok(Arc::new(InMemoryTopicPublisher {
             topic,
             balanced_on_full,
             outcome_interest: options.outcome_interest,
+            report_mode: options.report_mode,
+            route_mode: options.route_mode,
+            frozen_balanced_senders,
         }))
     }
 

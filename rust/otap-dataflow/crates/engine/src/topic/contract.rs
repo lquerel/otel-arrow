@@ -109,6 +109,9 @@ pub type TopicPublishOutcomeFuture =
 /// Full result returned by publisher-side publish operations.
 pub struct TopicPublishResult {
     /// Enqueue-time delivery report snapshot.
+    ///
+    /// When publisher options use `report_mode=Minimal`, this report can be
+    /// intentionally partial or unavailable (zeroed fields) to reduce overhead.
     pub report: TopicPublishReport,
     /// Optional asynchronous downstream Ack/Nack outcome.
     ///
@@ -123,6 +126,33 @@ pub struct TopicPublisherOptions {
     pub balanced_on_full_override: Option<TopicBalancedOnFullPolicy>,
     /// Publisher interest for downstream Ack/Nack outcomes.
     pub outcome_interest: TopicOutcomeInterest,
+    /// Publish report collection mode.
+    pub report_mode: TopicPublishReportMode,
+    /// Route snapshot mode.
+    pub route_mode: TopicPublisherRouteMode,
+}
+
+/// Publish report collection mode.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum TopicPublishReportMode {
+    /// Return full per-publish enqueue report.
+    #[default]
+    Full,
+    /// Allow partial/unavailable report fields for lower overhead.
+    Minimal,
+}
+
+/// Publisher route resolution mode.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum TopicPublisherRouteMode {
+    /// Resolve destinations dynamically at publish time.
+    #[default]
+    Dynamic,
+    /// Freeze balanced-group destinations at publisher creation.
+    ///
+    /// For in-memory backend this mode does not include broadcast fan-out and
+    /// is intended for balanced-only hot paths.
+    FrozenBalancedOnly,
 }
 
 /// Publisher-side API for runtime topics.
