@@ -157,18 +157,52 @@ pub struct HttpAdminSettings {
     /// The address to bind the HTTP server to (e.g., "127.0.0.1:8080").
     #[serde(default = "default_bind_address")]
     pub bind_address: String,
+
+    /// Optional upstream metrics proxy configuration.
+    #[serde(default)]
+    pub metrics_proxy: Option<HttpAdminMetricsProxySettings>,
+}
+
+/// Configuration for proxying metrics through the admin HTTP server.
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+pub struct HttpAdminMetricsProxySettings {
+    /// Upstream Prometheus text endpoint exposed by the pipeline exporter.
+    pub prometheus_url: String,
+    /// Upstream JSON metrics snapshot endpoint exposed by the pipeline exporter.
+    pub json_url: String,
+    /// Maximum time to wait for an upstream response.
+    #[serde(
+        default = "default_admin_proxy_request_timeout",
+        with = "humantime_serde"
+    )]
+    #[schemars(with = "String")]
+    pub request_timeout: std::time::Duration,
+    /// How long successful upstream responses remain in the in-memory proxy cache.
+    #[serde(default = "default_admin_proxy_cache_ttl", with = "humantime_serde")]
+    #[schemars(with = "String")]
+    pub cache_ttl: std::time::Duration,
 }
 
 impl Default for HttpAdminSettings {
     fn default() -> Self {
         Self {
             bind_address: default_bind_address(),
+            metrics_proxy: None,
         }
     }
 }
 
 fn default_bind_address() -> String {
     "127.0.0.1:8080".into()
+}
+
+fn default_admin_proxy_request_timeout() -> std::time::Duration {
+    std::time::Duration::from_secs(2)
+}
+
+fn default_admin_proxy_cache_ttl() -> std::time::Duration {
+    std::time::Duration::from_millis(500)
 }
 
 #[cfg(test)]

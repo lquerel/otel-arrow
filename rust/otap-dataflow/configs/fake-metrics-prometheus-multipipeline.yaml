@@ -1,0 +1,85 @@
+version: otel_dataflow/v1
+
+# Two-pipeline demo:
+# - `metric_traffic_gen` generates metrics-only traffic and ships it over OTLP/gRPC
+# - `prometheus_export` receives that OTLP stream and exposes it through the
+#   new pipeline Prometheus exporter on 127.0.0.1:9464
+#
+# The admin server is also configured to proxy the exporter endpoints so the UI
+# can stay same-origin:
+# - admin Prometheus:        http://127.0.0.1:8080/metrics
+# - admin JSON compatibility: http://127.0.0.1:8080/telemetry/metrics?format=json
+# - raw exporter Prometheus:  http://127.0.0.1:9464/metrics
+# - raw exporter JSON:        http://127.0.0.1:9464/metrics.json
+
+engine:
+  http_admin:
+    bind_address: 127.0.0.1:8080
+    metrics_proxy:
+      prometheus_url: "http://127.0.0.1:9464/metrics"
+      json_url: "http://127.0.0.1:9464/metrics.json"
+      request_timeout: "2s"
+      cache_ttl: "500ms"
+
+groups:
+  demo:
+    pipelines:
+      metric_traffic_gen:
+        policies:
+          resources:
+            core_allocation:
+              type: core_count
+              count: 1
+
+        nodes:
+          generator:
+            type: receiver:traffic_generator
+            config:
+              data_source: semantic_conventions
+              registry_path: https://github.com/open-telemetry/semantic-conventions.git[model]
+              generation_strategy: fresh
+              traffic_config:
+                signals_per_second: 10000
+                max_signal_count: null
+                max_batch_size: 512
+                metric_weight: 100
+                trace_weight: 0
+                log_weight: 0
+
+          ship_metrics:
+            type: exporter:otlp_grpc
+            config:
+              grpc_endpoint: "http://127.0.0.1:4319"
+
+        connections:
+          - from: generator
+            to: ship_metrics
+
+      prometheus_export:
+        policies:
+          resources:
+            core_allocation:
+              type: core_count
+              count: 1
+
+        nodes:
+          ingest:
+            type: receiver:otlp
+            config:
+              protocols:
+                grpc:
+                  listening_addr: "127.0.0.1:4319"
+
+          prometheus:
+            type: exporter:prometheus
+            config:
+              host: "127.0.0.1"
+              port: 9464
+              path: "/metrics"
+              json_path: "/metrics.json"
+              max_active_series: 100000
+              stale_series_ttl: "15m"
+
+        connections:
+          - from: ingest
+            to: prometheus

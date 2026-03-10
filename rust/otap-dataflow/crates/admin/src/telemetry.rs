@@ -7,14 +7,16 @@
 //! - /telemetry/metrics - current aggregated metrics in JSON, line protocol, or Prometheus text format
 //! - /telemetry/metrics/aggregate - aggregated metrics grouped by metric set name and optional attributes
 
-use crate::AppState;
+use crate::{AppState, CachedMetricsProxyResponse, MetricsProxyCacheKey};
 use axum::extract::{Query, State};
 use axum::http::{StatusCode, header};
 use axum::response::{IntoResponse, Response};
 use axum::routing::get;
 use axum::{Json, Router};
 use otap_df_telemetry::attributes::{AttributeSetHandler, AttributeValue};
-use otap_df_telemetry::descriptor::{Instrument, MetricValueType, MetricsDescriptor, MetricsField};
+use otap_df_telemetry::descriptor::{
+    Instrument, MetricValueType, MetricsDescriptor, MetricsField, Temporality,
+};
 use otap_df_telemetry::metrics::{MetricValue, MetricsIterator};
 use otap_df_telemetry::registry::TelemetryRegistryHandle;
 use otap_df_telemetry::semconv::SemConvRegistry;
@@ -22,6 +24,7 @@ use serde::{Deserialize, Serialize};
 use std::collections::hash_map::Entry;
 use std::collections::{HashMap, HashSet};
 use std::fmt::Write as _;
+use std::time::Instant;
 
 /// All the routes for telemetry.
 pub(crate) fn routes() -> Router<AppState> {
@@ -29,7 +32,7 @@ pub(crate) fn routes() -> Router<AppState> {
         .route("/telemetry/live-schema", get(get_live_schema))
         .route("/telemetry/metrics", get(get_metrics))
         .route("/telemetry/metrics/aggregate", get(get_metrics_aggregate))
-        .route("/metrics", get(get_metrics))
+        .route("/metrics", get(get_prometheus_metrics))
 }
 
 /// All metric sets.
@@ -61,6 +64,38 @@ struct MetricDataPointWithMetadata {
     #[serde(flatten)]
     metadata: MetricsField,
     /// Current value.
+    value: MetricValue,
+}
+
+#[derive(Clone, Serialize, Deserialize)]
+struct ProxyMetricsSnapshot {
+    timestamp: String,
+    #[serde(default)]
+    metric_sets: Vec<ProxyMetricSet>,
+}
+
+#[derive(Clone, Serialize, Deserialize)]
+struct ProxyMetricSet {
+    name: String,
+    #[serde(default)]
+    brief: String,
+    #[serde(default)]
+    attributes: HashMap<String, AttributeValue>,
+    #[serde(default)]
+    metrics: Vec<ProxyMetric>,
+}
+
+#[derive(Clone, Serialize, Deserialize)]
+struct ProxyMetric {
+    name: String,
+    #[serde(default)]
+    unit: String,
+    #[serde(default)]
+    brief: String,
+    instrument: Instrument,
+    #[serde(default)]
+    temporality: Option<Temporality>,
+    value_type: MetricValueType,
     value: MetricValue,
 }
 
@@ -143,6 +178,22 @@ pub async fn get_live_schema(
     Ok(Json(state.metrics_registry.generate_semconv_registry()))
 }
 
+/// Handler for the `/metrics` endpoint.
+pub async fn get_prometheus_metrics(State(state): State<AppState>) -> Result<Response, StatusCode> {
+    if state.metrics_proxy.is_some() {
+        return proxy_prometheus_response(&state).await;
+    }
+
+    let now = chrono::Utc::now();
+    let body = format_prometheus_text(&state.metrics_registry, false, Some(now.timestamp_millis()));
+    let mut resp = body.into_response();
+    let _ = resp.headers_mut().insert(
+        header::CONTENT_TYPE,
+        header::HeaderValue::from_static("text/plain; version=0.0.4; charset=utf-8"),
+    );
+    Ok(resp)
+}
+
 /// Handler for the `/telemetry/metrics` endpoint.
 /// Supports multiple output formats and optional reset.
 ///
@@ -153,6 +204,10 @@ pub async fn get_metrics(
     State(state): State<AppState>,
     Query(q): Query<MetricsQuery>,
 ) -> Result<Response, StatusCode> {
+    if state.metrics_proxy.is_some() {
+        return proxy_metrics_response(&state, q).await;
+    }
+
     let now = chrono::Utc::now();
     let timestamp = now.to_rfc3339();
 
@@ -229,6 +284,10 @@ pub async fn get_metrics_aggregate(
     State(state): State<AppState>,
     Query(q): Query<AggregateQuery>,
 ) -> Result<Response, StatusCode> {
+    if state.metrics_proxy.is_some() {
+        return proxy_metrics_aggregate_response(&state, q).await;
+    }
+
     let now = chrono::Utc::now();
     let timestamp = now.to_rfc3339();
 
@@ -282,6 +341,500 @@ pub async fn get_metrics_aggregate(
             Ok(resp)
         }
     }
+}
+
+async fn proxy_prometheus_response(state: &AppState) -> Result<Response, StatusCode> {
+    let cached = fetch_proxy_response(state, MetricsProxyCacheKey::Prometheus).await?;
+    Ok(cached_proxy_response(cached))
+}
+
+async fn proxy_metrics_response(state: &AppState, q: MetricsQuery) -> Result<Response, StatusCode> {
+    let fmt = q.format.unwrap_or_default();
+    match fmt {
+        OutputFormat::Prometheus => proxy_prometheus_response(state).await,
+        OutputFormat::Json => {
+            let snapshot = fetch_proxy_json_snapshot(state).await?;
+            let response = ProxyMetricsSnapshot {
+                timestamp: snapshot.timestamp,
+                metric_sets: filter_proxy_metric_sets(snapshot.metric_sets, q.keep_all_zeroes),
+            };
+            Ok(Json(response).into_response())
+        }
+        OutputFormat::JsonCompact => {
+            let snapshot = fetch_proxy_json_snapshot(state).await?;
+            let metric_sets = filter_proxy_metric_sets(snapshot.metric_sets, q.keep_all_zeroes);
+            let response = AllMetrics {
+                timestamp: snapshot.timestamp,
+                metric_sets: compact_proxy_metric_sets(&metric_sets),
+            };
+            Ok(Json(response).into_response())
+        }
+        OutputFormat::LineProtocol => {
+            let snapshot = fetch_proxy_json_snapshot(state).await?;
+            let metric_sets = filter_proxy_metric_sets(snapshot.metric_sets, q.keep_all_zeroes);
+            let body = proxy_line_protocol_text(
+                &metric_sets,
+                snapshot_timestamp_millis(&snapshot.timestamp),
+            );
+            let mut resp = body.into_response();
+            let _ = resp.headers_mut().insert(
+                header::CONTENT_TYPE,
+                header::HeaderValue::from_static("text/plain; charset=utf-8"),
+            );
+            Ok(resp)
+        }
+    }
+}
+
+async fn proxy_metrics_aggregate_response(
+    state: &AppState,
+    q: AggregateQuery,
+) -> Result<Response, StatusCode> {
+    let snapshot = fetch_proxy_json_snapshot(state).await?;
+    let group_attrs: Vec<_> = q
+        .attrs
+        .as_deref()
+        .unwrap_or("")
+        .split(',')
+        .map(|s| s.trim())
+        .filter(|s| !s.is_empty())
+        .collect();
+    let groups = aggregate_proxy_metric_groups(&snapshot.metric_sets, &group_attrs);
+    let fmt = q.format.unwrap_or_default();
+
+    match fmt {
+        OutputFormat::Json => Ok(Json(ProxyMetricsSnapshot {
+            timestamp: snapshot.timestamp,
+            metric_sets: groups,
+        })
+        .into_response()),
+        OutputFormat::JsonCompact => Ok(Json(AllMetrics {
+            timestamp: snapshot.timestamp,
+            metric_sets: compact_proxy_metric_sets(&groups),
+        })
+        .into_response()),
+        OutputFormat::LineProtocol => {
+            let body =
+                proxy_line_protocol_text(&groups, snapshot_timestamp_millis(&snapshot.timestamp));
+            let mut resp = body.into_response();
+            let _ = resp.headers_mut().insert(
+                header::CONTENT_TYPE,
+                header::HeaderValue::from_static("text/plain; charset=utf-8"),
+            );
+            Ok(resp)
+        }
+        OutputFormat::Prometheus => {
+            let body =
+                proxy_prometheus_text(&groups, snapshot_timestamp_millis(&snapshot.timestamp));
+            let mut resp = body.into_response();
+            let _ = resp.headers_mut().insert(
+                header::CONTENT_TYPE,
+                header::HeaderValue::from_static("text/plain; version=0.0.4; charset=utf-8"),
+            );
+            Ok(resp)
+        }
+    }
+}
+
+async fn fetch_proxy_json_snapshot(state: &AppState) -> Result<ProxyMetricsSnapshot, StatusCode> {
+    let cached = fetch_proxy_response(state, MetricsProxyCacheKey::Json).await?;
+    serde_json::from_slice(cached.body.as_ref()).map_err(|_| StatusCode::BAD_GATEWAY)
+}
+
+async fn fetch_proxy_response(
+    state: &AppState,
+    cache_key: MetricsProxyCacheKey,
+) -> Result<CachedMetricsProxyResponse, StatusCode> {
+    let Some(proxy) = state.metrics_proxy.as_ref() else {
+        return Err(StatusCode::NOT_FOUND);
+    };
+
+    if let Some(cached) = proxy_cache_get(state, cache_key) {
+        return Ok(cached);
+    }
+
+    let url = match cache_key {
+        MetricsProxyCacheKey::Prometheus => proxy.config.prometheus_url.as_str(),
+        MetricsProxyCacheKey::Json => proxy.config.json_url.as_str(),
+    };
+    let upstream = proxy
+        .client
+        .get(url)
+        .timeout(proxy.config.request_timeout)
+        .send()
+        .await
+        .map_err(map_proxy_error)?;
+
+    if !upstream.status().is_success() {
+        return Err(StatusCode::BAD_GATEWAY);
+    }
+
+    let content_type = upstream
+        .headers()
+        .get(header::CONTENT_TYPE)
+        .and_then(|value| value.to_str().ok())
+        .map(str::to_owned)
+        .unwrap_or_else(|| default_proxy_content_type(cache_key).to_owned());
+    let body = upstream.bytes().await.map_err(map_proxy_error)?.to_vec();
+    let cached = CachedMetricsProxyResponse {
+        body: std::sync::Arc::new(body),
+        content_type,
+        expires_at: Instant::now() + proxy.config.cache_ttl,
+    };
+
+    if !proxy.config.cache_ttl.is_zero() {
+        let mut cache = proxy
+            .cache
+            .lock()
+            .unwrap_or_else(|poison| poison.into_inner());
+        let _ = cache.insert(cache_key, cached.clone());
+    }
+
+    Ok(cached)
+}
+
+fn proxy_cache_get(
+    state: &AppState,
+    cache_key: MetricsProxyCacheKey,
+) -> Option<CachedMetricsProxyResponse> {
+    let proxy = state.metrics_proxy.as_ref()?;
+    let now = Instant::now();
+    let cache = proxy
+        .cache
+        .lock()
+        .unwrap_or_else(|poison| poison.into_inner());
+    let cached = cache.get(&cache_key)?;
+    (cached.expires_at > now).then_some(cached.clone())
+}
+
+fn map_proxy_error(error: reqwest::Error) -> StatusCode {
+    if error.is_timeout() {
+        StatusCode::GATEWAY_TIMEOUT
+    } else {
+        StatusCode::BAD_GATEWAY
+    }
+}
+
+fn default_proxy_content_type(cache_key: MetricsProxyCacheKey) -> &'static str {
+    match cache_key {
+        MetricsProxyCacheKey::Prometheus => "text/plain; version=0.0.4; charset=utf-8",
+        MetricsProxyCacheKey::Json => "application/json; charset=utf-8",
+    }
+}
+
+fn cached_proxy_response(cached: CachedMetricsProxyResponse) -> Response {
+    let mut response = cached.body.as_ref().clone().into_response();
+    let header_value = header::HeaderValue::from_str(cached.content_type.as_str())
+        .unwrap_or_else(|_| header::HeaderValue::from_static("application/octet-stream"));
+    let _ = response
+        .headers_mut()
+        .insert(header::CONTENT_TYPE, header_value);
+    response
+}
+
+fn filter_proxy_metric_sets(
+    metric_sets: Vec<ProxyMetricSet>,
+    keep_all_zeroes: bool,
+) -> Vec<ProxyMetricSet> {
+    if keep_all_zeroes {
+        return metric_sets;
+    }
+
+    metric_sets
+        .into_iter()
+        .filter(|set| set.metrics.iter().any(|metric| !metric.value.is_zero()))
+        .collect()
+}
+
+fn compact_proxy_metric_sets(metric_sets: &[ProxyMetricSet]) -> Vec<MetricSet> {
+    metric_sets
+        .iter()
+        .map(|set| MetricSet {
+            name: set.name.clone(),
+            attributes: set.attributes.clone(),
+            metrics: set
+                .metrics
+                .iter()
+                .map(|metric| (metric.name.clone(), metric.value))
+                .collect(),
+        })
+        .collect()
+}
+
+fn aggregate_proxy_metric_groups(
+    metric_sets: &[ProxyMetricSet],
+    group_attrs: &[&str],
+) -> Vec<ProxyMetricSet> {
+    type GroupKey = (String, Vec<(String, Option<String>)>);
+
+    let group_filter: Option<HashSet<&str>> = if group_attrs.is_empty() {
+        None
+    } else {
+        Some(group_attrs.iter().copied().collect())
+    };
+    let mut groups: HashMap<GroupKey, ProxyMetricSet> = HashMap::new();
+
+    for set in metric_sets {
+        let mut selected = HashMap::new();
+        if let Some(filter) = &group_filter {
+            for (key, value) in &set.attributes {
+                if filter.contains(key.as_str()) {
+                    let _ = selected.insert(key.clone(), value.clone());
+                }
+            }
+        }
+
+        let mut key_attrs = Vec::new();
+        for group_attr in group_attrs {
+            let value = selected
+                .get(*group_attr)
+                .map(AttributeValue::to_string_value);
+            key_attrs.push(((*group_attr).to_owned(), value));
+        }
+        key_attrs.sort_unstable_by(|left, right| left.0.cmp(&right.0));
+
+        let entry = groups
+            .entry((set.name.clone(), key_attrs))
+            .or_insert_with(|| ProxyMetricSet {
+                name: set.name.clone(),
+                brief: set.brief.clone(),
+                attributes: selected,
+                metrics: Vec::new(),
+            });
+
+        for metric in &set.metrics {
+            if let Some(existing) = entry
+                .metrics
+                .iter_mut()
+                .find(|existing| existing.name == metric.name)
+            {
+                existing.value.add_in_place(metric.value);
+            } else {
+                entry.metrics.push(metric.clone());
+            }
+        }
+    }
+
+    let mut groups: Vec<_> = groups.into_values().collect();
+    groups.sort_unstable_by(|left, right| {
+        let ord = left.name.cmp(&right.name);
+        if ord == std::cmp::Ordering::Equal {
+            left.metrics.len().cmp(&right.metrics.len())
+        } else {
+            ord
+        }
+    });
+    for group in &mut groups {
+        group
+            .metrics
+            .sort_unstable_by(|left, right| left.name.cmp(&right.name));
+    }
+    groups
+}
+
+fn proxy_line_protocol_text(
+    metric_sets: &[ProxyMetricSet],
+    timestamp_millis: Option<i64>,
+) -> String {
+    let mut out = String::new();
+    let ts_suffix = timestamp_millis
+        .map(|ms| format!(" {ms}"))
+        .unwrap_or_default();
+
+    for set in metric_sets {
+        let measurement_name = if set.name.is_empty() {
+            "metrics"
+        } else {
+            set.name.as_str()
+        };
+        let measurement = escape_lp_measurement(measurement_name);
+        let mut tags = String::new();
+        let mut attrs: Vec<_> = set.attributes.iter().collect();
+        attrs.sort_unstable_by(|left, right| left.0.cmp(right.0));
+        for (key, value) in attrs {
+            let _ = write!(
+                &mut tags,
+                ",{}={}",
+                escape_lp_tag_key(key),
+                escape_lp_tag_value(&value.to_string_value())
+            );
+        }
+
+        let mut fields = String::new();
+        let mut first = true;
+        for metric in &set.metrics {
+            match metric.value {
+                MetricValue::U64(_) | MetricValue::F64(_) => {
+                    if !first {
+                        fields.push(',');
+                    }
+                    first = false;
+                    let _ = write!(
+                        &mut fields,
+                        "{}={}",
+                        escape_lp_field_key(metric.name.as_str()),
+                        format_lp_value(metric.value, Some(metric.value_type))
+                    );
+                }
+                MetricValue::Mmsc(summary) => {
+                    if summary.count == 0 {
+                        continue;
+                    }
+                    for (suffix, value) in [
+                        ("_min", summary.min),
+                        ("_max", summary.max),
+                        ("_sum", summary.sum),
+                    ] {
+                        if !first {
+                            fields.push(',');
+                        }
+                        first = false;
+                        let _ = write!(
+                            &mut fields,
+                            "{}{}={}",
+                            escape_lp_field_key(metric.name.as_str()),
+                            suffix,
+                            value
+                        );
+                    }
+                    if !first {
+                        fields.push(',');
+                    }
+                    first = false;
+                    let _ = write!(
+                        &mut fields,
+                        "{}_count={}i",
+                        escape_lp_field_key(metric.name.as_str()),
+                        summary.count
+                    );
+                }
+            }
+        }
+
+        if !fields.is_empty() {
+            let _ = writeln!(&mut out, "{measurement}{tags} {fields}{ts_suffix}");
+        }
+    }
+
+    out
+}
+
+fn proxy_prometheus_text(metric_sets: &[ProxyMetricSet], timestamp_millis: Option<i64>) -> String {
+    let mut out = String::new();
+    let ts_suffix = timestamp_millis
+        .map(|ms| format!(" {ms}"))
+        .unwrap_or_default();
+    let mut seen = HashSet::new();
+
+    for set in metric_sets {
+        let mut base_labels = String::new();
+        if !set.name.is_empty() {
+            let _ = write!(
+                &mut base_labels,
+                "set=\"{}\"",
+                escape_prom_label_value(set.name.as_str())
+            );
+        }
+        let mut attrs: Vec<_> = set.attributes.iter().collect();
+        attrs.sort_unstable_by(|left, right| left.0.cmp(right.0));
+        for (key, value) in attrs {
+            if !base_labels.is_empty() {
+                base_labels.push(',');
+            }
+            let _ = write!(
+                &mut base_labels,
+                "{}=\"{}\"",
+                sanitize_prom_label_key(key),
+                escape_prom_label_value(&value.to_string_value())
+            );
+        }
+
+        for metric in &set.metrics {
+            let metric_name = sanitize_prom_metric_name(metric.name.as_str());
+            match metric.value {
+                MetricValue::U64(_) | MetricValue::F64(_) => {
+                    if seen.insert(metric_name.clone()) {
+                        if !metric.brief.is_empty() {
+                            let _ = writeln!(
+                                &mut out,
+                                "# HELP {} {}",
+                                metric_name,
+                                escape_prom_help(metric.brief.as_str())
+                            );
+                        }
+                        let prom_type = match metric.instrument {
+                            Instrument::Counter => "counter",
+                            Instrument::UpDownCounter
+                            | Instrument::Gauge
+                            | Instrument::Histogram => "gauge",
+                            Instrument::Mmsc => unreachable!("MMSC is not a scalar"),
+                        };
+                        let _ = writeln!(&mut out, "# TYPE {metric_name} {prom_type}");
+                    }
+                    let value_str = format_prom_value(metric.value, Some(metric.value_type));
+                    if base_labels.is_empty() {
+                        let _ = writeln!(&mut out, "{metric_name} {value_str}{ts_suffix}");
+                    } else {
+                        let _ = writeln!(
+                            &mut out,
+                            "{metric_name}{{{base_labels}}} {value_str}{ts_suffix}"
+                        );
+                    }
+                }
+                MetricValue::Mmsc(summary) => {
+                    if summary.count == 0 {
+                        continue;
+                    }
+                    let brief = escape_prom_help(metric.brief.as_str());
+                    for (suffix, prom_type, value) in [
+                        ("_min", "gauge", summary.min),
+                        ("_max", "gauge", summary.max),
+                        ("_sum", "counter", summary.sum),
+                    ] {
+                        let sub_name = format!("{metric_name}{suffix}");
+                        if seen.insert(sub_name.clone()) {
+                            if !metric.brief.is_empty() {
+                                let _ = writeln!(&mut out, "# HELP {sub_name} {brief}");
+                            }
+                            let _ = writeln!(&mut out, "# TYPE {sub_name} {prom_type}");
+                        }
+                        if base_labels.is_empty() {
+                            let _ = writeln!(&mut out, "{sub_name} {value}{ts_suffix}");
+                        } else {
+                            let _ = writeln!(
+                                &mut out,
+                                "{sub_name}{{{base_labels}}} {value}{ts_suffix}"
+                            );
+                        }
+                    }
+                    let count_name = format!("{metric_name}_count");
+                    if seen.insert(count_name.clone()) {
+                        if !metric.brief.is_empty() {
+                            let _ = writeln!(&mut out, "# HELP {count_name} {brief}");
+                        }
+                        let _ = writeln!(&mut out, "# TYPE {count_name} counter");
+                    }
+                    if base_labels.is_empty() {
+                        let _ = writeln!(&mut out, "{count_name} {}{ts_suffix}", summary.count);
+                    } else {
+                        let _ = writeln!(
+                            &mut out,
+                            "{count_name}{{{base_labels}}} {}{ts_suffix}",
+                            summary.count
+                        );
+                    }
+                }
+            }
+        }
+    }
+
+    out
+}
+
+fn snapshot_timestamp_millis(timestamp: &str) -> Option<i64> {
+    chrono::DateTime::parse_from_rfc3339(timestamp)
+        .ok()
+        .map(|ts| ts.timestamp_millis())
 }
 
 fn aggregate_metric_groups(

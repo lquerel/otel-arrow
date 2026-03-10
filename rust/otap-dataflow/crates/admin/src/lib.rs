@@ -11,14 +11,17 @@ mod pipeline_group;
 mod telemetry;
 
 use axum::Router;
+use reqwest::Client;
+use std::collections::HashMap;
 use std::net::SocketAddr;
-use std::sync::Arc;
+use std::sync::{Arc, Mutex};
+use std::time::Instant;
 use tokio::net::TcpListener;
 use tokio_util::sync::CancellationToken;
 use tower::ServiceBuilder;
 
 use crate::error::Error;
-use otap_df_config::engine::HttpAdminSettings;
+use otap_df_config::engine::{HttpAdminMetricsProxySettings, HttpAdminSettings};
 use otap_df_engine::control::PipelineAdminSender;
 use otap_df_state::store::ObservedStateHandle;
 use otap_df_telemetry::registry::TelemetryRegistryHandle;
@@ -35,6 +38,39 @@ struct AppState {
 
     /// The control message senders for controlling pipelines.
     ctrl_msg_senders: Vec<Arc<dyn PipelineAdminSender>>,
+
+    /// Optional upstream exporter proxy used to serve same-origin metrics.
+    metrics_proxy: Option<MetricsProxyState>,
+}
+
+#[derive(Clone)]
+struct MetricsProxyState {
+    config: HttpAdminMetricsProxySettings,
+    client: Client,
+    cache: Arc<Mutex<HashMap<MetricsProxyCacheKey, CachedMetricsProxyResponse>>>,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+enum MetricsProxyCacheKey {
+    Prometheus,
+    Json,
+}
+
+#[derive(Clone)]
+struct CachedMetricsProxyResponse {
+    body: Arc<Vec<u8>>,
+    content_type: String,
+    expires_at: Instant,
+}
+
+impl MetricsProxyState {
+    fn new(config: HttpAdminMetricsProxySettings) -> Self {
+        Self {
+            config,
+            client: Client::new(),
+            cache: Arc::new(Mutex::new(HashMap::new())),
+        }
+    }
 }
 
 /// Run the admin HTTP server until shutdown is requested.
@@ -45,10 +81,12 @@ pub async fn run(
     metrics_registry: TelemetryRegistryHandle,
     cancel: CancellationToken,
 ) -> Result<(), Error> {
+    let metrics_proxy = config.metrics_proxy.clone().map(MetricsProxyState::new);
     let app_state = AppState {
         observed_state_store: observed_store,
         metrics_registry,
         ctrl_msg_senders,
+        metrics_proxy,
     };
 
     let app = Router::new()

@@ -106,6 +106,8 @@ pub mod topic_receiver;
 
 pub mod topic_exporter;
 
+mod prometheus_exporter;
+
 /// Object storage utilities including integrations for different cloud
 /// providers
 pub mod object_store;

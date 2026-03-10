@@ -22,6 +22,15 @@ A basic pipeline with telemetry export enabled:
 - Generates fake data -> debug processor -> noop exporter
 - Includes `engine.telemetry` configuration with console metrics export
 
+### `fake-metrics-prometheus-multipipeline.yaml`
+
+A two-pipeline Prometheus exporter demo:
+
+- `metric_traffic_gen`: generates metrics-only fake traffic
+- `prometheus_export`: receives OTLP/gRPC and exposes metrics through the new
+  pipeline Prometheus exporter
+- Includes admin same-origin proxying for `/metrics` and `/telemetry/metrics`
+
 ### `fake-debug-output-ports.yaml`
 
 Demonstrates multiple output ports:
