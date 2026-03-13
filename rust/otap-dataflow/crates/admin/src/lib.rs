@@ -14,9 +14,10 @@ use axum::Router;
 use reqwest::Client;
 use std::collections::HashMap;
 use std::net::SocketAddr;
-use std::sync::{Arc, Mutex};
+use std::sync::{Arc, Mutex as StdMutex};
 use std::time::Instant;
 use tokio::net::TcpListener;
+use tokio::sync::Mutex as TokioMutex;
 use tokio_util::sync::CancellationToken;
 use tower::ServiceBuilder;
 
@@ -37,7 +38,7 @@ struct AppState {
     metrics_registry: TelemetryRegistryHandle,
 
     /// The control message senders for controlling pipelines.
-    ctrl_msg_senders: Vec<Arc<dyn PipelineAdminSender>>,
+    ctrl_msg_senders: Arc<TokioMutex<Vec<Arc<dyn PipelineAdminSender>>>>,
 
     /// Optional upstream exporter proxy used to serve same-origin metrics.
     metrics_proxy: Option<MetricsProxyState>,
@@ -47,7 +48,7 @@ struct AppState {
 struct MetricsProxyState {
     config: HttpAdminMetricsProxySettings,
     client: Client,
-    cache: Arc<Mutex<HashMap<MetricsProxyCacheKey, CachedMetricsProxyResponse>>>,
+    cache: Arc<StdMutex<HashMap<MetricsProxyCacheKey, CachedMetricsProxyResponse>>>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
@@ -68,7 +69,7 @@ impl MetricsProxyState {
         Self {
             config,
             client: Client::new(),
-            cache: Arc::new(Mutex::new(HashMap::new())),
+            cache: Arc::new(StdMutex::new(HashMap::new())),
         }
     }
 }
@@ -85,8 +86,8 @@ pub async fn run(
     let app_state = AppState {
         observed_state_store: observed_store,
         metrics_registry,
-        ctrl_msg_senders,
         metrics_proxy,
+        ctrl_msg_senders: Arc::new(TokioMutex::new(ctrl_msg_senders)),
     };
 
     let app = Router::new()
