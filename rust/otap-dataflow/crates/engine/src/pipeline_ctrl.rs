@@ -16,8 +16,8 @@ use crate::context::PipelineContext;
 use crate::control::RouteData;
 use crate::control::UnwindData;
 use crate::control::{
-    AckMsg, ControlSenders, NackMsg, NodeControlMsg, PipelineResultMsg, PipelineResultMsgReceiver,
-    RuntimeControlMsg, RuntimeCtrlMsgReceiver,
+    AckMsg, ControlSenders, NackMsg, NodeControlMsg, PipelineCompletionMsg,
+    PipelineCompletionMsgReceiver, RuntimeControlMsg, RuntimeCtrlMsgReceiver,
 };
 use crate::error::Error;
 use crate::pipeline_metrics::PipelineMetricsMonitor;
@@ -664,22 +664,22 @@ impl<PData> RuntimeCtrlMsgManager<PData> {
 }
 
 /// Dedicated return-path dispatcher for Ack/Nack unwinding.
-pub struct PipelineResultMsgDispatcher<PData> {
-    pipeline_result_msg_receiver: PipelineResultMsgReceiver<PData>,
+pub struct PipelineCompletionMsgDispatcher<PData> {
+    pipeline_completion_msg_receiver: PipelineCompletionMsgReceiver<PData>,
     control_senders: ControlSenders<PData>,
     node_metric_handles: Rc<RefCell<Vec<Option<NodeMetricHandles>>>>,
     pending_sends: VecDeque<(usize, NodeControlMsg<PData>)>,
 }
 
-impl<PData> PipelineResultMsgDispatcher<PData> {
+impl<PData> PipelineCompletionMsgDispatcher<PData> {
     #[must_use]
     pub(crate) fn new(
-        pipeline_result_msg_receiver: PipelineResultMsgReceiver<PData>,
+        pipeline_completion_msg_receiver: PipelineCompletionMsgReceiver<PData>,
         control_senders: ControlSenders<PData>,
         node_metric_handles: Rc<RefCell<Vec<Option<NodeMetricHandles>>>>,
     ) -> Self {
         Self {
-            pipeline_result_msg_receiver,
+            pipeline_completion_msg_receiver,
             control_senders,
             node_metric_handles,
             pending_sends: VecDeque::new(),
@@ -767,7 +767,7 @@ impl<PData> PipelineResultMsgDispatcher<PData> {
     }
 }
 
-impl<PData: Unwindable> PipelineResultMsgDispatcher<PData> {
+impl<PData: Unwindable> PipelineCompletionMsgDispatcher<PData> {
     /// Runs the return-path dispatcher until all return senders are dropped.
     pub async fn run(mut self) -> Result<(), Error> {
         let retry_delay = tokio::time::sleep(Duration::from_millis(5));
@@ -789,11 +789,11 @@ impl<PData: Unwindable> PipelineResultMsgDispatcher<PData> {
             tokio::select! {
                 biased;
 
-                msg = self.pipeline_result_msg_receiver.recv() => {
+                msg = self.pipeline_completion_msg_receiver.recv() => {
                     let Some(msg) = msg.ok() else { break; };
                     match msg {
-                        PipelineResultMsg::DeliverAck { ack } => self.unwind_ack(ack),
-                        PipelineResultMsg::DeliverNack { nack } => self.unwind_nack(nack),
+                        PipelineCompletionMsg::DeliverAck { ack } => self.unwind_ack(ack),
+                        PipelineCompletionMsg::DeliverNack { nack } => self.unwind_nack(nack),
                     }
                 }
 
@@ -904,7 +904,7 @@ mod tests {
     use crate::context::ControllerContext;
     use crate::control::{AckMsg, Frame, NackMsg, RouteData, nanos_since_birth};
     use crate::control::{
-        NodeControlMsg, PipelineResultMsg, RuntimeControlMsg, pipeline_result_msg_channel,
+        NodeControlMsg, PipelineCompletionMsg, RuntimeControlMsg, pipeline_completion_msg_channel,
         runtime_ctrl_msg_channel,
     };
     use crate::message::{Receiver, Sender};
@@ -2148,8 +2148,8 @@ mod tests {
             .run_until(async {
                 let (manager, pipeline_tx, _control_receivers, _nodes, _pipeline_entity_guard) =
                     setup_test_manager::<String>();
-                let (return_tx, return_rx) = pipeline_result_msg_channel(10);
-                let dispatcher = PipelineResultMsgDispatcher::new(
+                let (return_tx, return_rx) = pipeline_completion_msg_channel(10);
+                let dispatcher = PipelineCompletionMsgDispatcher::new(
                     return_rx,
                     ControlSenders::new(),
                     empty_node_metric_handles(),
@@ -2175,7 +2175,7 @@ mod tests {
                 // Send DeliverAck during draining - should be processed
                 let ack = AckMsg::new("ack_data".to_owned());
                 return_tx
-                    .send(PipelineResultMsg::DeliverAck { ack })
+                    .send(PipelineCompletionMsg::DeliverAck { ack })
                     .await
                     .unwrap();
 
@@ -2214,8 +2214,8 @@ mod tests {
             .run_until(async {
                 let (manager, pipeline_tx, _control_receivers, _nodes, _pipeline_entity_guard) =
                     setup_test_manager::<String>();
-                let (return_tx, return_rx) = pipeline_result_msg_channel(10);
-                let dispatcher = PipelineResultMsgDispatcher::new(
+                let (return_tx, return_rx) = pipeline_completion_msg_channel(10);
+                let dispatcher = PipelineCompletionMsgDispatcher::new(
                     return_rx,
                     ControlSenders::new(),
                     empty_node_metric_handles(),
@@ -2241,7 +2241,7 @@ mod tests {
                 // Send DeliverNack during draining - should be processed
                 let nack = NackMsg::new("test failure", "nack_data".to_owned());
                 return_tx
-                    .send(PipelineResultMsg::DeliverNack { nack })
+                    .send(PipelineCompletionMsg::DeliverNack { nack })
                     .await
                     .unwrap();
 
@@ -2986,7 +2986,7 @@ mod tests {
     /// Helper: run the manager, send messages, shut down, collect snapshots.
     async fn run_and_collect(
         harness: MetricsTestHarness,
-        send_fn: impl FnOnce(&[NodeId]) -> Vec<PipelineResultMsg<TestPData>>,
+        send_fn: impl FnOnce(&[NodeId]) -> Vec<PipelineCompletionMsg<TestPData>>,
     ) -> HashMap<MetricLabel, Vec<MetricValue>> {
         let MetricsTestHarness {
             manager,
@@ -3003,8 +3003,8 @@ mod tests {
         local
             .run_until(async {
                 let msgs = send_fn(&nodes);
-                let (return_tx, return_rx) = pipeline_result_msg_channel(32);
-                let return_dispatcher = PipelineResultMsgDispatcher::new(
+                let (return_tx, return_rx) = pipeline_completion_msg_channel(32);
+                let return_dispatcher = PipelineCompletionMsgDispatcher::new(
                     return_rx,
                     ControlSenders::new(),
                     node_metric_handles.clone(),
@@ -3048,7 +3048,7 @@ mod tests {
         let nodes_clone = harness.nodes.clone();
         let snapshots = run_and_collect(harness, |nodes| {
             let pdata = build_3node_pdata(nodes, false);
-            vec![PipelineResultMsg::DeliverAck {
+            vec![PipelineCompletionMsg::DeliverAck {
                 ack: AckMsg::new(pdata),
             }]
         })
@@ -3084,7 +3084,7 @@ mod tests {
         let harness = setup_test_manager_with_metrics();
         let snapshots = run_and_collect(harness, |nodes| {
             let pdata = build_3node_pdata(nodes, false);
-            vec![PipelineResultMsg::DeliverNack {
+            vec![PipelineCompletionMsg::DeliverNack {
                 nack: NackMsg::new("transient error", pdata),
             }]
         })
@@ -3108,7 +3108,7 @@ mod tests {
         let harness = setup_test_manager_with_metrics();
         let snapshots = run_and_collect(harness, |nodes| {
             let pdata = build_3node_pdata(nodes, false);
-            vec![PipelineResultMsg::DeliverNack {
+            vec![PipelineCompletionMsg::DeliverNack {
                 nack: NackMsg::new_permanent("permanent refusal", pdata),
             }]
         })
@@ -3135,7 +3135,7 @@ mod tests {
             let pdata = build_3node_pdata(nodes, true);
             let mut ack = AckMsg::new(pdata);
             ack.unwind.return_time_ns = nanos_since_birth();
-            vec![PipelineResultMsg::DeliverAck { ack }]
+            vec![PipelineCompletionMsg::DeliverAck { ack }]
         })
         .await;
 
@@ -3176,7 +3176,7 @@ mod tests {
             let pdata = build_3node_pdata_no_subscribers(nodes, true);
             let mut ack = AckMsg::new(pdata);
             ack.unwind.return_time_ns = nanos_since_birth();
-            vec![PipelineResultMsg::DeliverAck { ack }]
+            vec![PipelineCompletionMsg::DeliverAck { ack }]
         })
         .await;
 
@@ -3218,7 +3218,7 @@ mod tests {
         let harness = setup_test_manager_with_metrics();
         let snapshots = run_and_collect(harness, |nodes| {
             let pdata = build_3node_pdata_no_subscribers(nodes, false);
-            vec![PipelineResultMsg::DeliverAck {
+            vec![PipelineCompletionMsg::DeliverAck {
                 ack: AckMsg::new(pdata),
             }]
         })
@@ -3239,7 +3239,7 @@ mod tests {
         let harness = setup_test_manager_with_metrics();
         let snapshots = run_and_collect(harness, |nodes| {
             let pdata = build_3node_pdata(nodes, false);
-            vec![PipelineResultMsg::DeliverAck {
+            vec![PipelineCompletionMsg::DeliverAck {
                 ack: AckMsg::new(pdata),
             }]
         })
@@ -3268,7 +3268,7 @@ mod tests {
             (0..3)
                 .map(|_| {
                     let pdata = build_3node_pdata(nodes, false);
-                    PipelineResultMsg::DeliverAck {
+                    PipelineCompletionMsg::DeliverAck {
                         ack: AckMsg::new(pdata),
                     }
                 })
@@ -3297,13 +3297,13 @@ mod tests {
         let harness = setup_test_manager_with_metrics();
         let snapshots = run_and_collect(harness, |nodes| {
             vec![
-                PipelineResultMsg::DeliverAck {
+                PipelineCompletionMsg::DeliverAck {
                     ack: AckMsg::new(build_3node_pdata(nodes, false)),
                 },
-                PipelineResultMsg::DeliverNack {
+                PipelineCompletionMsg::DeliverNack {
                     nack: NackMsg::new("transient", build_3node_pdata(nodes, false)),
                 },
-                PipelineResultMsg::DeliverNack {
+                PipelineCompletionMsg::DeliverNack {
                     nack: NackMsg::new_permanent("refused", build_3node_pdata(nodes, false)),
                 },
             ]
@@ -3361,8 +3361,8 @@ mod tests {
             ack2.unwind.return_time_ns = nanos_since_birth();
 
             vec![
-                PipelineResultMsg::DeliverAck { ack: ack1 },
-                PipelineResultMsg::DeliverAck { ack: ack2 },
+                PipelineCompletionMsg::DeliverAck { ack: ack1 },
+                PipelineCompletionMsg::DeliverAck { ack: ack2 },
             ]
         })
         .await;
@@ -3437,15 +3437,15 @@ mod tests {
                         .unwrap();
                 }
 
-                let (return_tx, return_rx) = pipeline_result_msg_channel(8);
+                let (return_tx, return_rx) = pipeline_completion_msg_channel(8);
                 return_tx
-                    .send(PipelineResultMsg::DeliverAck {
+                    .send(PipelineCompletionMsg::DeliverAck {
                         ack: AckMsg::new(pdata_for_node(target.index)),
                     })
                     .await
                     .unwrap();
 
-                let dispatcher = PipelineResultMsgDispatcher::new(
+                let dispatcher = PipelineCompletionMsgDispatcher::new(
                     return_rx,
                     control_senders,
                     empty_node_metric_handles(),
@@ -3540,7 +3540,7 @@ mod tests {
         local
             .run_until(async {
                 // --- Custom setup with specific channel capacities ---
-                let (return_tx, return_rx) = pipeline_result_msg_channel(3);
+                let (return_tx, return_rx) = pipeline_completion_msg_channel(3);
                 let mut control_senders = ControlSenders::new();
 
                 let nodes = test_nodes(vec!["node_a", "node_b"]);
@@ -3563,7 +3563,7 @@ mod tests {
                     Sender::Shared(SharedSender::mpsc(tx_b)),
                 );
 
-                let dispatcher = PipelineResultMsgDispatcher::new(
+                let dispatcher = PipelineCompletionMsgDispatcher::new(
                     return_rx,
                     control_senders,
                     empty_node_metric_handles(),
@@ -3572,19 +3572,19 @@ mod tests {
                 // Pre-load the shared return channel: [DeliverAck{A}, DeliverAck{A}, DeliverAck{B}]
                 // This fills the channel (cap=3) before anyone starts consuming.
                 return_tx
-                    .send(PipelineResultMsg::DeliverAck {
+                    .send(PipelineCompletionMsg::DeliverAck {
                         ack: AckMsg::new(pdata_for_node(node_a.index)),
                     })
                     .await
                     .unwrap();
                 return_tx
-                    .send(PipelineResultMsg::DeliverAck {
+                    .send(PipelineCompletionMsg::DeliverAck {
                         ack: AckMsg::new(pdata_for_node(node_a.index)),
                     })
                     .await
                     .unwrap();
                 return_tx
-                    .send(PipelineResultMsg::DeliverAck {
+                    .send(PipelineCompletionMsg::DeliverAck {
                         ack: AckMsg::new(pdata_for_node(node_b.index)),
                     })
                     .await
@@ -3604,7 +3604,7 @@ mod tests {
                     let _rx_a = rx_a; // keep A's ctrl channel open (not closed)
                     loop {
                         if node_a_tx
-                            .send(PipelineResultMsg::DeliverAck {
+                            .send(PipelineCompletionMsg::DeliverAck {
                                 ack: AckMsg::new(pdata_for_node(node_a_index)),
                             })
                             .await
@@ -3689,17 +3689,17 @@ mod tests {
                 manager.tick_timers.start(node_timer.index, Duration::from_millis(1));
                 tokio::time::sleep(Duration::from_millis(5)).await;
 
-                let (return_tx, return_rx) = pipeline_result_msg_channel(3);
+                let (return_tx, return_rx) = pipeline_completion_msg_channel(3);
                 for _ in 0..3 {
                     return_tx
-                        .send(PipelineResultMsg::DeliverAck {
+                        .send(PipelineCompletionMsg::DeliverAck {
                             ack: AckMsg::new(pdata_for_node(node_a.index)),
                         })
                         .await
                         .unwrap();
                 }
 
-                let dispatcher = PipelineResultMsgDispatcher::new(
+                let dispatcher = PipelineCompletionMsgDispatcher::new(
                     return_rx,
                     control_senders,
                     empty_node_metric_handles(),
@@ -3711,7 +3711,7 @@ mod tests {
                     let _rx_a = rx_a;
                     for _ in 0..200 {
                         if node_a_tx
-                            .send(PipelineResultMsg::DeliverAck {
+                            .send(PipelineCompletionMsg::DeliverAck {
                                 ack: AckMsg::new(pdata_for_node(node_a_index)),
                             })
                             .await
