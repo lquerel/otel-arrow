@@ -381,6 +381,10 @@ impl shared::Receiver<OtapPdata> for OTAPReceiver {
 
         loop {
             if let Some(deadline) = draining_deadline {
+                // DrainIngress is receiver-first shutdown: stop accepting new RPCs
+                // immediately, but keep the event loop alive until the serving task
+                // has exited and all in-flight wait_for_result state has been
+                // resolved or force-failed at the deadline.
                 grpc_shutdown.cancel();
 
                 if clock::now() >= deadline {
@@ -420,6 +424,10 @@ impl shared::Receiver<OtapPdata> for OTAPReceiver {
                         Ok(NodeControlMsg::DrainIngress { deadline, reason }) => {
                             if draining_deadline.is_none() {
                                 otap_df_telemetry::otel_info!("otap_receiver.drain_ingress");
+                                // Latch the first drain request and close ingress.
+                                // This stops new admissions, but does not yet report
+                                // ReceiverDrained because previously admitted batches
+                                // may still need to finish their wait_for_result path.
                                 draining_deadline = Some(deadline);
                                 draining_reason = Some(reason);
                                 grpc_shutdown.cancel();
@@ -480,6 +488,9 @@ impl shared::Receiver<OtapPdata> for OTAPReceiver {
 
                 _ = &mut drain_sleep => {
                     if let Some(reason) = draining_reason.as_deref() {
+                        // The receiver missed the graceful-drain deadline. Force any
+                        // remaining in-flight wait_for_result subscriptions to fail so
+                        // the runtime can eventually observe ReceiverDrained.
                         states.force_shutdown(reason);
                     }
                     drain_deadline_sleep = None;
@@ -552,7 +563,7 @@ mod tests {
                 let metrics_stream = stream! {
                     let mut producer = Producer::new();
                     for batch_id in 0..3 {
-                        let mut metrics_records = create_otap_batch(batch_id, ArrowPayloadType::UnivariateMetrics);
+                        let mut metrics_records = create_otap_batch(batch_id, ArrowPayloadType::MultivariateMetrics);
                         let bar = producer.produce_bar(&mut metrics_records).unwrap();
                         yield bar
                     }
@@ -656,7 +667,7 @@ mod tests {
 
                     // Assert that the message received is what the test client sent.
                     let _expected_metrics_message =
-                        create_otap_batch(batch_id, ArrowPayloadType::UnivariateMetrics);
+                        create_otap_batch(batch_id, ArrowPayloadType::MultivariateMetrics);
                     assert!(matches!(metrics_records, _expected_metrics_message));
 
                     // Send ACK if wait_for_result is enabled
@@ -738,7 +749,7 @@ mod tests {
                 let metrics_stream = stream! {
                     let mut producer = Producer::new();
                     for batch_id in 0..3 {
-                        let mut metrics_records = create_otap_batch(batch_id, ArrowPayloadType::UnivariateMetrics);
+                        let mut metrics_records = create_otap_batch(batch_id, ArrowPayloadType::MultivariateMetrics);
                         let bar = producer.produce_bar(&mut metrics_records).unwrap();
                         yield bar
                     }
