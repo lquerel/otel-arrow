@@ -5,18 +5,20 @@ use super::{DstRng, SimClock, dst_seeds};
 use crate::Interests;
 use crate::clock;
 use crate::control::{
-    AckMsg, ControlSenders, NackMsg, NodeControlMsg, PipelineResultMsg, RuntimeControlMsg,
-    pipeline_result_msg_channel,
+    AckMsg, ControlSenders, NackMsg, NodeControlMsg, PipelineCompletionMsg, RuntimeControlMsg,
+    pipeline_completion_msg_channel,
 };
-use crate::message::{Message, MessageChannel, Receiver};
+use crate::message::{ExporterMessageChannel, Message, ProcessorMessageChannel, Receiver};
 use crate::node::NodeType;
-use crate::pipeline_ctrl::PipelineResultMsgDispatcher;
+use crate::pipeline_ctrl::PipelineCompletionMsgDispatcher;
 use crate::testing::dst::common::{
     DstPData, build_manager, create_mock_control_sender, empty_node_metric_handles, frame,
     setup_dst_runtime, yield_cycles,
 };
 use crate::testing::test_nodes;
 use otap_df_channel::mpsc;
+use otap_df_config::policy::TelemetryPolicy;
+use otap_df_telemetry::reporter::MetricsReporter;
 use std::cell::RefCell;
 use std::collections::HashSet;
 use std::rc::Rc;
@@ -72,13 +74,16 @@ async fn run_backpressure_interblock_seed(seed: u64) {
             }
         }
 
-        let (manager, runtime_tx, _scope, _pipeline_context) =
+        let (manager, runtime_tx, _scope, pipeline_context) =
             build_manager::<DstPData>(32, control_senders.clone());
-        let (result_tx, result_rx) = pipeline_result_msg_channel(16);
-        let dispatcher = PipelineResultMsgDispatcher::new(
-            result_rx,
+        let (completion_tx, completion_rx) = pipeline_completion_msg_channel(16);
+        let dispatcher = PipelineCompletionMsgDispatcher::new(
+            pipeline_context,
+            completion_rx,
             control_senders.clone(),
             empty_node_metric_handles(),
+            MetricsReporter::create_new_and_receiver(16).1,
+            TelemetryPolicy::default(),
         );
 
         let manager_handle = tokio::task::spawn_local(async move { manager.run().await });
@@ -198,7 +203,7 @@ async fn run_backpressure_interblock_seed(seed: u64) {
         let processor_handle = tokio::task::spawn_local(async move {
             let mut inflight = 0usize;
             let mut was_paused = false;
-            let mut msg_channel = MessageChannel::new(
+            let mut msg_channel = ProcessorMessageChannel::new(
                 processor_control_rx.expect("processor control receiver"),
                 Receiver::Local(crate::local::message::LocalReceiver::mpsc(recv_to_proc_rx)),
                 processor_id.index,
@@ -253,7 +258,7 @@ async fn run_backpressure_interblock_seed(seed: u64) {
         });
 
         let exporter_state = state.clone();
-        let exporter_result_tx = result_tx.clone();
+        let exporter_completion_tx = completion_tx.clone();
         let exporter_handle = tokio::task::spawn_local(async move {
             struct ScheduledCompletion {
                 when: std::time::Instant,
@@ -262,7 +267,7 @@ async fn run_backpressure_interblock_seed(seed: u64) {
                 nack: bool,
             }
 
-            let mut msg_channel = MessageChannel::new(
+            let mut msg_channel = ExporterMessageChannel::new(
                 exporter_control_rx.expect("exporter control receiver"),
                 Receiver::Local(crate::local::message::LocalReceiver::mpsc(proc_to_export_rx)),
                 exporter_id.index,
@@ -302,13 +307,13 @@ async fn run_backpressure_interblock_seed(seed: u64) {
                                 } else {
                                     NackMsg::new("dst-temporary", item.pdata)
                                 };
-                                exporter_result_tx
-                                    .send(PipelineResultMsg::DeliverNack { nack })
+                                exporter_completion_tx
+                                    .send(PipelineCompletionMsg::DeliverNack { nack })
                                     .await
                                     .expect("exporter should deliver nack");
                             } else {
-                                exporter_result_tx
-                                    .send(PipelineResultMsg::DeliverAck {
+                                exporter_completion_tx
+                                    .send(PipelineCompletionMsg::DeliverAck {
                                         ack: AckMsg::new(item.pdata),
                                     })
                                     .await
@@ -447,7 +452,7 @@ async fn run_backpressure_interblock_seed(seed: u64) {
             .expect("exporter should exit")
             .unwrap();
 
-        drop(result_tx);
+        drop(completion_tx);
         drop(runtime_tx);
 
         timeout(Duration::from_secs(1), manager_handle)
@@ -485,6 +490,9 @@ async fn run_backpressure_interblock_seed(seed: u64) {
     }));
 }
 
+// Drive a seeded heavy-ingress scenario with bounded pdata channels, processor
+// admission gating, mixed Ack/Nack completion traffic, and runtime noise. This
+// documents the interblock class the refactor was designed to keep live.
 #[test]
 fn dst_heavy_ingress_backpressure_seeded() {
     for seed in dst_seeds(&[7, 23, 31], 8) {

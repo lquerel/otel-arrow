@@ -823,8 +823,7 @@ impl OTLPReceiver {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::compression::CompressionMethod;
-    use crate::testing::{next_ack, next_nack};
+
     use otap_df_channel::error::RecvError;
     use otap_df_config::node::NodeUserConfig;
     use otap_df_engine::Interests;
@@ -2510,6 +2509,9 @@ mod tests {
             .run_validation_concurrent(validation);
     }
 
+    // Hold a wait_for_result gRPC request in flight, then trigger shutdown
+    // before any Ack or Nack is produced. The caller should receive a terminal
+    // Unavailable result that carries the shutdown reason instead of hanging.
     #[test]
     fn test_otlp_grpc_wait_for_result_shutdown_returns_unavailable() {
         let test_runtime = TestRuntime::new();
@@ -2589,6 +2591,9 @@ mod tests {
             .run_validation_concurrent(validation);
     }
 
+    // Mirror the gRPC shutdown-result scenario on the OTLP HTTP path.
+    // An in-flight wait_for_result request should complete with an HTTP 503
+    // shutdown response instead of timing out or being dropped silently.
     #[test]
     fn test_otlp_http_wait_for_result_shutdown_returns_503() {
         let test_runtime = TestRuntime::new();
@@ -3574,6 +3579,9 @@ mod tests {
             .run_validation_concurrent(validation);
     }
 
+    // Run the receiver-side DST sweep for wait_for_result completion.
+    // The seeded scenarios cover normal Ack, temporary Nack, permanent Nack,
+    // and shutdown-forced completion without standing up real network servers.
     #[test]
     fn dst_otlp_wait_for_result_shutdown_seeded() {
         for seed in dst_seeds(&[7, 23, 61], 8) {
