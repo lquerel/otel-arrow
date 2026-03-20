@@ -1367,8 +1367,8 @@ mod tests {
     use otap_df_engine::config::ProcessorConfig;
     use otap_df_engine::context::ControllerContext;
     use otap_df_engine::control::{
-        AckMsg, NodeControlMsg, PipelineControlMsg, PipelineReturnMsg, pipeline_ctrl_msg_channel,
-        pipeline_return_msg_channel,
+        AckMsg, NodeControlMsg, PipelineResultMsg, RuntimeControlMsg,
+        pipeline_result_msg_channel, runtime_ctrl_msg_channel,
     };
     use otap_df_engine::message::Message;
     use otap_df_engine::node::Node;
@@ -1685,10 +1685,10 @@ mod tests {
 
         phase
             .run_test(move |mut ctx| async move {
-                let (pipeline_tx, mut pipeline_rx) = pipeline_ctrl_msg_channel(10);
-                let (pipeline_return_tx, mut pipeline_return_rx) = pipeline_return_msg_channel(10);
-                ctx.set_pipeline_ctrl_sender(pipeline_tx);
-                ctx.set_pipeline_return_sender(pipeline_return_tx);
+                let (pipeline_tx, mut pipeline_rx) = runtime_ctrl_msg_channel(10);
+                let (pipeline_return_tx, mut pipeline_return_rx) = pipeline_result_msg_channel(10);
+                ctx.set_runtime_ctrl_sender(pipeline_tx);
+                ctx.set_pipeline_result_sender(pipeline_return_tx);
 
                 // Track outputs by event position
                 let mut event_outputs: Vec<EventOutputs> = vec![
@@ -1800,7 +1800,7 @@ mod tests {
                         // Drain control channel for DelayData requests and acks/nacks
                         loop {
                             match pipeline_rx.try_recv() {
-                                Ok(PipelineControlMsg::DelayData { when, data, .. }) => {
+                                Ok(RuntimeControlMsg::DelayData { when, data, .. }) => {
                                     looped += 1;
                                     pending_delay = Some((when, data));
                                 }
@@ -1815,7 +1815,7 @@ mod tests {
 
                         loop {
                             match pipeline_return_rx.try_recv() {
-                                Ok(PipelineReturnMsg::DeliverAck { ack }) => {
+                                Ok(PipelineResultMsg::DeliverAck { ack }) => {
                                     looped += 1;
                                     if let Some((_node_id, ack)) = next_ack(ack) {
                                         let calldata: TestCallData =
@@ -1823,7 +1823,7 @@ mod tests {
                                         received_acks.push(calldata);
                                     }
                                 }
-                                Ok(PipelineReturnMsg::DeliverNack { nack }) => {
+                                Ok(PipelineResultMsg::DeliverNack { nack }) => {
                                     looped += 1;
                                     if let Some((_node_id, nack)) = next_nack(nack) {
                                         let calldata: TestCallData = nack
@@ -2427,8 +2427,8 @@ mod tests {
 
         phase
             .run_test(move |mut ctx| async move {
-                let (pipeline_tx, mut pipeline_rx) = pipeline_ctrl_msg_channel(10);
-                ctx.set_pipeline_ctrl_sender(pipeline_tx);
+                let (pipeline_tx, mut pipeline_rx) = runtime_ctrl_msg_channel(10);
+                ctx.set_runtime_ctrl_sender(pipeline_tx);
 
                 // Create test data
                 let mut datagen = DataGenerator::new(1);
@@ -2452,7 +2452,7 @@ mod tests {
                     .expect("process otlp");
 
                 // Drain control channel for DelayData
-                while let Ok(PipelineControlMsg::DelayData { when, data, .. }) =
+                while let Ok(RuntimeControlMsg::DelayData { when, data, .. }) =
                     pipeline_rx.try_recv()
                 {
                     pending_delays.push((when, data));
