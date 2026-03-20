@@ -364,6 +364,65 @@ to each pipeline component:
 These utilities streamline the process of validating individual component
 behaviors, significantly reducing setup effort while enabling comprehensive
 testing.
+This keeps runtime behavior testable at the level where bugs usually occur:
+channel interaction, Ack/Nack unwinding, runtime-control handling, and
+component-local state transitions.
+
+For a contributor-facing overview of when to use unit tests, node harnesses,
+small pipeline liveness tests, validation scenarios, or DST, see the
+[Testing Guide](../../docs/testing-guide.md).
+
+## Deterministic Simulation Testing
+
+In addition to ordinary unit and integration tests, the engine includes a
+deterministic simulation testing (DST) layer for concurrency-sensitive runtime
+behavior.
+
+The DST approach combines:
+
+- a deterministic clock (`SimClock`) so deadlines, timer expiry, and delayed
+  data wakeups can be advanced explicitly
+- seeded interleavings so the same scenario can be replayed via `DST_SEED` or
+  expanded into a larger sweep via `DST_SEEDS`
+- real engine actors and channels rather than parallel mock semantics
+
+This is important for the control plane because many of the interesting failure
+classes are about ordering and bounded progress, not only about local business
+logic. The DST harness therefore runs real `ProcessorMessageChannel`,
+`ExporterMessageChannel`, `RuntimeCtrlMsgManager`, and
+`PipelineCompletionMsgDispatcher` logic inside the engine's single-threaded
+runtime model.
+
+The current DST scenarios cover five main families:
+
+- role-specific channel fairness and drain behavior: bounded-fair control vs
+  `pdata`, processor shutdown draining after admission reopens, exporter
+  shutdown draining of buffered `pdata`, and deadline-forced shutdown when a
+  processor keeps admission closed
+- runtime-control vs pipeline-completion progress under load: timer and delayed
+  data delivery, Ack/Nack unwinding, `RETURN_DATA`, and receiver-first shutdown
+  ordering under mixed runtime noise
+- heavy ingress / backpressure / interblock scenarios: sustained receiver
+  traffic, bounded `pdata` channels, processor admission gating and reopen,
+  mixed Ack/Nack completions, and clean drain propagation
+- explicit known-limitation coverage for processor closed admission through the
+  shutdown deadline: the DST suite documents the current case where buffered
+  `pdata` remains stranded if a processor never reopens admission before the
+  deadline
+- receiver `wait_for_result` behavior during drain and shutdown: the OTLP
+  receiver DST suite exercises Ack, temporary Nack, permanent Nack, and
+  shutdown/unavailable completion at the deadline
+
+The seed controls are:
+
+- `DST_SEED=<u64>` to replay one specific deterministic run
+- `DST_SEEDS=<n>` to append `n` generated seeds after the fixed regression
+  seeds
+
+The current DST coverage is intentionally scoped. It does not yet model
+topic-based routing, cross-pipeline Ack/Nack across topic hops, or fatal
+process failure. Those cases still rely on ordinary tests, design review, and
+future targeted coverage.
 
 ## Compile-Time Plugin System
 
