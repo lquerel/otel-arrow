@@ -3,7 +3,6 @@
 
 //! Message definitions for the pipeline engine.
 
-use crate::clock;
 use crate::control::{AckMsg, NackMsg, NodeControlMsg};
 use crate::local::message::{LocalReceiver, LocalSender};
 use crate::shared::message::{SharedReceiver, SharedSender};
@@ -12,7 +11,9 @@ use otap_df_channel::error::{RecvError, SendError};
 use otap_df_channel::mpsc;
 use std::future::Future;
 use std::ops::Add;
+use std::pin::Pin;
 use std::time::{Duration, Instant};
+use tokio::time::{Instant as TokioInstant, Sleep, sleep_until};
 
 /// Maximum number of consecutive control messages delivered before the channel
 /// forces one pdata attempt when pdata delivery is allowed.
@@ -310,7 +311,7 @@ where
     fn closed_pdata_shutdown(&mut self) -> Message<PData> {
         self.shutdown();
         Message::Control(NodeControlMsg::Shutdown {
-            deadline: clock::now().add(Duration::from_secs(1)),
+            deadline: Instant::now().add(Duration::from_secs(1)),
             reason: "pdata channel closed".to_owned(),
         })
     }
@@ -335,7 +336,7 @@ where
         accept_pdata: bool,
         drain_policy: DrainPolicy,
     ) -> Result<Message<PData>, RecvError> {
-        let mut sleep_until_deadline: Option<clock::Sleep> = None;
+        let mut sleep_until_deadline: Option<Pin<Box<Sleep>>> = None;
 
         loop {
             if self.control_rx.is_none() || self.pdata_rx.is_none() {
@@ -369,7 +370,10 @@ where
                 let drain_accepts_pdata =
                     Self::shutdown_drain_accepts_pdata(accept_pdata, drain_policy);
 
-                // If shutdown pending and no pdata left, return Shutdown immediately
+                // Once shutdown has been latched, the stored Shutdown is released
+                // only after the bounded pdata backlog is empty. This keeps the
+                // channel-level drain contract explicit: upstream work that was
+                // already accepted into the channel gets a chance to run first.
                 if self
                     .pdata_rx
                     .as_ref()
@@ -386,9 +390,13 @@ where
 
                 if sleep_until_deadline.is_none() {
                     // Create a sleep timer for the deadline
-                    sleep_until_deadline = Some(clock::sleep_until(dl));
+                    sleep_until_deadline =
+                        Some(Box::pin(sleep_until(TokioInstant::from_std(dl))));
                 }
 
+                // Even while draining we cap control preference. This prevents a
+                // sustained Ack/Nack or shutdown-control burst from starving the
+                // already buffered pdata that shutdown is trying to drain.
                 if drain_accepts_pdata && self.consecutive_control >= CONTROL_BURST_LIMIT {
                     match self
                         .pdata_rx
@@ -499,7 +507,12 @@ where
 
                     ctrl = self.control_rx.as_mut().expect("control_rx must exist").recv() => match ctrl {
                         Ok(NodeControlMsg::Shutdown { deadline, reason }) => {
-                            if deadline <= clock::now() {
+                            // The first Shutdown is latched instead of returned
+                            // immediately. That switches the channel into
+                            // shutdown-drain mode, where it keeps delivering
+                            // cleanup control and buffered pdata until either the
+                            // backlog empties or the deadline expires.
+                            if deadline <= Instant::now() {
                                 self.shutdown();
                                 return Ok(Message::Control(NodeControlMsg::Shutdown { deadline, reason }));
                             }
@@ -517,7 +530,11 @@ where
 
                     ctrl = self.control_rx.as_mut().expect("control_rx must exist").recv() => match ctrl {
                         Ok(NodeControlMsg::Shutdown { deadline, reason }) => {
-                            if deadline <= clock::now() {
+                            // Same shutdown latching as above, but in the
+                            // control-preferred branch used when pdata admission
+                            // is currently closed or control has not yet hit the
+                            // fairness limit.
+                            if deadline <= Instant::now() {
                                 self.shutdown();
                                 return Ok(Message::Control(NodeControlMsg::Shutdown { deadline, reason }));
                             }
