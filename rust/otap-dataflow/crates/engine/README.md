@@ -451,6 +451,58 @@ for external (e.g. WASM-based) plugins is planned but not yet implemented.
 
 ## Telemetry
 
+The engine emits telemetry in terms of process, core, pipeline runtime, and
+node identity. These attributes let operators and contributors correlate engine
+metrics and events with the runtime structure described above.
+
+The `policies.telemetry.runtime_metrics` level now gates three related
+observability surfaces:
+
+- channel endpoint transport metrics
+- per-node produced/consumed outcome metrics
+- shared pipeline-scoped control-plane metrics
+
+For the shared control plane, the engine exports two pipeline metric families:
+
+- `pipeline.runtime_control`
+  This family is owned by `RuntimeCtrlMsgManager` and helps explain graceful
+  drain state, pending control-send backpressure, active timers, delayed-data
+  backlog, and whether shutdown finished naturally or was forced by deadline.
+- `pipeline.completion`
+  This family is owned by `PipelineCompletionMsgDispatcher` and helps explain
+  whether completion traffic is arriving, being delivered upstream, being
+  dropped because no frame was interested, or building up as a buffered
+  backlog.
+
+The `runtime_metrics` levels apply as follows:
+
+- `none`: disables channel endpoint, per-node outcome, and shared control-plane
+  metric export
+- `basic`: exports channel transport metrics plus the shared control-plane
+  state gauges such as `pipeline.runtime_control.drain.active`,
+  `pipeline.runtime_control.drain.pending_receivers`, and
+  `pipeline.completion.pending_sends.buffered`
+- `normal`: adds message and phase counters such as
+  `pipeline.runtime_control.shutdown.received`,
+  `pipeline.runtime_control.downstream_shutdown.sent`,
+  `pipeline.completion.deliver_ack.received`, and
+  `pipeline.completion.ack.sent`
+- `detailed`: adds the expensive summaries, including drain durations on
+  `pipeline.runtime_control` and unwind-depth distribution on
+  `pipeline.completion`
+
+Operationally, these two pipeline-scoped metric families help answer different
+questions:
+
+- if receivers appear stuck during shutdown, `pipeline.runtime_control` shows
+  whether drain is active, how many receivers are still pending, whether timer
+  or delayed-data work is still queued, and whether the shutdown deadline was
+  ultimately forced
+- if upstream callers are not seeing final Ack/Nack outcomes, `pipeline.completion`
+  shows whether completions are reaching the dispatcher, whether they are being
+  delivered to an interested frame, or whether the unwind ran out of interested
+  subscribers
+
 ### Predefined Attributes
 
 The pipeline engine defines a set of predefined attributes that can be used for
@@ -467,3 +519,65 @@ and its components, facilitating better observability and analysis.
 | Pipeline | pipeline_id         | string  | Pipeline identifier.                                         |
 | Node     | node_id             | string  | Node unique identifier (in scope of the pipeline).           |
 | Node     | node_type           | string  | Node type (e.g. "receiver", "processor", "exporter").        |
+
+### Drain Lifecycle Events
+
+The engine also emits a small set of pipeline-level lifecycle events around
+graceful drain:
+
+- `ShutdownRequested`: shutdown was accepted for the pipeline runtime
+- `IngressDrainStarted`: `DrainIngress` was sent to receivers
+- `ReceiversDrained`: all pending receivers reported `ReceiverDrained`
+- `DownstreamShutdownStarted`: downstream `Shutdown` was sent to non-receivers
+- `DrainDeadlineReached`: the shutdown deadline expired before natural drain
+  completion
+
+These events are intentionally low-volume. They are useful when a pipeline
+appears to stall during shutdown because they let operators distinguish between
+"ingress was never told to stop", "receivers have not drained yet", "downstream
+shutdown has already started", and "the runtime had to force completion at the
+deadline".
+
+## Failure Modes and Engine Responses
+
+The engine is designed to address a small number of important runtime failure
+classes without pretending that every failure becomes harmless:
+
+- **Bounded memory and explicit backpressure**
+  All forward-path and control-path communication remains bounded. Pressure is
+  surfaced on the relevant channel family instead of being hidden behind
+  unbounded buffering.
+
+- **Separation of orchestration and result traffic**
+  Runtime-control work and Ack/Nack unwinding travel on separate runtime paths,
+  so completion traffic does not share the same queue as timers, delayed data,
+  and receiver-drain coordination.
+
+- **Bounded-fair progress**
+  The runtime avoids absolute control priority. Control remains responsive, but
+  `pdata`, due timers, telemetry collection, and delayed-data resumption still
+  make progress under sustained control load.
+
+- **Receiver-first graceful drain**
+  Shutdown begins by stopping ingress rather than abruptly terminating the whole
+  DAG. This gives receivers a place to finish admitted work, unwind late
+  Ack/Nack outcomes, and then let downstream drain naturally.
+
+- **Explicit drain-time behavior**
+  During graceful shutdown, recurring timers are canceled, delayed data is
+  returned explicitly, and downstream shutdown is gated by `ReceiverDrained`.
+
+- **Invalid cross-pipeline topic topologies are rejected early**
+  Topic declaration and cycle validation happen before runtimes start, so the
+  engine does not need to discover topic feedback loops at runtime.
+
+These protections still live within explicit limits:
+
+- graceful shutdown is bounded by a deadline
+- fatal process failure bypasses graceful behavior
+- correctness depends on nodes honoring the runtime contracts and continuing to
+  poll while draining
+
+Those limits are intentional. The engine favors explicit contracts, bounded
+resource use, and predictable runtime behavior over hidden retries or
+unbounded buffering.
