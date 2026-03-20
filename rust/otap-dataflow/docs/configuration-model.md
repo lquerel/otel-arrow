@@ -207,6 +207,7 @@ policies:
       control:
         node: 256
         pipeline: 256
+        completion: 512
       pdata: 128
   health:
     # optional overrides; defaults are applied when omitted
@@ -231,6 +232,7 @@ Defaults at top-level:
 
 - `channel_capacity.control.node = 256`
 - `channel_capacity.control.pipeline = 256`
+- `channel_capacity.control.completion = 512`
 - `channel_capacity.pdata = 128`
 - `telemetry.pipeline_metrics = true`
 - `telemetry.tokio_metrics = true`
@@ -488,7 +490,8 @@ Config loading validates:
 - Missing source/destination nodes in connections.
 - Graph cycles.
 - Source output selector validity when node `outputs` is declared.
-- Non-zero channel capacities (`control.node`, `control.pipeline`, `pdata`).
+- Non-zero channel capacities (`control.node`, `control.pipeline`,
+  `control.completion`, `pdata`).
 - Non-zero topic queue capacities
   (`topics.*.policies.balanced.queue_capacity`,
   `topics.*.policies.broadcast.queue_capacity`).

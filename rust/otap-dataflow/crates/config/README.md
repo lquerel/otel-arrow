@@ -82,6 +82,7 @@ Policy families:
 
 - `policies.channel_capacity.control.node`
 - `policies.channel_capacity.control.pipeline`
+- `policies.channel_capacity.control.completion`
 - `policies.channel_capacity.pdata`
 - `policies.health`
 - `policies.telemetry.pipeline_metrics`
@@ -93,6 +94,7 @@ Defaults:
 
 - `channel_capacity.control.node = 256`
 - `channel_capacity.control.pipeline = 256`
+- `channel_capacity.control.completion = 512`
 - `channel_capacity.pdata = 128`
 - `telemetry.pipeline_metrics = true`
 - `telemetry.tokio_metrics = true`
