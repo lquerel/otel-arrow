@@ -1367,8 +1367,9 @@ mod tests {
     use otap_df_engine::config::ProcessorConfig;
     use otap_df_engine::context::ControllerContext;
     use otap_df_engine::control::{
-        AckMsg, NodeControlMsg, PipelineResultMsg, RuntimeControlMsg,
-        pipeline_result_msg_channel, runtime_ctrl_msg_channel,
+        AckMsg, NodeControlMsg, PipelineCompletionMsg, RuntimeControlMsg,
+        pipeline_completion_msg_channel,
+        runtime_ctrl_msg_channel,
     };
     use otap_df_engine::message::Message;
     use otap_df_engine::node::Node;
@@ -1685,10 +1686,11 @@ mod tests {
 
         phase
             .run_test(move |mut ctx| async move {
-                let (pipeline_tx, mut pipeline_rx) = runtime_ctrl_msg_channel(10);
-                let (pipeline_return_tx, mut pipeline_return_rx) = pipeline_result_msg_channel(10);
-                ctx.set_runtime_ctrl_sender(pipeline_tx);
-                ctx.set_pipeline_result_sender(pipeline_return_tx);
+                let (runtime_ctrl_tx, mut runtime_ctrl_rx) = runtime_ctrl_msg_channel(10);
+                let (pipeline_completion_tx, mut pipeline_completion_rx) =
+                    pipeline_completion_msg_channel(10);
+                ctx.set_runtime_ctrl_sender(runtime_ctrl_tx);
+                ctx.set_pipeline_completion_sender(pipeline_completion_tx);
 
                 // Track outputs by event position
                 let mut event_outputs: Vec<EventOutputs> = vec![
@@ -1799,7 +1801,7 @@ mod tests {
 
                         // Drain control channel for DelayData requests and acks/nacks
                         loop {
-                            match pipeline_rx.try_recv() {
+                            match runtime_ctrl_rx.try_recv() {
                                 Ok(RuntimeControlMsg::DelayData { when, data, .. }) => {
                                     looped += 1;
                                     pending_delay = Some((when, data));
@@ -1814,8 +1816,8 @@ mod tests {
                         }
 
                         loop {
-                            match pipeline_return_rx.try_recv() {
-                                Ok(PipelineResultMsg::DeliverAck { ack }) => {
+                            match pipeline_completion_rx.try_recv() {
+                                Ok(PipelineCompletionMsg::DeliverAck { ack }) => {
                                     looped += 1;
                                     if let Some((_node_id, ack)) = next_ack(ack) {
                                         let calldata: TestCallData =
@@ -1823,7 +1825,7 @@ mod tests {
                                         received_acks.push(calldata);
                                     }
                                 }
-                                Ok(PipelineResultMsg::DeliverNack { nack }) => {
+                                Ok(PipelineCompletionMsg::DeliverNack { nack }) => {
                                     looped += 1;
                                     if let Some((_node_id, nack)) = next_nack(nack) {
                                         let calldata: TestCallData = nack

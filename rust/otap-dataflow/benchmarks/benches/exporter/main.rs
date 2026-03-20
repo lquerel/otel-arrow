@@ -61,7 +61,7 @@ use tonic::{Request, Response, Status};
 use otap_df_config::node::NodeUserConfig;
 use otap_df_engine::context::ControllerContext;
 use otap_df_engine::control::{
-    Controllable, NodeControlMsg, pipeline_result_msg_channel, runtime_ctrl_msg_channel,
+    Controllable, NodeControlMsg, pipeline_completion_msg_channel, runtime_ctrl_msg_channel,
 };
 use otap_df_otap::otlp_grpc::OTLPData;
 use otap_df_telemetry::InternalTelemetrySystem;
@@ -455,8 +455,9 @@ fn bench_exporter(c: &mut Criterion) {
                     let control_sender = exporter.control_sender();
                     let pdata_sender = Sender::new_local_mpsc_sender(pdata_tx);
                     let pdata_receiver = Receiver::new_local_mpsc_receiver(pdata_rx);
-                    let (node_req_tx, _node_req_rx) = runtime_ctrl_msg_channel(10);
-                    let (pipeline_return_tx, _pipeline_return_rx) = pipeline_result_msg_channel(10);
+                    let (runtime_ctrl_tx, _runtime_ctrl_rx) = runtime_ctrl_msg_channel(10);
+                    let (pipeline_completion_tx, _pipeline_completion_rx) =
+                        pipeline_completion_msg_channel(10);
 
                     exporter
                         .set_pdata_receiver(test_node("exporter"), pdata_receiver)
@@ -466,8 +467,8 @@ fn bench_exporter(c: &mut Criterion) {
                     let _run_exporter_handle = local.spawn_local(async move {
                         exporter
                             .start(
-                                node_req_tx,
-                                pipeline_return_tx,
+                                runtime_ctrl_tx,
+                                pipeline_completion_tx,
                                 metrics_reporter,
                                 Interests::empty(),
                             )
@@ -526,8 +527,9 @@ fn bench_exporter(c: &mut Criterion) {
                     let control_sender = exporter.control_sender();
                     let pdata_sender = Sender::new_local_mpsc_sender(pdata_tx);
                     let pdata_receiver = Receiver::new_local_mpsc_receiver(pdata_rx);
-                    let (node_req_tx, _node_req_rx) = runtime_ctrl_msg_channel(10);
-                    let (pipeline_return_tx, _pipeline_return_rx) = pipeline_result_msg_channel(10);
+                    let (runtime_ctrl_tx, _runtime_ctrl_rx) = runtime_ctrl_msg_channel(10);
+                    let (pipeline_completion_tx, _pipeline_completion_rx) =
+                        pipeline_completion_msg_channel(10);
 
                     exporter
                         .set_pdata_receiver(test_node("exporter"), pdata_receiver)
@@ -538,8 +540,8 @@ fn bench_exporter(c: &mut Criterion) {
                     let _run_exporter_handle = local.spawn_local(async move {
                         exporter
                             .start(
-                                node_req_tx,
-                                pipeline_return_tx,
+                                runtime_ctrl_tx,
+                                pipeline_completion_tx,
                                 metrics_reporter,
                                 Interests::empty(),
                             )
@@ -603,8 +605,9 @@ fn bench_exporter(c: &mut Criterion) {
                     let control_sender = exporter.control_sender();
                     let pdata_sender = Sender::new_local_mpsc_sender(pdata_tx);
                     let pdata_receiver = Receiver::new_local_mpsc_receiver(pdata_rx);
-                    let (node_req_tx, _node_req_rx) = runtime_ctrl_msg_channel(10);
-                    let (pipeline_return_tx, _pipeline_return_rx) = pipeline_result_msg_channel(10);
+                    let (runtime_ctrl_tx, _runtime_ctrl_rx) = runtime_ctrl_msg_channel(10);
+                    let (pipeline_completion_tx, _pipeline_completion_rx) =
+                        pipeline_completion_msg_channel(10);
 
                     exporter
                         .set_pdata_receiver(test_node("exporter"), pdata_receiver)
@@ -615,8 +618,8 @@ fn bench_exporter(c: &mut Criterion) {
                     let _run_exporter_handle = local.spawn_local(async move {
                         exporter
                             .start(
-                                node_req_tx,
-                                pipeline_return_tx,
+                                runtime_ctrl_tx,
+                                pipeline_completion_tx,
                                 metrics_reporter,
                                 Interests::empty(),
                             )
