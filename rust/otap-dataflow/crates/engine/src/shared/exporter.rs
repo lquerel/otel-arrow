@@ -32,11 +32,12 @@
 //! To ensure scalability, the pipeline engine will start multiple instances of the same pipeline
 //! in parallel on different cores, each with its own exporter instance.
 
-use crate::control::{AckMsg, NackMsg, NodeControlMsg};
+use crate::control::{AckMsg, NackMsg};
 use crate::effect_handler::{EffectHandlerCore, TelemetryTimerCancelHandle, TimerCancelHandle};
 use crate::error::Error;
 use crate::message::{Message, SharedExporterInbox};
 use crate::node::NodeId;
+use crate::node_control_channel::SharedNodeControlReceiver;
 use crate::shared::message::SharedReceiver;
 use crate::terminal_state::TerminalState;
 use crate::{Interests, ReceivedAtNode};
@@ -57,13 +58,20 @@ impl<PData> ExporterInbox<PData> {
     /// Creates a new shared exporter inbox.
     #[must_use]
     pub(crate) fn new(
-        control_rx: SharedReceiver<NodeControlMsg<PData>>,
+        control_rx: SharedNodeControlReceiver<PData>,
         pdata_rx: SharedReceiver<PData>,
+        metrics_reporter: MetricsReporter,
         node_id: usize,
         interests: Interests,
     ) -> Self {
         Self {
-            inner: SharedExporterInbox::new_internal(control_rx, pdata_rx, node_id, interests),
+            inner: SharedExporterInbox::new_with_shared_control_channel(
+                control_rx,
+                pdata_rx,
+                metrics_reporter,
+                node_id,
+                interests,
+            ),
         }
     }
 }

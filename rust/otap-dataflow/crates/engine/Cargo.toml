@@ -20,6 +20,7 @@ test-utils = []
 
 [dependencies]
 otap-df-channel = { workspace = true }
+otap-df-control-channel = { workspace = true }
 otap-df-pdata = { workspace = true }
 otap-df-config = { workspace = true }
 otap-df-state = { workspace = true }

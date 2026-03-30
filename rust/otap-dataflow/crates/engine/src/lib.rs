@@ -57,7 +57,6 @@ pub mod receiver;
 
 mod attributes;
 mod channel_metrics;
-mod channel_mode;
 mod completion_emission_metrics;
 pub mod config;
 pub mod context;
@@ -69,6 +68,7 @@ pub mod entity_context;
 pub mod local;
 pub mod node;
 mod node_local_scheduler;
+mod node_control_channel;
 pub mod output_router;
 pub mod pipeline_ctrl;
 mod pipeline_metrics;

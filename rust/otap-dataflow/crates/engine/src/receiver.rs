@@ -9,24 +9,28 @@
 
 use crate::Interests;
 use crate::channel_metrics::ChannelMetricsRegistry;
-use crate::channel_mode::{LocalMode, SharedMode, wrap_control_channel_metrics};
 use crate::config::ReceiverConfig;
 use crate::context::PipelineContext;
 use crate::control::{
-    Controllable, NodeControlMsg, PipelineCompletionMsgSender, RuntimeCtrlMsgSender,
+    Controllable, NodeControlMsg, PipelineCompletionMsgSender, ReceiverControlSender,
+    RuntimeCtrlMsgSender,
 };
 use crate::effect_handler::SourceTagging;
 use crate::entity_context::NodeTelemetryGuard;
 use crate::error::{Error, ReceiverErrorKind};
-use crate::local::message::{LocalReceiver, LocalSender};
+use crate::local::message::LocalReceiver;
 use crate::local::receiver as local;
 use crate::message::{Receiver, Sender};
+use crate::node_control_channel::{
+    LocalReceiverControlReceiver, LocalReceiverControlSender, SharedReceiverControlReceiver,
+    SharedReceiverControlSender, attach_local_receiver_metrics, attach_shared_receiver_metrics,
+    local_receiver_channel, shared_receiver_channel,
+};
 use crate::node::{Node, NodeId, NodeWithPDataSender};
 use crate::shared::message::{SharedReceiver, SharedSender};
 use crate::shared::receiver as shared;
 use crate::terminal_state::TerminalState;
 use otap_df_channel::error::SendError;
-use otap_df_channel::mpsc;
 use otap_df_config::PortName;
 use otap_df_config::node::NodeUserConfig;
 use otap_df_telemetry::reporter::MetricsReporter;
@@ -37,6 +41,7 @@ use std::sync::Arc;
 ///
 /// Note: This is useful for creating a single interface for the receiver regardless of their
 /// 'sendability'.
+#[allow(private_interfaces)]
 pub enum ReceiverWrapper<PData> {
     /// A receiver with a `!Send` implementation.
     Local {
@@ -49,9 +54,9 @@ pub enum ReceiverWrapper<PData> {
         /// The receiver instance.
         receiver: Box<dyn local::Receiver<PData>>,
         /// A sender for control messages.
-        control_sender: LocalSender<NodeControlMsg<PData>>,
+        control_sender: LocalReceiverControlSender<PData>,
         /// A receiver for control messages.
-        control_receiver: LocalReceiver<NodeControlMsg<PData>>,
+        control_receiver: LocalReceiverControlReceiver<PData>,
         /// Senders for PData messages per output port.
         /// Uses the generic `Sender` so local receivers can still target shared channels when
         /// mixed local/shared wiring requires it.
@@ -74,9 +79,9 @@ pub enum ReceiverWrapper<PData> {
         /// The receiver instance.
         receiver: Box<dyn shared::Receiver<PData>>,
         /// A sender for control messages.
-        control_sender: SharedSender<NodeControlMsg<PData>>,
+        control_sender: SharedReceiverControlSender<PData>,
         /// A receiver for control messages.
-        control_receiver: SharedReceiver<NodeControlMsg<PData>>,
+        control_receiver: SharedReceiverControlReceiver<PData>,
         /// Senders for PData messages per output port.
         /// Uses `SharedSender` to keep the shared receiver `Send` for multi-threaded execution.
         pdata_senders: HashMap<PortName, SharedSender<PData>>,
@@ -91,12 +96,16 @@ pub enum ReceiverWrapper<PData> {
 
 #[async_trait::async_trait(?Send)]
 impl<PData> Controllable<PData> for ReceiverWrapper<PData> {
+    type ControlSender = ReceiverControlSender<PData>;
+
     /// Returns the control message sender for the receiver.
-    fn control_sender(&self) -> Sender<NodeControlMsg<PData>> {
+    fn control_sender(&self) -> Self::ControlSender {
         match self {
-            ReceiverWrapper::Local { control_sender, .. } => Sender::Local(control_sender.clone()),
+            ReceiverWrapper::Local { control_sender, .. } => {
+                ReceiverControlSender::Local(control_sender.clone())
+            }
             ReceiverWrapper::Shared { control_sender, .. } => {
-                Sender::Shared(control_sender.clone())
+                ReceiverControlSender::Shared(control_sender.clone())
             }
         }
     }
@@ -113,16 +122,15 @@ impl<PData> ReceiverWrapper<PData> {
     where
         R: local::Receiver<PData> + 'static,
     {
-        let (control_sender, control_receiver) =
-            mpsc::Channel::new(config.control_channel.capacity);
+        let (control_sender, control_receiver) = local_receiver_channel(config.control_channel.capacity);
 
         ReceiverWrapper::Local {
             node_id,
             user_config,
             runtime_config: config.clone(),
             receiver: Box::new(receiver),
-            control_sender: LocalSender::mpsc(control_sender),
-            control_receiver: LocalReceiver::mpsc(control_receiver),
+            control_sender,
+            control_receiver,
             pdata_senders: HashMap::new(),
             pdata_receiver: None,
             telemetry: None,
@@ -141,15 +149,15 @@ impl<PData> ReceiverWrapper<PData> {
         R: shared::Receiver<PData> + 'static,
     {
         let (control_sender, control_receiver) =
-            tokio::sync::mpsc::channel(config.control_channel.capacity);
+            shared_receiver_channel(config.control_channel.capacity);
 
         ReceiverWrapper::Shared {
             node_id,
             user_config,
             runtime_config: config.clone(),
             receiver: Box::new(receiver),
-            control_sender: SharedSender::mpsc(control_sender),
-            control_receiver: SharedReceiver::mpsc(control_receiver),
+            control_sender,
+            control_receiver,
             pdata_senders: HashMap::new(),
             pdata_receiver: None,
             telemetry: None,
@@ -218,7 +226,7 @@ impl<PData> ReceiverWrapper<PData> {
     pub(crate) fn with_control_channel_metrics(
         self,
         pipeline_ctx: &PipelineContext,
-        channel_metrics: &mut ChannelMetricsRegistry,
+        _channel_metrics: &mut ChannelMetricsRegistry,
         channel_metrics_enabled: bool,
     ) -> Self {
         match self {
@@ -235,17 +243,12 @@ impl<PData> ReceiverWrapper<PData> {
                 source_tag,
                 ..
             } => {
-                let (control_sender, control_receiver) =
-                    wrap_control_channel_metrics::<LocalMode, PData>(
-                        &node_id,
-                        pipeline_ctx,
-                        channel_metrics,
-                        channel_metrics_enabled,
-                        runtime_config.control_channel.capacity as u64,
-                        control_sender,
-                        control_receiver,
-                    );
-
+                let control_sender = attach_local_receiver_metrics(
+                    control_sender,
+                    &node_id,
+                    pipeline_ctx,
+                    channel_metrics_enabled,
+                );
                 ReceiverWrapper::Local {
                     node_id,
                     user_config,
@@ -272,17 +275,12 @@ impl<PData> ReceiverWrapper<PData> {
                 source_tag,
                 ..
             } => {
-                let (control_sender, control_receiver) =
-                    wrap_control_channel_metrics::<SharedMode, PData>(
-                        &node_id,
-                        pipeline_ctx,
-                        channel_metrics,
-                        channel_metrics_enabled,
-                        runtime_config.control_channel.capacity as u64,
-                        control_sender,
-                        control_receiver,
-                    );
-
+                let control_sender = attach_shared_receiver_metrics(
+                    control_sender,
+                    &node_id,
+                    pipeline_ctx,
+                    channel_metrics_enabled,
+                );
                 ReceiverWrapper::Shared {
                     node_id,
                     user_config,
@@ -332,7 +330,7 @@ impl<PData> ReceiverWrapper<PData> {
                     pdata_senders
                 };
                 let default_port = user_config.default_output.clone();
-                let ctrl_msg_chan = local::ControlChannel::new(Receiver::Local(control_receiver));
+                let ctrl_msg_chan = local::ControlChannel::new(control_receiver, metrics_reporter.clone());
                 let mut effect_handler = local::EffectHandler::new(
                     node_id,
                     msg_senders,
@@ -370,7 +368,7 @@ impl<PData> ReceiverWrapper<PData> {
                     pdata_senders
                 };
                 let default_port = user_config.default_output.clone();
-                let ctrl_msg_chan = shared::ControlChannel::new(control_receiver);
+                let ctrl_msg_chan = shared::ControlChannel::new(control_receiver, metrics_reporter.clone());
                 let mut effect_handler = shared::EffectHandler::new(
                     node_id,
                     msg_senders,

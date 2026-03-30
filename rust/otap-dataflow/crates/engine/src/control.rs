@@ -8,10 +8,13 @@
 use crate::clock;
 use crate::error::{Error, TypedError};
 use crate::message::Sender;
+pub use crate::node_control_channel::{NodeControlSender, ReceiverControlSender};
 use crate::node::{NodeId, NodeType};
 use crate::shared::message::{SharedReceiver, SharedSender};
 use bytemuck::Pod;
 use otap_df_channel::error::SendError;
+use otap_df_control_channel::LifecycleSendResult;
+use otap_df_telemetry::error::Error as TelemetryError;
 use otap_df_telemetry::reporter::MetricsReporter;
 use smallvec::SmallVec;
 use std::collections::HashMap;
@@ -337,10 +340,13 @@ pub enum PipelineCompletionMsg<PData> {
 /// updates, shutdown requests, or timer events. Implementers are not required to be thread-safe.
 #[async_trait::async_trait(?Send)]
 pub trait Controllable<PData> {
+    /// Role-specific control sender type for this node.
+    type ControlSender: Clone;
+
     /// Returns the sender for control messages to this node.
     ///
     /// Used for direct message passing from the pipeline engine.
-    fn control_sender(&self) -> Sender<NodeControlMsg<PData>>;
+    fn control_sender(&self) -> Self::ControlSender;
 }
 
 impl<PData> NodeControlMsg<PData> {
@@ -411,6 +417,94 @@ pub fn pipeline_completion_msg_channel<PData>(
     (SharedSender::mpsc(tx), SharedReceiver::mpsc(rx))
 }
 
+#[derive(Clone)]
+pub(crate) enum RegisteredControlSender<PData> {
+    Receiver(ReceiverControlSender<PData>),
+    Node(NodeControlSender<PData>),
+    Legacy(Sender<NodeControlMsg<PData>>),
+}
+
+impl<PData> From<ReceiverControlSender<PData>> for RegisteredControlSender<PData> {
+    fn from(sender: ReceiverControlSender<PData>) -> Self {
+        Self::Receiver(sender)
+    }
+}
+
+impl<PData> From<NodeControlSender<PData>> for RegisteredControlSender<PData> {
+    fn from(sender: NodeControlSender<PData>) -> Self {
+        Self::Node(sender)
+    }
+}
+
+impl<PData> From<Sender<NodeControlMsg<PData>>> for RegisteredControlSender<PData> {
+    fn from(sender: Sender<NodeControlMsg<PData>>) -> Self {
+        Self::Legacy(sender)
+    }
+}
+
+impl<PData> RegisteredControlSender<PData> {
+    async fn send(
+        &self,
+        msg: NodeControlMsg<PData>,
+    ) -> Result<(), SendError<NodeControlMsg<PData>>> {
+        match self {
+            Self::Receiver(sender) => sender.send(msg).await,
+            Self::Node(sender) => sender.send(msg).await,
+            Self::Legacy(sender) => sender.send(msg).await,
+        }
+    }
+
+    fn try_send(&self, msg: NodeControlMsg<PData>) -> Result<(), SendError<NodeControlMsg<PData>>> {
+        match self {
+            Self::Receiver(sender) => sender.try_send(msg),
+            Self::Node(sender) => sender.try_send(msg),
+            Self::Legacy(sender) => sender.try_send(msg),
+        }
+    }
+
+    fn begin_drain_ingress(
+        &self,
+        deadline: Instant,
+        reason: String,
+    ) -> Result<LifecycleSendResult, SendError<NodeControlMsg<PData>>> {
+        match self {
+            Self::Receiver(sender) => Ok(sender.accept_drain_ingress(deadline, reason)),
+            Self::Node(_) => Err(SendError::Closed(NodeControlMsg::DrainIngress {
+                deadline,
+                reason,
+            })),
+            Self::Legacy(sender) => sender
+                .try_send(NodeControlMsg::DrainIngress { deadline, reason })
+                .map(|()| LifecycleSendResult::Accepted),
+        }
+    }
+
+    fn begin_shutdown(
+        &self,
+        deadline: Instant,
+        reason: String,
+    ) -> Result<LifecycleSendResult, SendError<NodeControlMsg<PData>>> {
+        match self {
+            Self::Receiver(sender) => Ok(sender.accept_shutdown(deadline, reason)),
+            Self::Node(sender) => Ok(sender.accept_shutdown(deadline, reason)),
+            Self::Legacy(sender) => sender
+                .try_send(NodeControlMsg::Shutdown { deadline, reason })
+                .map(|()| LifecycleSendResult::Accepted),
+        }
+    }
+
+    fn report_metrics(
+        &self,
+        metrics_reporter: &mut MetricsReporter,
+    ) -> Result<(), TelemetryError> {
+        match self {
+            Self::Receiver(sender) => sender.report_metrics(metrics_reporter),
+            Self::Node(sender) => sender.report_metrics(metrics_reporter),
+            Self::Legacy(_) => Ok(()),
+        }
+    }
+}
+
 /// Typed control message sender for a specific node type.
 #[derive(Clone)]
 pub struct TypedControlSender<PData> {
@@ -419,7 +513,7 @@ pub struct TypedControlSender<PData> {
     /// Type of the node (Receiver, Processor, Exporter).
     pub node_type: NodeType,
     /// The control message sender for the node.
-    pub sender: Sender<NodeControlMsg<PData>>,
+    sender: RegisteredControlSender<PData>,
 }
 
 /// Holds the control message senders for all nodes in the pipeline.
@@ -445,6 +539,29 @@ impl<PData> TypedControlSender<PData> {
         msg: NodeControlMsg<PData>,
     ) -> Result<(), SendError<NodeControlMsg<PData>>> {
         self.sender.try_send(msg)
+    }
+
+    pub(crate) fn begin_drain_ingress(
+        &self,
+        deadline: Instant,
+        reason: String,
+    ) -> Result<LifecycleSendResult, SendError<NodeControlMsg<PData>>> {
+        self.sender.begin_drain_ingress(deadline, reason)
+    }
+
+    pub(crate) fn begin_shutdown(
+        &self,
+        deadline: Instant,
+        reason: String,
+    ) -> Result<LifecycleSendResult, SendError<NodeControlMsg<PData>>> {
+        self.sender.begin_shutdown(deadline, reason)
+    }
+
+    pub(crate) fn report_metrics(
+        &self,
+        metrics_reporter: &mut MetricsReporter,
+    ) -> Result<(), TelemetryError> {
+        self.sender.report_metrics(metrics_reporter)
     }
 }
 
@@ -478,18 +595,20 @@ impl<PData> ControlSenders<PData> {
     /// * `node_id` - Unique identifier of the node.
     /// * `node_type` - Type of the node (Receiver, Processor, Exporter).
     /// * `sender` - The control message sender for the node.
-    pub fn register(
+    pub(crate) fn register<S>(
         &mut self,
         node_id: NodeId,
         node_type: NodeType,
-        sender: Sender<NodeControlMsg<PData>>,
-    ) {
+        sender: S,
+    ) where
+        S: Into<RegisteredControlSender<PData>>,
+    {
         _ = self.senders.insert(
             node_id.index,
             TypedControlSender {
                 node_id,
                 node_type,
-                sender,
+                sender: sender.into(),
             },
         );
     }
@@ -550,12 +669,7 @@ impl<PData> ControlSenders<PData> {
             }
 
             if let Err(error) = typed_sender
-                .sender
-                .send(NodeControlMsg::DrainIngress {
-                    deadline,
-                    reason: reason.clone(),
-                })
-                .await
+                .begin_drain_ingress(deadline, reason.clone())
             {
                 errors.push(TypedError::NodeControlMsgSendError {
                     node_id: typed_sender.node_id.index,
@@ -625,12 +739,7 @@ impl<PData> ControlSenders<PData> {
                 }
             }
 
-            let shutdown_msg = NodeControlMsg::Shutdown {
-                deadline,
-                reason: reason.clone(),
-            };
-
-            if let Err(error) = typed_sender.sender.send(shutdown_msg).await {
+            if let Err(error) = typed_sender.begin_shutdown(deadline, reason.clone()) {
                 errors.push(TypedError::NodeControlMsgSendError {
                     node_id: typed_sender.node_id.index,
                     error,
@@ -643,6 +752,16 @@ impl<PData> ControlSenders<PData> {
         } else {
             Err(errors)
         }
+    }
+
+    pub(crate) fn report_metrics(
+        &self,
+        metrics_reporter: &mut MetricsReporter,
+    ) -> Result<(), TelemetryError> {
+        for sender in self.senders.values() {
+            sender.report_metrics(metrics_reporter)?;
+        }
+        Ok(())
     }
 }
 

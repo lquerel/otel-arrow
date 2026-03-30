@@ -39,8 +39,9 @@ use crate::effect_handler::{
 };
 use crate::error::{Error, TypedError};
 use crate::node::NodeId;
+use crate::node_control_channel::{SharedReceiverControlReceiver, push_receiver_event};
 use crate::output_router::OutputRouter;
-use crate::shared::message::{SharedReceiver, SharedSender};
+use crate::shared::message::SharedSender;
 use crate::terminal_state::TerminalState;
 use async_trait::async_trait;
 use otap_df_channel::error::RecvError;
@@ -48,6 +49,7 @@ use otap_df_config::PortName;
 use otap_df_telemetry::error::Error as TelemetryError;
 use otap_df_telemetry::metrics::{MetricSet, MetricSetHandler};
 use otap_df_telemetry::reporter::MetricsReporter;
+use std::collections::VecDeque;
 use std::collections::HashMap;
 use std::net::SocketAddr;
 use std::time::Duration;
@@ -72,14 +74,23 @@ pub trait Receiver<PData> {
 /// This structure wraps a receiver end of a channel that carries [`NodeControlMsg`]
 /// values used to control the behavior of a receiver at runtime.
 pub struct ControlChannel<PData> {
-    rx: SharedReceiver<NodeControlMsg<PData>>,
+    rx: SharedReceiverControlReceiver<PData>,
+    pending: VecDeque<NodeControlMsg<PData>>,
+    metrics_reporter: MetricsReporter,
 }
 
 impl<PData> ControlChannel<PData> {
     /// Creates a new `ControlChannelShared` with the given receiver.
     #[must_use]
-    pub fn new(rx: SharedReceiver<NodeControlMsg<PData>>) -> Self {
-        Self { rx }
+    pub(crate) fn new(
+        rx: SharedReceiverControlReceiver<PData>,
+        metrics_reporter: MetricsReporter,
+    ) -> Self {
+        Self {
+            rx,
+            pending: VecDeque::new(),
+            metrics_reporter,
+        }
     }
 
     /// Asynchronously receives the next control message.
@@ -92,7 +103,16 @@ impl<PData> ControlChannel<PData> {
     ///
     /// Returns a [`RecvError`] if the channel is closed.
     pub async fn recv(&mut self) -> Result<NodeControlMsg<PData>, RecvError> {
-        self.rx.recv().await
+        loop {
+            if let Some(msg) = self.pending.pop_front() {
+                return Ok(msg);
+            }
+
+            let Some(event) = self.rx.recv_event().await else {
+                return Err(RecvError::Closed);
+            };
+            push_receiver_event(event, &mut self.pending, &self.metrics_reporter);
+        }
     }
 }
 

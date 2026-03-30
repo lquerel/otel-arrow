@@ -82,17 +82,6 @@ impl<T> LocalSender<T> {
         sender
     }
 
-    pub(crate) fn into_mpsc(self) -> Result<mpsc::Sender<T>, Self> {
-        let LocalSender { inner, metrics } = self;
-        match inner {
-            LocalSenderInner::Mpsc(sender) => Ok(sender),
-            LocalSenderInner::Mpmc(sender) => Err(Self {
-                inner: LocalSenderInner::Mpmc(sender),
-                metrics,
-            }),
-        }
-    }
-
     /// Sends a message to the channel.
     pub async fn send(&self, msg: T) -> Result<(), SendError<T>> {
         let result = match &self.inner {
@@ -194,17 +183,6 @@ impl<T> LocalReceiver<T> {
         let mut receiver = Self::mpmc(receiver);
         receiver.metrics = Some(handle);
         receiver
-    }
-
-    pub(crate) fn into_mpsc(self) -> Result<mpsc::Receiver<T>, Self> {
-        let LocalReceiver { inner, metrics } = self;
-        match inner {
-            LocalReceiverInner::Mpsc(receiver) => Ok(receiver),
-            LocalReceiverInner::Mpmc(receiver) => Err(Self {
-                inner: LocalReceiverInner::Mpmc(receiver),
-                metrics,
-            }),
-        }
     }
 
     /// Receives a message from the channel.

@@ -11,8 +11,8 @@ use crate::Interests;
 use crate::config::ExporterConfig;
 use crate::context::{ControllerContext, PipelineContext};
 use crate::control::{
-    Controllable, NodeControlMsg, PipelineCompletionMsgReceiver, RuntimeCtrlMsgReceiver,
-    pipeline_completion_msg_channel, runtime_ctrl_msg_channel,
+    Controllable, NodeControlMsg, NodeControlSender, PipelineCompletionMsgReceiver,
+    RuntimeCtrlMsgReceiver, pipeline_completion_msg_channel, runtime_ctrl_msg_channel,
 };
 use crate::error::Error;
 use crate::exporter::ExporterWrapper;
@@ -38,7 +38,7 @@ use tokio::time::sleep;
 /// A context object that holds transmitters for use in test tasks.
 pub struct TestContext<PData> {
     /// Sender for control messages
-    control_tx: Sender<NodeControlMsg<PData>>,
+    control_tx: NodeControlSender<PData>,
     /// Sender for pipeline data
     pdata_tx: Sender<PData>,
     /// Message counter for tracking processed messages
@@ -65,7 +65,7 @@ impl<PData> TestContext<PData> {
     /// Creates a new TestContext with the given transmitters.
     #[must_use]
     pub const fn new(
-        control_tx: Sender<NodeControlMsg<PData>>,
+        control_tx: NodeControlSender<PData>,
         pdata_tx: Sender<PData>,
         counters: CtrlMsgCounters,
     ) -> Self {
@@ -181,7 +181,7 @@ pub struct TestPhase<PData> {
 
     counters: CtrlMsgCounters,
 
-    control_sender: Sender<NodeControlMsg<PData>>,
+    control_sender: NodeControlSender<PData>,
     pdata_sender: Sender<PData>,
 
     /// Join handle for the starting the exporter task

@@ -6,11 +6,16 @@
 use crate::clock;
 use crate::control::{AckMsg, NackMsg, NodeControlMsg};
 use crate::local::message::{LocalReceiver, LocalSender};
+use crate::node_control_channel::{
+    LocalNodeControlReceiver, SharedNodeControlReceiver, control_stats_is_empty, push_node_event,
+};
 use crate::node_local_scheduler::NodeLocalSchedulerHandle;
 use crate::shared::message::{SharedReceiver, SharedSender};
 use crate::{Interests, ReceivedAtNode};
 use otap_df_channel::error::{RecvError, SendError};
 use otap_df_channel::mpsc;
+use otap_df_telemetry::reporter::MetricsReporter;
+use std::collections::VecDeque;
 use std::future::Future;
 use std::ops::Add;
 use std::time::{Duration, Instant};
@@ -228,6 +233,162 @@ impl<T> ChannelReceiver<T> for SharedReceiver<T> {
 
     fn is_empty(&self) -> bool {
         SharedReceiver::is_empty(self)
+    }
+}
+
+pub(crate) struct LocalNodeControlInboxReceiver<PData> {
+    inner: LocalNodeControlReceiver<PData>,
+    pending: VecDeque<NodeControlMsg<PData>>,
+    metrics_reporter: MetricsReporter,
+}
+
+impl<PData> LocalNodeControlInboxReceiver<PData> {
+    fn new(inner: LocalNodeControlReceiver<PData>, metrics_reporter: MetricsReporter) -> Self {
+        Self {
+            inner,
+            pending: VecDeque::new(),
+            metrics_reporter,
+        }
+    }
+}
+
+pub(crate) struct SharedNodeControlInboxReceiver<PData> {
+    inner: SharedNodeControlReceiver<PData>,
+    pending: VecDeque<NodeControlMsg<PData>>,
+    metrics_reporter: MetricsReporter,
+}
+
+impl<PData> SharedNodeControlInboxReceiver<PData> {
+    fn new(inner: SharedNodeControlReceiver<PData>, metrics_reporter: MetricsReporter) -> Self {
+        Self {
+            inner,
+            pending: VecDeque::new(),
+            metrics_reporter,
+        }
+    }
+}
+
+/// Control-receiver adapter used by inboxes to consume either legacy
+/// `NodeControlMsg` channels or the integrated control-channel receiver side.
+#[allow(private_interfaces)]
+pub enum InboxNodeControlReceiver<PData> {
+    /// Legacy raw control-message receiver.
+    Legacy(Receiver<NodeControlMsg<PData>>),
+    /// Integrated local control-channel receiver.
+    Local(LocalNodeControlInboxReceiver<PData>),
+    /// Integrated shared control-channel receiver.
+    Shared(SharedNodeControlInboxReceiver<PData>),
+}
+
+impl<PData> ChannelReceiver<NodeControlMsg<PData>> for LocalNodeControlInboxReceiver<PData> {
+    fn recv(
+        &mut self,
+    ) -> impl Future<Output = Result<NodeControlMsg<PData>, RecvError>> + '_ {
+        async move {
+            loop {
+                if let Some(msg) = self.pending.pop_front() {
+                    return Ok(msg);
+                }
+
+                let Some(event) = self.inner.recv_event().await else {
+                    return Err(RecvError::Closed);
+                };
+                push_node_event(event, &mut self.pending, &self.metrics_reporter);
+            }
+        }
+    }
+
+    fn try_recv(&mut self) -> Result<NodeControlMsg<PData>, RecvError> {
+        if let Some(msg) = self.pending.pop_front() {
+            return Ok(msg);
+        }
+
+        if let Some(event) = self.inner.try_recv_event() {
+            push_node_event(event, &mut self.pending, &self.metrics_reporter);
+            return self.pending.pop_front().ok_or(RecvError::Empty);
+        }
+
+        let stats = self.inner.stats();
+        if stats.closed && control_stats_is_empty(&stats) {
+            Err(RecvError::Closed)
+        } else {
+            Err(RecvError::Empty)
+        }
+    }
+
+    fn is_empty(&self) -> bool {
+        self.pending.is_empty() && control_stats_is_empty(&self.inner.stats())
+    }
+}
+
+impl<PData> ChannelReceiver<NodeControlMsg<PData>> for SharedNodeControlInboxReceiver<PData> {
+    fn recv(
+        &mut self,
+    ) -> impl Future<Output = Result<NodeControlMsg<PData>, RecvError>> + '_ {
+        async move {
+            loop {
+                if let Some(msg) = self.pending.pop_front() {
+                    return Ok(msg);
+                }
+
+                let Some(event) = self.inner.recv_event().await else {
+                    return Err(RecvError::Closed);
+                };
+                push_node_event(event, &mut self.pending, &self.metrics_reporter);
+            }
+        }
+    }
+
+    fn try_recv(&mut self) -> Result<NodeControlMsg<PData>, RecvError> {
+        if let Some(msg) = self.pending.pop_front() {
+            return Ok(msg);
+        }
+
+        if let Some(event) = self.inner.try_recv_event() {
+            push_node_event(event, &mut self.pending, &self.metrics_reporter);
+            return self.pending.pop_front().ok_or(RecvError::Empty);
+        }
+
+        let stats = self.inner.stats();
+        if stats.closed && control_stats_is_empty(&stats) {
+            Err(RecvError::Closed)
+        } else {
+            Err(RecvError::Empty)
+        }
+    }
+
+    fn is_empty(&self) -> bool {
+        self.pending.is_empty() && control_stats_is_empty(&self.inner.stats())
+    }
+}
+
+impl<PData> ChannelReceiver<NodeControlMsg<PData>> for InboxNodeControlReceiver<PData> {
+    fn recv(
+        &mut self,
+    ) -> impl Future<Output = Result<NodeControlMsg<PData>, RecvError>> + '_ {
+        async move {
+            match self {
+                Self::Legacy(receiver) => receiver.recv().await,
+                Self::Local(receiver) => receiver.recv().await,
+                Self::Shared(receiver) => receiver.recv().await,
+            }
+        }
+    }
+
+    fn try_recv(&mut self) -> Result<NodeControlMsg<PData>, RecvError> {
+        match self {
+            Self::Legacy(receiver) => receiver.try_recv(),
+            Self::Local(receiver) => receiver.try_recv(),
+            Self::Shared(receiver) => receiver.try_recv(),
+        }
+    }
+
+    fn is_empty(&self) -> bool {
+        match self {
+            Self::Legacy(receiver) => receiver.is_empty(),
+            Self::Local(receiver) => receiver.is_empty(),
+            Self::Shared(receiver) => receiver.is_empty(),
+        }
     }
 }
 
@@ -733,7 +894,7 @@ where
 /// controlled by the engine via `accept_pdata()`, and the admission guard
 /// remains authoritative during shutdown draining.
 pub struct ProcessorInbox<PData> {
-    core: InboxCore<PData, Receiver<NodeControlMsg<PData>>, Receiver<PData>>,
+    core: InboxCore<PData, InboxNodeControlReceiver<PData>, Receiver<PData>>,
 }
 
 impl<PData> ProcessorInbox<PData> {
@@ -763,6 +924,22 @@ impl<PData> ProcessorInbox<PData> {
         node_id: usize,
         interests: Interests,
     ) -> Self {
+        Self::new_with_control_receiver(
+            InboxNodeControlReceiver::Legacy(control_rx),
+            pdata_rx,
+            local_scheduler,
+            node_id,
+            interests,
+        )
+    }
+
+    pub(crate) fn new_with_control_receiver(
+        control_rx: InboxNodeControlReceiver<PData>,
+        pdata_rx: Receiver<PData>,
+        local_scheduler: NodeLocalSchedulerHandle<PData>,
+        node_id: usize,
+        interests: Interests,
+    ) -> Self {
         Self {
             core: InboxCore::new(
                 control_rx,
@@ -772,6 +949,46 @@ impl<PData> ProcessorInbox<PData> {
                 interests,
             ),
         }
+    }
+
+    pub(crate) fn new_with_local_control_channel(
+        control_rx: LocalNodeControlReceiver<PData>,
+        pdata_rx: Receiver<PData>,
+        local_scheduler: NodeLocalSchedulerHandle<PData>,
+        metrics_reporter: MetricsReporter,
+        node_id: usize,
+        interests: Interests,
+    ) -> Self {
+        Self::new_with_control_receiver(
+            InboxNodeControlReceiver::Local(LocalNodeControlInboxReceiver::new(
+                control_rx,
+                metrics_reporter,
+            )),
+            pdata_rx,
+            local_scheduler,
+            node_id,
+            interests,
+        )
+    }
+
+    pub(crate) fn new_with_shared_control_channel(
+        control_rx: SharedNodeControlReceiver<PData>,
+        pdata_rx: Receiver<PData>,
+        local_scheduler: NodeLocalSchedulerHandle<PData>,
+        metrics_reporter: MetricsReporter,
+        node_id: usize,
+        interests: Interests,
+    ) -> Self {
+        Self::new_with_control_receiver(
+            InboxNodeControlReceiver::Shared(SharedNodeControlInboxReceiver::new(
+                control_rx,
+                metrics_reporter,
+            )),
+            pdata_rx,
+            local_scheduler,
+            node_id,
+            interests,
+        )
     }
 }
 
@@ -792,7 +1009,7 @@ impl<PData: ReceivedAtNode> ProcessorInbox<PData> {
 /// closed normal pdata admission.
 pub struct ExporterInbox<
     PData,
-    ControlRx = Receiver<NodeControlMsg<PData>>,
+    ControlRx = InboxNodeControlReceiver<PData>,
     PDataRx = Receiver<PData>,
 > {
     core: InboxCore<PData, ControlRx, PDataRx>,
@@ -842,7 +1059,56 @@ impl<PData> ExporterInbox<PData> {
         node_id: usize,
         interests: Interests,
     ) -> Self {
+        Self::new_internal(
+            InboxNodeControlReceiver::Legacy(control_rx),
+            pdata_rx,
+            node_id,
+            interests,
+        )
+    }
+
+    pub(crate) fn new_with_control_channel(
+        control_rx: InboxNodeControlReceiver<PData>,
+        pdata_rx: Receiver<PData>,
+        node_id: usize,
+        interests: Interests,
+    ) -> Self {
         Self::new_internal(control_rx, pdata_rx, node_id, interests)
+    }
+
+    pub(crate) fn new_with_local_control_channel(
+        control_rx: LocalNodeControlReceiver<PData>,
+        pdata_rx: Receiver<PData>,
+        metrics_reporter: MetricsReporter,
+        node_id: usize,
+        interests: Interests,
+    ) -> Self {
+        Self::new_with_control_channel(
+            InboxNodeControlReceiver::Local(LocalNodeControlInboxReceiver::new(
+                control_rx,
+                metrics_reporter,
+            )),
+            pdata_rx,
+            node_id,
+            interests,
+        )
+    }
+}
+
+impl<PData> ExporterInbox<PData, SharedNodeControlInboxReceiver<PData>, SharedReceiver<PData>> {
+    pub(crate) fn new_with_shared_control_channel(
+        control_rx: SharedNodeControlReceiver<PData>,
+        pdata_rx: SharedReceiver<PData>,
+        metrics_reporter: MetricsReporter,
+        node_id: usize,
+        interests: Interests,
+    ) -> Self {
+        Self::new_internal(
+            SharedNodeControlInboxReceiver::new(control_rx, metrics_reporter),
+            pdata_rx,
+            node_id,
+            interests,
+        )
     }
 }
 
@@ -868,7 +1134,7 @@ pub type ExporterMessageChannel<
 
 /// Send-friendly exporter inbox type for shared exporter runtimes.
 pub(crate) type SharedExporterInbox<PData> =
-    ExporterInbox<PData, SharedReceiver<NodeControlMsg<PData>>, SharedReceiver<PData>>;
+    ExporterInbox<PData, SharedNodeControlInboxReceiver<PData>, SharedReceiver<PData>>;
 
 #[cfg(test)]
 mod tests {

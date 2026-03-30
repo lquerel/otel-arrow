@@ -9,8 +9,8 @@
 use crate::Interests;
 use crate::config::ReceiverConfig;
 use crate::control::{
-    Controllable, NodeControlMsg, RuntimeCtrlMsgReceiver, pipeline_completion_msg_channel,
-    runtime_ctrl_msg_channel,
+    Controllable, NodeControlMsg, ReceiverControlSender, RuntimeCtrlMsgReceiver,
+    pipeline_completion_msg_channel, runtime_ctrl_msg_channel,
 };
 use crate::error::Error;
 use crate::local::message::{LocalReceiver, LocalSender};
@@ -32,14 +32,14 @@ use tokio::time::sleep;
 /// Context used during the test phase of a test.
 pub struct TestContext<PData> {
     /// Sender for control messages
-    control_sender: Sender<NodeControlMsg<PData>>,
+    control_sender: ReceiverControlSender<PData>,
 }
 
 /// Context used during the validation phase of a test (!Send context).
 pub struct NotSendValidateContext<PData> {
     pdata_receiver: Receiver<PData>,
     counters: CtrlMsgCounters,
-    control_sender: Sender<NodeControlMsg<PData>>,
+    control_sender: ReceiverControlSender<PData>,
 }
 
 /// Context used during the validation phase of a test (Send context).
@@ -157,7 +157,7 @@ pub struct TestPhase<PData> {
     /// Local task set for non-Send futures
     local_tasks: LocalSet,
 
-    control_sender: Sender<NodeControlMsg<PData>>,
+    control_sender: ReceiverControlSender<PData>,
     receiver: ReceiverWrapper<PData>,
     counters: CtrlMsgCounters,
 }
@@ -174,7 +174,7 @@ pub struct ValidationPhase<PData> {
     pdata_receiver: Receiver<PData>,
 
     /// Control sender for injecting control messages during validation
-    control_sender: Sender<NodeControlMsg<PData>>,
+    control_sender: ReceiverControlSender<PData>,
 
     /// Join handle for the running the receiver task
     run_receiver_handle: tokio::task::JoinHandle<()>,

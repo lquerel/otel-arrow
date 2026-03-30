@@ -9,24 +9,27 @@
 
 use crate::Interests;
 use crate::channel_metrics::ChannelMetricsRegistry;
-use crate::channel_mode::{LocalMode, SharedMode, wrap_control_channel_metrics};
 use crate::completion_emission_metrics::CompletionEmissionMetricsHandle;
 use crate::config::ExporterConfig;
 use crate::context::PipelineContext;
 use crate::control::{
-    Controllable, NodeControlMsg, PipelineCompletionMsgSender, RuntimeCtrlMsgSender,
+    Controllable, NodeControlMsg, NodeControlSender, PipelineCompletionMsgSender,
+    RuntimeCtrlMsgSender,
 };
 use crate::entity_context::NodeTelemetryGuard;
 use crate::error::{Error, ExporterErrorKind};
 use crate::local::exporter as local;
-use crate::local::message::{LocalReceiver, LocalSender};
-use crate::message::{ExporterInbox, Receiver, Sender};
+use crate::message::{ExporterInbox, Receiver};
 use crate::node::{Node, NodeId, NodeWithPDataReceiver};
+use crate::node_control_channel::{
+    LocalNodeControlReceiver, LocalNodeControlSender, SharedNodeControlReceiver,
+    SharedNodeControlSender, attach_local_node_metrics, attach_shared_node_metrics,
+    local_node_channel, shared_node_channel,
+};
 use crate::shared::exporter as shared;
-use crate::shared::message::{SharedReceiver, SharedSender};
+use crate::shared::message::SharedReceiver;
 use crate::terminal_state::TerminalState;
 use otap_df_channel::error::SendError;
-use otap_df_channel::mpsc;
 use otap_df_config::node::NodeUserConfig;
 use otap_df_telemetry::reporter::MetricsReporter;
 use std::sync::Arc;
@@ -35,6 +38,7 @@ use std::sync::Arc;
 ///
 /// Note: This is useful for creating a single interface for the exporter regardless of their
 /// 'sendability'.
+#[allow(private_interfaces)]
 pub enum ExporterWrapper<PData> {
     /// An exporter with a `!Send` implementation.
     Local {
@@ -47,9 +51,9 @@ pub enum ExporterWrapper<PData> {
         /// The exporter instance.
         exporter: Box<dyn local::Exporter<PData>>,
         /// A sender for control messages.
-        control_sender: LocalSender<NodeControlMsg<PData>>,
+        control_sender: LocalNodeControlSender<PData>,
         /// A receiver for control messages.
-        control_receiver: LocalReceiver<NodeControlMsg<PData>>,
+        control_receiver: LocalNodeControlReceiver<PData>,
         /// Receiver for PData messages.
         pdata_receiver: Option<Receiver<PData>>,
         /// Telemetry guard for node lifecycle cleanup.
@@ -66,9 +70,9 @@ pub enum ExporterWrapper<PData> {
         /// The exporter instance.
         exporter: Box<dyn shared::Exporter<PData>>,
         /// A sender for control messages.
-        control_sender: SharedSender<NodeControlMsg<PData>>,
+        control_sender: SharedNodeControlSender<PData>,
         /// A receiver for control messages.
-        control_receiver: SharedReceiver<NodeControlMsg<PData>>,
+        control_receiver: SharedNodeControlReceiver<PData>,
         /// Receiver for PData messages.
         pdata_receiver: Option<SharedReceiver<PData>>,
         /// Telemetry guard for node lifecycle cleanup.
@@ -78,12 +82,16 @@ pub enum ExporterWrapper<PData> {
 
 #[async_trait::async_trait(?Send)]
 impl<PData> Controllable<PData> for ExporterWrapper<PData> {
+    type ControlSender = NodeControlSender<PData>;
+
     /// Returns the control message sender for the exporter.
-    fn control_sender(&self) -> Sender<NodeControlMsg<PData>> {
+    fn control_sender(&self) -> Self::ControlSender {
         match self {
-            ExporterWrapper::Local { control_sender, .. } => Sender::Local(control_sender.clone()),
+            ExporterWrapper::Local { control_sender, .. } => {
+                NodeControlSender::Local(control_sender.clone())
+            }
             ExporterWrapper::Shared { control_sender, .. } => {
-                Sender::Shared(control_sender.clone())
+                NodeControlSender::Shared(control_sender.clone())
             }
         }
     }
@@ -101,16 +109,15 @@ impl<PData> ExporterWrapper<PData> {
     where
         E: local::Exporter<PData> + 'static,
     {
-        let (control_sender, control_receiver) =
-            mpsc::Channel::new(config.control_channel.capacity);
+        let (control_sender, control_receiver) = local_node_channel(config.control_channel.capacity);
 
         ExporterWrapper::Local {
             node_id,
             user_config,
             runtime_config: config.clone(),
             exporter: Box::new(exporter),
-            control_sender: LocalSender::mpsc(control_sender),
-            control_receiver: LocalReceiver::mpsc(control_receiver),
+            control_sender,
+            control_receiver,
             pdata_receiver: None, // This will be set later
             telemetry: None,
         }
@@ -127,16 +134,15 @@ impl<PData> ExporterWrapper<PData> {
     where
         E: shared::Exporter<PData> + 'static,
     {
-        let (control_sender, control_receiver) =
-            tokio::sync::mpsc::channel(config.control_channel.capacity);
+        let (control_sender, control_receiver) = shared_node_channel(config.control_channel.capacity);
 
         ExporterWrapper::Shared {
             node_id,
             user_config,
             runtime_config: config.clone(),
             exporter: Box::new(exporter),
-            control_sender: SharedSender::mpsc(control_sender),
-            control_receiver: SharedReceiver::mpsc(control_receiver),
+            control_sender,
+            control_receiver,
             pdata_receiver: None, // This will be set later
             telemetry: None,
         }
@@ -195,7 +201,7 @@ impl<PData> ExporterWrapper<PData> {
     pub(crate) fn with_control_channel_metrics(
         self,
         pipeline_ctx: &PipelineContext,
-        channel_metrics: &mut ChannelMetricsRegistry,
+        _channel_metrics: &mut ChannelMetricsRegistry,
         channel_metrics_enabled: bool,
     ) -> Self {
         match self {
@@ -210,17 +216,12 @@ impl<PData> ExporterWrapper<PData> {
                 telemetry,
                 ..
             } => {
-                let (control_sender, control_receiver) =
-                    wrap_control_channel_metrics::<LocalMode, PData>(
-                        &node_id,
-                        pipeline_ctx,
-                        channel_metrics,
-                        channel_metrics_enabled,
-                        runtime_config.control_channel.capacity as u64,
-                        control_sender,
-                        control_receiver,
-                    );
-
+                let control_sender = attach_local_node_metrics(
+                    control_sender,
+                    &node_id,
+                    pipeline_ctx,
+                    channel_metrics_enabled,
+                );
                 ExporterWrapper::Local {
                     node_id,
                     user_config,
@@ -243,17 +244,12 @@ impl<PData> ExporterWrapper<PData> {
                 telemetry,
                 ..
             } => {
-                let (control_sender, control_receiver) =
-                    wrap_control_channel_metrics::<SharedMode, PData>(
-                        &node_id,
-                        pipeline_ctx,
-                        channel_metrics,
-                        channel_metrics_enabled,
-                        runtime_config.control_channel.capacity as u64,
-                        control_sender,
-                        control_receiver,
-                    );
-
+                let control_sender = attach_shared_node_metrics(
+                    control_sender,
+                    &node_id,
+                    pipeline_ctx,
+                    channel_metrics_enabled,
+                );
                 ExporterWrapper::Shared {
                     node_id,
                     user_config,
@@ -306,7 +302,7 @@ impl<PData> ExporterWrapper<PData> {
                 metrics_reporter,
             ) => {
                 let mut effect_handler =
-                    local::EffectHandler::new(node_id.clone(), metrics_reporter);
+                    local::EffectHandler::new(node_id.clone(), metrics_reporter.clone());
                 let pdata_rx = pdata_receiver.ok_or_else(|| Error::ExporterError {
                     exporter: effect_handler.exporter_id(),
                     kind: ExporterErrorKind::Configuration,
@@ -323,9 +319,10 @@ impl<PData> ExporterWrapper<PData> {
                 effect_handler
                     .core
                     .set_completion_emission_metrics(completion_emission_metrics.clone());
-                let inbox = ExporterInbox::new(
-                    Receiver::Local(control_receiver),
+                let inbox = ExporterInbox::new_with_local_control_channel(
+                    control_receiver,
                     pdata_rx,
+                    metrics_reporter.clone(),
                     node_id.index,
                     node_interests,
                 );
@@ -342,7 +339,7 @@ impl<PData> ExporterWrapper<PData> {
                 metrics_reporter,
             ) => {
                 let mut effect_handler =
-                    shared::EffectHandler::new(node_id.clone(), metrics_reporter);
+                    shared::EffectHandler::new(node_id.clone(), metrics_reporter.clone());
                 let pdata_rx = pdata_receiver.ok_or_else(|| Error::ExporterError {
                     exporter: effect_handler.exporter_id(),
                     kind: ExporterErrorKind::Configuration,
@@ -362,6 +359,7 @@ impl<PData> ExporterWrapper<PData> {
                 let inbox = shared::ExporterInbox::new(
                     control_receiver,
                     pdata_rx,
+                    metrics_reporter.clone(),
                     node_id.index,
                     node_interests,
                 );

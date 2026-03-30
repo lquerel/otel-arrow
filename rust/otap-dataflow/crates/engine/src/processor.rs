@@ -10,25 +10,28 @@
 use crate::Interests;
 use crate::ReceivedAtNode;
 use crate::channel_metrics::ChannelMetricsRegistry;
-use crate::channel_mode::{LocalMode, SharedMode, wrap_control_channel_metrics};
 use crate::completion_emission_metrics::CompletionEmissionMetricsHandle;
 use crate::config::ProcessorConfig;
 use crate::context::PipelineContext;
 use crate::control::{
-    Controllable, NodeControlMsg, PipelineCompletionMsgSender, RuntimeCtrlMsgSender,
+    Controllable, NodeControlMsg, NodeControlSender, PipelineCompletionMsgSender,
+    RuntimeCtrlMsgSender,
 };
 use crate::effect_handler::SourceTagging;
 use crate::entity_context::NodeTelemetryGuard;
 use crate::error::{Error, ProcessorErrorKind};
-use crate::local::message::{LocalReceiver, LocalSender};
 use crate::local::processor as local;
 use crate::message::{Message, ProcessorInbox, Receiver, Sender};
 use crate::node::{Node, NodeId, NodeWithPDataReceiver, NodeWithPDataSender};
 use crate::node_local_scheduler::NodeLocalSchedulerHandle;
+use crate::node_control_channel::{
+    LocalNodeControlReceiver, LocalNodeControlSender, SharedNodeControlReceiver,
+    SharedNodeControlSender, attach_local_node_metrics, attach_shared_node_metrics,
+    local_node_channel, shared_node_channel,
+};
 use crate::shared::message::{SharedReceiver, SharedSender};
 use crate::shared::processor as shared;
 use otap_df_channel::error::SendError;
-use otap_df_channel::mpsc;
 use otap_df_config::PortName;
 use otap_df_config::node::NodeUserConfig;
 use otap_df_telemetry::reporter::MetricsReporter;
@@ -41,6 +44,7 @@ use std::time::Duration;
 /// Note: This is useful for creating a single interface for the processor regardless of the effect
 /// handler type. This is the only type that the pipeline engine will use in order to be agnostic to
 /// the effect handler type.
+#[allow(private_interfaces)]
 pub enum ProcessorWrapper<PData> {
     /// A processor with a `!Send` implementation.
     Local {
@@ -53,9 +57,9 @@ pub enum ProcessorWrapper<PData> {
         /// The processor instance.
         processor: Box<dyn local::Processor<PData>>,
         /// A sender for control messages.
-        control_sender: LocalSender<NodeControlMsg<PData>>,
+        control_sender: LocalNodeControlSender<PData>,
         /// A receiver for control messages.
-        control_receiver: LocalReceiver<NodeControlMsg<PData>>,
+        control_receiver: LocalNodeControlReceiver<PData>,
         /// Senders for PData messages per output port.
         /// Uses the generic `Sender` so local processors can still target shared channels when
         /// mixed local/shared wiring requires it.
@@ -78,9 +82,9 @@ pub enum ProcessorWrapper<PData> {
         /// The processor instance.
         processor: Box<dyn shared::Processor<PData>>,
         /// A sender for control messages.
-        control_sender: SharedSender<NodeControlMsg<PData>>,
+        control_sender: SharedNodeControlSender<PData>,
         /// A receiver for control messages.
-        control_receiver: SharedReceiver<NodeControlMsg<PData>>,
+        control_receiver: SharedNodeControlReceiver<PData>,
         /// Senders for PData messages per output port.
         /// Uses `SharedSender` to keep the shared processor `Send` for multi-threaded execution.
         pdata_senders: HashMap<PortName, SharedSender<PData>>,
@@ -131,16 +135,15 @@ impl<PData> ProcessorWrapper<PData> {
         P: local::Processor<PData> + 'static,
     {
         let runtime_config = config.clone();
-        let (control_sender, control_receiver) =
-            mpsc::Channel::new(config.control_channel.capacity);
+        let (control_sender, control_receiver) = local_node_channel(config.control_channel.capacity);
 
         ProcessorWrapper::Local {
             node_id,
             user_config,
             runtime_config,
             processor: Box::new(processor),
-            control_sender: LocalSender::mpsc(control_sender),
-            control_receiver: LocalReceiver::mpsc(control_receiver),
+            control_sender,
+            control_receiver,
             pdata_senders: HashMap::new(),
             pdata_receiver: None,
             telemetry: None,
@@ -159,16 +162,15 @@ impl<PData> ProcessorWrapper<PData> {
         P: shared::Processor<PData> + 'static,
     {
         let runtime_config = config.clone();
-        let (control_sender, control_receiver) =
-            tokio::sync::mpsc::channel(config.control_channel.capacity);
+        let (control_sender, control_receiver) = shared_node_channel(config.control_channel.capacity);
 
         ProcessorWrapper::Shared {
             node_id,
             user_config,
             runtime_config,
             processor: Box::new(processor),
-            control_sender: SharedSender::mpsc(control_sender),
-            control_receiver: SharedReceiver::mpsc(control_receiver),
+            control_sender,
+            control_receiver,
             pdata_senders: HashMap::new(),
             pdata_receiver: None,
             telemetry: None,
@@ -237,7 +239,7 @@ impl<PData> ProcessorWrapper<PData> {
     pub(crate) fn with_control_channel_metrics(
         self,
         pipeline_ctx: &PipelineContext,
-        channel_metrics: &mut ChannelMetricsRegistry,
+        _channel_metrics: &mut ChannelMetricsRegistry,
         channel_metrics_enabled: bool,
     ) -> Self {
         match self {
@@ -253,17 +255,12 @@ impl<PData> ProcessorWrapper<PData> {
                 telemetry,
                 source_tag,
             } => {
-                let (control_sender, control_receiver) =
-                    wrap_control_channel_metrics::<LocalMode, PData>(
-                        &node_id,
-                        pipeline_ctx,
-                        channel_metrics,
-                        channel_metrics_enabled,
-                        runtime_config.control_channel.capacity as u64,
-                        control_sender,
-                        control_receiver,
-                    );
-
+                let control_sender = attach_local_node_metrics(
+                    control_sender,
+                    &node_id,
+                    pipeline_ctx,
+                    channel_metrics_enabled,
+                );
                 ProcessorWrapper::Local {
                     node_id,
                     user_config,
@@ -289,17 +286,12 @@ impl<PData> ProcessorWrapper<PData> {
                 telemetry,
                 source_tag,
             } => {
-                let (control_sender, control_receiver) =
-                    wrap_control_channel_metrics::<SharedMode, PData>(
-                        &node_id,
-                        pipeline_ctx,
-                        channel_metrics,
-                        channel_metrics_enabled,
-                        runtime_config.control_channel.capacity as u64,
-                        control_sender,
-                        control_receiver,
-                    );
-
+                let control_sender = attach_shared_node_metrics(
+                    control_sender,
+                    &node_id,
+                    pipeline_ctx,
+                    channel_metrics_enabled,
+                );
                 ProcessorWrapper::Shared {
                     node_id,
                     user_config,
@@ -339,8 +331,8 @@ impl<PData> ProcessorWrapper<PData> {
                     runtime_config.input_pdata_channel.capacity,
                     runtime_config.control_channel.capacity,
                 );
-                let inbox = ProcessorInbox::new_with_local_scheduler(
-                    Receiver::Local(control_receiver),
+                let inbox = ProcessorInbox::new_with_local_control_channel(
+                    control_receiver,
                     pdata_receiver.ok_or_else(|| Error::ProcessorError {
                         processor: node_id.clone(),
                         kind: ProcessorErrorKind::Configuration,
@@ -348,6 +340,7 @@ impl<PData> ProcessorWrapper<PData> {
                         source_detail: String::new(),
                     })?,
                     local_scheduler.clone(),
+                    metrics_reporter.clone(),
                     node_id.index,
                     node_interests,
                 );
@@ -381,8 +374,8 @@ impl<PData> ProcessorWrapper<PData> {
                     runtime_config.input_pdata_channel.capacity,
                     runtime_config.control_channel.capacity,
                 );
-                let inbox = ProcessorInbox::new_with_local_scheduler(
-                    Receiver::Shared(control_receiver),
+                let inbox = ProcessorInbox::new_with_shared_control_channel(
+                    control_receiver,
                     Receiver::Shared(pdata_receiver.ok_or_else(|| Error::ProcessorError {
                         processor: node_id.clone(),
                         kind: ProcessorErrorKind::Configuration,
@@ -390,6 +383,7 @@ impl<PData> ProcessorWrapper<PData> {
                         source_detail: String::new(),
                     })?),
                     local_scheduler.clone(),
+                    metrics_reporter.clone(),
                     node_id.index,
                     node_interests,
                 );
@@ -576,12 +570,16 @@ impl<PData> Node<PData> for ProcessorWrapper<PData> {
 
 #[async_trait::async_trait(?Send)]
 impl<PData> Controllable<PData> for ProcessorWrapper<PData> {
+    type ControlSender = NodeControlSender<PData>;
+
     /// Returns the control message sender for the processor.
-    fn control_sender(&self) -> Sender<NodeControlMsg<PData>> {
+    fn control_sender(&self) -> Self::ControlSender {
         match self {
-            ProcessorWrapper::Local { control_sender, .. } => Sender::Local(control_sender.clone()),
+            ProcessorWrapper::Local { control_sender, .. } => {
+                NodeControlSender::Local(control_sender.clone())
+            }
             ProcessorWrapper::Shared { control_sender, .. } => {
-                Sender::Shared(control_sender.clone())
+                NodeControlSender::Shared(control_sender.clone())
             }
         }
     }

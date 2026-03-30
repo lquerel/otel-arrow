@@ -80,17 +80,6 @@ impl<T> SharedSender<T> {
         sender
     }
 
-    pub(crate) fn into_mpsc(self) -> Result<tokio::sync::mpsc::Sender<T>, Self> {
-        let SharedSender { inner, metrics } = self;
-        match inner {
-            SharedSenderInner::Mpsc(sender) => Ok(sender),
-            SharedSenderInner::Mpmc(sender) => Err(Self {
-                inner: SharedSenderInner::Mpmc(sender),
-                metrics,
-            }),
-        }
-    }
-
     /// Sends a message to the channel.
     pub async fn send(&self, msg: T) -> Result<(), SendError<T>> {
         let result = match &self.inner {
@@ -200,17 +189,6 @@ impl<T> SharedReceiver<T> {
         let mut receiver = Self::mpmc(receiver);
         receiver.metrics = Some(handle);
         receiver
-    }
-
-    pub(crate) fn into_mpsc(self) -> Result<tokio::sync::mpsc::Receiver<T>, Self> {
-        let SharedReceiver { inner, metrics } = self;
-        match inner {
-            SharedReceiverInner::Mpsc(receiver) => Ok(receiver),
-            SharedReceiverInner::Mpmc(receiver) => Err(Self {
-                inner: SharedReceiverInner::Mpmc(receiver),
-                metrics,
-            }),
-        }
     }
 
     /// Receives a message from the channel.

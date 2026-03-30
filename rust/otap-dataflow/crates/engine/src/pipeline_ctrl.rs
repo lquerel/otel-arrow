@@ -306,12 +306,17 @@ impl<PData> RuntimeCtrlMsgManager<PData> {
             // Drain any buffered sends before processing new messages.
             self.drain_pending_sends();
 
-            // Control-plane metrics are actor-owned state snapshots. Flush them
-            // on the telemetry reporting interval while they are dirty instead
-            // of materializing a new snapshot on every loop iteration.
-            if self.runtime_control_metrics.is_dirty() && metrics_flush_delay.is_none() {
+            let periodic_control_metrics = self.telemetry.runtime_metrics >= MetricLevel::Basic
+                && !self.control_senders.is_empty();
+
+            // Runtime-control metrics remain dirty-tracked, but control-channel
+            // sender stats need a periodic flush surface because they can change
+            // from completion dispatch traffic outside this actor's owned state.
+            if (self.runtime_control_metrics.is_dirty() || periodic_control_metrics)
+                && metrics_flush_delay.is_none()
+            {
                 metrics_flush_delay = Some(clock::sleep(self.control_plane_metrics_flush_interval));
-            } else if !self.runtime_control_metrics.is_dirty() {
+            } else if !self.runtime_control_metrics.is_dirty() && !periodic_control_metrics {
                 metrics_flush_delay = None;
             }
 
@@ -336,28 +341,19 @@ impl<PData> RuntimeCtrlMsgManager<PData> {
                         ));
                     if let Some(reason) = shutdown_reason.as_ref() {
                         for node_id in self.control_senders.non_receiver_ids() {
-                            self.send(
-                                node_id,
-                                NodeControlMsg::Shutdown {
-                                    deadline,
-                                    reason: reason.clone(),
-                                },
-                            );
+                            self.begin_shutdown(node_id, deadline, reason.clone());
                         }
                         for node_id in pending_receivers.iter().copied() {
-                            self.send(
-                                node_id,
-                                NodeControlMsg::Shutdown {
-                                    deadline,
-                                    reason: reason.clone(),
-                                },
-                            );
+                            self.begin_shutdown(node_id, deadline, reason.clone());
                         }
                     }
                     // Deadline-forced drain is a major lifecycle boundary; do
                     // not wait for the periodic flush interval to surface it.
                     self.report_runtime_control_metrics();
-                    break;
+                    self.report_control_channel_metrics();
+                    if self.pending_sends.is_empty() {
+                        break;
+                    }
                 }
             }
 
@@ -413,13 +409,7 @@ impl<PData> RuntimeCtrlMsgManager<PData> {
                             );
 
                             for node_id in pending_receivers.iter().copied() {
-                                self.send(
-                                    node_id,
-                                    NodeControlMsg::DrainIngress {
-                                        deadline,
-                                        reason: reason.clone(),
-                                    },
-                                );
+                                self.begin_receiver_drain(node_id, deadline, reason.clone());
                             }
                             self.runtime_control_metrics.record_drain_ingress_sent();
                             self.event_reporter.report(EngineEvent::ingress_drain_started(
@@ -432,13 +422,7 @@ impl<PData> RuntimeCtrlMsgManager<PData> {
                                 // receiver-drain phase and start downstream
                                 // shutdown immediately.
                                 for node_id in self.control_senders.non_receiver_ids() {
-                                    self.send(
-                                        node_id,
-                                        NodeControlMsg::Shutdown {
-                                            deadline,
-                                            reason: reason.clone(),
-                                        },
-                                    );
+                                    self.begin_shutdown(node_id, deadline, reason.clone());
                                 }
                                 downstream_shutdown_sent = true;
                                 self.runtime_control_metrics.record_downstream_shutdown_sent();
@@ -478,13 +462,7 @@ impl<PData> RuntimeCtrlMsgManager<PData> {
                                     .clone()
                                     .unwrap_or_else(|| "pipeline shutting down".to_owned());
                                 for node_id in self.control_senders.non_receiver_ids() {
-                                    self.send(
-                                        node_id,
-                                        NodeControlMsg::Shutdown {
-                                            deadline,
-                                            reason: reason.clone(),
-                                        },
-                                    );
+                                    self.begin_shutdown(node_id, deadline, reason.clone());
                                 }
                                 downstream_shutdown_sent = true;
                                 self.runtime_control_metrics.record_downstream_shutdown_sent();
@@ -588,6 +566,7 @@ impl<PData> RuntimeCtrlMsgManager<PData> {
                 }, if metrics_flush_delay.is_some() => {
                     metrics_flush_delay = None;
                     self.report_runtime_control_metrics();
+                    self.report_control_channel_metrics();
                 }
             }
         }
@@ -600,6 +579,7 @@ impl<PData> RuntimeCtrlMsgManager<PData> {
         // backlog transitions are not lost if the loop terminates before the
         // next periodic interval elapses.
         self.report_runtime_control_metrics();
+        self.report_control_channel_metrics();
 
         if self.telemetry.runtime_metrics >= MetricLevel::Normal {
             let _ = self.report_node_metrics();
@@ -745,10 +725,47 @@ impl<PData> RuntimeCtrlMsgManager<PData> {
             .set_pending_sends_buffered(self.pending_sends.len());
     }
 
+    fn begin_receiver_drain(&mut self, node_id: usize, deadline: Instant, reason: String) {
+        if let Some(sender) = self.control_senders.get(node_id) {
+            match sender.begin_drain_ingress(deadline, reason) {
+                Ok(_) => {}
+                Err(otap_df_channel::error::SendError::Full(msg)) => {
+                    self.pending_sends.push_back((node_id, msg));
+                    self.runtime_control_metrics
+                        .set_pending_sends_buffered(self.pending_sends.len());
+                }
+                Err(otap_df_channel::error::SendError::Closed(_)) => {}
+            }
+        }
+    }
+
+    fn begin_shutdown(&mut self, node_id: usize, deadline: Instant, reason: String) {
+        if let Some(sender) = self.control_senders.get(node_id) {
+            match sender.begin_shutdown(deadline, reason) {
+                Ok(_) => {}
+                Err(otap_df_channel::error::SendError::Full(msg)) => {
+                    self.pending_sends.push_back((node_id, msg));
+                    self.runtime_control_metrics
+                        .set_pending_sends_buffered(self.pending_sends.len());
+                }
+                Err(otap_df_channel::error::SendError::Closed(_)) => {}
+            }
+        }
+    }
+
     fn report_runtime_control_metrics(&mut self) {
         if let Err(err) = self.runtime_control_metrics.report_if_needed() {
             otel_warn!(
                 "pipeline.runtime_control.metrics.reporting.fail",
+                error = err.to_string()
+            );
+        }
+    }
+
+    fn report_control_channel_metrics(&mut self) {
+        if let Err(err) = self.control_senders.report_metrics(&mut self.metrics_reporter) {
+            otel_warn!(
+                "pipeline.control_channel.metrics.reporting.fail",
                 error = err.to_string()
             );
         }
@@ -1094,13 +1111,19 @@ mod tests {
     use crate::context::ControllerContext;
     use crate::control::{AckMsg, Frame, NackMsg, RouteData, nanos_since_birth};
     use crate::control::{
-        NodeControlMsg, PipelineCompletionMsg, RuntimeControlMsg, pipeline_completion_msg_channel,
-        runtime_ctrl_msg_channel,
+        NodeControlMsg, NodeControlSender, PipelineCompletionMsg, ReceiverControlSender,
+        RuntimeControlMsg, pipeline_completion_msg_channel, runtime_ctrl_msg_channel,
     };
     use crate::message::{Receiver, Sender};
+    use crate::node_control_channel::{
+        SharedNodeControlReceiver, SharedReceiverControlReceiver, push_node_event,
+        push_receiver_event, shared_node_channel, shared_receiver_channel,
+    };
     use crate::node::{NodeId, NodeType};
     use crate::shared::message::{SharedReceiver, SharedSender};
     use crate::testing::test_nodes;
+    use otap_df_channel::error::RecvError;
+    use otap_df_control_channel::ControlChannelStats;
     use otap_df_config::observed_state::{ObservedStateSettings, SendPolicy};
     use otap_df_config::{PipelineGroupId, PipelineId};
     use otap_df_state::store::ObservedStateStore;
@@ -1112,7 +1135,7 @@ mod tests {
     use otap_df_telemetry::registry::MetricSetKey;
     use otap_df_telemetry::reporter::MetricsReporter;
     use std::cell::RefCell;
-    use std::collections::HashMap;
+    use std::collections::{HashMap, VecDeque};
     use std::rc::Rc;
     use std::time::{Duration, Instant};
     use tokio::task::LocalSet;
@@ -1270,6 +1293,131 @@ mod tests {
         (
             manager,
             pipeline_tx,
+            control_receivers,
+            nodes,
+            pipeline_entity_guard,
+        )
+    }
+
+    enum IntegratedControlReceiver<PData> {
+        Receiver {
+            inner: SharedReceiverControlReceiver<PData>,
+            pending: VecDeque<NodeControlMsg<PData>>,
+            metrics_reporter: MetricsReporter,
+        },
+        Node {
+            inner: SharedNodeControlReceiver<PData>,
+            pending: VecDeque<NodeControlMsg<PData>>,
+            metrics_reporter: MetricsReporter,
+        },
+    }
+
+    impl<PData> IntegratedControlReceiver<PData> {
+        async fn recv(&mut self) -> Result<NodeControlMsg<PData>, RecvError> {
+            loop {
+                match self {
+                    Self::Receiver { pending, .. } | Self::Node { pending, .. } => {
+                        if let Some(msg) = pending.pop_front() {
+                            return Ok(msg);
+                        }
+                    }
+                }
+
+                match self {
+                    Self::Receiver {
+                        inner,
+                        pending,
+                        metrics_reporter,
+                    } => {
+                        let Some(event) = inner.recv_event().await else {
+                            return Err(RecvError::Closed);
+                        };
+                        push_receiver_event(event, pending, metrics_reporter);
+                    }
+                    Self::Node {
+                        inner,
+                        pending,
+                        metrics_reporter,
+                    } => {
+                        let Some(event) = inner.recv_event().await else {
+                            return Err(RecvError::Closed);
+                        };
+                        push_node_event(event, pending, metrics_reporter);
+                    }
+                }
+            }
+        }
+
+        fn stats(&self) -> ControlChannelStats {
+            match self {
+                Self::Receiver { .. } => {
+                    panic!("stats() is only defined for integrated node control receivers")
+                }
+                Self::Node { inner, .. } => inner.stats(),
+            }
+        }
+    }
+
+    fn setup_integrated_test_manager_with_capacities<PData: Clone>(
+        pipeline_capacity: usize,
+        control_capacity: usize,
+        node_specs: Vec<(&'static str, NodeType)>,
+    ) -> (
+        RuntimeCtrlMsgManager<PData>,
+        crate::control::RuntimeCtrlMsgSender<PData>,
+        ControlSenders<PData>,
+        HashMap<usize, IntegratedControlReceiver<PData>>,
+        Vec<NodeId>,
+        crate::entity_context::PipelineEntityScope,
+    ) {
+        let mut control_senders = ControlSenders::new();
+        let mut control_receivers = HashMap::new();
+        let nodes = test_nodes(node_specs.iter().map(|(name, _)| *name).collect());
+
+        for (node, (_, node_type)) in nodes.iter().zip(node_specs.iter()) {
+            let metrics_reporter = MetricsReporter::create_new_and_receiver(4).1;
+            match node_type {
+                NodeType::Receiver => {
+                    let (sender, receiver) = shared_receiver_channel(control_capacity);
+                    control_senders.register(
+                        node.clone(),
+                        *node_type,
+                        ReceiverControlSender::Shared(sender),
+                    );
+                    let _ = control_receivers.insert(
+                        node.index,
+                        IntegratedControlReceiver::Receiver {
+                            inner: receiver,
+                            pending: VecDeque::new(),
+                            metrics_reporter,
+                        },
+                    );
+                }
+                NodeType::Processor | NodeType::Exporter => {
+                    let (sender, receiver) = shared_node_channel(control_capacity);
+                    control_senders.register(
+                        node.clone(),
+                        *node_type,
+                        NodeControlSender::Shared(sender),
+                    );
+                    let _ = control_receivers.insert(
+                        node.index,
+                        IntegratedControlReceiver::Node {
+                            inner: receiver,
+                            pending: VecDeque::new(),
+                            metrics_reporter,
+                        },
+                    );
+                }
+            }
+        }
+
+        let (manager, pipeline_tx, pipeline_entity_guard) =
+            build_test_manager(pipeline_capacity, control_senders.clone());
+        (
+            manager,
+            pipeline_tx,
+            control_senders,
             control_receivers,
             nodes,
             pipeline_entity_guard,
@@ -2380,6 +2528,222 @@ mod tests {
                 assert!(
                     shutdown_result.is_ok(),
                     "Manager should shutdown when draining deadline is exceeded, even with active senders"
+                );
+            })
+            .await;
+    }
+
+    #[tokio::test]
+    async fn test_integrated_receiver_first_shutdown_waits_for_receiver_drain() {
+        let local = LocalSet::new();
+
+        local
+            .run_until(async {
+                let (
+                    manager,
+                    pipeline_tx,
+                    _control_senders,
+                    mut control_receivers,
+                    nodes,
+                    _pipeline_entity_guard,
+                ) = setup_integrated_test_manager_with_capacities::<String>(
+                    16,
+                    16,
+                    vec![
+                        ("receiver", NodeType::Receiver),
+                        ("processor", NodeType::Processor),
+                    ],
+                );
+
+                let receiver = nodes[0].clone();
+                let processor = nodes[1].clone();
+                let manager_handle = tokio::task::spawn_local(async move { manager.run().await });
+
+                pipeline_tx
+                    .send(RuntimeControlMsg::Shutdown {
+                        deadline: Instant::now() + Duration::from_secs(1),
+                        reason: "test shutdown".to_owned(),
+                    })
+                    .await
+                    .unwrap();
+
+                let mut receiver_ctrl = control_receivers.remove(&receiver.index).unwrap();
+                let drain_msg = timeout(Duration::from_millis(100), receiver_ctrl.recv())
+                    .await
+                    .expect("receiver should get DrainIngress")
+                    .expect("receiver control channel should stay open");
+                assert!(matches!(drain_msg, NodeControlMsg::DrainIngress { .. }));
+
+                let mut processor_ctrl = control_receivers.remove(&processor.index).unwrap();
+                assert!(
+                    timeout(Duration::from_millis(40), processor_ctrl.recv())
+                        .await
+                        .is_err(),
+                    "processor should not observe shutdown before the receiver drains"
+                );
+
+                pipeline_tx
+                    .send(RuntimeControlMsg::ReceiverDrained {
+                        node_id: receiver.index,
+                    })
+                    .await
+                    .unwrap();
+
+                let shutdown_msg = timeout(Duration::from_millis(100), processor_ctrl.recv())
+                    .await
+                    .expect("processor should get Shutdown once receivers drain")
+                    .expect("processor control channel should stay open");
+                assert!(matches!(shutdown_msg, NodeControlMsg::Shutdown { .. }));
+
+                drop(pipeline_tx);
+                let manager_result = timeout(Duration::from_millis(200), manager_handle).await;
+                assert!(manager_result.is_ok(), "manager should stop cleanly");
+            })
+            .await;
+    }
+
+    #[tokio::test]
+    async fn test_integrated_manager_waits_for_deadline_when_receiver_never_drains() {
+        let local = LocalSet::new();
+
+        local
+            .run_until(async {
+                let (
+                    manager,
+                    pipeline_tx,
+                    _control_senders,
+                    mut control_receivers,
+                    nodes,
+                    _pipeline_entity_guard,
+                ) = setup_integrated_test_manager_with_capacities::<String>(
+                    16,
+                    16,
+                    vec![("receiver", NodeType::Receiver)],
+                );
+
+                let receiver = nodes[0].clone();
+                let mut manager_handle = tokio::task::spawn_local(async move { manager.run().await });
+
+                pipeline_tx
+                    .send(RuntimeControlMsg::Shutdown {
+                        deadline: Instant::now() + Duration::from_millis(100),
+                        reason: "deadline test".to_owned(),
+                    })
+                    .await
+                    .unwrap();
+
+                let mut receiver_ctrl = control_receivers.remove(&receiver.index).unwrap();
+                let drain_msg = timeout(Duration::from_millis(100), receiver_ctrl.recv())
+                    .await
+                    .expect("receiver should get DrainIngress")
+                    .expect("receiver control channel should stay open");
+                assert!(matches!(drain_msg, NodeControlMsg::DrainIngress { .. }));
+
+                assert!(
+                    timeout(Duration::from_millis(40), &mut manager_handle)
+                        .await
+                        .is_err(),
+                    "manager should stay alive until the forced deadline while the receiver is pending"
+                );
+
+                let shutdown_msg = timeout(Duration::from_millis(200), receiver_ctrl.recv())
+                    .await
+                    .expect("receiver should get forced Shutdown after the deadline")
+                    .expect("receiver control channel should stay open");
+                assert!(matches!(shutdown_msg, NodeControlMsg::Shutdown { .. }));
+
+                let manager_result = timeout(Duration::from_millis(200), &mut manager_handle).await;
+                assert!(
+                    manager_result.is_ok(),
+                    "manager should stop once forced shutdown is accepted"
+                );
+            })
+            .await;
+    }
+
+    #[tokio::test]
+    async fn test_integrated_forced_shutdown_bypasses_saturated_processor_control_backlog() {
+        let local = LocalSet::new();
+
+        local
+            .run_until(async {
+                let (
+                    manager,
+                    pipeline_tx,
+                    control_senders,
+                    mut control_receivers,
+                    nodes,
+                    _pipeline_entity_guard,
+                ) = setup_integrated_test_manager_with_capacities::<String>(
+                    16,
+                    2,
+                    vec![
+                        ("receiver", NodeType::Receiver),
+                        ("processor", NodeType::Processor),
+                    ],
+                );
+
+                let receiver = nodes[0].clone();
+                let processor = nodes[1].clone();
+
+                let processor_sender = control_senders
+                    .get(processor.index)
+                    .expect("processor control sender must exist");
+                processor_sender
+                    .try_send(NodeControlMsg::Ack(AckMsg::new("ack-1".to_owned())))
+                    .expect("first ack should fill the completion backlog");
+                processor_sender
+                    .try_send(NodeControlMsg::Ack(AckMsg::new("ack-2".to_owned())))
+                    .expect("second ack should fill the completion backlog");
+
+                let mut manager_handle = tokio::task::spawn_local(async move { manager.run().await });
+
+                pipeline_tx
+                    .send(RuntimeControlMsg::Shutdown {
+                        deadline: Instant::now() + Duration::from_millis(25),
+                        reason: "forced shutdown".to_owned(),
+                    })
+                    .await
+                    .unwrap();
+
+                let mut receiver_ctrl = control_receivers.remove(&receiver.index).unwrap();
+                let drain_msg = timeout(Duration::from_millis(100), receiver_ctrl.recv())
+                    .await
+                    .expect("receiver should get DrainIngress")
+                    .expect("receiver control channel should stay open");
+                assert!(matches!(drain_msg, NodeControlMsg::DrainIngress { .. }));
+
+                pipeline_tx
+                    .send(RuntimeControlMsg::ReceiverDrained {
+                        node_id: receiver.index,
+                    })
+                    .await
+                    .unwrap();
+
+                tokio::time::sleep(Duration::from_millis(50)).await;
+
+                let mut processor_ctrl = control_receivers.remove(&processor.index).unwrap();
+                let shutdown_msg = timeout(Duration::from_millis(100), processor_ctrl.recv())
+                    .await
+                    .expect("processor should reach forced Shutdown even with a saturated backlog")
+                    .expect("processor control channel should stay open");
+                assert!(matches!(shutdown_msg, NodeControlMsg::Shutdown { .. }));
+
+                let stats = processor_ctrl.stats();
+                assert_eq!(
+                    stats.completion_abandoned_on_forced_shutdown_total,
+                    2,
+                    "forced shutdown should abandon the buffered completion backlog"
+                );
+                assert!(
+                    stats.closed,
+                    "forced shutdown should leave the saturated control channel closed"
+                );
+
+                let manager_result = timeout(Duration::from_millis(200), &mut manager_handle).await;
+                assert!(
+                    manager_result.is_ok(),
+                    "manager should stop once forced shutdown has been accepted"
                 );
             })
             .await;
