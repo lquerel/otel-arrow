@@ -88,10 +88,10 @@ impl<PData> Controllable<PData> for ExporterWrapper<PData> {
     fn control_sender(&self) -> Self::ControlSender {
         match self {
             ExporterWrapper::Local { control_sender, .. } => {
-                NodeControlSender::Local(control_sender.clone())
+                NodeControlSender::<PData>::Local(control_sender.clone())
             }
             ExporterWrapper::Shared { control_sender, .. } => {
-                NodeControlSender::Shared(control_sender.clone())
+                NodeControlSender::<PData>::Shared(control_sender.clone())
             }
         }
     }
@@ -109,7 +109,8 @@ impl<PData> ExporterWrapper<PData> {
     where
         E: local::Exporter<PData> + 'static,
     {
-        let (control_sender, control_receiver) = local_node_channel(config.control_channel.capacity);
+        let (control_sender, control_receiver) =
+            local_node_channel::<PData>(config.control_channel.capacity);
 
         ExporterWrapper::Local {
             node_id,
@@ -134,7 +135,8 @@ impl<PData> ExporterWrapper<PData> {
     where
         E: shared::Exporter<PData> + 'static,
     {
-        let (control_sender, control_receiver) = shared_node_channel(config.control_channel.capacity);
+        let (control_sender, control_receiver) =
+            shared_node_channel::<PData>(config.control_channel.capacity);
 
         ExporterWrapper::Shared {
             node_id,
@@ -216,7 +218,7 @@ impl<PData> ExporterWrapper<PData> {
                 telemetry,
                 ..
             } => {
-                let control_sender = attach_local_node_metrics(
+                let control_sender = attach_local_node_metrics::<PData>(
                     control_sender,
                     &node_id,
                     pipeline_ctx,
@@ -244,7 +246,7 @@ impl<PData> ExporterWrapper<PData> {
                 telemetry,
                 ..
             } => {
-                let control_sender = attach_shared_node_metrics(
+                let control_sender = attach_shared_node_metrics::<PData>(
                     control_sender,
                     &node_id,
                     pipeline_ctx,
@@ -512,7 +514,7 @@ mod tests {
         }
     }
 
-    #[async_trait]
+    #[async_trait(?Send)]
     impl shared::Exporter<TestMsg> for TestExporter {
         async fn start(
             self: Box<Self>,

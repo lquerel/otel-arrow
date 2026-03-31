@@ -135,7 +135,8 @@ impl<PData> ProcessorWrapper<PData> {
         P: local::Processor<PData> + 'static,
     {
         let runtime_config = config.clone();
-        let (control_sender, control_receiver) = local_node_channel(config.control_channel.capacity);
+        let (control_sender, control_receiver) =
+            local_node_channel::<PData>(config.control_channel.capacity);
 
         ProcessorWrapper::Local {
             node_id,
@@ -162,7 +163,8 @@ impl<PData> ProcessorWrapper<PData> {
         P: shared::Processor<PData> + 'static,
     {
         let runtime_config = config.clone();
-        let (control_sender, control_receiver) = shared_node_channel(config.control_channel.capacity);
+        let (control_sender, control_receiver) =
+            shared_node_channel::<PData>(config.control_channel.capacity);
 
         ProcessorWrapper::Shared {
             node_id,
@@ -255,7 +257,7 @@ impl<PData> ProcessorWrapper<PData> {
                 telemetry,
                 source_tag,
             } => {
-                let control_sender = attach_local_node_metrics(
+                let control_sender = attach_local_node_metrics::<PData>(
                     control_sender,
                     &node_id,
                     pipeline_ctx,
@@ -286,7 +288,7 @@ impl<PData> ProcessorWrapper<PData> {
                 telemetry,
                 source_tag,
             } => {
-                let control_sender = attach_shared_node_metrics(
+                let control_sender = attach_shared_node_metrics::<PData>(
                     control_sender,
                     &node_id,
                     pipeline_ctx,
@@ -576,10 +578,10 @@ impl<PData> Controllable<PData> for ProcessorWrapper<PData> {
     fn control_sender(&self) -> Self::ControlSender {
         match self {
             ProcessorWrapper::Local { control_sender, .. } => {
-                NodeControlSender::Local(control_sender.clone())
+                NodeControlSender::<PData>::Local(control_sender.clone())
             }
             ProcessorWrapper::Shared { control_sender, .. } => {
-                NodeControlSender::Shared(control_sender.clone())
+                NodeControlSender::<PData>::Shared(control_sender.clone())
             }
         }
     }
@@ -706,7 +708,7 @@ mod tests {
         }
     }
 
-    #[async_trait]
+    #[async_trait(?Send)]
     impl shared::Processor<TestMsg> for TestProcessor {
         async fn process(
             &mut self,

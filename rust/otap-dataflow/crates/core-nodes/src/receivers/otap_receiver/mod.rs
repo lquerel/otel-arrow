@@ -252,7 +252,7 @@ impl SharedStates {
 // Use the async_trait due to the need for thread safety because of tonic requiring Send and Sync traits
 // The Shared version of the receiver allows us to implement a Receiver that requires the effect handler to be Send and Sync
 //
-#[async_trait]
+#[async_trait(?Send)]
 impl shared::Receiver<OtapPdata> for OTAPReceiver {
     async fn start(
         mut self: Box<Self>,

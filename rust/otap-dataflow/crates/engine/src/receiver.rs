@@ -102,10 +102,10 @@ impl<PData> Controllable<PData> for ReceiverWrapper<PData> {
     fn control_sender(&self) -> Self::ControlSender {
         match self {
             ReceiverWrapper::Local { control_sender, .. } => {
-                ReceiverControlSender::Local(control_sender.clone())
+                ReceiverControlSender::<PData>::Local(control_sender.clone())
             }
             ReceiverWrapper::Shared { control_sender, .. } => {
-                ReceiverControlSender::Shared(control_sender.clone())
+                ReceiverControlSender::<PData>::Shared(control_sender.clone())
             }
         }
     }
@@ -122,7 +122,8 @@ impl<PData> ReceiverWrapper<PData> {
     where
         R: local::Receiver<PData> + 'static,
     {
-        let (control_sender, control_receiver) = local_receiver_channel(config.control_channel.capacity);
+        let (control_sender, control_receiver) =
+            local_receiver_channel::<PData>(config.control_channel.capacity);
 
         ReceiverWrapper::Local {
             node_id,
@@ -149,7 +150,7 @@ impl<PData> ReceiverWrapper<PData> {
         R: shared::Receiver<PData> + 'static,
     {
         let (control_sender, control_receiver) =
-            shared_receiver_channel(config.control_channel.capacity);
+            shared_receiver_channel::<PData>(config.control_channel.capacity);
 
         ReceiverWrapper::Shared {
             node_id,
@@ -243,7 +244,7 @@ impl<PData> ReceiverWrapper<PData> {
                 source_tag,
                 ..
             } => {
-                let control_sender = attach_local_receiver_metrics(
+                let control_sender = attach_local_receiver_metrics::<PData>(
                     control_sender,
                     &node_id,
                     pipeline_ctx,
@@ -275,7 +276,7 @@ impl<PData> ReceiverWrapper<PData> {
                 source_tag,
                 ..
             } => {
-                let control_sender = attach_shared_receiver_metrics(
+                let control_sender = attach_shared_receiver_metrics::<PData>(
                     control_sender,
                     &node_id,
                     pipeline_ctx,
@@ -595,7 +596,7 @@ mod tests {
         }
     }
 
-    #[async_trait]
+    #[async_trait(?Send)]
     impl shared::Receiver<TestMsg> for TestReceiver {
         async fn start(
             self: Box<Self>,

@@ -12,23 +12,15 @@ use crate::control::{AckMsg, NackMsg, NodeControlMsg, UnwindData};
 use crate::entity_context::current_node_telemetry_handle;
 use crate::node::NodeId;
 use otap_df_channel::error::SendError;
-use otap_df_control_channel::local::{
-    LocalNodeControlReceiver as RawLocalNodeControlReceiver,
-    LocalNodeControlSender as RawLocalNodeControlSender,
-    LocalReceiverControlReceiver as RawLocalReceiverControlReceiver,
-    LocalReceiverControlSender as RawLocalReceiverControlSender,
-};
-use otap_df_control_channel::shared::{
-    SharedNodeControlReceiver as RawSharedNodeControlReceiver,
-    SharedNodeControlSender as RawSharedNodeControlSender,
-    SharedReceiverControlReceiver as RawSharedReceiverControlReceiver,
-    SharedReceiverControlSender as RawSharedReceiverControlSender,
-};
 use otap_df_control_channel::{
     AckMsg as ChannelAckMsg, CompletionMsg as ChannelCompletionMsg, ControlChannelConfig,
     ControlChannelStats, ControlCmd, LifecycleSendResult, NackMsg as ChannelNackMsg,
-    NodeControlEvent as ChannelNodeControlEvent, Phase,
-    ReceiverControlEvent as ChannelReceiverControlEvent, local, shared,
+    NodeControlEvent as ChannelNodeControlEvent, NodeControlReceiver as RawNodeControlReceiver,
+    NodeControlSender as RawNodeControlSender, Phase,
+    ReceiverControlEvent as ChannelReceiverControlEvent,
+    ReceiverControlReceiver as RawReceiverControlReceiver,
+    ReceiverControlSender as RawReceiverControlSender, node_channel_with_meta,
+    receiver_channel_with_meta,
 };
 use otap_df_telemetry::error::Error as TelemetryError;
 use otap_df_telemetry::instrument::{Counter, Gauge};
@@ -47,21 +39,14 @@ fn control_channel_config(capacity: usize) -> ControlChannelConfig {
     }
 }
 
-#[derive(Debug, Clone)]
-pub(crate) struct CompletionPayload<PData> {
-    pdata: PData,
-    unwind: UnwindData,
-}
+type ControlMeta = UnwindData;
 
-fn ack_to_channel<PData>(ack: AckMsg<PData>) -> ChannelAckMsg<CompletionPayload<PData>> {
+fn ack_to_channel<PData>(ack: AckMsg<PData>) -> ChannelAckMsg<PData, ControlMeta> {
     let AckMsg { accepted, unwind } = ack;
-    ChannelAckMsg::new(CompletionPayload {
-        pdata: *accepted,
-        unwind,
-    })
+    ChannelAckMsg::with_meta(*accepted, unwind)
 }
 
-fn nack_to_channel<PData>(nack: NackMsg<PData>) -> ChannelNackMsg<CompletionPayload<PData>> {
+fn nack_to_channel<PData>(nack: NackMsg<PData>) -> ChannelNackMsg<PData, ControlMeta> {
     let NackMsg {
         reason,
         refused,
@@ -69,35 +54,26 @@ fn nack_to_channel<PData>(nack: NackMsg<PData>) -> ChannelNackMsg<CompletionPayl
         permanent,
     } = nack;
 
-    let payload = CompletionPayload {
-        pdata: *refused,
-        unwind,
-    };
-
     if permanent {
-        ChannelNackMsg::new_permanent(reason, payload)
+        ChannelNackMsg::with_meta_permanent(reason, *refused, unwind)
     } else {
-        ChannelNackMsg::new(reason, payload)
+        ChannelNackMsg::with_meta(reason, *refused, unwind)
     }
 }
 
-fn completion_to_node_control<PData>(
-    completion: ChannelCompletionMsg<CompletionPayload<PData>>,
-) -> NodeControlMsg<PData> {
+fn completion_to_node_control<PData>(completion: ChannelCompletionMsg<PData, ControlMeta>) -> NodeControlMsg<PData> {
     match completion {
         ChannelCompletionMsg::Ack(ack) => {
-            let CompletionPayload { pdata, unwind } = *ack.accepted;
             NodeControlMsg::Ack(AckMsg {
-                accepted: Box::new(pdata),
-                unwind,
+                accepted: ack.accepted,
+                unwind: ack.meta,
             })
         }
         ChannelCompletionMsg::Nack(nack) => {
-            let CompletionPayload { pdata, unwind } = *nack.refused;
             NodeControlMsg::Nack(NackMsg {
                 reason: nack.reason,
-                refused: Box::new(pdata),
-                unwind,
+                refused: nack.refused,
+                unwind: nack.meta,
                 permanent: nack.permanent,
             })
         }
@@ -114,7 +90,7 @@ pub(crate) fn control_stats_is_empty(stats: &ControlChannelStats) -> bool {
 }
 
 pub(crate) fn push_receiver_event<PData>(
-    event: ChannelReceiverControlEvent<CompletionPayload<PData>>,
+    event: ChannelReceiverControlEvent<PData, ControlMeta>,
     pending: &mut VecDeque<NodeControlMsg<PData>>,
     metrics_reporter: &MetricsReporter,
 ) {
@@ -149,7 +125,7 @@ pub(crate) fn push_receiver_event<PData>(
 }
 
 pub(crate) fn push_node_event<PData>(
-    event: ChannelNodeControlEvent<CompletionPayload<PData>>,
+    event: ChannelNodeControlEvent<PData, ControlMeta>,
     pending: &mut VecDeque<NodeControlMsg<PData>>,
     metrics_reporter: &MetricsReporter,
 ) {
@@ -350,7 +326,7 @@ fn unsupported_message_error<PData>(msg: NodeControlMsg<PData>) -> SendError<Nod
 }
 
 fn control_cmd_to_node_control<PData>(
-    cmd: ControlCmd<CompletionPayload<PData>>,
+    cmd: ControlCmd<PData, ControlMeta>,
     collect_telemetry_reporter: Option<MetricsReporter>,
 ) -> NodeControlMsg<PData> {
     match cmd {
@@ -366,7 +342,7 @@ fn control_cmd_to_node_control<PData>(
 }
 
 fn map_try_send_error<PData>(
-    err: otap_df_control_channel::TrySendError<CompletionPayload<PData>>,
+    err: otap_df_control_channel::TrySendError<PData, ControlMeta>,
     collect_telemetry_reporter: Option<MetricsReporter>,
 ) -> SendError<NodeControlMsg<PData>> {
     match err {
@@ -380,7 +356,7 @@ fn map_try_send_error<PData>(
 }
 
 fn map_send_error<PData>(
-    err: otap_df_control_channel::SendError<CompletionPayload<PData>>,
+    err: otap_df_control_channel::SendError<PData, ControlMeta>,
     collect_telemetry_reporter: Option<MetricsReporter>,
 ) -> SendError<NodeControlMsg<PData>> {
     match err {
@@ -391,22 +367,22 @@ fn map_send_error<PData>(
 }
 
 pub struct LocalReceiverControlSender<PData> {
-    inner: RawLocalReceiverControlSender<CompletionPayload<PData>>,
+    inner: RawReceiverControlSender<PData, ControlMeta>,
     metrics: Option<ControlChannelMetricsHandle>,
 }
 
 pub struct SharedReceiverControlSender<PData> {
-    inner: RawSharedReceiverControlSender<CompletionPayload<PData>>,
+    inner: RawReceiverControlSender<PData, ControlMeta>,
     metrics: Option<ControlChannelMetricsHandle>,
 }
 
 pub struct LocalNodeControlSender<PData> {
-    inner: RawLocalNodeControlSender<CompletionPayload<PData>>,
+    inner: RawNodeControlSender<PData, ControlMeta>,
     metrics: Option<ControlChannelMetricsHandle>,
 }
 
 pub struct SharedNodeControlSender<PData> {
-    inner: RawSharedNodeControlSender<CompletionPayload<PData>>,
+    inner: RawNodeControlSender<PData, ControlMeta>,
     metrics: Option<ControlChannelMetricsHandle>,
 }
 
@@ -447,19 +423,19 @@ impl<PData> Clone for SharedNodeControlSender<PData> {
 }
 
 pub(crate) struct LocalReceiverControlReceiver<PData> {
-    inner: RawLocalReceiverControlReceiver<CompletionPayload<PData>>,
+    inner: RawReceiverControlReceiver<PData, ControlMeta>,
 }
 
 pub(crate) struct SharedReceiverControlReceiver<PData> {
-    inner: RawSharedReceiverControlReceiver<CompletionPayload<PData>>,
+    inner: RawReceiverControlReceiver<PData, ControlMeta>,
 }
 
 pub(crate) struct LocalNodeControlReceiver<PData> {
-    inner: RawLocalNodeControlReceiver<CompletionPayload<PData>>,
+    inner: RawNodeControlReceiver<PData, ControlMeta>,
 }
 
 pub(crate) struct SharedNodeControlReceiver<PData> {
-    inner: RawSharedNodeControlReceiver<CompletionPayload<PData>>,
+    inner: RawNodeControlReceiver<PData, ControlMeta>,
 }
 
 macro_rules! impl_receiver_sender {
@@ -742,7 +718,7 @@ impl_node_sender!(SharedNodeControlSender);
 impl<PData> LocalReceiverControlReceiver<PData> {
     pub(crate) async fn recv_event(
         &mut self,
-    ) -> Option<ChannelReceiverControlEvent<CompletionPayload<PData>>> {
+    ) -> Option<ChannelReceiverControlEvent<PData, ControlMeta>> {
         self.inner.recv().await
     }
 }
@@ -750,7 +726,7 @@ impl<PData> LocalReceiverControlReceiver<PData> {
 impl<PData> SharedReceiverControlReceiver<PData> {
     pub(crate) async fn recv_event(
         &mut self,
-    ) -> Option<ChannelReceiverControlEvent<CompletionPayload<PData>>> {
+    ) -> Option<ChannelReceiverControlEvent<PData, ControlMeta>> {
         self.inner.recv().await
     }
 }
@@ -758,13 +734,13 @@ impl<PData> SharedReceiverControlReceiver<PData> {
 impl<PData> LocalNodeControlReceiver<PData> {
     pub(crate) async fn recv_event(
         &mut self,
-    ) -> Option<ChannelNodeControlEvent<CompletionPayload<PData>>> {
+    ) -> Option<ChannelNodeControlEvent<PData, ControlMeta>> {
         self.inner.recv().await
     }
 
     pub(crate) fn try_recv_event(
         &mut self,
-    ) -> Option<ChannelNodeControlEvent<CompletionPayload<PData>>> {
+    ) -> Option<ChannelNodeControlEvent<PData, ControlMeta>> {
         self.inner.try_recv()
     }
 
@@ -776,13 +752,13 @@ impl<PData> LocalNodeControlReceiver<PData> {
 impl<PData> SharedNodeControlReceiver<PData> {
     pub(crate) async fn recv_event(
         &mut self,
-    ) -> Option<ChannelNodeControlEvent<CompletionPayload<PData>>> {
+    ) -> Option<ChannelNodeControlEvent<PData, ControlMeta>> {
         self.inner.recv().await
     }
 
     pub(crate) fn try_recv_event(
         &mut self,
-    ) -> Option<ChannelNodeControlEvent<CompletionPayload<PData>>> {
+    ) -> Option<ChannelNodeControlEvent<PData, ControlMeta>> {
         self.inner.try_recv()
     }
 
@@ -933,7 +909,8 @@ pub(crate) fn local_receiver_channel<PData>(
     LocalReceiverControlReceiver<PData>,
 ) {
     let (sender, receiver) =
-        local::receiver_channel(control_channel_config(capacity)).expect("control config must be valid");
+        receiver_channel_with_meta::<PData, ControlMeta>(control_channel_config(capacity))
+            .expect("control config must be valid");
     (
         LocalReceiverControlSender {
             inner: sender,
@@ -950,7 +927,8 @@ pub(crate) fn shared_receiver_channel<PData>(
     SharedReceiverControlReceiver<PData>,
 ) {
     let (sender, receiver) =
-        shared::receiver_channel(control_channel_config(capacity)).expect("control config must be valid");
+        receiver_channel_with_meta::<PData, ControlMeta>(control_channel_config(capacity))
+            .expect("control config must be valid");
     (
         SharedReceiverControlSender {
             inner: sender,
@@ -964,7 +942,8 @@ pub(crate) fn local_node_channel<PData>(
     capacity: usize,
 ) -> (LocalNodeControlSender<PData>, LocalNodeControlReceiver<PData>) {
     let (sender, receiver) =
-        local::node_channel(control_channel_config(capacity)).expect("control config must be valid");
+        node_channel_with_meta::<PData, ControlMeta>(control_channel_config(capacity))
+            .expect("control config must be valid");
     (
         LocalNodeControlSender {
             inner: sender,
@@ -978,7 +957,8 @@ pub(crate) fn shared_node_channel<PData>(
     capacity: usize,
 ) -> (SharedNodeControlSender<PData>, SharedNodeControlReceiver<PData>) {
     let (sender, receiver) =
-        shared::node_channel(control_channel_config(capacity)).expect("control config must be valid");
+        node_channel_with_meta::<PData, ControlMeta>(control_channel_config(capacity))
+            .expect("control config must be valid");
     (
         SharedNodeControlSender {
             inner: sender,

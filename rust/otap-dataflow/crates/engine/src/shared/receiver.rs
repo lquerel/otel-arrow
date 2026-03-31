@@ -59,7 +59,7 @@ use tokio::net::TcpListener;
 ///
 /// Receivers are responsible for accepting data from external sources and converting
 /// it into messages that can be processed by the pipeline.
-#[async_trait]
+#[async_trait(?Send)]
 pub trait Receiver<PData> {
     /// Similar to local::receiver::Receiver::start, but operates in a Send context.
     async fn start(

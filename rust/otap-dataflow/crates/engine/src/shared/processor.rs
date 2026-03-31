@@ -51,7 +51,7 @@ use std::collections::HashMap;
 use std::time::{Duration, Instant};
 
 /// A trait for processors in the pipeline (Send definition).
-#[async_trait]
+#[async_trait(?Send)]
 pub trait Processor<PData> {
     /// Processes a message and optionally produces effects, such as generating new pdata messages.
     ///

@@ -426,7 +426,7 @@ type GrpcServerTask = Pin<Box<dyn Future<Output = Result<(), tonic::transport::E
 /// Type alias for the HTTP server future.
 type HttpServerTask = Pin<Box<dyn Future<Output = std::io::Result<()>> + Send>>;
 
-#[async_trait]
+#[async_trait(?Send)]
 impl shared::Receiver<OtapPdata> for OTLPReceiver {
     async fn start(
         mut self: Box<Self>,

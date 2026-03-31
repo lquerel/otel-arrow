@@ -90,7 +90,7 @@ impl<PData: ReceivedAtNode> ExporterInbox<PData> {
 }
 
 /// A trait for egress exporters (Send definition).
-#[async_trait]
+#[async_trait(?Send)]
 pub trait Exporter<PData> {
     /// Similar to local::exporter::Exporter::start, but operates in a Send context.
     async fn start(
