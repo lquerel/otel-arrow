@@ -12,14 +12,26 @@ use otap_df_admin::{
 use otap_df_state::conditions::ConditionStatus;
 use otap_df_state::phase::PipelinePhase;
 use otap_df_state::pipeline_status::{PipelineRolloutState, PipelineRolloutSummary};
+use std::any::Any;
 use std::collections::VecDeque;
 use std::io;
+use std::panic::{AssertUnwindSafe, catch_unwind};
 use std::sync::{Condvar, Mutex, Weak};
 use std::time::{Duration, Instant};
 
 const TERMINAL_ROLLOUT_RETENTION_LIMIT: usize = 32;
 const TERMINAL_SHUTDOWN_RETENTION_LIMIT: usize = 32;
 const TERMINAL_OPERATION_RETENTION_TTL: Duration = Duration::from_secs(24 * 60 * 60);
+
+fn panic_payload_message(payload: &(dyn Any + Send)) -> String {
+    if let Some(message) = payload.downcast_ref::<&str>() {
+        (*message).to_owned()
+    } else if let Some(message) = payload.downcast_ref::<String>() {
+        message.clone()
+    } else {
+        "panic payload was not a string".to_owned()
+    }
+}
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum RolloutAction {
@@ -672,9 +684,9 @@ impl<PData: 'static + Clone + Send + Sync + std::fmt::Debug + ReceivedAtNode + U
     fn prune_exited_runtime_instances_for_pipeline_locked(
         state: &mut ControllerRuntimeState,
         pipeline_key: &PipelineKey,
-    ) {
+    ) -> bool {
         if Self::pipeline_has_active_operation_locked(state, pipeline_key) {
-            return;
+            return false;
         }
 
         state.runtime_instances.retain(|deployed_key, instance| {
@@ -686,6 +698,7 @@ impl<PData: 'static + Clone + Send + Sync + std::fmt::Debug + ReceivedAtNode + U
 
             matches!(instance.lifecycle, RuntimeInstanceLifecycle::Active)
         });
+        true
     }
 
     /// Opportunistically trims retained rollout and shutdown history.
@@ -699,13 +712,21 @@ impl<PData: 'static + Clone + Send + Sync + std::fmt::Debug + ReceivedAtNode + U
 
     /// Trims exited instances and terminal history for one logical pipeline.
     fn prune_pipeline_runtime_and_history(&self, pipeline_key: &PipelineKey) {
-        let mut state = self
-            .state
-            .lock()
-            .unwrap_or_else(|poisoned| poisoned.into_inner());
-        Self::prune_exited_runtime_instances_for_pipeline_locked(&mut state, pipeline_key);
-        Self::prune_terminal_rollout_queue_locked(&mut state, pipeline_key, Instant::now());
-        Self::prune_terminal_shutdown_queue_locked(&mut state, pipeline_key, Instant::now());
+        let should_compact = {
+            let mut state = self
+                .state
+                .lock()
+                .unwrap_or_else(|poisoned| poisoned.into_inner());
+            let should_compact =
+                Self::prune_exited_runtime_instances_for_pipeline_locked(&mut state, pipeline_key);
+            Self::prune_terminal_rollout_queue_locked(&mut state, pipeline_key, Instant::now());
+            Self::prune_terminal_shutdown_queue_locked(&mut state, pipeline_key, Instant::now());
+            should_compact
+        };
+        if should_compact {
+            self.observed_state_store
+                .compact_pipeline_instances(pipeline_key);
+        }
     }
 
     /// Resolves the concrete core ids selected by a pipeline resource policy.
@@ -1273,6 +1294,24 @@ impl<PData: 'static + Clone + Send + Sync + std::fmt::Debug + ReceivedAtNode + U
         self.prune_pipeline_runtime_and_history(pipeline_key);
     }
 
+    /// Forces rollout terminal cleanup when the detached rollout worker panics.
+    fn handle_rollout_worker_panic(
+        &self,
+        pipeline_key: &PipelineKey,
+        rollout_id: &str,
+        panic: Box<dyn Any + Send>,
+    ) {
+        let failure_reason = format!(
+            "rollout worker panicked: {}",
+            panic_payload_message(&*panic)
+        );
+        self.update_rollout(pipeline_key, rollout_id, |rollout| {
+            rollout.state = RolloutLifecycleState::Failed;
+            rollout.failure_reason = Some(failure_reason.clone());
+        });
+        self.finish_rollout(pipeline_key, rollout_id);
+    }
+
     /// Returns the latest rollout snapshot, evicting expired history first.
     fn rollout_status_snapshot(&self, rollout_id: &str) -> Option<RolloutStatus> {
         let mut state = self
@@ -1482,6 +1521,23 @@ impl<PData: 'static + Clone + Send + Sync + std::fmt::Debug + ReceivedAtNode + U
         state.shutdowns.get(shutdown_id).map(ShutdownRecord::status)
     }
 
+    /// Forces shutdown terminal cleanup when the detached shutdown worker panics.
+    fn handle_shutdown_worker_panic(
+        &self,
+        pipeline_key: &PipelineKey,
+        shutdown_id: &str,
+        panic: Box<dyn Any + Send>,
+    ) {
+        let failure_reason = format!(
+            "shutdown worker panicked: {}",
+            panic_payload_message(&*panic)
+        );
+        self.update_shutdown(pipeline_key, shutdown_id, |shutdown| {
+            shutdown.state = ShutdownLifecycleState::Failed;
+            shutdown.failure_reason = Some(failure_reason.clone());
+        });
+    }
+
     /// Returns the committed pipeline config plus any currently active rollout summary.
     fn pipeline_details_snapshot(
         &self,
@@ -1540,6 +1596,9 @@ impl<PData: 'static + Clone + Send + Sync + std::fmt::Debug + ReceivedAtNode + U
         let initial_status = plan.rollout.status();
         let runtime = Arc::clone(self);
         let rollout_runtime = Arc::clone(&runtime);
+        let rollout_cleanup_runtime = Arc::clone(&runtime);
+        let worker_pipeline_key = pipeline_key.clone();
+        let worker_rollout_id = rollout_id.clone();
         let _rollout_handle = thread::Builder::new()
             .name(format!(
                 "rollout-{}-{}",
@@ -1547,7 +1606,15 @@ impl<PData: 'static + Clone + Send + Sync + std::fmt::Debug + ReceivedAtNode + U
                 pipeline_key.pipeline_id().as_ref()
             ))
             .spawn(move || {
-                rollout_runtime.run_rollout(plan);
+                if let Err(panic) =
+                    catch_unwind(AssertUnwindSafe(|| rollout_runtime.run_rollout(plan)))
+                {
+                    rollout_cleanup_runtime.handle_rollout_worker_panic(
+                        &worker_pipeline_key,
+                        &worker_rollout_id,
+                        panic,
+                    );
+                }
             })
             .map_err(|err| {
                 runtime.finish_rollout(&pipeline_key, &rollout_id);
@@ -1569,6 +1636,9 @@ impl<PData: 'static + Clone + Send + Sync + std::fmt::Debug + ReceivedAtNode + U
         self.insert_shutdown(&pipeline_key, plan.shutdown.clone())?;
         let runtime = Arc::clone(self);
         let shutdown_runtime = Arc::clone(&runtime);
+        let shutdown_cleanup_runtime = Arc::clone(&runtime);
+        let worker_pipeline_key = pipeline_key.clone();
+        let worker_shutdown_id = shutdown_id.clone();
         let _shutdown_handle = thread::Builder::new()
             .name(format!(
                 "shutdown-{}-{}",
@@ -1576,7 +1646,15 @@ impl<PData: 'static + Clone + Send + Sync + std::fmt::Debug + ReceivedAtNode + U
                 pipeline_key.pipeline_id().as_ref()
             ))
             .spawn(move || {
-                shutdown_runtime.run_shutdown(plan);
+                if let Err(panic) =
+                    catch_unwind(AssertUnwindSafe(|| shutdown_runtime.run_shutdown(plan)))
+                {
+                    shutdown_cleanup_runtime.handle_shutdown_worker_panic(
+                        &worker_pipeline_key,
+                        &worker_shutdown_id,
+                        panic,
+                    );
+                }
             })
             .map_err(|err| {
                 runtime.update_shutdown(&pipeline_key, &shutdown_id, |shutdown| {
@@ -2396,24 +2474,37 @@ impl<PData: 'static + Clone + Send + Sync + std::fmt::Debug + ReceivedAtNode + U
             }
         }
 
-        let mut state = self
-            .state
-            .lock()
-            .unwrap_or_else(|poisoned| poisoned.into_inner());
-        if let Some(instance) = state.runtime_instances.get_mut(&pipeline_key) {
-            instance.lifecycle = RuntimeInstanceLifecycle::Exited(exit.clone());
-        }
-        state.active_instances = state.active_instances.saturating_sub(1);
-        if let RuntimeInstanceExit::Error(message) = &exit {
-            if state.first_error.is_none() {
-                state.first_error = Some(message.clone());
+        let should_compact = {
+            let mut state = self
+                .state
+                .lock()
+                .unwrap_or_else(|poisoned| poisoned.into_inner());
+            if let Some(instance) = state.runtime_instances.get_mut(&pipeline_key) {
+                instance.lifecycle = RuntimeInstanceLifecycle::Exited(exit.clone());
             }
+            state.active_instances = state.active_instances.saturating_sub(1);
+            if let RuntimeInstanceExit::Error(message) = &exit {
+                if state.first_error.is_none() {
+                    state.first_error = Some(message.clone());
+                }
+            }
+            let logical_pipeline_key = PipelineKey::new(
+                pipeline_key.pipeline_group_id.clone(),
+                pipeline_key.pipeline_id.clone(),
+            );
+            Self::prune_exited_runtime_instances_for_pipeline_locked(
+                &mut state,
+                &logical_pipeline_key,
+            )
+        };
+        if should_compact {
+            let logical_pipeline_key = PipelineKey::new(
+                pipeline_key.pipeline_group_id.clone(),
+                pipeline_key.pipeline_id.clone(),
+            );
+            self.observed_state_store
+                .compact_pipeline_instances(&logical_pipeline_key);
         }
-        let logical_pipeline_key = PipelineKey::new(
-            pipeline_key.pipeline_group_id.clone(),
-            pipeline_key.pipeline_id.clone(),
-        );
-        Self::prune_exited_runtime_instances_for_pipeline_locked(&mut state, &logical_pipeline_key);
         self.state_changed.notify_all();
     }
 

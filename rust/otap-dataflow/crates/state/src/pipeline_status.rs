@@ -12,7 +12,7 @@ use otap_df_config::CoreId;
 use otap_df_config::health::{HealthPolicy, PhaseKind, Quorum};
 use serde::Serialize;
 use serde::ser::SerializeStruct;
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::time::SystemTime;
 
 /// Unique runtime-instance key for a logical pipeline.
@@ -153,6 +153,13 @@ impl PipelineStatus {
     /// Clears the rollout summary once no rollout is active anymore.
     pub(crate) fn clear_rollout_summary(&mut self) {
         self.rollout = None;
+    }
+
+    /// Compacts retained runtime instances down to the generations currently
+    /// selected for status aggregation.
+    pub(crate) fn compact_instances_to_selected(&mut self) {
+        let retained: HashSet<_> = self.selected_runtime_keys().into_iter().collect();
+        self.instances.retain(|key, _| retained.contains(key));
     }
 
     #[must_use]
@@ -417,18 +424,16 @@ impl PipelineStatus {
     }
 
     /// Selects the runtime instances that currently represent this logical pipeline.
-    fn selected_runtimes(&self) -> Vec<(RuntimeInstanceKey, &PipelineRuntimeStatus)> {
+    fn selected_runtime_keys(&self) -> Vec<RuntimeInstanceKey> {
         if !self.serving_generations.is_empty() {
             return self
                 .serving_generations
                 .iter()
-                .filter_map(|(core_id, generation)| {
-                    let key = RuntimeInstanceKey {
-                        core_id: *core_id,
-                        deployment_generation: *generation,
-                    };
-                    self.instances.get(&key).map(|runtime| (key, runtime))
+                .map(|(core_id, generation)| RuntimeInstanceKey {
+                    core_id: *core_id,
+                    deployment_generation: *generation,
                 })
+                .filter(|key| self.instances.contains_key(key))
                 .collect();
         }
 
@@ -437,24 +442,31 @@ impl PipelineStatus {
                 .instances
                 .iter()
                 .filter(|(key, _)| key.deployment_generation == active_generation)
-                .map(|(key, runtime)| (*key, runtime))
+                .map(|(key, _)| *key)
                 .collect();
             if !selected.is_empty() {
                 return selected;
             }
         }
 
-        let mut per_core: HashMap<CoreId, (RuntimeInstanceKey, &PipelineRuntimeStatus)> =
-            HashMap::new();
-        for (key, runtime) in &self.instances {
-            let replace = per_core.get(&key.core_id).is_none_or(|(existing, _)| {
-                key.deployment_generation > existing.deployment_generation
-            });
+        let mut per_core: HashMap<CoreId, RuntimeInstanceKey> = HashMap::new();
+        for key in self.instances.keys() {
+            let replace = per_core
+                .get(&key.core_id)
+                .is_none_or(|existing| key.deployment_generation > existing.deployment_generation);
             if replace {
-                _ = per_core.insert(key.core_id, (*key, runtime));
+                _ = per_core.insert(key.core_id, *key);
             }
         }
         per_core.into_values().collect()
+    }
+
+    /// Selects the runtime instances that should contribute to aggregated status.
+    fn selected_runtimes(&self) -> Vec<(RuntimeInstanceKey, &PipelineRuntimeStatus)> {
+        self.selected_runtime_keys()
+            .into_iter()
+            .filter_map(|key| self.instances.get(&key).map(|runtime| (key, runtime)))
+            .collect()
     }
 
     /// Builds a per-core view of the selected runtime instances.
@@ -463,6 +475,22 @@ impl PipelineStatus {
             .into_iter()
             .map(|(key, runtime)| (key.core_id, runtime.clone()))
             .collect()
+    }
+
+    /// Builds the retained per-instance view exposed for overlap-aware status
+    /// debugging.
+    fn retained_instance_views(&self) -> Vec<RuntimeInstanceStatusView<'_>> {
+        let mut instances = self
+            .instances
+            .iter()
+            .map(|(key, status)| RuntimeInstanceStatusView {
+                core_id: key.core_id,
+                deployment_generation: key.deployment_generation,
+                status,
+            })
+            .collect::<Vec<_>>();
+        instances.sort_by_key(|instance| (instance.core_id, instance.deployment_generation));
+        instances
     }
 
     /// Counts how many selected runtimes satisfy a quorum predicate.
@@ -544,22 +572,14 @@ impl Serialize for PipelineStatus {
         S: serde::Serializer,
     {
         let selected_cores = self.selected_core_map();
-        let selected_instances = self
-            .selected_runtimes()
-            .into_iter()
-            .map(|(key, status)| RuntimeInstanceStatusView {
-                core_id: key.core_id,
-                deployment_generation: key.deployment_generation,
-                status,
-            })
-            .collect::<Vec<_>>();
+        let retained_instances = self.retained_instance_views();
 
         let mut state = serializer.serialize_struct("PipelineStatus", 8)?;
         state.serialize_field("conditions", &self.conditions())?;
         state.serialize_field("totalCores", &self.total_cores())?;
         state.serialize_field("runningCores", &self.running_cores())?;
         state.serialize_field("cores", &selected_cores)?;
-        state.serialize_field("instances", &selected_instances)?;
+        state.serialize_field("instances", &retained_instances)?;
         state.serialize_field("activeGeneration", &self.active_generation)?;
         state.serialize_field("servingGenerations", &self.serving_generations)?;
         state.serialize_field("rollout", &self.rollout)?;
@@ -802,5 +822,140 @@ mod tests {
         assert_eq!(status.total_cores(), 2);
         assert_eq!(status.running_cores(), 2);
         assert!(status.readiness());
+    }
+
+    /// Scenario: observed state contains multiple generations for the same
+    /// cores while the controller has already pinned the serving generation on
+    /// each core.
+    /// Guarantees: compaction retains only the serving `(core, generation)`
+    /// instances and removes superseded generations from retained state.
+    #[test]
+    fn compact_instances_retains_only_serving_generations() {
+        let mut status = new_status(HealthPolicy::default());
+        insert_runtime(&mut status, 0, 0, runtime(PipelinePhase::Stopped));
+        insert_runtime(&mut status, 0, 1, runtime(PipelinePhase::Running));
+        insert_runtime(&mut status, 1, 0, runtime(PipelinePhase::Running));
+        insert_runtime(&mut status, 1, 1, runtime(PipelinePhase::Stopped));
+        status.set_active_generation(0);
+        status.set_serving_generation(0, 1);
+        status.set_serving_generation(1, 0);
+
+        status.compact_instances_to_selected();
+
+        assert_eq!(status.per_instance().len(), 2);
+        assert!(status.instance_status(0, 1).is_some());
+        assert!(status.instance_status(1, 0).is_some());
+        assert!(status.instance_status(0, 0).is_none());
+        assert!(status.instance_status(1, 1).is_none());
+    }
+
+    /// Scenario: observed state has multiple generations but there is no
+    /// mixed-generation serving override and the controller has committed a new
+    /// active generation.
+    /// Guarantees: compaction retains only the committed active generation.
+    #[test]
+    fn compact_instances_retains_only_active_generation_when_no_serving_override() {
+        let mut status = new_status(HealthPolicy::default());
+        insert_runtime(&mut status, 0, 0, runtime(PipelinePhase::Stopped));
+        insert_runtime(&mut status, 0, 1, runtime(PipelinePhase::Running));
+        insert_runtime(&mut status, 1, 0, runtime(PipelinePhase::Stopped));
+        insert_runtime(&mut status, 1, 1, runtime(PipelinePhase::Running));
+        status.set_active_generation(1);
+
+        status.compact_instances_to_selected();
+
+        assert_eq!(status.per_instance().len(), 2);
+        assert!(status.instance_status(0, 1).is_some());
+        assert!(status.instance_status(1, 1).is_some());
+        assert!(status.instance_status(0, 0).is_none());
+        assert!(status.instance_status(1, 0).is_none());
+    }
+
+    /// Scenario: observed state contains only superseded generations relative
+    /// to the last committed active generation.
+    /// Guarantees: compaction falls back to the highest observed generation per
+    /// core so status remains bounded without dropping the last known view.
+    #[test]
+    fn compact_instances_falls_back_to_latest_generation_per_core() {
+        let mut status = new_status(HealthPolicy::default());
+        insert_runtime(&mut status, 0, 0, runtime(PipelinePhase::Stopped));
+        insert_runtime(&mut status, 0, 2, runtime(PipelinePhase::Stopped));
+        insert_runtime(&mut status, 1, 1, runtime(PipelinePhase::Running));
+        insert_runtime(&mut status, 1, 3, runtime(PipelinePhase::Stopped));
+        status.set_active_generation(9);
+
+        status.compact_instances_to_selected();
+
+        assert_eq!(status.per_instance().len(), 2);
+        assert!(status.instance_status(0, 2).is_some());
+        assert!(status.instance_status(1, 3).is_some());
+        assert!(status.instance_status(0, 0).is_none());
+        assert!(status.instance_status(1, 1).is_none());
+    }
+
+    /// Scenario: a logical pipeline has been fully shut down and observed state
+    /// still contains an older generation alongside the final stopped
+    /// generation.
+    /// Guarantees: compaction keeps the last stopped generation per core so
+    /// `/status` continues to surface the final stopped view instead of
+    /// collapsing to an empty runtime set.
+    #[test]
+    fn compact_instances_preserves_last_stopped_generation_view_after_shutdown() {
+        let mut status = new_status(HealthPolicy::default());
+        insert_runtime(&mut status, 0, 0, runtime(PipelinePhase::Stopped));
+        insert_runtime(&mut status, 0, 1, runtime(PipelinePhase::Stopped));
+        status.set_active_generation(1);
+
+        status.compact_instances_to_selected();
+
+        assert_eq!(status.per_instance().len(), 1);
+        assert_eq!(status.total_cores(), 1);
+        assert_eq!(status.running_cores(), 0);
+        assert!(matches!(
+            status
+                .instance_status(0, 1)
+                .expect("latest generation should remain")
+                .phase(),
+            PipelinePhase::Stopped
+        ));
+        assert!(status.instance_status(0, 0).is_none());
+    }
+
+    /// Scenario: a rolling cutover overlaps the old and new generations on one
+    /// core while aggregation must still reflect only the selected serving set.
+    /// Guarantees: `/status.instances` preserves both retained generations for
+    /// debugging, while aggregated `cores` and core counts continue to use the
+    /// selected serving generation per core.
+    #[test]
+    fn serialization_preserves_overlap_aware_instances_while_aggregating_selected_cores() {
+        let mut status = new_status(HealthPolicy::default());
+        insert_runtime(&mut status, 0, 0, runtime(PipelinePhase::Stopped));
+        insert_runtime(&mut status, 0, 1, runtime(PipelinePhase::Running));
+        insert_runtime(&mut status, 1, 0, runtime(PipelinePhase::Running));
+        status.set_active_generation(0);
+        status.set_serving_generation(0, 1);
+        status.set_serving_generation(1, 0);
+
+        let json = serde_json::to_value(&status).expect("pipeline status should serialize");
+        let instances = json["instances"]
+            .as_array()
+            .expect("instances should serialize as an array");
+
+        assert_eq!(json["totalCores"], 2);
+        assert_eq!(json["runningCores"], 2);
+        assert_eq!(
+            json["cores"]
+                .as_object()
+                .expect("cores should serialize as an object")
+                .len(),
+            2
+        );
+        assert_eq!(instances.len(), 3);
+        assert_eq!(instances[0]["coreId"], 0);
+        assert_eq!(instances[0]["deploymentGeneration"], 0);
+        assert_eq!(instances[1]["coreId"], 0);
+        assert_eq!(instances[1]["deploymentGeneration"], 1);
+        assert_eq!(instances[2]["coreId"], 1);
+        assert_eq!(instances[2]["deploymentGeneration"], 0);
     }
 }
