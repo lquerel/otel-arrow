@@ -36,6 +36,10 @@ pub mod settings;
 /// TLS configuration.
 pub mod tls;
 pub mod topic;
+/// Transport header core types and capture/propagation engines.
+pub mod transport_headers;
+/// Transport header capture and propagation policy declarations.
+pub mod transport_headers_policy;
 pub use topic::{
     SubscriptionGroupName, TopicAckPropagationMode, TopicAckPropagationPolicies, TopicBackendKind,
     TopicBroadcastOnLagPolicy, TopicImplSelectionPolicy, TopicName,
@@ -73,6 +77,9 @@ pub type PipelineId = Cow<'static, str>;
 
 /// The id of a node in the pipeline.
 pub type NodeId = Cow<'static, str>;
+
+/// The id of a capability binding (e.g., "bearer_token_provider").
+pub type CapabilityId = Cow<'static, str>;
 
 /// The URN of a node type.
 pub use node_urn::NodeUrn;
