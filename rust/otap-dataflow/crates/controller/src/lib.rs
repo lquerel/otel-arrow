@@ -92,6 +92,7 @@ use otap_df_telemetry::{
 };
 use smallvec::smallvec;
 use std::collections::{HashMap, HashSet};
+use std::panic::{AssertUnwindSafe, catch_unwind};
 use std::sync::Arc;
 use std::sync::mpsc as std_mpsc;
 use std::thread;
@@ -105,7 +106,10 @@ pub mod startup;
 /// Utilities to spawn async tasks on dedicated threads with graceful shutdown.
 pub mod thread_task;
 
-use live_control::{ControllerRuntime, LaunchedPipelineThread};
+use live_control::{
+    ControllerRuntime, LaunchedPipelineThread, PanicReport, RuntimeInstanceError,
+    RuntimeInstanceExit,
+};
 
 /// Controller for managing pipelines in a thread-per-core model.
 ///
@@ -1316,12 +1320,30 @@ impl<PData: 'static + Clone + Send + Sync + std::fmt::Debug + ReceivedAtNode + U
         let planned_core_assignments =
             Self::preflight_pipeline_core_allocations(&pipelines, &all_cores)?;
 
+        let runtime = Arc::new(ControllerRuntime::new(
+            self.pipeline_factory,
+            controller_ctx.clone(),
+            obs_state_store.clone(),
+            obs_state_handle.clone(),
+            engine_evt_reporter.clone(),
+            metrics_reporter.clone(),
+            declared_topics,
+            all_cores.clone(),
+            telemetry_system.engine_tracing_setup(),
+            telemetry_reporting_interval,
+            memory_pressure_tx.clone(),
+            engine_config.clone(),
+        ));
+
+        // Pipeline threads receive only a Weak handle back to the controller runtime. That lets
+        // them report their terminal exit without becoming owners that keep the runtime alive
+        // during shutdown.
         let internal_pipeline_handle = Self::spawn_internal_pipeline_if_configured(
+            Arc::downgrade(&runtime),
             its_key.clone(),
             its_core,
             observability_pipeline,
             &engine_config,
-            &declared_topics,
             &telemetry_system,
             self.pipeline_factory,
             &controller_ctx,
@@ -1356,7 +1378,7 @@ impl<PData: 'static + Clone + Send + Sync + std::fmt::Debug + ReceivedAtNode + U
         // successful startup. This ensures the channel receiver is being consumed
         // before we start sending logs.
         telemetry_system.init_global_subscriber();
-        Self::emit_topic_mode_reports(&declared_topics.inferred_mode_reports);
+        Self::emit_topic_mode_reports(&runtime.declared_topics().inferred_mode_reports);
 
         let internal_collector = telemetry_system.collector();
         let metrics_agg_handle = spawn_thread_local_task(
@@ -1431,21 +1453,6 @@ impl<PData: 'static + Clone + Send + Sync + std::fmt::Debug + ReceivedAtNode + U
             },
         )?;
 
-        let runtime = Arc::new(ControllerRuntime::new(
-            self.pipeline_factory,
-            controller_ctx.clone(),
-            obs_state_store.clone(),
-            obs_state_handle.clone(),
-            engine_evt_reporter.clone(),
-            metrics_reporter.clone(),
-            declared_topics,
-            all_cores.clone(),
-            telemetry_system.engine_tracing_setup(),
-            telemetry_reporting_interval,
-            memory_pressure_tx.clone(),
-            engine_config.clone(),
-        ));
-
         if let Some(launched) = internal_pipeline_handle {
             runtime.register_launched_instance(launched);
         }
@@ -1468,6 +1475,9 @@ impl<PData: 'static + Clone + Send + Sync + std::fmt::Debug + ReceivedAtNode + U
             );
 
             for core_id in &requested_cores {
+                // Pass a Weak runtime handle into each pipeline thread. The thread upgrades it
+                // only when it needs to report Success/Error/Panic on exit, and silently skips
+                // that late report if shutdown has already dropped the runtime.
                 let launched = Self::launch_pipeline_thread(
                     self.pipeline_factory,
                     DeployedPipelineKey {
@@ -1490,6 +1500,7 @@ impl<PData: 'static + Clone + Send + Sync + std::fmt::Debug + ReceivedAtNode + U
                     memory_pressure_tx.clone(),
                     &engine_config,
                     runtime.declared_topics(),
+                    Arc::downgrade(&runtime),
                     runtime.next_thread_id(),
                     None,
                 )?;
@@ -1749,6 +1760,12 @@ impl<PData: 'static + Clone + Send + Sync + std::fmt::Debug + ReceivedAtNode + U
         }
     }
 
+    /// Launches one pipeline OS thread and wires its terminal exit back into the controller.
+    ///
+    /// The spawned thread owns the actual pipeline execution and maps success, runtime error, or
+    /// panic into RuntimeInstanceExit. `runtime` is a Weak handle on purpose: the pipeline thread
+    /// should be able to report its exit, but it must not become an owner that prolongs the
+    /// controller runtime during shutdown.
     #[allow(clippy::too_many_arguments)]
     fn launch_pipeline_thread(
         pipeline_factory: &'static PipelineFactory<PData>,
@@ -1767,6 +1784,7 @@ impl<PData: 'static + Clone + Send + Sync + std::fmt::Debug + ReceivedAtNode + U
         memory_pressure_tx: tokio::sync::watch::Sender<MemoryPressureChanged>,
         config: &OtelDataflowSpec,
         declared_topics: &DeclaredTopics<PData>,
+        runtime: std::sync::Weak<ControllerRuntime<PData>>,
         thread_id: usize,
         internal_telemetry: Option<(
             InternalTelemetrySettings,
@@ -1803,29 +1821,52 @@ impl<PData: 'static + Clone + Send + Sync + std::fmt::Debug + ReceivedAtNode + U
             pipeline_key.deployment_generation
         );
         let run_key = pipeline_key.clone();
-        let handle = thread::Builder::new()
+        let runtime_key = pipeline_key.clone();
+        let runtime_thread_name = thread_name.clone();
+        let _handle = thread::Builder::new()
             .name(thread_name.clone())
             .spawn(move || {
-                Self::run_pipeline_thread(
-                    run_key,
-                    core_id,
-                    pipeline_config,
-                    channel_capacity_policy,
-                    telemetry_policy,
-                    transport_headers_policy,
-                    telemetry_reporting_interval,
-                    pipeline_factory,
-                    pipeline_ctx,
-                    engine_evt_reporter,
-                    metrics_reporter,
-                    runtime_ctrl_msg_tx,
-                    runtime_ctrl_msg_rx,
-                    pipeline_completion_msg_tx,
-                    pipeline_completion_msg_rx,
-                    memory_pressure_rx,
-                    tracing_setup,
-                    internal_telemetry,
-                )
+                let exit = match catch_unwind(AssertUnwindSafe(|| {
+                    Self::run_pipeline_thread(
+                        run_key,
+                        core_id,
+                        pipeline_config,
+                        channel_capacity_policy,
+                        telemetry_policy,
+                        transport_headers_policy,
+                        telemetry_reporting_interval,
+                        pipeline_factory,
+                        pipeline_ctx,
+                        engine_evt_reporter,
+                        metrics_reporter,
+                        runtime_ctrl_msg_tx,
+                        runtime_ctrl_msg_rx,
+                        pipeline_completion_msg_tx,
+                        pipeline_completion_msg_rx,
+                        memory_pressure_rx,
+                        tracing_setup,
+                        internal_telemetry,
+                    )
+                })) {
+                    Ok(Ok(_)) => RuntimeInstanceExit::Success,
+                    Ok(Err(err)) => {
+                        RuntimeInstanceExit::Error(RuntimeInstanceError::runtime(err.to_string()))
+                    }
+                    Err(panic) => RuntimeInstanceExit::Error(RuntimeInstanceError::from_panic(
+                        PanicReport::capture(
+                            "runtime thread",
+                            panic,
+                            Some(runtime_thread_name),
+                            Some(thread_id),
+                            Some(runtime_key.core_id),
+                        ),
+                    )),
+                };
+                if let Some(runtime) = runtime.upgrade() {
+                    runtime.note_instance_exit(runtime_key, exit);
+                }
+                // The controller runtime may already be gone during teardown. In that case there
+                // is nothing left to update, so late exit reporting is intentionally best-effort.
             })
             .map_err(|e| Error::ThreadSpawnError {
                 thread_name: thread_name.clone(),
@@ -1833,11 +1874,8 @@ impl<PData: 'static + Clone + Send + Sync + std::fmt::Debug + ReceivedAtNode + U
             })?;
 
         Ok(LaunchedPipelineThread {
-            thread_name,
-            thread_id,
             pipeline_key,
             control_sender,
-            join_handle: handle,
             _marker: std::marker::PhantomData,
         })
     }
@@ -1848,11 +1886,11 @@ impl<PData: 'static + Clone + Send + Sync + std::fmt::Debug + ReceivedAtNode + U
     /// and waits for it to start, or None.
     #[allow(clippy::too_many_arguments)]
     fn spawn_internal_pipeline_if_configured(
+        runtime: std::sync::Weak<ControllerRuntime<PData>>,
         its_key: DeployedPipelineKey,
         its_core: CoreId,
         observability_pipeline: Option<ResolvedPipelineConfig>,
         config: &OtelDataflowSpec,
-        declared_topics: &DeclaredTopics<PData>,
         telemetry_system: &InternalTelemetrySystem,
         pipeline_factory: &'static PipelineFactory<PData>,
         controller_ctx: &ControllerContext,
@@ -1911,7 +1949,11 @@ impl<PData: 'static + Clone + Send + Sync + std::fmt::Debug + ReceivedAtNode + U
             telemetry_reporting_interval,
             memory_pressure_tx.clone(),
             config,
-            declared_topics,
+            runtime
+                .upgrade()
+                .expect("controller runtime should exist while spawning internal pipeline")
+                .declared_topics(),
+            runtime,
             0,
             Some((its_settings, startup_tx)),
         )?;
@@ -3280,13 +3322,13 @@ groups:
         assert_eq!(
             topic
                 .try_publish(Arc::new(()))
-                .expect("publish should still reach broadcast"),
+                .expect("publish should report backpressure once balanced is full"),
             otap_df_engine::topic::PublishOutcome::DroppedOnFull
         );
         assert_eq!(
             topic
                 .try_publish(Arc::new(()))
-                .expect("publish should still reach broadcast"),
+                .expect("publish should keep reporting backpressure while balanced is full"),
             otap_df_engine::topic::PublishOutcome::DroppedOnFull
         );
         assert_eq!(
@@ -3315,6 +3357,6 @@ groups:
                 }
             }
         }
-        assert_eq!(broadcast_messages, 3);
+        assert_eq!(broadcast_messages, 1);
     }
 }

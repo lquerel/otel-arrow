@@ -13,10 +13,11 @@ use otap_df_state::conditions::ConditionStatus;
 use otap_df_state::phase::PipelinePhase;
 use otap_df_state::pipeline_status::{PipelineRolloutState, PipelineRolloutSummary};
 use std::any::Any;
+use std::backtrace::Backtrace;
 use std::collections::VecDeque;
 use std::io;
 use std::panic::{AssertUnwindSafe, catch_unwind};
-use std::sync::{Condvar, Mutex, Weak};
+use std::sync::{Condvar, Mutex};
 use std::time::{Duration, Instant};
 
 const TERMINAL_ROLLOUT_RETENTION_LIMIT: usize = 32;
@@ -29,7 +30,103 @@ fn panic_payload_message(payload: &(dyn Any + Send)) -> String {
     } else if let Some(message) = payload.downcast_ref::<String>() {
         message.clone()
     } else {
-        "panic payload was not a string".to_owned()
+        "non-string panic payload".to_owned()
+    }
+}
+
+#[derive(Debug, Clone)]
+pub(super) struct PanicReport {
+    kind: &'static str,
+    payload_message: String,
+    thread_name: Option<String>,
+    thread_id: Option<usize>,
+    core_id: Option<usize>,
+    backtrace: String,
+}
+
+impl PanicReport {
+    pub(super) fn capture(
+        kind: &'static str,
+        panic: Box<dyn Any + Send>,
+        thread_name: Option<String>,
+        thread_id: Option<usize>,
+        core_id: Option<usize>,
+    ) -> Self {
+        Self {
+            kind,
+            payload_message: panic_payload_message(&*panic),
+            thread_name,
+            thread_id,
+            core_id,
+            backtrace: Backtrace::force_capture().to_string(),
+        }
+    }
+
+    fn summary_message(&self) -> String {
+        format!("{} panicked: {}", self.kind, self.payload_message)
+    }
+
+    fn detail_message(&self) -> String {
+        let mut context = Vec::new();
+        if let Some(thread_name) = &self.thread_name {
+            context.push(format!("thread_name={thread_name}"));
+        }
+        if let Some(thread_id) = self.thread_id {
+            context.push(format!("thread_id={thread_id}"));
+        }
+        if let Some(core_id) = self.core_id {
+            context.push(format!("core_id={core_id}"));
+        }
+
+        let mut detail = self.summary_message();
+        if !context.is_empty() {
+            detail.push_str("\ncontext: ");
+            detail.push_str(&context.join(", "));
+        }
+        detail.push_str("\nbacktrace:\n");
+        detail.push_str(&self.backtrace);
+        detail
+    }
+
+    fn error_summary(&self) -> ErrorSummary {
+        ErrorSummary::Pipeline {
+            error_kind: "panic".into(),
+            message: self.summary_message(),
+            source: Some(self.detail_message()),
+        }
+    }
+}
+
+#[derive(Debug, Clone)]
+pub(super) struct RuntimeInstanceError {
+    error_kind: String,
+    message: String,
+    detail: Option<String>,
+}
+
+impl RuntimeInstanceError {
+    pub(super) fn runtime(message: String) -> Self {
+        Self {
+            error_kind: "runtime".into(),
+            message,
+            detail: None,
+        }
+    }
+
+    pub(super) fn from_panic(report: PanicReport) -> Self {
+        Self {
+            error_kind: "panic".into(),
+            message: report.summary_message(),
+            detail: Some(report.detail_message()),
+        }
+    }
+
+    fn error_summary(&self) -> ErrorSummary {
+        ErrorSummary::Pipeline {
+            error_kind: self.error_kind.clone(),
+            message: self.message.clone(),
+            source: self.detail.clone(),
+        }
     }
 }
 
@@ -303,9 +400,9 @@ enum RuntimeInstanceLifecycle {
 }
 
 #[derive(Debug, Clone)]
-enum RuntimeInstanceExit {
+pub(super) enum RuntimeInstanceExit {
     Success,
-    Error(String),
+    Error(RuntimeInstanceError),
 }
 
 #[derive(Debug, Clone)]
@@ -325,6 +422,10 @@ struct ControllerRuntimeState {
     live_config: OtelDataflowSpec,
     logical_pipelines: HashMap<PipelineKey, LogicalPipelineRecord>,
     runtime_instances: HashMap<DeployedPipelineKey, RuntimeInstanceRecord>,
+    // A pipeline thread can finish before register_launched_instance() publishes it as Active.
+    // We park that exit here and reconcile it during registration instead of leaving stale
+    // liveness behind.
+    pending_instance_exits: HashMap<DeployedPipelineKey, RuntimeInstanceExit>,
     rollouts: HashMap<String, RolloutRecord>,
     active_rollouts: HashMap<PipelineKey, String>,
     terminal_rollouts: HashMap<PipelineKey, VecDeque<String>>,
@@ -360,11 +461,8 @@ struct ControllerControlPlane<PData: 'static + Clone + Send + Sync + std::fmt::D
 }
 
 pub(super) struct LaunchedPipelineThread<PData> {
-    pub(super) thread_name: String,
-    pub(super) thread_id: usize,
     pub(super) pipeline_key: DeployedPipelineKey,
     pub(super) control_sender: Arc<dyn PipelineAdminSender>,
-    pub(super) join_handle: thread::JoinHandle<Result<Vec<()>, Error>>,
     pub(super) _marker: std::marker::PhantomData<PData>,
 }
 
@@ -449,6 +547,7 @@ impl<PData: 'static + Clone + Send + Sync + std::fmt::Debug + ReceivedAtNode + U
                 live_config,
                 logical_pipelines: HashMap::new(),
                 runtime_instances: HashMap::new(),
+                pending_instance_exits: HashMap::new(),
                 rollouts: HashMap::new(),
                 active_rollouts: HashMap::new(),
                 terminal_rollouts: HashMap::new(),
@@ -525,6 +624,29 @@ impl<PData: 'static + Clone + Send + Sync + std::fmt::Debug + ReceivedAtNode + U
     ) -> bool {
         state.active_rollouts.contains_key(pipeline_key)
             || state.active_shutdowns.contains_key(pipeline_key)
+    }
+
+    /// Applies a terminal instance exit to controller state after the instance
+    /// has been registered as active.
+    fn apply_instance_exit_locked(
+        state: &mut ControllerRuntimeState,
+        pipeline_key: &DeployedPipelineKey,
+        exit: &RuntimeInstanceExit,
+    ) -> bool {
+        if let Some(instance) = state.runtime_instances.get_mut(pipeline_key) {
+            instance.lifecycle = RuntimeInstanceLifecycle::Exited(exit.clone());
+        }
+        state.active_instances = state.active_instances.saturating_sub(1);
+        if let RuntimeInstanceExit::Error(error) = exit {
+            if state.first_error.is_none() {
+                state.first_error = Some(error.message.clone());
+            }
+        }
+        let logical_pipeline_key = PipelineKey::new(
+            pipeline_key.pipeline_group_id.clone(),
+            pipeline_key.pipeline_id.clone(),
+        );
+        Self::prune_exited_runtime_instances_for_pipeline_locked(state, &logical_pipeline_key)
     }
 
     /// Marks a rollout terminal and enqueues it for bounded retention.
@@ -1294,21 +1416,50 @@ impl<PData: 'static + Clone + Send + Sync + std::fmt::Debug + ReceivedAtNode + U
         self.prune_pipeline_runtime_and_history(pipeline_key);
     }
 
+    /// Emits a structured controller panic log without mutating observed instance state.
+    fn report_controller_worker_panic(
+        &self,
+        pipeline_key: &PipelineKey,
+        operation_kind: &'static str,
+        operation_id: &str,
+        report: &PanicReport,
+    ) {
+        let ErrorSummary::Pipeline {
+            error_kind,
+            message,
+            source,
+        } = report.error_summary()
+        else {
+            unreachable!("panic reports are always pipeline-level summaries");
+        };
+
+        otel_error!(
+            "controller.worker_panic",
+            pipeline_group_id = %pipeline_key.pipeline_group_id(),
+            pipeline_id = %pipeline_key.pipeline_id(),
+            operation_kind = operation_kind,
+            operation_id = operation_id,
+            error_kind = error_kind.as_str(),
+            message = message.as_str(),
+            source = source.as_deref().unwrap_or(""),
+        );
+    }
+
     /// Forces rollout terminal cleanup when the detached rollout worker panics.
     fn handle_rollout_worker_panic(
         &self,
         pipeline_key: &PipelineKey,
         rollout_id: &str,
+        thread_name: String,
         panic: Box<dyn Any + Send>,
     ) {
-        let failure_reason = format!(
-            "rollout worker panicked: {}",
-            panic_payload_message(&*panic)
-        );
+        let report = PanicReport::capture("rollout worker", panic, Some(thread_name), None, None);
+        let failure_reason = report.summary_message();
         self.update_rollout(pipeline_key, rollout_id, |rollout| {
             rollout.state = RolloutLifecycleState::Failed;
             rollout.failure_reason = Some(failure_reason.clone());
         });
+        self.report_controller_worker_panic(pipeline_key, "rollout", rollout_id, &report);
         self.finish_rollout(pipeline_key, rollout_id);
     }
 
@@ -1526,16 +1677,16 @@ impl<PData: 'static + Clone + Send + Sync + std::fmt::Debug + ReceivedAtNode + U
         &self,
         pipeline_key: &PipelineKey,
         shutdown_id: &str,
+        thread_name: String,
         panic: Box<dyn Any + Send>,
     ) {
-        let failure_reason = format!(
-            "shutdown worker panicked: {}",
-            panic_payload_message(&*panic)
-        );
+        let report = PanicReport::capture("shutdown worker", panic, Some(thread_name), None, None);
+        let failure_reason = report.summary_message();
         self.update_shutdown(pipeline_key, shutdown_id, |shutdown| {
             shutdown.state = ShutdownLifecycleState::Failed;
             shutdown.failure_reason = Some(failure_reason.clone());
         });
+        self.report_controller_worker_panic(pipeline_key, "shutdown", shutdown_id, &report);
     }
 
     /// Returns the committed pipeline config plus any currently active rollout summary.
@@ -1599,12 +1750,13 @@ impl<PData: 'static + Clone + Send + Sync + std::fmt::Debug + ReceivedAtNode + U
         let rollout_cleanup_runtime = Arc::clone(&runtime);
         let worker_pipeline_key = pipeline_key.clone();
         let worker_rollout_id = rollout_id.clone();
+        let worker_thread_name = format!(
+            "rollout-{}-{}",
+            pipeline_key.pipeline_group_id().as_ref(),
+            pipeline_key.pipeline_id().as_ref()
+        );
         let _rollout_handle = thread::Builder::new()
-            .name(format!(
-                "rollout-{}-{}",
-                pipeline_key.pipeline_group_id().as_ref(),
-                pipeline_key.pipeline_id().as_ref()
-            ))
+            .name(worker_thread_name.clone())
             .spawn(move || {
                 if let Err(panic) =
                     catch_unwind(AssertUnwindSafe(|| rollout_runtime.run_rollout(plan)))
@@ -1612,6 +1764,7 @@ impl<PData: 'static + Clone + Send + Sync + std::fmt::Debug + ReceivedAtNode + U
                     rollout_cleanup_runtime.handle_rollout_worker_panic(
                         &worker_pipeline_key,
                         &worker_rollout_id,
+                        worker_thread_name,
                         panic,
                     );
                 }
@@ -1639,12 +1792,13 @@ impl<PData: 'static + Clone + Send + Sync + std::fmt::Debug + ReceivedAtNode + U
         let shutdown_cleanup_runtime = Arc::clone(&runtime);
         let worker_pipeline_key = pipeline_key.clone();
         let worker_shutdown_id = shutdown_id.clone();
+        let worker_thread_name = format!(
+            "shutdown-{}-{}",
+            pipeline_key.pipeline_group_id().as_ref(),
+            pipeline_key.pipeline_id().as_ref()
+        );
         let _shutdown_handle = thread::Builder::new()
-            .name(format!(
-                "shutdown-{}-{}",
-                pipeline_key.pipeline_group_id().as_ref(),
-                pipeline_key.pipeline_id().as_ref()
-            ))
+            .name(worker_thread_name.clone())
             .spawn(move || {
                 if let Err(panic) =
                     catch_unwind(AssertUnwindSafe(|| shutdown_runtime.run_shutdown(plan)))
@@ -1652,6 +1806,7 @@ impl<PData: 'static + Clone + Send + Sync + std::fmt::Debug + ReceivedAtNode + U
                     shutdown_cleanup_runtime.handle_shutdown_worker_panic(
                         &worker_pipeline_key,
                         &worker_shutdown_id,
+                        worker_thread_name,
                         panic,
                     );
                 }
@@ -1750,13 +1905,13 @@ impl<PData: 'static + Clone + Send + Sync + std::fmt::Debug + ReceivedAtNode + U
                     Some(RuntimeInstanceExit::Success) => {
                         completed.push(deployed_key.clone());
                     }
-                    Some(RuntimeInstanceExit::Error(message)) => {
+                    Some(RuntimeInstanceExit::Error(error)) => {
                         self.update_shutdown(
                             &plan.pipeline_key,
                             &plan.shutdown.shutdown_id,
                             |shutdown| {
                                 shutdown.state = ShutdownLifecycleState::Failed;
-                                shutdown.failure_reason = Some(message.clone());
+                                shutdown.failure_reason = Some(error.message.clone());
                                 if let Some(core) = shutdown.cores.iter_mut().find(|core| {
                                     core.core_id == deployed_key.core_id
                                         && core.deployment_generation
@@ -1764,7 +1919,7 @@ impl<PData: 'static + Clone + Send + Sync + std::fmt::Debug + ReceivedAtNode + U
                                 }) {
                                     core.state = "failed".to_owned();
                                     core.updated_at = timestamp_now();
-                                    core.detail = Some(message.clone());
+                                    core.detail = Some(error.message.clone());
                                 }
                             },
                         );
@@ -2406,6 +2561,7 @@ impl<PData: 'static + Clone + Send + Sync + std::fmt::Debug + ReceivedAtNode + U
                 .unwrap_or_else(|poisoned| poisoned.into_inner())
                 .live_config,
             &self.declared_topics,
+            Arc::downgrade(self),
             thread_id,
             None,
         )?;
@@ -2413,12 +2569,16 @@ impl<PData: 'static + Clone + Send + Sync + std::fmt::Debug + ReceivedAtNode + U
         Ok(deployed_key)
     }
 
-    /// Registers a launched instance and starts a watcher for its terminal exit.
+    /// Registers a launched instance and reconciles the race where the thread exited first.
+    ///
+    /// The launch path inserts the instance as Active here, while the runtime thread reports its
+    /// terminal exit independently through note_instance_exit(). If that exit arrived first, it
+    /// was parked in pending_instance_exits and is applied immediately during registration.
     pub(super) fn register_launched_instance(
         self: &Arc<Self>,
         launched: LaunchedPipelineThread<PData>,
     ) {
-        {
+        let should_compact = {
             let mut state = self
                 .state
                 .lock()
@@ -2431,45 +2591,47 @@ impl<PData: 'static + Clone + Send + Sync + std::fmt::Debug + ReceivedAtNode + U
                 },
             );
             state.active_instances += 1;
+            let pending_exit = state.pending_instance_exits.remove(&launched.pipeline_key);
+            let should_compact = if let Some(exit) = pending_exit.as_ref() {
+                Self::apply_instance_exit_locked(&mut state, &launched.pipeline_key, exit)
+            } else {
+                false
+            };
             self.state_changed.notify_all();
-        }
+            should_compact
+        };
 
-        let runtime = Arc::downgrade(self);
-        let _ = thread::Builder::new()
-            .name(format!("watcher-{}", launched.thread_name))
-            .spawn(move || {
-                let exit = match launched.join_handle.join() {
-                    Ok(Ok(_)) => RuntimeInstanceExit::Success,
-                    Ok(Err(err)) => RuntimeInstanceExit::Error(err.to_string()),
-                    Err(panic) => RuntimeInstanceExit::Error(format!(
-                        "thread {} (id {}) panicked: {panic:?}",
-                        launched.thread_name, launched.thread_id
-                    )),
-                };
-                if let Some(runtime) = Weak::upgrade(&runtime) {
-                    runtime.note_instance_exit(launched.pipeline_key, exit);
-                }
-            });
+        if should_compact {
+            let logical_pipeline_key = PipelineKey::new(
+                launched.pipeline_key.pipeline_group_id.clone(),
+                launched.pipeline_key.pipeline_id.clone(),
+            );
+            self.observed_state_store
+                .compact_pipeline_instances(&logical_pipeline_key);
+        }
     }
 
-    /// Records a pipeline instance exit and wakes any waiters observing it.
-    fn note_instance_exit(&self, pipeline_key: DeployedPipelineKey, exit: RuntimeInstanceExit) {
+    /// Records a pipeline instance exit and closes the registration-before/after-exit race.
+    ///
+    /// If the instance is already visible in runtime_instances, the exit is applied immediately.
+    /// Otherwise we store it in pending_instance_exits so register_launched_instance() can
+    /// reconcile it as soon as registration becomes visible.
+    pub(super) fn note_instance_exit(
+        &self,
+        pipeline_key: DeployedPipelineKey,
+        exit: RuntimeInstanceExit,
+    ) {
         match &exit {
             RuntimeInstanceExit::Success => {
                 self.engine_event_reporter
                     .report(EngineEvent::drained(pipeline_key.clone(), None));
             }
-            RuntimeInstanceExit::Error(message) => {
-                let err_summary = ErrorSummary::Pipeline {
-                    error_kind: "runtime".into(),
-                    message: message.clone(),
-                    source: None,
-                };
+            RuntimeInstanceExit::Error(error) => {
                 self.engine_event_reporter
                     .report(EngineEvent::pipeline_runtime_error(
                         pipeline_key.clone(),
                         "Pipeline encountered a runtime error.",
-                        err_summary,
+                        error.error_summary(),
                     ));
             }
         }
@@ -2479,23 +2641,14 @@ impl<PData: 'static + Clone + Send + Sync + std::fmt::Debug + ReceivedAtNode + U
                 .state
                 .lock()
                 .unwrap_or_else(|poisoned| poisoned.into_inner());
-            if let Some(instance) = state.runtime_instances.get_mut(&pipeline_key) {
-                instance.lifecycle = RuntimeInstanceLifecycle::Exited(exit.clone());
+            if state.runtime_instances.contains_key(&pipeline_key) {
+                Self::apply_instance_exit_locked(&mut state, &pipeline_key, &exit)
+            } else {
+                _ = state
+                    .pending_instance_exits
+                    .insert(pipeline_key.clone(), exit.clone());
+                false
             }
-            state.active_instances = state.active_instances.saturating_sub(1);
-            if let RuntimeInstanceExit::Error(message) = &exit {
-                if state.first_error.is_none() {
-                    state.first_error = Some(message.clone());
-                }
-            }
-            let logical_pipeline_key = PipelineKey::new(
-                pipeline_key.pipeline_group_id.clone(),
-                pipeline_key.pipeline_id.clone(),
-            );
-            Self::prune_exited_runtime_instances_for_pipeline_locked(
-                &mut state,
-                &logical_pipeline_key,
-            )
         };
         if should_compact {
             let logical_pipeline_key = PipelineKey::new(
@@ -2549,7 +2702,7 @@ impl<PData: 'static + Clone + Send + Sync + std::fmt::Debug + ReceivedAtNode + U
                         "pipeline exited before reporting ready on core {} (generation {})",
                         deployed_key.core_id, deployed_key.deployment_generation
                     )),
-                    RuntimeInstanceExit::Error(message) => Err(message),
+                    RuntimeInstanceExit::Error(error) => Err(error.message),
                 };
             }
 
@@ -2602,8 +2755,8 @@ impl<PData: 'static + Clone + Send + Sync + std::fmt::Debug + ReceivedAtNode + U
 
             match &instance.lifecycle {
                 RuntimeInstanceLifecycle::Exited(RuntimeInstanceExit::Success) => return Ok(()),
-                RuntimeInstanceLifecycle::Exited(RuntimeInstanceExit::Error(message)) => {
-                    return Err(message.clone());
+                RuntimeInstanceLifecycle::Exited(RuntimeInstanceExit::Error(error)) => {
+                    return Err(error.message.clone());
                 }
                 RuntimeInstanceLifecycle::Active => {}
             }
@@ -2625,7 +2778,7 @@ impl<PData: 'static + Clone + Send + Sync + std::fmt::Debug + ReceivedAtNode + U
         ) {
             return match self.instance_exit(deployed_key) {
                 Some(RuntimeInstanceExit::Success) => Ok(()),
-                Some(RuntimeInstanceExit::Error(message)) => Err(message),
+                Some(RuntimeInstanceExit::Error(error)) => Err(error.message),
                 None => Err(err.to_string()),
             };
         }
@@ -2643,7 +2796,7 @@ impl<PData: 'static + Clone + Send + Sync + std::fmt::Debug + ReceivedAtNode + U
             if let Some(exit) = self.instance_exit(deployed_key) {
                 return match exit {
                     RuntimeInstanceExit::Success => Ok(()),
-                    RuntimeInstanceExit::Error(message) => Err(message),
+                    RuntimeInstanceExit::Error(error) => Err(error.message),
                 };
             }
             if Instant::now() >= deadline {
