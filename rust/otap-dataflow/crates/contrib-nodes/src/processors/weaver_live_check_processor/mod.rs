@@ -83,6 +83,7 @@ struct PreparedFindings {
     information: u64,
     improvement: u64,
     violation: u64,
+    fingerprints: Vec<FindingFingerprint>,
 }
 
 #[derive(Debug, Clone)]
@@ -282,10 +283,9 @@ impl WeaverLiveCheckProcessor {
         );
     }
 
-    fn build_findings(&mut self, pdata: &OtapPdata) -> Result<Option<PreparedFindings>, String> {
-        let payload: OtlpProtoBytes = pdata
-            .payload_ref()
-            .clone()
+    fn build_findings(&mut self, pdata: OtapPdata) -> Result<Option<PreparedFindings>, String> {
+        let (context, payload) = pdata.into_parts();
+        let payload: OtlpProtoBytes = payload
             .try_into()
             .map_err(|error| format!("failed to normalize payload to OTLP bytes: {error}"))?;
 
@@ -321,7 +321,7 @@ impl WeaverLiveCheckProcessor {
             );
         }
 
-        let findings = self.filter_findings_for_emission(findings);
+        let (findings, fingerprints) = self.filter_findings_for_emission(findings);
 
         if findings.is_empty() {
             return Ok(None);
@@ -333,7 +333,6 @@ impl WeaverLiveCheckProcessor {
             .encode(&mut buffer)
             .map_err(|error| format!("failed to encode finding logs: {error}"))?;
 
-        let (context, _) = pdata.clone_without_context().into_parts();
         Ok(Some(PreparedFindings {
             pdata: OtapPdata::new(
                 context,
@@ -343,6 +342,7 @@ impl WeaverLiveCheckProcessor {
             information: counts.information,
             improvement: counts.improvement,
             violation: counts.violation,
+            fingerprints,
         }))
     }
 
@@ -353,6 +353,7 @@ impl WeaverLiveCheckProcessor {
     ) {
         match effect_handler.try_send_message_with_source_node_to(FINDINGS_PORT, prepared.pdata) {
             Ok(()) => {
+                self.mark_findings_as_seen(&prepared.fingerprints);
                 self.metrics.findings_emitted.add(prepared.total);
                 self.metrics.findings_information.add(prepared.information);
                 self.metrics.findings_improvement.add(prepared.improvement);
@@ -392,18 +393,29 @@ impl WeaverLiveCheckProcessor {
     }
 
     fn filter_findings_for_emission(
-        &mut self,
+        &self,
         findings: Vec<EmittedFinding>,
-    ) -> Vec<EmittedFinding> {
-        findings
-            .into_iter()
-            .filter(|finding| self.should_emit_finding(&finding.finding))
-            .collect()
+    ) -> (Vec<EmittedFinding>, Vec<FindingFingerprint>) {
+        let mut batch_seen = HashSet::new();
+        let mut filtered = Vec::new();
+        let mut fingerprints = Vec::new();
+
+        for finding in findings {
+            let fingerprint = FindingFingerprint::from_policy_finding(&finding.finding);
+            if self.seen_findings.contains(&fingerprint) || !batch_seen.insert(fingerprint.clone())
+            {
+                continue;
+            }
+
+            fingerprints.push(fingerprint);
+            filtered.push(finding);
+        }
+
+        (filtered, fingerprints)
     }
 
-    fn should_emit_finding(&mut self, finding: &PolicyFinding) -> bool {
-        self.seen_findings
-            .insert(FindingFingerprint::from_policy_finding(finding))
+    fn mark_findings_as_seen(&mut self, fingerprints: &[FindingFingerprint]) {
+        self.seen_findings.extend(fingerprints.iter().cloned());
     }
 }
 
@@ -774,16 +786,7 @@ impl local::Processor<OtapPdata> for WeaverLiveCheckProcessor {
                 self.metrics.batches_processed.add(1);
                 self.metrics.items_processed.add(pdata.num_items() as u64);
 
-                match self.build_findings(&pdata) {
-                    Ok(Some(prepared)) => self.emit_findings_best_effort(effect_handler, prepared),
-                    Ok(None) => {}
-                    Err(error) => {
-                        self.record_processing_error(
-                            "weaver_live_check_processor.normalization_failed",
-                            error,
-                        );
-                    }
-                }
+                let findings_input = pdata.clone_without_context();
 
                 effect_handler
                     .send_message_with_source_node(pdata)
@@ -794,6 +797,17 @@ impl local::Processor<OtapPdata> for WeaverLiveCheckProcessor {
                         error: error.to_string(),
                         source_detail: String::new(),
                     })?;
+
+                match self.build_findings(findings_input) {
+                    Ok(Some(prepared)) => self.emit_findings_best_effort(effect_handler, prepared),
+                    Ok(None) => {}
+                    Err(error) => {
+                        self.record_processing_error(
+                            "weaver_live_check_processor.normalization_failed",
+                            error,
+                        );
+                    }
+                }
 
                 Ok(())
             }
@@ -1202,7 +1216,7 @@ mod tests {
     fn repeated_non_violations_are_emitted_only_once() {
         let mut processor = build_harness(false, 0).processor;
 
-        let first_batch = processor.filter_findings_for_emission(vec![
+        let (first_batch, first_fingerprints) = processor.filter_findings_for_emission(vec![
             synthetic_finding(
                 FindingLevel::Improvement,
                 "duplicate_improvement",
@@ -1215,15 +1229,16 @@ mod tests {
             ),
         ]);
         assert_eq!(first_batch.len(), 1);
+        processor.mark_findings_as_seen(&first_fingerprints);
 
-        let second_batch = processor.filter_findings_for_emission(vec![synthetic_finding(
+        let (second_batch, _) = processor.filter_findings_for_emission(vec![synthetic_finding(
             FindingLevel::Improvement,
             "duplicate_improvement",
             Some("event-a"),
         )]);
         assert!(second_batch.is_empty());
 
-        let third_batch = processor.filter_findings_for_emission(vec![synthetic_finding(
+        let (third_batch, _) = processor.filter_findings_for_emission(vec![synthetic_finding(
             FindingLevel::Information,
             "duplicate_improvement",
             Some("event-a"),
@@ -1235,19 +1250,42 @@ mod tests {
     fn repeated_violations_are_emitted_only_once() {
         let mut processor = build_harness(false, 0).processor;
 
-        let first_batch = processor.filter_findings_for_emission(vec![synthetic_finding(
-            FindingLevel::Violation,
-            "missing_attribute",
-            Some("event-a"),
-        )]);
+        let (first_batch, first_fingerprints) =
+            processor.filter_findings_for_emission(vec![synthetic_finding(
+                FindingLevel::Violation,
+                "missing_attribute",
+                Some("event-a"),
+            )]);
         assert_eq!(first_batch.len(), 1);
+        processor.mark_findings_as_seen(&first_fingerprints);
 
-        let second_batch = processor.filter_findings_for_emission(vec![synthetic_finding(
+        let (second_batch, _) = processor.filter_findings_for_emission(vec![synthetic_finding(
             FindingLevel::Violation,
             "missing_attribute",
             Some("event-a"),
         )]);
         assert!(second_batch.is_empty());
+    }
+
+    #[test]
+    fn dropped_findings_are_retried_until_emitted() {
+        let mut processor = build_harness(false, 0).processor;
+        let finding = synthetic_finding(
+            FindingLevel::Violation,
+            "missing_attribute",
+            Some("event-a"),
+        );
+
+        let (first_attempt, _) = processor.filter_findings_for_emission(vec![finding.clone()]);
+        assert_eq!(first_attempt.len(), 1);
+
+        let (second_attempt, second_fingerprints) =
+            processor.filter_findings_for_emission(vec![finding.clone()]);
+        assert_eq!(second_attempt.len(), 1);
+        processor.mark_findings_as_seen(&second_fingerprints);
+
+        let (third_attempt, _) = processor.filter_findings_for_emission(vec![finding]);
+        assert!(third_attempt.is_empty());
     }
 
     #[tokio::test(flavor = "current_thread")]

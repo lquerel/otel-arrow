@@ -1,0 +1,140 @@
+version: otel_dataflow/v1
+
+engine:
+  http_admin:
+    bind_address: 127.0.0.1:8085
+  telemetry:
+    logs:
+      tap:
+        enabled: true
+
+policies:
+  channel_capacity:
+    control:
+      node: 256
+      pipeline: 256
+    pdata: 2048
+
+groups:
+  default:
+    topics:
+      synthetic_ingress:
+        description: "Shared synthetic ingress topic for balanced backend delivery and broadcast live-check fanout"
+        policies:
+          balanced:
+            queue_capacity: 8192
+            on_full: block
+          broadcast:
+            queue_capacity: 8192
+            on_lag: drop_oldest
+
+    pipelines:
+      traffic_gen:
+        policies:
+          resources:
+            core_allocation:
+              type: core_count
+              count: 2
+
+        nodes:
+          semconv_based_gen:
+            type: receiver:traffic_generator
+            config:
+              data_source: semantic_conventions
+              registry_path: https://github.com/open-telemetry/semantic-conventions.git[model]
+              generation_strategy: pre_generated
+              traffic_config:
+                signals_per_second: 25000
+                max_signal_count: null
+                max_batch_size: 1000
+                metric_weight: 8334
+                trace_weight: 8333
+                log_weight: 8333
+
+          static_gen:
+            type: receiver:traffic_generator
+            config:
+              data_source: static
+              generation_strategy: pre_generated
+              traffic_config:
+                signals_per_second: 25000
+                max_signal_count: null
+                max_batch_size: 1000
+                metric_weight: 8334
+                trace_weight: 8333
+                log_weight: 8333
+                use_trace_context: true
+
+          topic_exporter:
+            type: exporter:topic
+            config:
+              topic: synthetic_ingress
+              queue_on_full: block
+
+        connections:
+          - from: semconv_based_gen
+            to: topic_exporter
+          - from: static_gen
+            to: topic_exporter
+
+      telemetry_backend:
+        policies:
+          resources:
+            core_allocation:
+              type: core_count
+              count: 1
+
+        nodes:
+          topic_receiver:
+            type: receiver:topic
+            config:
+              topic: synthetic_ingress
+              subscription:
+                mode: balanced
+                group: telemetry_backend
+
+          telemetry_backend:
+            type: exporter:noop
+            config: {}
+
+        connections:
+          - from: topic_receiver
+            to: telemetry_backend
+
+      weaver_live_check:
+        policies:
+          resources:
+            core_allocation:
+              type: core_count
+              count: 1
+
+        nodes:
+          topic_receiver:
+            type: receiver:topic
+            config:
+              topic: synthetic_ingress
+              subscription:
+                mode: broadcast
+
+          live_check:
+            type: "urn:otel:processor:weaver_live_check"
+            outputs: ["telemetry", "findings"]
+            default_output: telemetry
+            config:
+              registry_path: https://github.com/open-telemetry/semantic-conventions.git[model]
+
+          telemetry_noop:
+            type: exporter:noop
+            config: {}
+
+          findings_console:
+            type: exporter:console
+            config: {}
+
+        connections:
+          - from: topic_receiver
+            to: live_check
+          - from: live_check["telemetry"]
+            to: telemetry_noop
+          - from: live_check["findings"]
+            to: findings_console

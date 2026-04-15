@@ -1,0 +1,76 @@
+version: otel_dataflow/v1
+engine:
+  http_admin:
+    bind_address: 127.0.0.1:8085
+  telemetry:
+    logs:
+      tap:
+        enabled: true
+groups:
+  default:
+    pipelines:
+      main:
+        policies:
+          channel_capacity:
+            control:
+              node: 100
+              pipeline: 100
+            pdata: 256
+          resources:
+            core_allocation:
+              type: core_count
+              count: 1
+
+        nodes:
+          static_traffic:
+            type: receiver:traffic_generator
+            config:
+              data_source: static
+              generation_strategy: pre_generated
+              traffic_config:
+                max_signal_count: null
+                max_batch_size: 100
+                signals_per_second: 500
+                metric_weight: 3334
+                trace_weight: 3333
+                log_weight: 3333
+                use_trace_context: true
+
+          # semconv_traffic:
+          #   type: receiver:traffic_generator
+          #   config:
+          #     data_source: semantic_conventions
+          #     registry_path: https://github.com/open-telemetry/semantic-conventions.git[model]
+          #     generation_strategy: pre_generated
+          #     traffic_config:
+          #       max_signal_count: null
+          #       max_batch_size: 100
+          #       signals_per_second: 200
+          #       metric_weight: 3334
+          #       trace_weight: 3333
+          #       log_weight: 3333
+
+          live_check:
+            type: "urn:otel:processor:weaver_live_check"
+            outputs: ["telemetry", "findings"]
+            default_output: telemetry
+            config:
+              registry_path: https://github.com/open-telemetry/semantic-conventions.git[model]
+
+          telemetry_noop:
+            type: exporter:noop
+            config:
+
+          findings_console:
+            type: exporter:console
+            config: {}
+
+        connections:
+          - from: static_traffic
+            to: live_check
+          # - from: semconv_traffic
+          #   to: live_check
+          - from: live_check["telemetry"]
+            to: telemetry_noop
+          - from: live_check["findings"]
+            to: findings_console
