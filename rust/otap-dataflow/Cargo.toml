@@ -202,7 +202,9 @@ unsync = "0.1.2"
 url = "2.5.7"
 uuid = { version = "1.17.0", features = ["v4", "v7"] }
 weaver_common = { git = "https://github.com/open-telemetry/weaver.git", tag = "v0.21.2"}
+weaver_checker = { git = "https://github.com/open-telemetry/weaver.git", tag = "v0.21.2"}
 weaver_forge = { git = "https://github.com/open-telemetry/weaver.git", tag = "v0.21.2" }
+weaver_live_check = { git = "https://github.com/open-telemetry/weaver.git", tag = "v0.21.2" }
 weaver_resolved_schema = { git = "https://github.com/open-telemetry/weaver.git", tag = "v0.21.2"}
 weaver_resolver = { git = "https://github.com/open-telemetry/weaver.git", tag = "v0.21.2"}
 weaver_semconv = { git = "https://github.com/open-telemetry/weaver.git", tag = "v0.21.2"}
@@ -269,6 +271,7 @@ contrib-processors = ["otap-df-contrib-nodes/contrib-processors"]
 condense-attributes-processor = ["otap-df-contrib-nodes/condense-attributes-processor"]
 recordset-kql-processor = ["otap-df-contrib-nodes/recordset-kql-processor"]
 resource-validator-processor = ["otap-df-contrib-nodes/resource-validator-processor"]
+weaver-live-check-processor = ["otap-df-contrib-nodes/weaver-live-check-processor"]
 
 [workspace.lints.rust]
 # General compatibility lints

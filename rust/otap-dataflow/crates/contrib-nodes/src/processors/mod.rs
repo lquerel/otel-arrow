@@ -12,3 +12,7 @@ pub mod recordset_kql_processor;
 /// Resource Validator processor for validating resource attributes
 #[cfg(feature = "resource-validator-processor")]
 pub mod resource_validator_processor;
+
+/// Weaver Live Check processor for semantic convention compliance findings
+#[cfg(feature = "weaver-live-check-processor")]
+pub mod weaver_live_check_processor;

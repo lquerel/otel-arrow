@@ -52,6 +52,12 @@ ryu = { workspace = true, optional = true }
 reqwest = { workspace = true, optional = true, features = ["rustls-no-provider"] }
 sysinfo = { workspace = true, optional = true }
 urlencoding = { workspace = true, optional = true }
+weaver_checker = { workspace = true, optional = true }
+weaver_common = { workspace = true, optional = true }
+weaver_forge = { workspace = true, optional = true }
+weaver_live_check = { workspace = true, optional = true }
+weaver_resolver = { workspace = true, optional = true }
+weaver_semconv = { workspace = true, optional = true }
 
 [features]
 contrib-exporters = [
@@ -83,6 +89,7 @@ contrib-processors = [
     "condense-attributes-processor",
     "recordset-kql-processor",
     "resource-validator-processor",
+    "weaver-live-check-processor",
 ]
 condense-attributes-processor = []
 recordset-kql-processor = [
@@ -91,6 +98,15 @@ recordset-kql-processor = [
     "dep:chrono",
 ]
 resource-validator-processor = []
+weaver-live-check-processor = [
+    "dep:chrono",
+    "dep:weaver_checker",
+    "dep:weaver_common",
+    "dep:weaver_forge",
+    "dep:weaver_live_check",
+    "dep:weaver_resolver",
+    "dep:weaver_semconv",
+]
 
 [dev-dependencies]
 axum.workspace = true

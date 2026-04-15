@@ -1,0 +1,56 @@
+version: otel_dataflow/v1
+engine:
+  http_admin:
+    bind_address: 127.0.0.1:8085
+  telemetry:
+    logs:
+      tap:
+        enabled: true
+groups:
+  default:
+    pipelines:
+      main:
+        policies:
+          channel_capacity:
+              control:
+                node: 100
+                pipeline: 100
+              pdata: 128
+
+        nodes:
+          generator:
+            type: receiver:traffic_generator
+            config:
+              data_source: static
+              generation_strategy: fresh
+              traffic_config:
+                max_signal_count: 24
+                max_batch_size: 6
+                signals_per_second: 6
+                metric_weight: 20
+                trace_weight: 20
+                log_weight: 60
+                use_trace_context: true
+
+          live_check:
+            type: "urn:otel:processor:weaver_live_check"
+            outputs: ["telemetry", "findings"]
+            default_output: telemetry
+            config:
+              registry_path: https://github.com/open-telemetry/semantic-conventions.git[model]
+
+          telemetry_noop:
+            type: exporter:noop
+            config:
+
+          findings_console:
+            type: exporter:console
+            config: {}
+
+        connections:
+          - from: generator
+            to: live_check
+          - from: live_check["telemetry"]
+            to: telemetry_noop
+          - from: live_check["findings"]
+            to: findings_console
