@@ -6,6 +6,7 @@
 use crate::clock;
 use crate::control::{AckMsg, NackMsg, NodeControlMsg};
 use crate::local::message::{LocalReceiver, LocalSender};
+use crate::node_local_scheduler::NodeLocalSchedulerHandle;
 use crate::shared::message::{SharedReceiver, SharedSender};
 use crate::{Interests, ReceivedAtNode};
 use otap_df_channel::error::{RecvError, SendError};
@@ -244,6 +245,7 @@ impl<T> ChannelReceiver<T> for SharedReceiver<T> {
 ///
 /// This enum lets the shared core express that difference explicitly without
 /// forking the whole receive loop.
+#[derive(Clone, Copy)]
 enum DrainPolicy {
     /// Respect the caller's admission flag even after shutdown has been
     /// latched.
@@ -257,6 +259,7 @@ enum DrainPolicy {
 struct MessageChannelCore<PData, ControlRx, PDataRx> {
     control_rx: Option<ControlRx>,
     pdata_rx: Option<PDataRx>,
+    local_scheduler: Option<NodeLocalSchedulerHandle<PData>>,
     /// Once a Shutdown is seen, this is set to `Some(instant)` representing the drain deadline.
     shutting_down_deadline: Option<Instant>,
     /// Holds the ControlMsg::Shutdown until after we’ve drained pdata.
@@ -270,10 +273,17 @@ struct MessageChannelCore<PData, ControlRx, PDataRx> {
 }
 
 impl<PData, ControlRx, PDataRx> MessageChannelCore<PData, ControlRx, PDataRx> {
-    fn new(control_rx: ControlRx, pdata_rx: PDataRx, node_id: usize, interests: Interests) -> Self {
+    fn new(
+        control_rx: ControlRx,
+        pdata_rx: PDataRx,
+        local_scheduler: Option<NodeLocalSchedulerHandle<PData>>,
+        node_id: usize,
+        interests: Interests,
+    ) -> Self {
         Self {
             control_rx: Some(control_rx),
             pdata_rx: Some(pdata_rx),
+            local_scheduler,
             shutting_down_deadline: None,
             pending_shutdown: None,
             node_id,
@@ -330,6 +340,35 @@ where
         accept_pdata || matches!(policy, DrainPolicy::ForceDrainDuringShutdown)
     }
 
+    fn shutdown_drain_complete(&self) -> bool {
+        self.pdata_rx
+            .as_ref()
+            // Safety: recv_with_policy returns before this helper is called if
+            // shutdown() has already taken the pdata receiver.
+            .expect("pdata_rx must exist")
+            .is_empty()
+            && self
+                .local_scheduler
+                .as_ref()
+                .map(NodeLocalSchedulerHandle::is_drained)
+                .unwrap_or(true)
+    }
+
+    fn pop_local_due(&mut self, now: Instant) -> Option<Message<PData>> {
+        self.local_scheduler
+            .as_ref()
+            .and_then(|scheduler| scheduler.pop_due(now))
+            .map(|msg| self.control_message(msg))
+    }
+
+    fn next_local_expiry_sleep(&self, now: Instant) -> Option<clock::Sleep> {
+        self.local_scheduler
+            .as_ref()
+            .and_then(NodeLocalSchedulerHandle::next_expiry)
+            .filter(|when| *when > now)
+            .map(clock::sleep_until)
+    }
+
     async fn recv_with_policy(
         &mut self,
         accept_pdata: bool,
@@ -373,12 +412,7 @@ where
                 // only after the bounded pdata backlog is empty. This keeps the
                 // channel-level drain contract explicit: upstream work that was
                 // already accepted into the channel gets a chance to run first.
-                if self
-                    .pdata_rx
-                    .as_ref()
-                    .expect("pdata_rx must exist")
-                    .is_empty()
-                {
+                if self.shutdown_drain_complete() {
                     let shutdown = self
                         .pending_shutdown
                         .take()
@@ -391,6 +425,9 @@ where
                     // Create a sleep timer for the deadline
                     sleep_until_deadline = Some(clock::sleep_until(dl));
                 }
+
+                let now = clock::now();
+                let mut sleep_until_local = self.next_local_expiry_sleep(now);
 
                 // Even while draining we cap control preference. This prevents a
                 // sustained Ack/Nack or shutdown-control burst from starving the
@@ -413,6 +450,10 @@ where
                         }
                         Err(RecvError::Empty) => {}
                     }
+                }
+
+                if let Some(msg) = self.pop_local_due(now) {
+                    return Ok(msg);
                 }
 
                 // Drain pdata (gated by accept_pdata) and deliver control messages.
@@ -445,6 +486,22 @@ where
                             Ok(msg) => return Ok(self.control_message(msg)),
                             Err(e) => return Err(e),
                         },
+
+                        _ = async {
+                            if let Some(delay) = sleep_until_local.as_mut() {
+                                delay.await;
+                            }
+                        }, if sleep_until_local.is_some() => {
+                            continue;
+                        },
+
+                        _ = async {
+                            if let Some(local_scheduler) = self.local_scheduler.as_ref() {
+                                local_scheduler.wait_for_change().await;
+                            }
+                        }, if self.local_scheduler.is_some() => {
+                            continue;
+                        },
                     }
                 } else {
                     tokio::select! {
@@ -473,11 +530,30 @@ where
                                 return Ok(Message::Control(shutdown));
                             }
                         },
+
+                        _ = async {
+                            if let Some(delay) = sleep_until_local.as_mut() {
+                                delay.await;
+                            }
+                        }, if sleep_until_local.is_some() => {
+                            continue;
+                        },
+
+                        _ = async {
+                            if let Some(local_scheduler) = self.local_scheduler.as_ref() {
+                                local_scheduler.wait_for_change().await;
+                            }
+                        }, if self.local_scheduler.is_some() => {
+                            continue;
+                        },
                     }
                 }
             }
 
             // Normal mode: no shutdown yet
+            let now = clock::now();
+            let mut sleep_until_local = self.next_local_expiry_sleep(now);
+
             if accept_pdata && self.consecutive_control >= CONTROL_BURST_LIMIT {
                 match self
                     .pdata_rx
@@ -489,6 +565,10 @@ where
                     Err(RecvError::Closed) => return Ok(self.closed_pdata_shutdown()),
                     Err(RecvError::Empty) => {}
                 }
+            }
+
+            if let Some(msg) = self.pop_local_due(now) {
+                return Ok(msg);
             }
 
             if accept_pdata && self.consecutive_control >= CONTROL_BURST_LIMIT {
@@ -514,12 +594,31 @@ where
                                 self.shutdown();
                                 return Ok(Message::Control(NodeControlMsg::Shutdown { deadline, reason }));
                             }
+                            if let Some(local_scheduler) = &self.local_scheduler {
+                                local_scheduler.begin_draining(clock::now());
+                            }
                             self.shutting_down_deadline = Some(deadline);
                             self.pending_shutdown = Some(NodeControlMsg::Shutdown { deadline, reason });
                             continue;
                         }
                         Ok(msg) => return Ok(self.control_message(msg)),
                         Err(e)  => return Err(e),
+                    },
+
+                    _ = async {
+                        if let Some(delay) = sleep_until_local.as_mut() {
+                            delay.await;
+                        }
+                    }, if sleep_until_local.is_some() => {
+                        continue;
+                    },
+
+                    _ = async {
+                        if let Some(local_scheduler) = self.local_scheduler.as_ref() {
+                            local_scheduler.wait_for_change().await;
+                        }
+                    }, if self.local_scheduler.is_some() => {
+                        continue;
                     },
                 }
             } else {
@@ -536,6 +635,9 @@ where
                                 self.shutdown();
                                 return Ok(Message::Control(NodeControlMsg::Shutdown { deadline, reason }));
                             }
+                            if let Some(local_scheduler) = &self.local_scheduler {
+                                local_scheduler.begin_draining(clock::now());
+                            }
                             self.shutting_down_deadline = Some(deadline);
                             self.pending_shutdown = Some(NodeControlMsg::Shutdown { deadline, reason });
                             continue;
@@ -550,6 +652,22 @@ where
                             Err(RecvError::Closed) => return Ok(self.closed_pdata_shutdown()),
                             Err(e) => return Err(e),
                         }
+                    },
+
+                    _ = async {
+                        if let Some(delay) = sleep_until_local.as_mut() {
+                            delay.await;
+                        }
+                    }, if sleep_until_local.is_some() => {
+                        continue;
+                    },
+
+                    _ = async {
+                        if let Some(local_scheduler) = self.local_scheduler.as_ref() {
+                            local_scheduler.wait_for_change().await;
+                        }
+                    }, if self.local_scheduler.is_some() => {
+                        continue;
                     }
                 }
             }
@@ -569,14 +687,39 @@ pub struct ProcessorMessageChannel<PData> {
 impl<PData> ProcessorMessageChannel<PData> {
     /// Creates a new processor message channel.
     #[must_use]
-    pub fn new(
+    #[allow(dead_code)] // Retained for test helpers that use default local-scheduler capacities.
+    pub(crate) fn new(
         control_rx: Receiver<NodeControlMsg<PData>>,
         pdata_rx: Receiver<PData>,
         node_id: usize,
         interests: Interests,
     ) -> Self {
+        Self::new_with_local_scheduler(
+            control_rx,
+            pdata_rx,
+            NodeLocalSchedulerHandle::new(256, 32),
+            node_id,
+            interests,
+        )
+    }
+
+    /// Creates a new processor message channel with an explicit local scheduler.
+    #[must_use]
+    pub(crate) fn new_with_local_scheduler(
+        control_rx: Receiver<NodeControlMsg<PData>>,
+        pdata_rx: Receiver<PData>,
+        local_scheduler: NodeLocalSchedulerHandle<PData>,
+        node_id: usize,
+        interests: Interests,
+    ) -> Self {
         Self {
-            core: MessageChannelCore::new(control_rx, pdata_rx, node_id, interests),
+            core: MessageChannelCore::new(
+                control_rx,
+                pdata_rx,
+                Some(local_scheduler),
+                node_id,
+                interests,
+            ),
         }
     }
 }
@@ -613,7 +756,7 @@ impl<PData, ControlRx, PDataRx> ExporterMessageChannel<PData, ControlRx, PDataRx
         interests: Interests,
     ) -> Self {
         Self {
-            core: MessageChannelCore::new(control_rx, pdata_rx, node_id, interests),
+            core: MessageChannelCore::new(control_rx, pdata_rx, None, node_id, interests),
         }
     }
 }

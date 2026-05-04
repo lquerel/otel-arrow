@@ -43,7 +43,7 @@
 //! - `TimerTick`: Poll storage for bundles, send downstream
 //! - `Ack`: Extract BundleRef from calldata, call handle.ack()
 //! - `Nack (permanent)`: Call handle.reject() — no retry
-//! - `Nack (transient)`: Call handle.defer() and schedule retry via delay_data()
+//! - `Nack (transient)`: Call handle.defer() and schedule retry via node-local wakeup
 //! - `Shutdown`: Flush storage engine
 //!
 //! # Retry Behavior and Error Handling
@@ -104,10 +104,12 @@ use otap_df_config::node::NodeUserConfig;
 use otap_df_engine::config::ProcessorConfig;
 use otap_df_engine::context::PipelineContext;
 use otap_df_engine::control::Context8u8;
-use otap_df_engine::control::{AckMsg, CallData, NackMsg, NodeControlMsg};
+use otap_df_engine::control::{AckMsg, CallData, NackMsg, NodeControlMsg, WakeupSlot};
 use otap_df_engine::error::Error;
 use otap_df_engine::local::processor::EffectHandler;
 use otap_df_engine::message::Message;
+
+const RETRY_WAKEUP_SLOT: WakeupSlot = WakeupSlot(0);
 use otap_df_engine::node::NodeId;
 use otap_df_engine::processor::ProcessorWrapper;
 use otap_df_engine::{
@@ -318,9 +320,10 @@ fn decode_bundle_ref(calldata: &CallData) -> Option<BundleRef> {
     })
 }
 
-/// Encode a retry ticket into CallData for DelayedData scheduling.
+/// Encode a retry ticket into CallData for retry test fixtures.
 ///
 /// Layout: [segment_seq (u64), bundle_index (u32), retry_count (u32) packed into u64]
+#[cfg(test)]
 fn encode_retry_ticket(bundle_ref: BundleRef, retry_count: u32) -> CallData {
     // Pack bundle_index (low 32 bits) and retry_count (high 32 bits) into one u64
     let packed = (bundle_ref.bundle_index.raw() as u64) | ((retry_count as u64) << 32);
@@ -333,6 +336,7 @@ fn encode_retry_ticket(bundle_ref: BundleRef, retry_count: u32) -> CallData {
 /// Decode a retry ticket from CallData.
 ///
 /// Returns (BundleRef, retry_count) if valid.
+#[cfg(test)]
 fn decode_retry_ticket(calldata: &CallData) -> Option<(BundleRef, u32)> {
     if calldata.len() < 2 {
         return None;
@@ -368,6 +372,12 @@ struct PendingBundle {
     item_count: u64,
     /// Signal type of this bundle.
     signal_type: SignalType,
+}
+
+#[derive(Clone, Copy)]
+struct ScheduledRetry {
+    due_at: Instant,
+    retry_count: u32,
 }
 
 /// Result of attempting to process a bundle with non-blocking send.
@@ -440,10 +450,9 @@ pub struct DurableBuffer {
     /// Key is the (segment_seq, bundle_index) pair encoded as a u128 for fast lookup.
     pending_bundles: HashMap<(u64, u32), PendingBundle>,
 
-    /// Bundles scheduled for retry via delay_data.
-    /// These are skipped by poll_next_bundle to enforce backoff.
-    /// Removed when the delay fires and claim_bundle is called.
-    retry_scheduled: HashSet<(u64, u32)>,
+    /// Bundles scheduled for retry with their next due time and retry count.
+    /// These are skipped by poll_next_bundle until their backoff has elapsed.
+    scheduled_retries: HashMap<(u64, u32), ScheduledRetry>,
 
     /// Configuration.
     config: DurableBufferConfig,
@@ -537,7 +546,7 @@ impl DurableBuffer {
         Ok(Self {
             engine_state: EngineState::Uninitialized,
             pending_bundles: HashMap::new(),
-            retry_scheduled: HashSet::new(),
+            scheduled_retries: HashMap::new(),
             config,
             core_id,
             num_cores,
@@ -633,14 +642,22 @@ impl DurableBuffer {
         self.pending_bundles.len() < self.config.max_in_flight
     }
 
-    /// Schedule a retry for a bundle via delay_data.
-    ///
-    /// This is the single point of coordination between `delay_data` scheduling
-    /// and `retry_scheduled` tracking. Always use this method instead of calling
-    /// `delay_data` directly to ensure the two stay in sync.
-    ///
-    /// Returns true if scheduling succeeded, false if it failed (caller should
-    /// let poll_next_bundle pick up the bundle instead).
+    fn refresh_retry_wakeup(&self, effect_handler: &EffectHandler<OtapPdata>) -> bool {
+        match self
+            .scheduled_retries
+            .values()
+            .map(|retry| retry.due_at)
+            .min()
+        {
+            Some(when) => effect_handler.set_wakeup(RETRY_WAKEUP_SLOT, when).is_ok(),
+            None => {
+                let _ = effect_handler.cancel_wakeup(RETRY_WAKEUP_SLOT);
+                true
+            }
+        }
+    }
+
+    /// Schedule or reschedule a retry for a bundle.
     async fn schedule_retry(
         &mut self,
         bundle_ref: BundleRef,
@@ -649,40 +666,36 @@ impl DurableBuffer {
         effect_handler: &mut EffectHandler<OtapPdata>,
     ) -> bool {
         let key = (bundle_ref.segment_seq.raw(), bundle_ref.bundle_index.raw());
-
-        // Create a lightweight retry ticket
-        // TODO(#1472): Replace with proper timer support when available.
-        // Currently we abuse delay_data() with an empty payload as a workaround
-        // for the lack of a native "schedule callback" primitive.
-        let retry_ticket = OtapPdata::new(
-            Default::default(),
-            OtapPayload::empty(SignalType::Traces), // Signal type doesn't matter for empty payload
-        );
-        let calldata = encode_retry_ticket(bundle_ref, retry_count);
-        let mut retry_ticket = Box::new(retry_ticket);
-        effect_handler.subscribe_to(Interests::empty(), calldata, &mut retry_ticket);
-
-        let retry_at = Instant::now() + delay;
-        if effect_handler
-            .delay_data(retry_at, retry_ticket)
-            .await
-            .is_ok()
-        {
-            // Track that this bundle is scheduled - poll_next_bundle will skip it
-            let _ = self.retry_scheduled.insert(key);
+        let retry = ScheduledRetry {
+            due_at: Instant::now() + delay,
+            retry_count,
+        };
+        let previous = self.scheduled_retries.insert(key, retry);
+        if self.refresh_retry_wakeup(effect_handler) {
             true
         } else {
-            // Failed to schedule - don't add to retry_scheduled, poll will pick it up
+            match previous {
+                Some(previous) => {
+                    let _ = self.scheduled_retries.insert(key, previous);
+                }
+                None => {
+                    let _ = self.scheduled_retries.remove(&key);
+                }
+            }
+            let _ = self.refresh_retry_wakeup(effect_handler);
             false
         }
     }
 
-    /// Remove a bundle from retry_scheduled tracking.
-    ///
-    /// Call this when the delay has fired and we're about to process the retry.
-    fn unschedule_retry(&mut self, bundle_ref: BundleRef) {
+    /// Remove a bundle from retry scheduling and refresh the aggregate wakeup.
+    fn unschedule_retry(
+        &mut self,
+        bundle_ref: BundleRef,
+        effect_handler: &EffectHandler<OtapPdata>,
+    ) {
         let key = (bundle_ref.segment_seq.raw(), bundle_ref.bundle_index.raw());
-        let _ = self.retry_scheduled.remove(&key);
+        let _ = self.scheduled_retries.remove(&key);
+        let _ = self.refresh_retry_wakeup(effect_handler);
     }
 
     /// Lazily initialize the Quiver engine on first use.
@@ -1264,7 +1277,7 @@ impl DurableBuffer {
                                     "durable_buffer.drain.all_blocked",
                                     bundles_processed = bundles_processed,
                                     in_flight = self.pending_bundles.len(),
-                                    retry_scheduled = self.retry_scheduled.len()
+                                    retry_scheduled = self.scheduled_retries.len()
                                 );
                                 break;
                             }
@@ -1356,15 +1369,17 @@ impl DurableBuffer {
             return ProcessBundleResult::Skipped;
         }
 
-        // Skip if this bundle is scheduled for retry (waiting for backoff).
-        // This enforces the exponential backoff - poll_next_bundle() returns
-        // deferred bundles immediately, but we should wait for delay_data to fire.
-        if self.retry_scheduled.contains(&key) {
-            // Bundle is waiting for backoff. Release the claim; it will be
-            // re-claimed when the delay_data retry ticket fires.
-            drop(handle); // Implicit defer
-            return ProcessBundleResult::Skipped;
-        }
+        let retry_count = if let Some(scheduled_retry) = self.scheduled_retries.get(&key).copied() {
+            if scheduled_retry.due_at > Instant::now() {
+                drop(handle); // Implicit defer
+                return ProcessBundleResult::Skipped;
+            }
+
+            self.unschedule_retry(bundle_ref, effect_handler);
+            scheduled_retry.retry_count
+        } else {
+            retry_count
+        };
 
         // Convert the reconstructed bundle to OtapPdata
         match convert_bundle_to_pdata(handle.data()) {
@@ -1501,10 +1516,10 @@ impl DurableBuffer {
     /// For permanent NACKs (e.g., malformed data that will never succeed), the bundle
     /// is rejected immediately without retry.
     ///
-    /// For transient NACKs, schedules a retry with exponential backoff using `delay_data()`.
-    /// The bundle is deferred in Quiver (releasing the claim) and a lightweight
-    /// retry ticket is scheduled. When the delay expires, `handle_delayed_retry`
-    /// will re-claim the bundle and attempt redelivery.
+    /// For transient NACKs, schedules a retry with exponential backoff.
+    /// The bundle is deferred in Quiver (releasing the claim), retry metadata
+    /// is retained locally, and a node-local wakeup is armed for the earliest
+    /// due retry.
     async fn handle_nack(
         &mut self,
         nack: NackMsg<OtapPdata>,
@@ -1601,126 +1616,12 @@ impl DurableBuffer {
         Ok(())
     }
 
-    /// Handle a delayed retry ticket.
-    ///
-    /// Re-claims the bundle from Quiver and attempts redelivery downstream.
-    async fn handle_delayed_retry(
+    /// Handle the aggregate retry wakeup by polling storage immediately.
+    async fn handle_retry_wakeup(
         &mut self,
-        retry_ticket: Box<OtapPdata>,
         effect_handler: &mut EffectHandler<OtapPdata>,
     ) -> Result<(), Error> {
-        // Decode the retry ticket
-        let Some(calldata) = retry_ticket.source_route() else {
-            otel_warn!("durable_buffer.retry.missing_calldata");
-            return Ok(());
-        };
-
-        let Some((bundle_ref, retry_count)) = decode_retry_ticket(&calldata.calldata) else {
-            otel_warn!("durable_buffer.retry.invalid_calldata");
-            return Ok(());
-        };
-
-        // Check max_in_flight limit
-        if !self.can_send_more() {
-            // At capacity - re-schedule with a short delay.
-            // Bundle stays in retry_scheduled (wasn't removed yet).
-            otel_debug!(
-                "durable_buffer.retry.deferred",
-                segment_seq = bundle_ref.segment_seq.raw(),
-                bundle_index = bundle_ref.bundle_index.raw(),
-                in_flight = self.pending_bundles.len(),
-                max_in_flight = self.config.max_in_flight
-            );
-
-            // Re-schedule - note: bundle is still in retry_scheduled, schedule_retry
-            // will just update it (insert is idempotent for HashSet)
-            if !self
-                .schedule_retry(
-                    bundle_ref,
-                    retry_count,
-                    self.config.poll_interval,
-                    effect_handler,
-                )
-                .await
-            {
-                // Failed to re-schedule - remove from retry_scheduled so poll can pick it up
-                self.unschedule_retry(bundle_ref);
-                otel_warn!("durable_buffer.retry.reschedule_failed");
-            }
-            return Ok(());
-        }
-
-        // Backoff period has elapsed and we have capacity - remove from retry_scheduled.
-        // This allows poll_next_bundle to see it again if claim_bundle fails.
-        self.unschedule_retry(bundle_ref);
-
-        // Re-claim the bundle from Quiver
-        let claim_result = {
-            let (engine, subscriber_id) = self.engine()?;
-            engine.claim_bundle(subscriber_id, bundle_ref)
-        };
-
-        match claim_result {
-            Ok(handle) => {
-                // Successfully re-claimed, now send downstream
-                match self.try_process_bundle_handle_with_retry_count(
-                    handle,
-                    retry_count,
-                    effect_handler,
-                ) {
-                    ProcessBundleResult::Sent => {
-                        otel_debug!(
-                            "durable_buffer.retry.sent",
-                            segment_seq = bundle_ref.segment_seq.raw(),
-                            bundle_index = bundle_ref.bundle_index.raw(),
-                            retry_count = retry_count
-                        );
-                    }
-                    ProcessBundleResult::Skipped => {
-                        // Shouldn't happen - we just claimed it and removed from retry_scheduled
-                        otel_warn!(
-                            "durable_buffer.retry.skipped",
-                            segment_seq = bundle_ref.segment_seq.raw(),
-                            bundle_index = bundle_ref.bundle_index.raw()
-                        );
-                    }
-                    ProcessBundleResult::Backpressure => {
-                        // Channel full - the handle was dropped (deferred).
-                        // Re-schedule retry with a short delay.
-                        otel_debug!(
-                            "durable_buffer.retry.backpressure",
-                            segment_seq = bundle_ref.segment_seq.raw(),
-                            bundle_index = bundle_ref.bundle_index.raw()
-                        );
-
-                        // Short delay for backpressure (not exponential - this isn't a failure).
-                        // If scheduling fails, poll will pick it up.
-                        let _ = self
-                            .schedule_retry(
-                                bundle_ref,
-                                retry_count,
-                                self.config.poll_interval,
-                                effect_handler,
-                            )
-                            .await;
-                    }
-                    ProcessBundleResult::Error(e) => {
-                        return Err(e);
-                    }
-                }
-            }
-            Err(e) => {
-                // Claim failed - bundle may have been resolved or segment dropped
-                otel_debug!(
-                    "durable_buffer.retry.claim_failed",
-                    segment_seq = bundle_ref.segment_seq.raw(),
-                    bundle_index = bundle_ref.bundle_index.raw(),
-                    error = %e
-                );
-            }
-        }
-
-        Ok(())
+        self.handle_timer_tick(effect_handler).await
     }
 
     /// Handle shutdown by flushing the Quiver engine and draining remaining bundles.
@@ -1749,8 +1650,14 @@ impl DurableBuffer {
             return Ok(());
         }
 
+        let now = Instant::now();
+        for retry in self.scheduled_retries.values_mut() {
+            retry.due_at = now;
+        }
+        let _ = self.refresh_retry_wakeup(effect_handler);
+
         // Check deadline before flush/drain sequence
-        if Instant::now() >= deadline {
+        if now >= deadline {
             otel_warn!("durable_buffer.shutdown.deadline_exceeded");
         } else {
             // Flush to finalize any open segment - this makes buffered data visible
@@ -1924,15 +1831,11 @@ impl otap_df_engine::local::processor::Processor<OtapPdata> for DurableBuffer {
                     Ok(())
                 }
                 NodeControlMsg::DrainIngress { .. } => Ok(()),
-                NodeControlMsg::DelayedData { data, .. } => {
-                    // Check if this is a retry ticket (has BundleRef + retry_count in calldata)
-                    if let Some(route) = data.source_route() {
-                        if decode_retry_ticket(&route.calldata).is_some() {
-                            // This is a retry ticket - handle retry
-                            return self.handle_delayed_retry(data, effect_handler).await;
-                        }
-                    }
-                    // Not a retry ticket - shouldn't happen, but handle gracefully
+                NodeControlMsg::Wakeup { slot, .. } if slot == RETRY_WAKEUP_SLOT => {
+                    self.handle_retry_wakeup(effect_handler).await
+                }
+                NodeControlMsg::Wakeup { .. } => Ok(()),
+                NodeControlMsg::DelayedData { .. } => {
                     otel_warn!("durable_buffer.delayed_data.unexpected");
                     Ok(())
                 }

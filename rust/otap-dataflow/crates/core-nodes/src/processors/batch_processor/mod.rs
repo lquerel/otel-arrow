@@ -38,7 +38,7 @@ use otap_df_engine::MessageSourceLocalEffectHandlerExtension;
 use otap_df_engine::{
     ConsumerEffectHandlerExtension, Interests, ProducerEffectHandlerExtension,
     config::ProcessorConfig,
-    control::{AckMsg, CallData, NackMsg, NodeControlMsg},
+    control::{AckMsg, CallData, NackMsg, NodeControlMsg, WakeupSlot},
     error::{Error as EngineError, ProcessorErrorKind},
     local::processor as local,
     message::Message,
@@ -77,6 +77,24 @@ pub const DEFAULT_MAX_BATCH_DURATION_MS: u64 = 200;
 /// Log messages
 const LOG_MSG_BATCHING_FAILED_PREFIX: &str = "OTAP batch processor: low-level batching failed for";
 const LOG_MSG_BATCHING_FAILED_SUFFIX: &str = "; dropping";
+
+const OTAP_LOGS_WAKEUP_SLOT: WakeupSlot = WakeupSlot(0);
+const OTAP_TRACES_WAKEUP_SLOT: WakeupSlot = WakeupSlot(1);
+const OTAP_METRICS_WAKEUP_SLOT: WakeupSlot = WakeupSlot(2);
+const OTLP_LOGS_WAKEUP_SLOT: WakeupSlot = WakeupSlot(3);
+const OTLP_TRACES_WAKEUP_SLOT: WakeupSlot = WakeupSlot(4);
+const OTLP_METRICS_WAKEUP_SLOT: WakeupSlot = WakeupSlot(5);
+
+const fn wakeup_slot(signal_format: SignalFormat, signal: SignalType) -> WakeupSlot {
+    match (signal_format, signal) {
+        (SignalFormat::OtapRecords, SignalType::Logs) => OTAP_LOGS_WAKEUP_SLOT,
+        (SignalFormat::OtapRecords, SignalType::Traces) => OTAP_TRACES_WAKEUP_SLOT,
+        (SignalFormat::OtapRecords, SignalType::Metrics) => OTAP_METRICS_WAKEUP_SLOT,
+        (SignalFormat::OtlpBytes, SignalType::Logs) => OTLP_LOGS_WAKEUP_SLOT,
+        (SignalFormat::OtlpBytes, SignalType::Traces) => OTLP_TRACES_WAKEUP_SLOT,
+        (SignalFormat::OtlpBytes, SignalType::Metrics) => OTLP_METRICS_WAKEUP_SLOT,
+    }
+}
 
 /// How to size a batch.
 ///
@@ -149,9 +167,7 @@ trait Batcher<T: OtapPayloadHelpers> {
         records: Vec<T>,
     ) -> Result<Vec<T>, PDataError>;
 
-    /// We are using an empty DelayData request as a one-shot
-    /// timer. This returns the appropriate empty request.
-    /// TODO: Add proper one-shot timer and cancellation, see #1472.
+    /// Return the empty payload for this signal type.
     fn empty(signal: SignalType) -> T;
 }
 
@@ -431,6 +447,7 @@ pub struct BatchProcessor {
 struct BatchProcessorFormat<'a, T: OtapPayloadHelpers> {
     config: &'a Config,
     fmtcfg: &'a FormatConfig,
+    signal_format: SignalFormat,
     signals: &'a mut SignalBatches<T>,
     metrics: &'a mut MetricSet<BatchProcessorMetrics>,
 }
@@ -440,6 +457,7 @@ where
     SignalBuffer<T>: Batcher<T>,
 {
     signal: SignalType,
+    wakeup_slot: WakeupSlot,
     config: &'a Config,
     fmtcfg: &'a FormatConfig,
     buffer: &'a mut SignalBuffer<T>,
@@ -539,6 +557,67 @@ async fn log_batching_failed(
 }
 
 impl BatchProcessor {
+    async fn handle_wakeup(
+        &mut self,
+        effect: &mut local::EffectHandler<OtapPdata>,
+        slot: WakeupSlot,
+        when: Instant,
+    ) -> Result<(), EngineError> {
+        match slot {
+            OTAP_LOGS_WAKEUP_SLOT => {
+                if let Some(mut signals) = self.otap_format() {
+                    signals
+                        .for_signal(SignalType::Logs)
+                        .flush_signal_impl(effect, when, FlushReason::Timer)
+                        .await?;
+                }
+            }
+            OTAP_TRACES_WAKEUP_SLOT => {
+                if let Some(mut signals) = self.otap_format() {
+                    signals
+                        .for_signal(SignalType::Traces)
+                        .flush_signal_impl(effect, when, FlushReason::Timer)
+                        .await?;
+                }
+            }
+            OTAP_METRICS_WAKEUP_SLOT => {
+                if let Some(mut signals) = self.otap_format() {
+                    signals
+                        .for_signal(SignalType::Metrics)
+                        .flush_signal_impl(effect, when, FlushReason::Timer)
+                        .await?;
+                }
+            }
+            OTLP_LOGS_WAKEUP_SLOT => {
+                if let Some(mut signals) = self.otlp_format() {
+                    signals
+                        .for_signal(SignalType::Logs)
+                        .flush_signal_impl(effect, when, FlushReason::Timer)
+                        .await?;
+                }
+            }
+            OTLP_TRACES_WAKEUP_SLOT => {
+                if let Some(mut signals) = self.otlp_format() {
+                    signals
+                        .for_signal(SignalType::Traces)
+                        .flush_signal_impl(effect, when, FlushReason::Timer)
+                        .await?;
+                }
+            }
+            OTLP_METRICS_WAKEUP_SLOT => {
+                if let Some(mut signals) = self.otlp_format() {
+                    signals
+                        .for_signal(SignalType::Metrics)
+                        .flush_signal_impl(effect, when, FlushReason::Timer)
+                        .await?;
+                }
+            }
+            _ => {}
+        }
+
+        Ok(())
+    }
+
     /// Parse JSON config and build the processor instance with the provided metrics set.
     /// This function does not wrap the processor into a ProcessorWrapper so callers can
     /// preserve the original NodeUserConfig (including outputs/default_output).
@@ -616,6 +695,7 @@ impl BatchProcessor {
             .map(|signals| BatchProcessorFormat {
                 fmtcfg: &self.config.otap,
                 config: &self.config,
+                signal_format: SignalFormat::OtapRecords,
                 signals,
                 metrics: &mut self.metrics,
             })
@@ -627,6 +707,7 @@ impl BatchProcessor {
             .map(|signals| BatchProcessorFormat {
                 fmtcfg: &self.config.otlp,
                 config: &self.config,
+                signal_format: SignalFormat::OtlpBytes,
                 signals,
                 metrics: &mut self.metrics,
             })
@@ -711,6 +792,7 @@ where
     const fn for_signal(&mut self, signal: SignalType) -> BatchProcessorSignal<'_, T> {
         BatchProcessorSignal {
             signal,
+            wakeup_slot: wakeup_slot(self.signal_format, signal),
             config: self.config,
             fmtcfg: self.fmtcfg,
             buffer: match signal {
@@ -809,7 +891,7 @@ where
             let now = Instant::now();
             arrival = Some(now);
             self.buffer
-                .set_arrival(self.signal, now, timeout, effect)
+                .set_arrival(self.wakeup_slot, now, timeout, effect)
                 .await?;
         }
 
@@ -923,7 +1005,12 @@ where
 
                 // We use the latest arrival time as the new arrival for timeout purposes.
                 self.buffer
-                    .set_arrival(self.signal, now, self.config.max_batch_duration, effect)
+                    .set_arrival(
+                        self.wakeup_slot,
+                        now,
+                        self.config.max_batch_duration,
+                        effect,
+                    )
                     .await?;
             }
         }
@@ -986,6 +1073,11 @@ where
             }
 
             effect.send_message_with_source_node(pdata).await?;
+        }
+
+        if self.buffer.inputs.is_empty() {
+            self.buffer.arrival = None;
+            let _ = effect.cancel_wakeup(self.wakeup_slot);
         }
 
         Ok(())
@@ -1099,27 +1191,9 @@ impl local::Processor<OtapPdata> for BatchProcessor {
                         message: e.to_string(),
                     }
                 }),
-                NodeControlMsg::DelayedData { data, when } => {
-                    let signal = data.signal_type();
-
-                    match data.signal_format() {
-                        SignalFormat::OtapRecords => {
-                            self.otap_format()
-                                .expect("some")
-                                .for_signal(signal)
-                                .flush_signal_impl(effect, when, FlushReason::Timer)
-                                .await?
-                        }
-                        SignalFormat::OtlpBytes => {
-                            self.otlp_format()
-                                .expect("some")
-                                .for_signal(signal)
-                                .flush_signal_impl(effect, when, FlushReason::Timer)
-                                .await?
-                        }
-                    };
-
-                    Ok(())
+                NodeControlMsg::DelayedData { .. } => Ok(()),
+                NodeControlMsg::Wakeup { slot, when } => {
+                    self.handle_wakeup(effect, slot, when).await
                 }
                 NodeControlMsg::Ack(ack) => self.handle_ack(effect, ack).await,
                 NodeControlMsg::Nack(nack) => self.handle_nack(effect, nack).await,
@@ -1318,7 +1392,7 @@ where
     /// should flush, where `now` is the current timestamp.
     async fn set_arrival(
         &mut self,
-        signal: SignalType,
+        wakeup_slot: WakeupSlot,
         now: Instant,
         timeout: Duration,
         effect: &mut local::EffectHandler<OtapPdata>,
@@ -1326,14 +1400,7 @@ where
         self.arrival = Some(now);
 
         effect
-            .delay_data(
-                now + timeout,
-                Box::new(OtapPdata::new(
-                    Context::default(),
-                    Self::empty(signal).into(),
-                )),
-            )
-            .await
+            .set_wakeup(wakeup_slot, now + timeout)
             .map_err(|_| EngineError::ProcessorError {
                 processor: effect.processor_id(),
                 kind: ProcessorErrorKind::Other,
@@ -1367,12 +1434,12 @@ mod tests {
     use otap_df_engine::config::ProcessorConfig;
     use otap_df_engine::context::ControllerContext;
     use otap_df_engine::control::{
-        NodeControlMsg, PipelineCompletionMsg, RuntimeControlMsg, pipeline_completion_msg_channel,
+        NodeControlMsg, PipelineCompletionMsg, pipeline_completion_msg_channel,
         runtime_ctrl_msg_channel,
     };
     use otap_df_engine::message::Message;
     use otap_df_engine::node::Node;
-    use otap_df_engine::testing::liveness::{next_completion, next_runtime_control};
+    use otap_df_engine::testing::liveness::next_completion;
     use otap_df_engine::testing::processor::TestRuntime;
     use otap_df_engine::testing::test_node;
     use otap_df_otap::pdata::OtapPdata;
@@ -1686,10 +1753,8 @@ mod tests {
 
         phase
             .run_test(move |mut ctx| async move {
-                let (runtime_ctrl_tx, mut runtime_ctrl_rx) = runtime_ctrl_msg_channel(10);
                 let (pipeline_completion_tx, mut pipeline_completion_rx) =
                     pipeline_completion_msg_channel(10);
-                ctx.set_runtime_ctrl_sender(runtime_ctrl_tx);
                 ctx.set_pipeline_completion_sender(pipeline_completion_tx);
 
                 // Track outputs by event position
@@ -1702,8 +1767,7 @@ mod tests {
                 let mut received_acks: Vec<TestCallData> = Vec::new();
                 let mut received_nacks: Vec<TestCallData> = Vec::new();
 
-                // Track latest DelayedData message
-                let mut pending_delay: Option<(Instant, Box<OtapPdata>)> = None;
+                let mut pending_controls: Vec<NodeControlMsg<OtapPdata>> = Vec::new();
                 let mut input_idx = 0;
                 let mut total_outputs = 0;
 
@@ -1748,16 +1812,12 @@ mod tests {
                         }
                     }
 
-                    // If this is an Elapsed event, deliver the pending DelayedData if present
+                    // If this is an Elapsed event, deliver the pending local wakeups.
                     if is_elapsed {
-                        if let Some((when, data)) = pending_delay.take() {
-                            // Note we deliver "when" exactly as the DelayData requested,
-                            // which is a future timestamp; however it's the deadline requested,
-                            // and since "when" passes through, the comparison is succesful using
-                            // the expected instant.
-                            let delayed_msg =
-                                Message::Control(NodeControlMsg::DelayedData { when, data });
-                            ctx.process(delayed_msg).await.expect("process delayed");
+                        for control in std::mem::take(&mut pending_controls) {
+                            ctx.process(Message::Control(control))
+                                .await
+                                .expect("process local control");
                         }
                     }
 
@@ -1799,20 +1859,12 @@ mod tests {
                             }
                         }
 
-                        // Drain control channel for DelayData requests and acks/nacks
-                        loop {
-                            match runtime_ctrl_rx.try_recv() {
-                                Ok(RuntimeControlMsg::DelayData { when, data, .. }) => {
-                                    looped += 1;
-                                    pending_delay = Some((when, data));
-                                }
-                                Ok(_) => {
-                                    panic!("unexpected case");
-                                }
-                                Err(_) => {
-                                    break;
-                                }
-                            }
+                        while let Some(when) = ctx.next_local_control_deadline() {
+                            looped += 1;
+                            let control = ctx
+                                .take_due_local_control(when)
+                                .expect("scheduled local control");
+                            pending_controls.push(control);
                         }
 
                         loop {
@@ -2026,9 +2078,6 @@ mod tests {
 
         phase
             .run_test(move |mut ctx| async move {
-                let (runtime_ctrl_tx, mut runtime_ctrl_rx) = runtime_ctrl_msg_channel(10);
-                ctx.set_runtime_ctrl_sender(runtime_ctrl_tx);
-
                 let mut datagen = DataGenerator::new(1);
                 let first = datagen.generate_logs();
                 let second = datagen.generate_logs();
@@ -2043,19 +2092,12 @@ mod tests {
                     "first input should remain buffered"
                 );
 
-                let RuntimeControlMsg::DelayData {
-                    when: stale_when,
-                    data: stale_data,
-                    ..
-                } = next_runtime_control(
-                    &mut runtime_ctrl_rx,
-                    Duration::from_secs(1),
-                    "initial batch timer wakeup",
-                )
-                .await
-                else {
-                    panic!("expected initial DelayData");
-                };
+                let stale_when = ctx
+                    .next_local_control_deadline()
+                    .expect("initial batch timer wakeup");
+                let stale_control = ctx
+                    .take_due_local_control(stale_when)
+                    .expect("initial batch timer control");
 
                 // The second input takes the buffer over the min size, so the processor flushes
                 // before the original timer fires.
@@ -2075,37 +2117,24 @@ mod tests {
                     "new post-flush batch should remain buffered"
                 );
 
-                let RuntimeControlMsg::DelayData {
-                    when: current_when,
-                    data: current_data,
-                    ..
-                } = next_runtime_control(
-                    &mut runtime_ctrl_rx,
-                    Duration::from_secs(1),
-                    "replacement batch timer wakeup",
-                )
-                .await
-                else {
-                    panic!("expected replacement DelayData");
-                };
+                let current_when = ctx
+                    .next_local_control_deadline()
+                    .expect("replacement batch timer wakeup");
+                let current_control = ctx
+                    .take_due_local_control(current_when)
+                    .expect("replacement batch timer control");
 
-                ctx.process(Message::Control(NodeControlMsg::DelayedData {
-                    when: stale_when,
-                    data: stale_data,
-                }))
-                .await
-                .expect("process stale delayed data");
+                ctx.process(Message::Control(stale_control))
+                    .await
+                    .expect("process stale local control");
                 assert!(
                     ctx.drain_pdata().await.is_empty(),
                     "stale wakeup should be ignored"
                 );
 
-                ctx.process(Message::Control(NodeControlMsg::DelayedData {
-                    when: current_when,
-                    data: current_data,
-                }))
-                .await
-                .expect("process current delayed data");
+                ctx.process(Message::Control(current_control))
+                    .await
+                    .expect("process current local control");
                 let final_flush = ctx.drain_pdata().await;
                 assert_eq!(
                     final_flush.len(),
@@ -2691,9 +2720,6 @@ mod tests {
 
         phase
             .run_test(move |mut ctx| async move {
-                let (pipeline_tx, mut pipeline_rx) = runtime_ctrl_msg_channel(10);
-                ctx.set_runtime_ctrl_sender(pipeline_tx);
-
                 // Create test data
                 let mut datagen = DataGenerator::new(1);
                 let logs1: OtlpProtoMessage = datagen.generate_logs().into();
@@ -2704,7 +2730,7 @@ mod tests {
                 let otap_message2 = otlp_to_otap(&logs2);
 
                 let mut outputs = Vec::new();
-                let mut pending_delays: Vec<(Instant, Box<OtapPdata>)> = Vec::new();
+                let mut pending_controls: Vec<NodeControlMsg<OtapPdata>> = Vec::new();
 
                 // Send both
                 ctx.process(Message::PData(OtapPdata::new_default(otlp_message1.into())))
@@ -2715,11 +2741,11 @@ mod tests {
                     .await
                     .expect("process otlp");
 
-                // Drain control channel for DelayData
-                while let Ok(RuntimeControlMsg::DelayData { when, data, .. }) =
-                    pipeline_rx.try_recv()
-                {
-                    pending_delays.push((when, data));
+                while let Some(when) = ctx.next_local_control_deadline() {
+                    let control = ctx
+                        .take_due_local_control(when)
+                        .expect("scheduled local control");
+                    pending_controls.push(control);
                 }
 
                 assert!(
@@ -2728,10 +2754,10 @@ mod tests {
                 );
 
                 // Trigger timeout
-                for (when, data) in pending_delays {
-                    ctx.process(Message::Control(NodeControlMsg::DelayedData { when, data }))
+                for control in pending_controls {
+                    ctx.process(Message::Control(control))
                         .await
-                        .expect("process delayed");
+                        .expect("process local control");
                 }
 
                 // Drain outputs after timeout

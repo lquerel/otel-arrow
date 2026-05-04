@@ -180,9 +180,9 @@ A realistic example looks like this:
 # admission while it waits for outstanding completions to reduce its inflight
 # count.
 # An exporter hits a temporary outage and emits a burst of DeliverNack.
-# The processor also needs to enqueue StartTimer / DelayData to retry work.
+# The processor also needs to enqueue StartTimer to retry work.
 #
-# If DeliverNack, StartTimer, DelayData, and Shutdown all share one bounded
+# If DeliverNack, StartTimer, and Shutdown all share one bounded
 # channel, the DeliverNack burst can fill it first.
 # Then:
 # - the exporter can block trying to publish more completion traffic
@@ -233,8 +233,8 @@ The current message families are:
 - **Node control messages**: `Ack`, `Nack`, `Config`, `TimerTick`,
   `CollectTelemetry`, `DelayedData`, `DrainIngress`, `Shutdown`
 - **Runtime control messages**: `StartTimer`, `CancelTimer`,
-  `StartTelemetryTimer`, `CancelTelemetryTimer`, `DelayData`,
-  `ReceiverDrained`, `Shutdown`
+  `StartTelemetryTimer`, `CancelTelemetryTimer`, `ReceiverDrained`,
+  `Shutdown`
 - **Pipeline completion messages**: `DeliverAck`, `DeliverNack`
 
 ## Runtime Message Dynamics
@@ -483,9 +483,7 @@ When graceful shutdown starts, the runtime control manager:
 
 1. Enters ingress-draining mode.
 2. Cancels recurring timers.
-3. Flushes queued delayed data back to the originating nodes as
-   `NodeControlMsg::DelayedData`.
-4. Sends `NodeControlMsg::DrainIngress` to every receiver.
+3. Sends `NodeControlMsg::DrainIngress` to every receiver.
 
 Each receiver is then responsible for stopping admission of new external work
 while keeping receiver-local drain state alive long enough to finish local
@@ -652,15 +650,16 @@ questions:
 
 - if receivers appear stuck during shutdown, `pipeline.runtime_control` shows
   whether drain is active, how many receivers are still pending, whether timer
-  or delayed-data work is still queued, and whether the shutdown deadline was
-  ultimately forced
-- if upstream callers are not seeing final Ack/Nack outcomes, `pipeline.completion`
-  shows whether completions are reaching the dispatcher, whether they are being
-  delivered to an interested frame, or whether the unwind ran out of interested
-  subscribers
+  work is still queued, and whether the shutdown deadline was ultimately
+  forced
+- if upstream callers are not seeing final Ack/Nack outcomes,
+  `pipeline.completion` shows whether completions are reaching the dispatcher,
+  whether they are being delivered to an interested frame, or whether the
+  unwind ran out of interested subscribers
 
 ### Predefined Attributes
 
+<!-- markdownlint-disable MD013 -->
 | Scope    | Attribute           | Type    | Description                                                  |
 |----------|---------------------|---------|--------------------------------------------------------------|
 | Resource | process_instance_id | string  | Unique process instance identifier (base32-encoded UUID v7). |
@@ -671,6 +670,7 @@ questions:
 | Pipeline | pipeline_id         | string  | Pipeline identifier.                                         |
 | Node     | node_id             | string  | Node unique identifier (in scope of the pipeline).           |
 | Node     | node_type           | string  | Node type (e.g. "receiver", "processor", "exporter").        |
+<!-- markdownlint-enable MD013 -->
 
 ### Drain Lifecycle Events
 

@@ -4,13 +4,15 @@
 //! Common foundation of all effect handlers.
 
 use crate::Interests;
+use crate::WakeupError;
 use crate::completion_emission_metrics::CompletionEmissionMetricsHandle;
 use crate::control::{
     AckMsg, NackMsg, PipelineCompletionMsg, PipelineCompletionMsgSender, RuntimeControlMsg,
-    RuntimeCtrlMsgSender,
+    RuntimeCtrlMsgSender, WakeupSlot,
 };
 use crate::error::Error;
 use crate::node::NodeId;
+use crate::node_local_scheduler::NodeLocalSchedulerHandle;
 use otap_df_channel::error::SendError;
 use otap_df_telemetry::error::Error as TelemetryError;
 use otap_df_telemetry::metrics::{MetricSet, MetricSetHandler};
@@ -48,6 +50,7 @@ pub(crate) struct EffectHandlerCore<PData> {
     pub(crate) node_id: NodeId,
     // ToDo refactor the code to avoid using Option here.
     pub(crate) runtime_ctrl_msg_sender: Option<RuntimeCtrlMsgSender<PData>>,
+    pub(crate) local_scheduler: Option<NodeLocalSchedulerHandle<PData>>,
     pub(crate) pipeline_completion_msg_sender: Option<PipelineCompletionMsgSender<PData>>,
     #[allow(dead_code)]
     // Will be used in the future. ToDo report metrics from channel and messages.
@@ -66,6 +69,7 @@ impl<PData> EffectHandlerCore<PData> {
         Self {
             node_id,
             runtime_ctrl_msg_sender: None,
+            local_scheduler: None,
             pipeline_completion_msg_sender: None,
             metrics_reporter,
             completion_emission_metrics: None,
@@ -80,6 +84,11 @@ impl<PData> EffectHandlerCore<PData> {
         runtime_ctrl_msg_sender: RuntimeCtrlMsgSender<PData>,
     ) {
         self.runtime_ctrl_msg_sender = Some(runtime_ctrl_msg_sender);
+    }
+
+    /// Sets the node-local scheduler handle for this effect handler.
+    pub fn set_local_scheduler(&mut self, local_scheduler: NodeLocalSchedulerHandle<PData>) {
+        self.local_scheduler = Some(local_scheduler);
     }
 
     /// Sets the pipeline result message sender for this effect handler.
@@ -377,21 +386,30 @@ impl<PData> EffectHandlerCore<PData> {
         }
     }
 
-    /// Delay a message.
-    pub async fn delay_data(&self, when: Instant, data: Box<PData>) -> Result<(), PData> {
-        self.send_runtime_ctrl_msg(RuntimeControlMsg::DelayData {
-            node_id: self.node_id().index,
-            when,
-            data,
-        })
-        .await
-        .map(|_| ())
-        .map_err(|e| -> PData {
-            match e.inner() {
-                RuntimeControlMsg::DelayData { data, .. } => *data,
-                _ => unreachable!(),
-            }
-        })
+    /// Requeue retained pdata onto this node later.
+    pub fn requeue_later(&self, when: Instant, data: Box<PData>) -> Result<(), PData> {
+        self.local_scheduler()
+            .requeue_later(when, data)
+            .map_err(|data| *data)
+    }
+
+    /// Set or replace a node-local wakeup.
+    pub fn set_wakeup(&self, slot: WakeupSlot, when: Instant) -> Result<(), WakeupError> {
+        self.local_scheduler().set_wakeup(slot, when)
+    }
+
+    /// Cancel a previously scheduled node-local wakeup.
+    #[must_use]
+    pub fn cancel_wakeup(&self, slot: WakeupSlot) -> bool {
+        self.local_scheduler().cancel_wakeup(slot)
+    }
+
+    fn local_scheduler(&self) -> &NodeLocalSchedulerHandle<PData> {
+        self.local_scheduler
+            .as_ref()
+            // Safety: processor runtime preparation installs the node-local scheduler
+            // before processor code receives an effect handler.
+            .expect("node-local scheduler not set for processor effect handler")
     }
 
     /// Notifies the runtime control manager that this receiver has completed

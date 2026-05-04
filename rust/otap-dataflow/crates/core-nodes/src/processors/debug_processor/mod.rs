@@ -258,6 +258,11 @@ impl local::Processor<OtapPdata> for DebugProcessor {
                             .output_message("DrainIngress message received\n")
                             .await?;
                     }
+                    NodeControlMsg::Wakeup { .. } => {
+                        debug_output
+                            .output_message("Wakeup message received\n")
+                            .await?;
+                    }
                     NodeControlMsg::Ack(ackmsg) => {
                         match DebugCallData::try_from(ackmsg.unwind.route.calldata.clone()) {
                             Ok(dd) => {
