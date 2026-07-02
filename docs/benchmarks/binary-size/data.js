@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1782867745155,
+  "lastUpdate": 1782954038666,
   "repoUrl": "https://github.com/lquerel/otel-arrow",
   "entries": {
     "Benchmark": [
@@ -282,6 +282,38 @@ window.BENCHMARK_DATA = {
           {
             "name": "linux-amd64-binary-size",
             "value": 111.55,
+            "unit": "MB"
+          },
+          {
+            "name": "linux-arm64-binary-size",
+            "value": 98.85,
+            "unit": "MB"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "name": "Swapnil Ashtekar",
+            "username": "swashtek",
+            "email": "46826200+swashtek@users.noreply.github.com"
+          },
+          "committer": {
+            "name": "GitHub",
+            "username": "web-flow",
+            "email": "noreply@github.com"
+          },
+          "id": "2785c4fdd9b4bb83274b3095948901a21abd1aeb",
+          "message": "etw_receiver: update attribute keys to use dot notation for consistency (#3346)\n\n# Change Summary\nupdate attribute keys to use dot notation for consistency\n\n## What issue does this PR close?\n* Closes #NNN\n\n## How are these changes tested?\n\n## Are there any user-facing changes?\nNo\n\n### Changelog\n\n<!--\nUser-facing changes need a .chloggen/*.yaml entry. Copy the\nTEMPLATE.yaml\nin go/.chloggen/ or rust/otap-dataflow/.chloggen/ and fill in the\nfields.\nIf not required, include `chore` in the PR title.\n-->\n\n* [x] Added a `.chloggen/*.yaml` entry, OR this PR is a `chore`\n(indicated in title).",
+          "timestamp": "2026-06-24T00:47:38Z",
+          "url": "https://github.com/lquerel/otel-arrow/commit/2785c4fdd9b4bb83274b3095948901a21abd1aeb"
+        },
+        "date": 1782954034045,
+        "tool": "customSmallerIsBetter",
+        "benches": [
+          {
+            "name": "linux-amd64-binary-size",
+            "value": 111.53,
             "unit": "MB"
           },
           {
