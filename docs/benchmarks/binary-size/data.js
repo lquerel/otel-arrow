@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1784168838486,
+  "lastUpdate": 1784255363683,
   "repoUrl": "https://github.com/lquerel/otel-arrow",
   "entries": {
     "Benchmark": [
@@ -767,6 +767,38 @@ window.BENCHMARK_DATA = {
           {
             "name": "linux-arm64-binary-size",
             "value": 99.72,
+            "unit": "MB"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "name": "Trask Stalnaker",
+            "username": "trask",
+            "email": "trask.stalnaker@gmail.com"
+          },
+          "committer": {
+            "name": "GitHub",
+            "username": "web-flow",
+            "email": "noreply@github.com"
+          },
+          "id": "1c01d124be03859fb474b7bdcfb21b306a4da8cb",
+          "message": "chore: update otelbot token workflows to use client IDs (#3486)\n\nUpdate otelbot token creation to use GitHub App client IDs.\n\nThe `app-id` input for `actions/create-github-app-token` is deprecated\nin favor of `client-id`. The matching `OTELBOT_*_CLIENT_ID` organization\nvariables have been provisioned, so this updates direct token creation\nfrom `app-id` / `*_APP_ID` to `client-id` / `*_CLIENT_ID`.\n\nTracking issue: https://github.com/open-telemetry/admin/issues/744",
+          "timestamp": "2026-07-15T03:51:56Z",
+          "url": "https://github.com/lquerel/otel-arrow/commit/1c01d124be03859fb474b7bdcfb21b306a4da8cb"
+        },
+        "date": 1784255358532,
+        "tool": "customSmallerIsBetter",
+        "benches": [
+          {
+            "name": "linux-amd64-binary-size",
+            "value": 112.4,
+            "unit": "MB"
+          },
+          {
+            "name": "linux-arm64-binary-size",
+            "value": 99.78,
             "unit": "MB"
           }
         ]
