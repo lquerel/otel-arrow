@@ -16,18 +16,6 @@ metrics:
       metric_value_type: double
     otap_dataflow:
       metric_set: exporter.azure_monitor
-      rust:
-        package: otap-df-contrib-nodes
-        type: AzureMonitorExporterMetrics
-        field: batch_size
-        instrument: Mmsc
-        value_type: f64
-        source: crates/contrib-nodes/src/exporters/azure_monitor_exporter/metrics.rs
-        temporality: delta
-        availability: feature = "azure-monitor-exporter"
-      wire:
-        scope_name: exporter.azure_monitor
-        metric_name: batch.size
 - name: exporter.azure_monitor.batch.to.msg.count
   brief: Current number of batch-to-message mappings (leak detector).
   instrument: gauge
@@ -43,17 +31,6 @@ metrics:
       metric_value_type: int
     otap_dataflow:
       metric_set: exporter.azure_monitor
-      rust:
-        package: otap-df-contrib-nodes
-        type: AzureMonitorExporterMetrics
-        field: batch_to_msg_count
-        instrument: Gauge
-        value_type: u64
-        source: crates/contrib-nodes/src/exporters/azure_monitor_exporter/metrics.rs
-        availability: feature = "azure-monitor-exporter"
-      wire:
-        scope_name: exporter.azure_monitor
-        metric_name: batch.to.msg.count
 - name: exporter.azure_monitor.batch.uncompressed.size
   brief: Uncompressed batch size in bytes (min/max/sum/count). Recorded once per batch,
     before compression.
@@ -70,18 +47,6 @@ metrics:
       metric_value_type: double
     otap_dataflow:
       metric_set: exporter.azure_monitor
-      rust:
-        package: otap-df-contrib-nodes
-        type: AzureMonitorExporterMetrics
-        field: batch_uncompressed_size
-        instrument: Mmsc
-        value_type: f64
-        source: crates/contrib-nodes/src/exporters/azure_monitor_exporter/metrics.rs
-        temporality: delta
-        availability: feature = "azure-monitor-exporter"
-      wire:
-        scope_name: exporter.azure_monitor
-        metric_name: batch.uncompressed.size
 - name: exporter.azure_monitor.failed.batches
   brief: Number of batches that failed to export.
   instrument: counter
@@ -97,18 +62,6 @@ metrics:
       metric_value_type: int
     otap_dataflow:
       metric_set: exporter.azure_monitor
-      rust:
-        package: otap-df-contrib-nodes
-        type: AzureMonitorExporterMetrics
-        field: failed_batches
-        instrument: Counter
-        value_type: u64
-        source: crates/contrib-nodes/src/exporters/azure_monitor_exporter/metrics.rs
-        temporality: delta
-        availability: feature = "azure-monitor-exporter"
-      wire:
-        scope_name: exporter.azure_monitor
-        metric_name: failed.batches
 - name: exporter.azure_monitor.failed.messages
   brief: Number of messages that failed to export.
   instrument: counter
@@ -124,18 +77,6 @@ metrics:
       metric_value_type: int
     otap_dataflow:
       metric_set: exporter.azure_monitor
-      rust:
-        package: otap-df-contrib-nodes
-        type: AzureMonitorExporterMetrics
-        field: failed_messages
-        instrument: Counter
-        value_type: u64
-        source: crates/contrib-nodes/src/exporters/azure_monitor_exporter/metrics.rs
-        temporality: delta
-        availability: feature = "azure-monitor-exporter"
-      wire:
-        scope_name: exporter.azure_monitor
-        metric_name: failed.messages
 - name: exporter.azure_monitor.failed.rows
   brief: Number of rows that failed to export.
   instrument: counter
@@ -151,18 +92,6 @@ metrics:
       metric_value_type: int
     otap_dataflow:
       metric_set: exporter.azure_monitor
-      rust:
-        package: otap-df-contrib-nodes
-        type: AzureMonitorExporterMetrics
-        field: failed_rows
-        instrument: Counter
-        value_type: u64
-        source: crates/contrib-nodes/src/exporters/azure_monitor_exporter/metrics.rs
-        temporality: delta
-        availability: feature = "azure-monitor-exporter"
-      wire:
-        scope_name: exporter.azure_monitor
-        metric_name: failed.rows
 - name: exporter.azure_monitor.heartbeats
   brief: Number of successful heartbeat sends.
   instrument: counter
@@ -178,18 +107,6 @@ metrics:
       metric_value_type: int
     otap_dataflow:
       metric_set: exporter.azure_monitor
-      rust:
-        package: otap-df-contrib-nodes
-        type: AzureMonitorExporterMetrics
-        field: heartbeats
-        instrument: Counter
-        value_type: u64
-        source: crates/contrib-nodes/src/exporters/azure_monitor_exporter/metrics.rs
-        temporality: delta
-        availability: feature = "azure-monitor-exporter"
-      wire:
-        scope_name: exporter.azure_monitor
-        metric_name: heartbeats
 - name: exporter.azure_monitor.in.flight.exports
   brief: Current number of in-flight export requests.
   instrument: gauge
@@ -205,17 +122,6 @@ metrics:
       metric_value_type: int
     otap_dataflow:
       metric_set: exporter.azure_monitor
-      rust:
-        package: otap-df-contrib-nodes
-        type: AzureMonitorExporterMetrics
-        field: in_flight_exports
-        instrument: Gauge
-        value_type: u64
-        source: crates/contrib-nodes/src/exporters/azure_monitor_exporter/metrics.rs
-        availability: feature = "azure-monitor-exporter"
-      wire:
-        scope_name: exporter.azure_monitor
-        metric_name: in.flight.exports
 - name: exporter.azure_monitor.in.flight.log.records
   brief: Current number of log records in-flight at the exporter (enqueued export
     requests awaiting completion, including records being retried).
@@ -232,17 +138,6 @@ metrics:
       metric_value_type: int
     otap_dataflow:
       metric_set: exporter.azure_monitor
-      rust:
-        package: otap-df-contrib-nodes
-        type: AzureMonitorExporterMetrics
-        field: in_flight_log_records
-        instrument: Gauge
-        value_type: u64
-        source: crates/contrib-nodes/src/exporters/azure_monitor_exporter/metrics.rs
-        availability: feature = "azure-monitor-exporter"
-      wire:
-        scope_name: exporter.azure_monitor
-        metric_name: in.flight.log.records
 - name: exporter.azure_monitor.laclient.http.2xx
   brief: Number of HTTP 2xx (success) responses.
   instrument: counter
@@ -258,18 +153,6 @@ metrics:
       metric_value_type: int
     otap_dataflow:
       metric_set: exporter.azure_monitor
-      rust:
-        package: otap-df-contrib-nodes
-        type: AzureMonitorExporterMetrics
-        field: laclient_http_2xx
-        instrument: Counter
-        value_type: u64
-        source: crates/contrib-nodes/src/exporters/azure_monitor_exporter/metrics.rs
-        temporality: delta
-        availability: feature = "azure-monitor-exporter"
-      wire:
-        scope_name: exporter.azure_monitor
-        metric_name: laclient.http.2xx
 - name: exporter.azure_monitor.laclient.http.401
   brief: Number of HTTP 401 (unauthorized) responses.
   instrument: counter
@@ -285,18 +168,6 @@ metrics:
       metric_value_type: int
     otap_dataflow:
       metric_set: exporter.azure_monitor
-      rust:
-        package: otap-df-contrib-nodes
-        type: AzureMonitorExporterMetrics
-        field: laclient_http_401
-        instrument: Counter
-        value_type: u64
-        source: crates/contrib-nodes/src/exporters/azure_monitor_exporter/metrics.rs
-        temporality: delta
-        availability: feature = "azure-monitor-exporter"
-      wire:
-        scope_name: exporter.azure_monitor
-        metric_name: laclient.http.401
 - name: exporter.azure_monitor.laclient.http.403
   brief: Number of HTTP 403 (forbidden) responses.
   instrument: counter
@@ -312,18 +183,6 @@ metrics:
       metric_value_type: int
     otap_dataflow:
       metric_set: exporter.azure_monitor
-      rust:
-        package: otap-df-contrib-nodes
-        type: AzureMonitorExporterMetrics
-        field: laclient_http_403
-        instrument: Counter
-        value_type: u64
-        source: crates/contrib-nodes/src/exporters/azure_monitor_exporter/metrics.rs
-        temporality: delta
-        availability: feature = "azure-monitor-exporter"
-      wire:
-        scope_name: exporter.azure_monitor
-        metric_name: laclient.http.403
 - name: exporter.azure_monitor.laclient.http.413
   brief: Number of HTTP 413 (payload too large) responses.
   instrument: counter
@@ -339,18 +198,6 @@ metrics:
       metric_value_type: int
     otap_dataflow:
       metric_set: exporter.azure_monitor
-      rust:
-        package: otap-df-contrib-nodes
-        type: AzureMonitorExporterMetrics
-        field: laclient_http_413
-        instrument: Counter
-        value_type: u64
-        source: crates/contrib-nodes/src/exporters/azure_monitor_exporter/metrics.rs
-        temporality: delta
-        availability: feature = "azure-monitor-exporter"
-      wire:
-        scope_name: exporter.azure_monitor
-        metric_name: laclient.http.413
 - name: exporter.azure_monitor.laclient.http.429
   brief: Number of HTTP 429 (rate limited) responses.
   instrument: counter
@@ -366,18 +213,6 @@ metrics:
       metric_value_type: int
     otap_dataflow:
       metric_set: exporter.azure_monitor
-      rust:
-        package: otap-df-contrib-nodes
-        type: AzureMonitorExporterMetrics
-        field: laclient_http_429
-        instrument: Counter
-        value_type: u64
-        source: crates/contrib-nodes/src/exporters/azure_monitor_exporter/metrics.rs
-        temporality: delta
-        availability: feature = "azure-monitor-exporter"
-      wire:
-        scope_name: exporter.azure_monitor
-        metric_name: laclient.http.429
 - name: exporter.azure_monitor.laclient.http.5xx
   brief: Number of HTTP 5xx (server error) responses.
   instrument: counter
@@ -393,18 +228,6 @@ metrics:
       metric_value_type: int
     otap_dataflow:
       metric_set: exporter.azure_monitor
-      rust:
-        package: otap-df-contrib-nodes
-        type: AzureMonitorExporterMetrics
-        field: laclient_http_5xx
-        instrument: Counter
-        value_type: u64
-        source: crates/contrib-nodes/src/exporters/azure_monitor_exporter/metrics.rs
-        temporality: delta
-        availability: feature = "azure-monitor-exporter"
-      wire:
-        scope_name: exporter.azure_monitor
-        metric_name: laclient.http.5xx
 - name: exporter.azure_monitor.laclient.http.success.latency
   brief: Client HTTP success latency in milliseconds (min/max/sum/count).
   instrument: histogram
@@ -420,18 +243,6 @@ metrics:
       metric_value_type: double
     otap_dataflow:
       metric_set: exporter.azure_monitor
-      rust:
-        package: otap-df-contrib-nodes
-        type: AzureMonitorExporterMetrics
-        field: laclient_http_success_latency
-        instrument: Mmsc
-        value_type: f64
-        source: crates/contrib-nodes/src/exporters/azure_monitor_exporter/metrics.rs
-        temporality: delta
-        availability: feature = "azure-monitor-exporter"
-      wire:
-        scope_name: exporter.azure_monitor
-        metric_name: laclient.http.success.latency
 - name: exporter.azure_monitor.laclient.network.errors
   brief: Number of network errors (connect, timeout, etc.) before receiving an HTTP
     response.
@@ -448,18 +259,6 @@ metrics:
       metric_value_type: int
     otap_dataflow:
       metric_set: exporter.azure_monitor
-      rust:
-        package: otap-df-contrib-nodes
-        type: AzureMonitorExporterMetrics
-        field: laclient_network_errors
-        instrument: Counter
-        value_type: u64
-        source: crates/contrib-nodes/src/exporters/azure_monitor_exporter/metrics.rs
-        temporality: delta
-        availability: feature = "azure-monitor-exporter"
-      wire:
-        scope_name: exporter.azure_monitor
-        metric_name: laclient.network.errors
 - name: exporter.azure_monitor.log.entries.too.large
   brief: Number of log entries rejected for exceeding the batch size limit.
   instrument: counter
@@ -475,18 +274,6 @@ metrics:
       metric_value_type: int
     otap_dataflow:
       metric_set: exporter.azure_monitor
-      rust:
-        package: otap-df-contrib-nodes
-        type: AzureMonitorExporterMetrics
-        field: log_entries_too_large
-        instrument: Counter
-        value_type: u64
-        source: crates/contrib-nodes/src/exporters/azure_monitor_exporter/metrics.rs
-        temporality: delta
-        availability: feature = "azure-monitor-exporter"
-      wire:
-        scope_name: exporter.azure_monitor
-        metric_name: log.entries.too.large
 - name: exporter.azure_monitor.msg.to.batch.count
   brief: Current number of message-to-batch mappings (leak detector).
   instrument: gauge
@@ -502,17 +289,6 @@ metrics:
       metric_value_type: int
     otap_dataflow:
       metric_set: exporter.azure_monitor
-      rust:
-        package: otap-df-contrib-nodes
-        type: AzureMonitorExporterMetrics
-        field: msg_to_batch_count
-        instrument: Gauge
-        value_type: u64
-        source: crates/contrib-nodes/src/exporters/azure_monitor_exporter/metrics.rs
-        availability: feature = "azure-monitor-exporter"
-      wire:
-        scope_name: exporter.azure_monitor
-        metric_name: msg.to.batch.count
 - name: exporter.azure_monitor.msg.to.data.count
   brief: Current number of message-to-data mappings (leak detector).
   instrument: gauge
@@ -528,17 +304,6 @@ metrics:
       metric_value_type: int
     otap_dataflow:
       metric_set: exporter.azure_monitor
-      rust:
-        package: otap-df-contrib-nodes
-        type: AzureMonitorExporterMetrics
-        field: msg_to_data_count
-        instrument: Gauge
-        value_type: u64
-        source: crates/contrib-nodes/src/exporters/azure_monitor_exporter/metrics.rs
-        availability: feature = "azure-monitor-exporter"
-      wire:
-        scope_name: exporter.azure_monitor
-        metric_name: msg.to.data.count
 - name: exporter.azure_monitor.successful.batches
   brief: Number of batches successfully exported.
   instrument: counter
@@ -554,18 +319,6 @@ metrics:
       metric_value_type: int
     otap_dataflow:
       metric_set: exporter.azure_monitor
-      rust:
-        package: otap-df-contrib-nodes
-        type: AzureMonitorExporterMetrics
-        field: successful_batches
-        instrument: Counter
-        value_type: u64
-        source: crates/contrib-nodes/src/exporters/azure_monitor_exporter/metrics.rs
-        temporality: delta
-        availability: feature = "azure-monitor-exporter"
-      wire:
-        scope_name: exporter.azure_monitor
-        metric_name: successful.batches
 - name: exporter.azure_monitor.successful.messages
   brief: Number of messages successfully exported.
   instrument: counter
@@ -581,18 +334,6 @@ metrics:
       metric_value_type: int
     otap_dataflow:
       metric_set: exporter.azure_monitor
-      rust:
-        package: otap-df-contrib-nodes
-        type: AzureMonitorExporterMetrics
-        field: successful_messages
-        instrument: Counter
-        value_type: u64
-        source: crates/contrib-nodes/src/exporters/azure_monitor_exporter/metrics.rs
-        temporality: delta
-        availability: feature = "azure-monitor-exporter"
-      wire:
-        scope_name: exporter.azure_monitor
-        metric_name: successful.messages
 - name: exporter.azure_monitor.successful.rows
   brief: Number of rows successfully exported.
   instrument: counter
@@ -608,15 +349,3 @@ metrics:
       metric_value_type: int
     otap_dataflow:
       metric_set: exporter.azure_monitor
-      rust:
-        package: otap-df-contrib-nodes
-        type: AzureMonitorExporterMetrics
-        field: successful_rows
-        instrument: Counter
-        value_type: u64
-        source: crates/contrib-nodes/src/exporters/azure_monitor_exporter/metrics.rs
-        temporality: delta
-        availability: feature = "azure-monitor-exporter"
-      wire:
-        scope_name: exporter.azure_monitor
-        metric_name: successful.rows

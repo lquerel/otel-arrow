@@ -15,17 +15,6 @@ metrics:
       metric_value_type: int
     otap_dataflow:
       metric_set: receiver.syslog_cef
-      rust:
-        package: otap-df-core-nodes
-        type: SyslogCefReceiverMetrics
-        field: received_logs_forward_failed
-        instrument: Counter
-        value_type: u64
-        source: crates/core-nodes/src/receivers/syslog_cef_receiver/mod.rs
-        temporality: delta
-      wire:
-        scope_name: receiver.syslog_cef
-        metric_name: received.logs.forward.failed
 - name: receiver.syslog_cef.received.logs.forwarded
   brief: Number of log records successfully forwarded downstream
   instrument: counter
@@ -41,17 +30,6 @@ metrics:
       metric_value_type: int
     otap_dataflow:
       metric_set: receiver.syslog_cef
-      rust:
-        package: otap-df-core-nodes
-        type: SyslogCefReceiverMetrics
-        field: received_logs_forwarded
-        instrument: Counter
-        value_type: u64
-        source: crates/core-nodes/src/receivers/syslog_cef_receiver/mod.rs
-        temporality: delta
-      wire:
-        scope_name: receiver.syslog_cef
-        metric_name: received.logs.forwarded
 - name: receiver.syslog_cef.received.logs.invalid
   brief: Number of log records rejected because their payload is zero-length
   instrument: counter
@@ -67,17 +45,6 @@ metrics:
       metric_value_type: int
     otap_dataflow:
       metric_set: receiver.syslog_cef
-      rust:
-        package: otap-df-core-nodes
-        type: SyslogCefReceiverMetrics
-        field: received_logs_invalid
-        instrument: Counter
-        value_type: u64
-        source: crates/core-nodes/src/receivers/syslog_cef_receiver/mod.rs
-        temporality: delta
-      wire:
-        scope_name: receiver.syslog_cef
-        metric_name: received.logs.invalid
 - name: receiver.syslog_cef.received.logs.rejected.memory.pressure
   brief: Number of log records dropped due to process-wide memory pressure.
   instrument: counter
@@ -93,17 +60,6 @@ metrics:
       metric_value_type: int
     otap_dataflow:
       metric_set: receiver.syslog_cef
-      rust:
-        package: otap-df-core-nodes
-        type: SyslogCefReceiverMetrics
-        field: received_logs_rejected_memory_pressure
-        instrument: Counter
-        value_type: u64
-        source: crates/core-nodes/src/receivers/syslog_cef_receiver/mod.rs
-        temporality: delta
-      wire:
-        scope_name: receiver.syslog_cef
-        metric_name: received.logs.rejected.memory.pressure
 - name: receiver.syslog_cef.received.logs.total
   brief: Total number of log records observed at the socket before parsing
   instrument: counter
@@ -119,22 +75,11 @@ metrics:
       metric_value_type: int
     otap_dataflow:
       metric_set: receiver.syslog_cef
-      rust:
-        package: otap-df-core-nodes
-        type: SyslogCefReceiverMetrics
-        field: received_logs_total
-        instrument: Counter
-        value_type: u64
-        source: crates/core-nodes/src/receivers/syslog_cef_receiver/mod.rs
-        temporality: delta
-      wire:
-        scope_name: receiver.syslog_cef
-        metric_name: received.logs.total
 - name: receiver.syslog_cef.received.logs.truncated
   brief: Number of log records whose raw message exceeded [`MAX_MESSAGE_SIZE`] and
     were truncated before parsing. For TCP, truncation is detected precisely when
     a newline-delimited message exceeds the size limit. For UDP, it is a heuristic
-    — a datagram that fills the entire receive buffer is assumed truncated, though
+    - a datagram that fills the entire receive buffer is assumed truncated, though
     a message exactly [`MAX_MESSAGE_SIZE`] bytes would also trigger this.
   instrument: counter
   unit: "{item}"
@@ -149,17 +94,6 @@ metrics:
       metric_value_type: int
     otap_dataflow:
       metric_set: receiver.syslog_cef
-      rust:
-        package: otap-df-core-nodes
-        type: SyslogCefReceiverMetrics
-        field: received_logs_truncated
-        instrument: Counter
-        value_type: u64
-        source: crates/core-nodes/src/receivers/syslog_cef_receiver/mod.rs
-        temporality: delta
-      wire:
-        scope_name: receiver.syslog_cef
-        metric_name: received.logs.truncated
 - name: receiver.syslog_cef.tcp.connections.active
   brief: Number of active TCP connections
   instrument: updowncounter
@@ -175,17 +109,7 @@ metrics:
       metric_value_type: int
     otap_dataflow:
       metric_set: receiver.syslog_cef
-      rust:
-        package: otap-df-core-nodes
-        type: SyslogCefReceiverMetrics
-        field: tcp_connections_active
-        instrument: UpDownCounter
-        value_type: u64
-        source: crates/core-nodes/src/receivers/syslog_cef_receiver/mod.rs
-        temporality: cumulative
-      wire:
-        scope_name: receiver.syslog_cef
-        metric_name: tcp.connections.active
+      recording: additive
 - name: receiver.syslog_cef.tcp.connections.rejected.memory.pressure
   brief: Number of TCP connections rejected or closed due to process-wide memory pressure.
   instrument: counter
@@ -201,17 +125,6 @@ metrics:
       metric_value_type: int
     otap_dataflow:
       metric_set: receiver.syslog_cef
-      rust:
-        package: otap-df-core-nodes
-        type: SyslogCefReceiverMetrics
-        field: tcp_connections_rejected_memory_pressure
-        instrument: Counter
-        value_type: u64
-        source: crates/core-nodes/src/receivers/syslog_cef_receiver/mod.rs
-        temporality: delta
-      wire:
-        scope_name: receiver.syslog_cef
-        metric_name: tcp.connections.rejected.memory.pressure
 - name: receiver.syslog_cef.tls.handshake.failures
   brief: Number of TLS handshake failures
   instrument: counter
@@ -227,14 +140,3 @@ metrics:
       metric_value_type: int
     otap_dataflow:
       metric_set: receiver.syslog_cef
-      rust:
-        package: otap-df-core-nodes
-        type: SyslogCefReceiverMetrics
-        field: tls_handshake_failures
-        instrument: Counter
-        value_type: u64
-        source: crates/core-nodes/src/receivers/syslog_cef_receiver/mod.rs
-        temporality: delta
-      wire:
-        scope_name: receiver.syslog_cef
-        metric_name: tls.handshake.failures

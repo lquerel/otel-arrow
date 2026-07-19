@@ -15,17 +15,6 @@ metrics:
       metric_value_type: int
     otap_dataflow:
       metric_set: otap.exporter.parquet
-      rust:
-        package: otap-df-core-nodes
-        type: ParquetExporterMetrics
-        field: files_closed
-        instrument: Counter
-        value_type: u64
-        source: crates/core-nodes/src/exporters/parquet_exporter/metrics.rs
-        temporality: delta
-      wire:
-        scope_name: otap.exporter.parquet
-        metric_name: files.closed
 - name: otap.exporter.parquet.files.created
   brief: Number of Parquet files created (across all payload types and partitions).
   instrument: counter
@@ -41,17 +30,6 @@ metrics:
       metric_value_type: int
     otap_dataflow:
       metric_set: otap.exporter.parquet
-      rust:
-        package: otap-df-core-nodes
-        type: ParquetExporterMetrics
-        field: files_created
-        instrument: Counter
-        value_type: u64
-        source: crates/core-nodes/src/exporters/parquet_exporter/metrics.rs
-        temporality: delta
-      wire:
-        scope_name: otap.exporter.parquet
-        metric_name: files.created
 - name: otap.exporter.parquet.flush.attempts
   brief: File close/flush attempts initiated by the exporter.
   instrument: counter
@@ -67,17 +45,6 @@ metrics:
       metric_value_type: int
     otap_dataflow:
       metric_set: otap.exporter.parquet
-      rust:
-        package: otap-df-core-nodes
-        type: ParquetExporterMetrics
-        field: flush_attempts
-        instrument: Counter
-        value_type: u64
-        source: crates/core-nodes/src/exporters/parquet_exporter/metrics.rs
-        temporality: delta
-      wire:
-        scope_name: otap.exporter.parquet
-        metric_name: flush.attempts
 - name: otap.exporter.parquet.flush.failures
   brief: File close/flush attempts that failed after the lower-level retry policy
     was exhausted.
@@ -94,17 +61,6 @@ metrics:
       metric_value_type: int
     otap_dataflow:
       metric_set: otap.exporter.parquet
-      rust:
-        package: otap-df-core-nodes
-        type: ParquetExporterMetrics
-        field: flush_failures
-        instrument: Counter
-        value_type: u64
-        source: crates/core-nodes/src/exporters/parquet_exporter/metrics.rs
-        temporality: delta
-      wire:
-        scope_name: otap.exporter.parquet
-        metric_name: flush.failures
 - name: otap.exporter.parquet.flush.scheduled.max.age
   brief: Files scheduled for flush due to exceeding max age threshold.
   instrument: counter
@@ -120,17 +76,6 @@ metrics:
       metric_value_type: int
     otap_dataflow:
       metric_set: otap.exporter.parquet
-      rust:
-        package: otap-df-core-nodes
-        type: ParquetExporterMetrics
-        field: flush_scheduled_max_age
-        instrument: Counter
-        value_type: u64
-        source: crates/core-nodes/src/exporters/parquet_exporter/metrics.rs
-        temporality: delta
-      wire:
-        scope_name: otap.exporter.parquet
-        metric_name: flush.scheduled.max.age
 - name: otap.exporter.parquet.flush.scheduled.max.rows
   brief: Files scheduled for flush due to reaching target rows per file.
   instrument: counter
@@ -146,17 +91,6 @@ metrics:
       metric_value_type: int
     otap_dataflow:
       metric_set: otap.exporter.parquet
-      rust:
-        package: otap-df-core-nodes
-        type: ParquetExporterMetrics
-        field: flush_scheduled_max_rows
-        instrument: Counter
-        value_type: u64
-        source: crates/core-nodes/src/exporters/parquet_exporter/metrics.rs
-        temporality: delta
-      wire:
-        scope_name: otap.exporter.parquet
-        metric_name: flush.scheduled.max.rows
 - name: otap.exporter.parquet.flush.successes
   brief: File close/flush attempts that succeeded and made the file visible to readers.
   instrument: counter
@@ -172,17 +106,6 @@ metrics:
       metric_value_type: int
     otap_dataflow:
       metric_set: otap.exporter.parquet
-      rust:
-        package: otap-df-core-nodes
-        type: ParquetExporterMetrics
-        field: flush_successes
-        instrument: Counter
-        value_type: u64
-        source: crates/core-nodes/src/exporters/parquet_exporter/metrics.rs
-        temporality: delta
-      wire:
-        scope_name: otap.exporter.parquet
-        metric_name: flush.successes
 - name: otap.exporter.parquet.rows.written
   brief: Total number of rows written into Parquet writers (appended, not necessarily
     flushed yet).
@@ -199,14 +122,3 @@ metrics:
       metric_value_type: int
     otap_dataflow:
       metric_set: otap.exporter.parquet
-      rust:
-        package: otap-df-core-nodes
-        type: ParquetExporterMetrics
-        field: rows_written
-        instrument: Counter
-        value_type: u64
-        source: crates/core-nodes/src/exporters/parquet_exporter/metrics.rs
-        temporality: delta
-      wire:
-        scope_name: otap.exporter.parquet
-        metric_name: rows.written

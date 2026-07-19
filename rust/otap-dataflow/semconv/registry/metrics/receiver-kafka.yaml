@@ -15,18 +15,6 @@ metrics:
       metric_value_type: int
     otap_dataflow:
       metric_set: receiver.kafka
-      rust:
-        package: otap-df-contrib-nodes
-        type: KafkaReceiverMetrics
-        field: acks_for_revoked_partition
-        instrument: Counter
-        value_type: u64
-        source: crates/contrib-nodes/src/receivers/kafka_receiver/metrics.rs
-        temporality: delta
-        availability: feature = "kafka-receiver"
-      wire:
-        scope_name: receiver.kafka
-        metric_name: acks.for.revoked.partition
 - name: receiver.kafka.acks.received
   brief: Number of acks received from downstream
   instrument: counter
@@ -42,18 +30,6 @@ metrics:
       metric_value_type: int
     otap_dataflow:
       metric_set: receiver.kafka
-      rust:
-        package: otap-df-contrib-nodes
-        type: KafkaReceiverMetrics
-        field: acks_received
-        instrument: Counter
-        value_type: u64
-        source: crates/contrib-nodes/src/receivers/kafka_receiver/metrics.rs
-        temporality: delta
-        availability: feature = "kafka-receiver"
-      wire:
-        scope_name: receiver.kafka
-        metric_name: acks.received
 - name: receiver.kafka.bytes.received
   brief: Total payload bytes consumed from Kafka
   instrument: counter
@@ -69,18 +45,6 @@ metrics:
       metric_value_type: int
     otap_dataflow:
       metric_set: receiver.kafka
-      rust:
-        package: otap-df-contrib-nodes
-        type: KafkaReceiverMetrics
-        field: bytes_received
-        instrument: Counter
-        value_type: u64
-        source: crates/contrib-nodes/src/receivers/kafka_receiver/metrics.rs
-        temporality: delta
-        availability: feature = "kafka-receiver"
-      wire:
-        scope_name: receiver.kafka
-        metric_name: bytes.received
 - name: receiver.kafka.empty.payloads
   brief: Messages with empty payload
   instrument: counter
@@ -96,18 +60,6 @@ metrics:
       metric_value_type: int
     otap_dataflow:
       metric_set: receiver.kafka
-      rust:
-        package: otap-df-contrib-nodes
-        type: KafkaReceiverMetrics
-        field: empty_payloads
-        instrument: Counter
-        value_type: u64
-        source: crates/contrib-nodes/src/receivers/kafka_receiver/metrics.rs
-        temporality: delta
-        availability: feature = "kafka-receiver"
-      wire:
-        scope_name: receiver.kafka
-        metric_name: empty.payloads
 - name: receiver.kafka.idempotent.skips
   brief: Messages skipped due to idempotency check (duplicate detection)
   instrument: counter
@@ -123,18 +75,6 @@ metrics:
       metric_value_type: int
     otap_dataflow:
       metric_set: receiver.kafka
-      rust:
-        package: otap-df-contrib-nodes
-        type: KafkaReceiverMetrics
-        field: idempotent_skips
-        instrument: Counter
-        value_type: u64
-        source: crates/contrib-nodes/src/receivers/kafka_receiver/metrics.rs
-        temporality: delta
-        availability: feature = "kafka-receiver"
-      wire:
-        scope_name: receiver.kafka
-        metric_name: idempotent.skips
 - name: receiver.kafka.log.msgs.received
   brief: Number of log messages received from the kafka broker
   instrument: counter
@@ -150,18 +90,6 @@ metrics:
       metric_value_type: int
     otap_dataflow:
       metric_set: receiver.kafka
-      rust:
-        package: otap-df-contrib-nodes
-        type: KafkaReceiverMetrics
-        field: log_msgs_received
-        instrument: Counter
-        value_type: u64
-        source: crates/contrib-nodes/src/receivers/kafka_receiver/metrics.rs
-        temporality: delta
-        availability: feature = "kafka-receiver"
-      wire:
-        scope_name: receiver.kafka
-        metric_name: log.msgs.received
 - name: receiver.kafka.messages.received
   brief: Total messages received from Kafka across all signal types
   instrument: counter
@@ -177,18 +105,6 @@ metrics:
       metric_value_type: int
     otap_dataflow:
       metric_set: receiver.kafka
-      rust:
-        package: otap-df-contrib-nodes
-        type: KafkaReceiverMetrics
-        field: messages_received
-        instrument: Counter
-        value_type: u64
-        source: crates/contrib-nodes/src/receivers/kafka_receiver/metrics.rs
-        temporality: delta
-        availability: feature = "kafka-receiver"
-      wire:
-        scope_name: receiver.kafka
-        metric_name: messages.received
 - name: receiver.kafka.metric.msgs.received
   brief: Number of metric messages received from the kafka broker
   instrument: counter
@@ -204,18 +120,6 @@ metrics:
       metric_value_type: int
     otap_dataflow:
       metric_set: receiver.kafka
-      rust:
-        package: otap-df-contrib-nodes
-        type: KafkaReceiverMetrics
-        field: metric_msgs_received
-        instrument: Counter
-        value_type: u64
-        source: crates/contrib-nodes/src/receivers/kafka_receiver/metrics.rs
-        temporality: delta
-        availability: feature = "kafka-receiver"
-      wire:
-        scope_name: receiver.kafka
-        metric_name: metric.msgs.received
 - name: receiver.kafka.nacks.received
   brief: Number of nacks received from downstream
   instrument: counter
@@ -231,18 +135,6 @@ metrics:
       metric_value_type: int
     otap_dataflow:
       metric_set: receiver.kafka
-      rust:
-        package: otap-df-contrib-nodes
-        type: KafkaReceiverMetrics
-        field: nacks_received
-        instrument: Counter
-        value_type: u64
-        source: crates/contrib-nodes/src/receivers/kafka_receiver/metrics.rs
-        temporality: delta
-        availability: feature = "kafka-receiver"
-      wire:
-        scope_name: receiver.kafka
-        metric_name: nacks.received
 - name: receiver.kafka.offset.commit.errors
   brief: Number of offset commits the broker rejected. Populated from the consumer
     commit callback (see [`offset_commits`]).
@@ -259,22 +151,10 @@ metrics:
       metric_value_type: int
     otap_dataflow:
       metric_set: receiver.kafka
-      rust:
-        package: otap-df-contrib-nodes
-        type: KafkaReceiverMetrics
-        field: offset_commit_errors
-        instrument: Counter
-        value_type: u64
-        source: crates/contrib-nodes/src/receivers/kafka_receiver/metrics.rs
-        temporality: delta
-        availability: feature = "kafka-receiver"
-      wire:
-        scope_name: receiver.kafka
-        metric_name: offset.commit.errors
 - name: receiver.kafka.offset.commits
   brief: Number of offset commits acknowledged by the broker. Populated from the consumer
     commit callback (not at commit-issue time), so it counts commits the broker actually
-    accepted — covering both the receiver's asynchronous steady-state commits and
+    accepted - covering both the receiver's asynchronous steady-state commits and
     the synchronous pre-rebalance commit-before-revoke.
   instrument: counter
   unit: "{commit}"
@@ -289,18 +169,6 @@ metrics:
       metric_value_type: int
     otap_dataflow:
       metric_set: receiver.kafka
-      rust:
-        package: otap-df-contrib-nodes
-        type: KafkaReceiverMetrics
-        field: offset_commits
-        instrument: Counter
-        value_type: u64
-        source: crates/contrib-nodes/src/receivers/kafka_receiver/metrics.rs
-        temporality: delta
-        availability: feature = "kafka-receiver"
-      wire:
-        scope_name: receiver.kafka
-        metric_name: offset.commits
 - name: receiver.kafka.partitions.assigned
   brief: Partitions newly acquired by this consumer across rebalances (retained partitions
     are not re-counted)
@@ -317,18 +185,6 @@ metrics:
       metric_value_type: int
     otap_dataflow:
       metric_set: receiver.kafka
-      rust:
-        package: otap-df-contrib-nodes
-        type: KafkaReceiverMetrics
-        field: partitions_assigned
-        instrument: Counter
-        value_type: u64
-        source: crates/contrib-nodes/src/receivers/kafka_receiver/metrics.rs
-        temporality: delta
-        availability: feature = "kafka-receiver"
-      wire:
-        scope_name: receiver.kafka
-        metric_name: partitions.assigned
 - name: receiver.kafka.partitions.revoked
   brief: Genuinely-owned partitions revoked from this consumer across rebalances
   instrument: counter
@@ -344,18 +200,6 @@ metrics:
       metric_value_type: int
     otap_dataflow:
       metric_set: receiver.kafka
-      rust:
-        package: otap-df-contrib-nodes
-        type: KafkaReceiverMetrics
-        field: partitions_revoked
-        instrument: Counter
-        value_type: u64
-        source: crates/contrib-nodes/src/receivers/kafka_receiver/metrics.rs
-        temporality: delta
-        availability: feature = "kafka-receiver"
-      wire:
-        scope_name: receiver.kafka
-        metric_name: partitions.revoked
 - name: receiver.kafka.processing.errors
   brief: Number of messages that failed processing and were skipped
   instrument: counter
@@ -371,18 +215,6 @@ metrics:
       metric_value_type: int
     otap_dataflow:
       metric_set: receiver.kafka
-      rust:
-        package: otap-df-contrib-nodes
-        type: KafkaReceiverMetrics
-        field: processing_errors
-        instrument: Counter
-        value_type: u64
-        source: crates/contrib-nodes/src/receivers/kafka_receiver/metrics.rs
-        temporality: delta
-        availability: feature = "kafka-receiver"
-      wire:
-        scope_name: receiver.kafka
-        metric_name: processing.errors
 - name: receiver.kafka.rebalance.commit.errors
   brief: Offset commit failures during pre-rebalance revoke
   instrument: counter
@@ -398,18 +230,6 @@ metrics:
       metric_value_type: int
     otap_dataflow:
       metric_set: receiver.kafka
-      rust:
-        package: otap-df-contrib-nodes
-        type: KafkaReceiverMetrics
-        field: rebalance_commit_errors
-        instrument: Counter
-        value_type: u64
-        source: crates/contrib-nodes/src/receivers/kafka_receiver/metrics.rs
-        temporality: delta
-        availability: feature = "kafka-receiver"
-      wire:
-        scope_name: receiver.kafka
-        metric_name: rebalance.commit.errors
 - name: receiver.kafka.topic.id.exhausted
   brief: Messages dropped because the topic ID space was exhausted (overflow guard)
   instrument: counter
@@ -425,18 +245,6 @@ metrics:
       metric_value_type: int
     otap_dataflow:
       metric_set: receiver.kafka
-      rust:
-        package: otap-df-contrib-nodes
-        type: KafkaReceiverMetrics
-        field: topic_id_exhausted
-        instrument: Counter
-        value_type: u64
-        source: crates/contrib-nodes/src/receivers/kafka_receiver/metrics.rs
-        temporality: delta
-        availability: feature = "kafka-receiver"
-      wire:
-        scope_name: receiver.kafka
-        metric_name: topic.id.exhausted
 - name: receiver.kafka.trace.msgs.received
   brief: Number of trace messages received from the kafka broker
   instrument: counter
@@ -452,18 +260,6 @@ metrics:
       metric_value_type: int
     otap_dataflow:
       metric_set: receiver.kafka
-      rust:
-        package: otap-df-contrib-nodes
-        type: KafkaReceiverMetrics
-        field: trace_msgs_received
-        instrument: Counter
-        value_type: u64
-        source: crates/contrib-nodes/src/receivers/kafka_receiver/metrics.rs
-        temporality: delta
-        availability: feature = "kafka-receiver"
-      wire:
-        scope_name: receiver.kafka
-        metric_name: trace.msgs.received
 - name: receiver.kafka.transport.errors
   brief: Number of Kafka transport errors encountered (non-fatal)
   instrument: counter
@@ -479,18 +275,6 @@ metrics:
       metric_value_type: int
     otap_dataflow:
       metric_set: receiver.kafka
-      rust:
-        package: otap-df-contrib-nodes
-        type: KafkaReceiverMetrics
-        field: transport_errors
-        instrument: Counter
-        value_type: u64
-        source: crates/contrib-nodes/src/receivers/kafka_receiver/metrics.rs
-        temporality: delta
-        availability: feature = "kafka-receiver"
-      wire:
-        scope_name: receiver.kafka
-        metric_name: transport.errors
 - name: receiver.kafka.unknown.topic.errors
   brief: Messages from topics that don't match any configured signal
   instrument: counter
@@ -506,18 +290,6 @@ metrics:
       metric_value_type: int
     otap_dataflow:
       metric_set: receiver.kafka
-      rust:
-        package: otap-df-contrib-nodes
-        type: KafkaReceiverMetrics
-        field: unknown_topic_errors
-        instrument: Counter
-        value_type: u64
-        source: crates/contrib-nodes/src/receivers/kafka_receiver/metrics.rs
-        temporality: delta
-        availability: feature = "kafka-receiver"
-      wire:
-        scope_name: receiver.kafka
-        metric_name: unknown.topic.errors
 - name: receiver.kafka.unmarshal.failed.logs
   brief: Log messages that failed to unmarshal
   instrument: counter
@@ -533,18 +305,6 @@ metrics:
       metric_value_type: int
     otap_dataflow:
       metric_set: receiver.kafka
-      rust:
-        package: otap-df-contrib-nodes
-        type: KafkaReceiverMetrics
-        field: unmarshal_failed_logs
-        instrument: Counter
-        value_type: u64
-        source: crates/contrib-nodes/src/receivers/kafka_receiver/metrics.rs
-        temporality: delta
-        availability: feature = "kafka-receiver"
-      wire:
-        scope_name: receiver.kafka
-        metric_name: unmarshal.failed.logs
 - name: receiver.kafka.unmarshal.failed.metrics
   brief: Metric messages that failed to unmarshal
   instrument: counter
@@ -560,18 +320,6 @@ metrics:
       metric_value_type: int
     otap_dataflow:
       metric_set: receiver.kafka
-      rust:
-        package: otap-df-contrib-nodes
-        type: KafkaReceiverMetrics
-        field: unmarshal_failed_metrics
-        instrument: Counter
-        value_type: u64
-        source: crates/contrib-nodes/src/receivers/kafka_receiver/metrics.rs
-        temporality: delta
-        availability: feature = "kafka-receiver"
-      wire:
-        scope_name: receiver.kafka
-        metric_name: unmarshal.failed.metrics
 - name: receiver.kafka.unmarshal.failed.traces
   brief: Trace messages that failed to unmarshal
   instrument: counter
@@ -587,15 +335,3 @@ metrics:
       metric_value_type: int
     otap_dataflow:
       metric_set: receiver.kafka
-      rust:
-        package: otap-df-contrib-nodes
-        type: KafkaReceiverMetrics
-        field: unmarshal_failed_traces
-        instrument: Counter
-        value_type: u64
-        source: crates/contrib-nodes/src/receivers/kafka_receiver/metrics.rs
-        temporality: delta
-        availability: feature = "kafka-receiver"
-      wire:
-        scope_name: receiver.kafka
-        metric_name: unmarshal.failed.traces

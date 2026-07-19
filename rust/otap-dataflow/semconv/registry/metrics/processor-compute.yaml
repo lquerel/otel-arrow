@@ -16,16 +16,7 @@ metrics:
     otap_dataflow:
       metric_set: processor.compute
       rust:
-        package: otap-df-engine
-        type: ComputeDurationMetrics
         field: compute_duration_failed
-        instrument: Mmsc
-        value_type: f64
-        source: crates/engine/src/process_duration.rs
-        temporality: delta
-      wire:
-        scope_name: processor.compute
-        metric_name: compute.failed.duration
 - name: processor.compute.compute.success.duration
   brief: Wall-clock duration of successful compute sections, in nanoseconds.
   instrument: histogram
@@ -42,13 +33,4 @@ metrics:
     otap_dataflow:
       metric_set: processor.compute
       rust:
-        package: otap-df-engine
-        type: ComputeDurationMetrics
         field: compute_duration_success
-        instrument: Mmsc
-        value_type: f64
-        source: crates/engine/src/process_duration.rs
-        temporality: delta
-      wire:
-        scope_name: processor.compute
-        metric_name: compute.success.duration

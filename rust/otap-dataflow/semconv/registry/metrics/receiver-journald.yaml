@@ -15,17 +15,6 @@ metrics:
       metric_value_type: int
     otap_dataflow:
       metric_set: receiver.journald
-      rust:
-        package: otap-df-core-nodes
-        type: JournaldReceiverMetrics
-        field: acks
-        instrument: Counter
-        value_type: u64
-        source: crates/core-nodes/src/receivers/journald_receiver/mod.rs
-        temporality: delta
-      wire:
-        scope_name: receiver.journald
-        metric_name: acks
 - name: receiver.journald.batches.sent
   brief: Number of log batches emitted downstream.
   instrument: counter
@@ -41,17 +30,6 @@ metrics:
       metric_value_type: int
     otap_dataflow:
       metric_set: receiver.journald
-      rust:
-        package: otap-df-core-nodes
-        type: JournaldReceiverMetrics
-        field: batches_sent
-        instrument: Counter
-        value_type: u64
-        source: crates/core-nodes/src/receivers/journald_receiver/mod.rs
-        temporality: delta
-      wire:
-        scope_name: receiver.journald
-        metric_name: batches.sent
 - name: receiver.journald.checkpoint.failures
   brief: Number of durable cursor commit failures.
   instrument: counter
@@ -67,17 +45,6 @@ metrics:
       metric_value_type: int
     otap_dataflow:
       metric_set: receiver.journald
-      rust:
-        package: otap-df-core-nodes
-        type: JournaldReceiverMetrics
-        field: checkpoint_failures
-        instrument: Counter
-        value_type: u64
-        source: crates/core-nodes/src/receivers/journald_receiver/mod.rs
-        temporality: delta
-      wire:
-        scope_name: receiver.journald
-        metric_name: checkpoint.failures
 - name: receiver.journald.cursor.commits
   brief: Number of durable cursor commits completed.
   instrument: counter
@@ -93,17 +60,6 @@ metrics:
       metric_value_type: int
     otap_dataflow:
       metric_set: receiver.journald
-      rust:
-        package: otap-df-core-nodes
-        type: JournaldReceiverMetrics
-        field: cursor_commits
-        instrument: Counter
-        value_type: u64
-        source: crates/core-nodes/src/receivers/journald_receiver/mod.rs
-        temporality: delta
-      wire:
-        scope_name: receiver.journald
-        metric_name: cursor.commits
 - name: receiver.journald.drains
   brief: Number of clean drain transitions.
   instrument: counter
@@ -119,17 +75,6 @@ metrics:
       metric_value_type: int
     otap_dataflow:
       metric_set: receiver.journald
-      rust:
-        package: otap-df-core-nodes
-        type: JournaldReceiverMetrics
-        field: drains
-        instrument: Counter
-        value_type: u64
-        source: crates/core-nodes/src/receivers/journald_receiver/mod.rs
-        temporality: delta
-      wire:
-        scope_name: receiver.journald
-        metric_name: drains
 - name: receiver.journald.nacks
   brief: Number of downstream Nacks observed.
   instrument: counter
@@ -145,17 +90,6 @@ metrics:
       metric_value_type: int
     otap_dataflow:
       metric_set: receiver.journald
-      rust:
-        package: otap-df-core-nodes
-        type: JournaldReceiverMetrics
-        field: nacks
-        instrument: Counter
-        value_type: u64
-        source: crates/core-nodes/src/receivers/journald_receiver/mod.rs
-        temporality: delta
-      wire:
-        scope_name: receiver.journald
-        metric_name: nacks
 - name: receiver.journald.records.sent
   brief: Number of log records emitted downstream.
   instrument: counter
@@ -171,17 +105,6 @@ metrics:
       metric_value_type: int
     otap_dataflow:
       metric_set: receiver.journald
-      rust:
-        package: otap-df-core-nodes
-        type: JournaldReceiverMetrics
-        field: records_sent
-        instrument: Counter
-        value_type: u64
-        source: crates/core-nodes/src/receivers/journald_receiver/mod.rs
-        temporality: delta
-      wire:
-        scope_name: receiver.journald
-        metric_name: records.sent
 - name: receiver.journald.rewinds
   brief: Number of times the worker was asked to rewind after a Nack.
   instrument: counter
@@ -197,17 +120,6 @@ metrics:
       metric_value_type: int
     otap_dataflow:
       metric_set: receiver.journald
-      rust:
-        package: otap-df-core-nodes
-        type: JournaldReceiverMetrics
-        field: rewinds
-        instrument: Counter
-        value_type: u64
-        source: crates/core-nodes/src/receivers/journald_receiver/mod.rs
-        temporality: delta
-      wire:
-        scope_name: receiver.journald
-        metric_name: rewinds
 - name: receiver.journald.shutdowns
   brief: Number of clean shutdown transitions.
   instrument: counter
@@ -223,17 +135,6 @@ metrics:
       metric_value_type: int
     otap_dataflow:
       metric_set: receiver.journald
-      rust:
-        package: otap-df-core-nodes
-        type: JournaldReceiverMetrics
-        field: shutdowns
-        instrument: Counter
-        value_type: u64
-        source: crates/core-nodes/src/receivers/journald_receiver/mod.rs
-        temporality: delta
-      wire:
-        scope_name: receiver.journald
-        metric_name: shutdowns
 - name: receiver.journald.source.dropped.fields
   brief: Number of journald fields dropped by extraction safety limits.
   instrument: counter
@@ -249,17 +150,6 @@ metrics:
       metric_value_type: int
     otap_dataflow:
       metric_set: receiver.journald
-      rust:
-        package: otap-df-core-nodes
-        type: JournaldReceiverMetrics
-        field: source_dropped_fields
-        instrument: Counter
-        value_type: u64
-        source: crates/core-nodes/src/receivers/journald_receiver/mod.rs
-        temporality: delta
-      wire:
-        scope_name: receiver.journald
-        metric_name: source.dropped.fields
 - name: receiver.journald.source.failures
   brief: Number of source read failures reported by the worker.
   instrument: counter
@@ -275,17 +165,6 @@ metrics:
       metric_value_type: int
     otap_dataflow:
       metric_set: receiver.journald
-      rust:
-        package: otap-df-core-nodes
-        type: JournaldReceiverMetrics
-        field: source_failures
-        instrument: Counter
-        value_type: u64
-        source: crates/core-nodes/src/receivers/journald_receiver/mod.rs
-        temporality: delta
-      wire:
-        scope_name: receiver.journald
-        metric_name: source.failures
 - name: receiver.journald.starts
   brief: Number of times the receiver was started.
   instrument: counter
@@ -301,14 +180,3 @@ metrics:
       metric_value_type: int
     otap_dataflow:
       metric_set: receiver.journald
-      rust:
-        package: otap-df-core-nodes
-        type: JournaldReceiverMetrics
-        field: starts
-        instrument: Counter
-        value_type: u64
-        source: crates/core-nodes/src/receivers/journald_receiver/mod.rs
-        temporality: delta
-      wire:
-        scope_name: receiver.journald
-        metric_name: starts

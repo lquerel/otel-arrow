@@ -15,17 +15,6 @@ metrics:
       metric_value_type: int
     otap_dataflow:
       metric_set: node.local_wakeup.scheduler
-      rust:
-        package: otap-df-engine
-        type: NodeLocalWakeupSchedulerMetrics
-        field: cancel_ignored_shutdown
-        instrument: Counter
-        value_type: u64
-        source: crates/engine/src/node_local_scheduler.rs
-        temporality: delta
-      wire:
-        scope_name: node.local_wakeup.scheduler
-        metric_name: cancel.ignored_shutdown
 - name: node.local_wakeup.scheduler.cancel.missed
   brief: Count of cancel attempts that found no live wakeup in the slot.
   instrument: counter
@@ -41,17 +30,6 @@ metrics:
       metric_value_type: int
     otap_dataflow:
       metric_set: node.local_wakeup.scheduler
-      rust:
-        package: otap-df-engine
-        type: NodeLocalWakeupSchedulerMetrics
-        field: cancel_missed
-        instrument: Counter
-        value_type: u64
-        source: crates/engine/src/node_local_scheduler.rs
-        temporality: delta
-      wire:
-        scope_name: node.local_wakeup.scheduler
-        metric_name: cancel.missed
 - name: node.local_wakeup.scheduler.cancel.removed
   brief: Count of cancel attempts that removed a live wakeup.
   instrument: counter
@@ -67,17 +45,6 @@ metrics:
       metric_value_type: int
     otap_dataflow:
       metric_set: node.local_wakeup.scheduler
-      rust:
-        package: otap-df-engine
-        type: NodeLocalWakeupSchedulerMetrics
-        field: cancel_removed
-        instrument: Counter
-        value_type: u64
-        source: crates/engine/src/node_local_scheduler.rs
-        temporality: delta
-      wire:
-        scope_name: node.local_wakeup.scheduler
-        metric_name: cancel.removed
 - name: node.local_wakeup.scheduler.capacity
   brief: Configured live wakeup slot capacity.
   instrument: gauge
@@ -93,16 +60,6 @@ metrics:
       metric_value_type: int
     otap_dataflow:
       metric_set: node.local_wakeup.scheduler
-      rust:
-        package: otap-df-engine
-        type: NodeLocalWakeupSchedulerMetrics
-        field: capacity
-        instrument: Gauge
-        value_type: u64
-        source: crates/engine/src/node_local_scheduler.rs
-      wire:
-        scope_name: node.local_wakeup.scheduler
-        metric_name: capacity
 - name: node.local_wakeup.scheduler.live
   brief: Current number of live wakeups.
   instrument: gauge
@@ -118,16 +75,6 @@ metrics:
       metric_value_type: int
     otap_dataflow:
       metric_set: node.local_wakeup.scheduler
-      rust:
-        package: otap-df-engine
-        type: NodeLocalWakeupSchedulerMetrics
-        field: live
-        instrument: Gauge
-        value_type: u64
-        source: crates/engine/src/node_local_scheduler.rs
-      wire:
-        scope_name: node.local_wakeup.scheduler
-        metric_name: live
 - name: node.local_wakeup.scheduler.pop.due
   brief: Count of wakeups popped for delivery to the processor.
   instrument: counter
@@ -143,17 +90,6 @@ metrics:
       metric_value_type: int
     otap_dataflow:
       metric_set: node.local_wakeup.scheduler
-      rust:
-        package: otap-df-engine
-        type: NodeLocalWakeupSchedulerMetrics
-        field: pop_due
-        instrument: Counter
-        value_type: u64
-        source: crates/engine/src/node_local_scheduler.rs
-        temporality: delta
-      wire:
-        scope_name: node.local_wakeup.scheduler
-        metric_name: pop.due
 - name: node.local_wakeup.scheduler.set.error_capacity
   brief: Count of set attempts rejected because the live-slot capacity was full.
   instrument: counter
@@ -169,17 +105,6 @@ metrics:
       metric_value_type: int
     otap_dataflow:
       metric_set: node.local_wakeup.scheduler
-      rust:
-        package: otap-df-engine
-        type: NodeLocalWakeupSchedulerMetrics
-        field: set_error_capacity
-        instrument: Counter
-        value_type: u64
-        source: crates/engine/src/node_local_scheduler.rs
-        temporality: delta
-      wire:
-        scope_name: node.local_wakeup.scheduler
-        metric_name: set.error_capacity
 - name: node.local_wakeup.scheduler.set.error_shutdown
   brief: Count of set attempts rejected after shutdown was latched.
   instrument: counter
@@ -195,17 +120,6 @@ metrics:
       metric_value_type: int
     otap_dataflow:
       metric_set: node.local_wakeup.scheduler
-      rust:
-        package: otap-df-engine
-        type: NodeLocalWakeupSchedulerMetrics
-        field: set_error_shutdown
-        instrument: Counter
-        value_type: u64
-        source: crates/engine/src/node_local_scheduler.rs
-        temporality: delta
-      wire:
-        scope_name: node.local_wakeup.scheduler
-        metric_name: set.error_shutdown
 - name: node.local_wakeup.scheduler.set.inserted
   brief: Count of newly inserted wakeups.
   instrument: counter
@@ -221,17 +135,6 @@ metrics:
       metric_value_type: int
     otap_dataflow:
       metric_set: node.local_wakeup.scheduler
-      rust:
-        package: otap-df-engine
-        type: NodeLocalWakeupSchedulerMetrics
-        field: set_inserted
-        instrument: Counter
-        value_type: u64
-        source: crates/engine/src/node_local_scheduler.rs
-        temporality: delta
-      wire:
-        scope_name: node.local_wakeup.scheduler
-        metric_name: set.inserted
 - name: node.local_wakeup.scheduler.set.replaced
   brief: Count of wakeups that replaced an existing live slot.
   instrument: counter
@@ -247,17 +150,6 @@ metrics:
       metric_value_type: int
     otap_dataflow:
       metric_set: node.local_wakeup.scheduler
-      rust:
-        package: otap-df-engine
-        type: NodeLocalWakeupSchedulerMetrics
-        field: set_replaced
-        instrument: Counter
-        value_type: u64
-        source: crates/engine/src/node_local_scheduler.rs
-        temporality: delta
-      wire:
-        scope_name: node.local_wakeup.scheduler
-        metric_name: set.replaced
 - name: node.local_wakeup.scheduler.shutdown.cleared
   brief: Count of live wakeups dropped when shutdown was latched.
   instrument: counter
@@ -273,14 +165,3 @@ metrics:
       metric_value_type: int
     otap_dataflow:
       metric_set: node.local_wakeup.scheduler
-      rust:
-        package: otap-df-engine
-        type: NodeLocalWakeupSchedulerMetrics
-        field: shutdown_cleared
-        instrument: Counter
-        value_type: u64
-        source: crates/engine/src/node_local_scheduler.rs
-        temporality: delta
-      wire:
-        scope_name: node.local_wakeup.scheduler
-        metric_name: shutdown.cleared

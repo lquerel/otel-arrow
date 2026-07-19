@@ -15,17 +15,6 @@ metrics:
       metric_value_type: int
     otap_dataflow:
       metric_set: exporter.pdata
-      rust:
-        package: otap-df-otap
-        type: ExporterPDataMetrics
-        field: logs_consumed
-        instrument: Counter
-        value_type: u64
-        source: crates/otap/src/metrics.rs
-        temporality: delta
-      wire:
-        scope_name: exporter.pdata
-        metric_name: logs.consumed
 - name: exporter.pdata.logs.exported
   brief: Number of pdata logs successfully exported.
   instrument: counter
@@ -41,17 +30,6 @@ metrics:
       metric_value_type: int
     otap_dataflow:
       metric_set: exporter.pdata
-      rust:
-        package: otap-df-otap
-        type: ExporterPDataMetrics
-        field: logs_exported
-        instrument: Counter
-        value_type: u64
-        source: crates/otap/src/metrics.rs
-        temporality: delta
-      wire:
-        scope_name: exporter.pdata
-        metric_name: logs.exported
 - name: exporter.pdata.logs.failed
   brief: Number of pdata logs that failed to be exported.
   instrument: counter
@@ -67,17 +45,6 @@ metrics:
       metric_value_type: int
     otap_dataflow:
       metric_set: exporter.pdata
-      rust:
-        package: otap-df-otap
-        type: ExporterPDataMetrics
-        field: logs_failed
-        instrument: Counter
-        value_type: u64
-        source: crates/otap/src/metrics.rs
-        temporality: delta
-      wire:
-        scope_name: exporter.pdata
-        metric_name: logs.failed
 - name: exporter.pdata.metrics.consumed
   brief: Number of pdata metrics consumed by this exporter.
   instrument: counter
@@ -93,17 +60,6 @@ metrics:
       metric_value_type: int
     otap_dataflow:
       metric_set: exporter.pdata
-      rust:
-        package: otap-df-otap
-        type: ExporterPDataMetrics
-        field: metrics_consumed
-        instrument: Counter
-        value_type: u64
-        source: crates/otap/src/metrics.rs
-        temporality: delta
-      wire:
-        scope_name: exporter.pdata
-        metric_name: metrics.consumed
 - name: exporter.pdata.metrics.exported
   brief: Number of pdata metrics successfully exported.
   instrument: counter
@@ -119,17 +75,6 @@ metrics:
       metric_value_type: int
     otap_dataflow:
       metric_set: exporter.pdata
-      rust:
-        package: otap-df-otap
-        type: ExporterPDataMetrics
-        field: metrics_exported
-        instrument: Counter
-        value_type: u64
-        source: crates/otap/src/metrics.rs
-        temporality: delta
-      wire:
-        scope_name: exporter.pdata
-        metric_name: metrics.exported
 - name: exporter.pdata.metrics.failed
   brief: Number of pdata metrics that failed to be exported.
   instrument: counter
@@ -145,17 +90,6 @@ metrics:
       metric_value_type: int
     otap_dataflow:
       metric_set: exporter.pdata
-      rust:
-        package: otap-df-otap
-        type: ExporterPDataMetrics
-        field: metrics_failed
-        instrument: Counter
-        value_type: u64
-        source: crates/otap/src/metrics.rs
-        temporality: delta
-      wire:
-        scope_name: exporter.pdata
-        metric_name: metrics.failed
 - name: exporter.pdata.traces.consumed
   brief: Number of pdata traces consumed by this exporter.
   instrument: counter
@@ -171,17 +105,6 @@ metrics:
       metric_value_type: int
     otap_dataflow:
       metric_set: exporter.pdata
-      rust:
-        package: otap-df-otap
-        type: ExporterPDataMetrics
-        field: traces_consumed
-        instrument: Counter
-        value_type: u64
-        source: crates/otap/src/metrics.rs
-        temporality: delta
-      wire:
-        scope_name: exporter.pdata
-        metric_name: traces.consumed
 - name: exporter.pdata.traces.exported
   brief: Number of pdata traces successfully exported.
   instrument: counter
@@ -197,17 +120,6 @@ metrics:
       metric_value_type: int
     otap_dataflow:
       metric_set: exporter.pdata
-      rust:
-        package: otap-df-otap
-        type: ExporterPDataMetrics
-        field: traces_exported
-        instrument: Counter
-        value_type: u64
-        source: crates/otap/src/metrics.rs
-        temporality: delta
-      wire:
-        scope_name: exporter.pdata
-        metric_name: traces.exported
 - name: exporter.pdata.traces.failed
   brief: Number of pdata traces that failed to be exported.
   instrument: counter
@@ -223,14 +135,3 @@ metrics:
       metric_value_type: int
     otap_dataflow:
       metric_set: exporter.pdata
-      rust:
-        package: otap-df-otap
-        type: ExporterPDataMetrics
-        field: traces_failed
-        instrument: Counter
-        value_type: u64
-        source: crates/otap/src/metrics.rs
-        temporality: delta
-      wire:
-        scope_name: exporter.pdata
-        metric_name: traces.failed

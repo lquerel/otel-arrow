@@ -13,17 +13,6 @@ metrics:
       metric_value_type: int
     otap_dataflow:
       metric_set: extension.lifecycle
-      rust:
-        package: otap-df-engine
-        type: ExtensionLifecycleMetrics
-        field: completed_cancelled
-        instrument: Counter
-        value_type: u64
-        source: crates/engine/src/extension_monitor.rs
-        temporality: delta
-      wire:
-        scope_name: extension.lifecycle
-        metric_name: completed.cancelled
 - name: extension.lifecycle.completed.error
   brief: Metric for the OTAP Dataflow internal telemetry extension.lifecycle.completed.error.
   instrument: counter
@@ -37,17 +26,6 @@ metrics:
       metric_value_type: int
     otap_dataflow:
       metric_set: extension.lifecycle
-      rust:
-        package: otap-df-engine
-        type: ExtensionLifecycleMetrics
-        field: completed_error
-        instrument: Counter
-        value_type: u64
-        source: crates/engine/src/extension_monitor.rs
-        temporality: delta
-      wire:
-        scope_name: extension.lifecycle
-        metric_name: completed.error
 - name: extension.lifecycle.completed.ok
   brief: Metric for the OTAP Dataflow internal telemetry extension.lifecycle.completed.ok.
   instrument: counter
@@ -61,17 +39,6 @@ metrics:
       metric_value_type: int
     otap_dataflow:
       metric_set: extension.lifecycle
-      rust:
-        package: otap-df-engine
-        type: ExtensionLifecycleMetrics
-        field: completed_ok
-        instrument: Counter
-        value_type: u64
-        source: crates/engine/src/extension_monitor.rs
-        temporality: delta
-      wire:
-        scope_name: extension.lifecycle
-        metric_name: completed.ok
 - name: extension.lifecycle.completed.panic
   brief: Metric for the OTAP Dataflow internal telemetry extension.lifecycle.completed.panic.
   instrument: counter
@@ -85,17 +52,6 @@ metrics:
       metric_value_type: int
     otap_dataflow:
       metric_set: extension.lifecycle
-      rust:
-        package: otap-df-engine
-        type: ExtensionLifecycleMetrics
-        field: completed_panic
-        instrument: Counter
-        value_type: u64
-        source: crates/engine/src/extension_monitor.rs
-        temporality: delta
-      wire:
-        scope_name: extension.lifecycle
-        metric_name: completed.panic
 - name: extension.lifecycle.shutdown.sent
   brief: Metric for the OTAP Dataflow internal telemetry extension.lifecycle.shutdown.sent.
   instrument: counter
@@ -109,17 +65,6 @@ metrics:
       metric_value_type: int
     otap_dataflow:
       metric_set: extension.lifecycle
-      rust:
-        package: otap-df-engine
-        type: ExtensionLifecycleMetrics
-        field: shutdown_sent
-        instrument: Counter
-        value_type: u64
-        source: crates/engine/src/extension_monitor.rs
-        temporality: delta
-      wire:
-        scope_name: extension.lifecycle
-        metric_name: shutdown.sent
 - name: extension.lifecycle.shutdown.timeout
   brief: Metric for the OTAP Dataflow internal telemetry extension.lifecycle.shutdown.timeout.
   instrument: counter
@@ -133,17 +78,6 @@ metrics:
       metric_value_type: int
     otap_dataflow:
       metric_set: extension.lifecycle
-      rust:
-        package: otap-df-engine
-        type: ExtensionLifecycleMetrics
-        field: shutdown_timeout
-        instrument: Counter
-        value_type: u64
-        source: crates/engine/src/extension_monitor.rs
-        temporality: delta
-      wire:
-        scope_name: extension.lifecycle
-        metric_name: shutdown.timeout
 - name: extension.lifecycle.spawned
   brief: Metric for the OTAP Dataflow internal telemetry extension.lifecycle.spawned.
   instrument: counter
@@ -157,17 +91,6 @@ metrics:
       metric_value_type: int
     otap_dataflow:
       metric_set: extension.lifecycle
-      rust:
-        package: otap-df-engine
-        type: ExtensionLifecycleMetrics
-        field: spawned
-        instrument: Counter
-        value_type: u64
-        source: crates/engine/src/extension_monitor.rs
-        temporality: delta
-      wire:
-        scope_name: extension.lifecycle
-        metric_name: spawned
 - name: extension.lifecycle.state
   brief: Metric for the OTAP Dataflow internal telemetry extension.lifecycle.state.
   instrument: gauge
@@ -181,13 +104,3 @@ metrics:
       metric_value_type: int
     otap_dataflow:
       metric_set: extension.lifecycle
-      rust:
-        package: otap-df-engine
-        type: ExtensionLifecycleMetrics
-        field: state
-        instrument: Gauge
-        value_type: u64
-        source: crates/engine/src/extension_monitor.rs
-      wire:
-        scope_name: extension.lifecycle
-        metric_name: state

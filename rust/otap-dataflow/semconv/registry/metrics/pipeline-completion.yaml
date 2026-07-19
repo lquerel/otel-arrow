@@ -16,17 +16,6 @@ metrics:
       metric_value_type: int
     otap_dataflow:
       metric_set: pipeline.completion
-      rust:
-        package: otap-df-engine
-        type: PipelineCompletionMetrics
-        field: ack_attempted
-        instrument: Counter
-        value_type: u64
-        source: crates/engine/src/control_plane_metrics.rs
-        temporality: delta
-      wire:
-        scope_name: pipeline.completion
-        metric_name: ack.attempted
 - name: pipeline.completion.ack.delivered
   brief: 'Count of Ack control messages actually delivered to upstream nodes. This
     increments only when the node-control send succeeds, either immediately or later
@@ -42,17 +31,6 @@ metrics:
       metric_value_type: int
     otap_dataflow:
       metric_set: pipeline.completion
-      rust:
-        package: otap-df-engine
-        type: PipelineCompletionMetrics
-        field: ack_delivered
-        instrument: Counter
-        value_type: u64
-        source: crates/engine/src/control_plane_metrics.rs
-        temporality: delta
-      wire:
-        scope_name: pipeline.completion
-        metric_name: ack.delivered
 - name: pipeline.completion.ack.dropped_no_interest
   brief: 'Count of Ack completions dropped because no upstream frame was interested.
     This distinguishes "successful unwind with no listener" from send failure or dispatcher
@@ -69,17 +47,6 @@ metrics:
       metric_value_type: int
     otap_dataflow:
       metric_set: pipeline.completion
-      rust:
-        package: otap-df-engine
-        type: PipelineCompletionMetrics
-        field: ack_dropped_no_interest
-        instrument: Counter
-        value_type: u64
-        source: crates/engine/src/control_plane_metrics.rs
-        temporality: delta
-      wire:
-        scope_name: pipeline.completion
-        metric_name: ack.dropped_no_interest
 - name: pipeline.completion.deliver_ack.received
   brief: 'Count of `DeliverAck` messages received by the completion dispatcher. This
     shows inbound successful completion pressure on the shared completion path and
@@ -95,17 +62,6 @@ metrics:
       metric_value_type: int
     otap_dataflow:
       metric_set: pipeline.completion
-      rust:
-        package: otap-df-engine
-        type: PipelineCompletionMetrics
-        field: deliver_ack_received
-        instrument: Counter
-        value_type: u64
-        source: crates/engine/src/control_plane_metrics.rs
-        temporality: delta
-      wire:
-        scope_name: pipeline.completion
-        metric_name: deliver_ack.received
 - name: pipeline.completion.deliver_nack.received
   brief: 'Count of `DeliverNack` messages received by the completion dispatcher. This
     is the failure-side counterpart to received acks and is especially useful when
@@ -121,17 +77,6 @@ metrics:
       metric_value_type: int
     otap_dataflow:
       metric_set: pipeline.completion
-      rust:
-        package: otap-df-engine
-        type: PipelineCompletionMetrics
-        field: deliver_nack_received
-        instrument: Counter
-        value_type: u64
-        source: crates/engine/src/control_plane_metrics.rs
-        temporality: delta
-      wire:
-        scope_name: pipeline.completion
-        metric_name: deliver_nack.received
 - name: pipeline.completion.nack.attempted
   brief: 'Count of Nack completions routed toward an interested upstream node. This
     is the failure-side counterpart to attempted Acks and captures how many downstream
@@ -147,17 +92,6 @@ metrics:
       metric_value_type: int
     otap_dataflow:
       metric_set: pipeline.completion
-      rust:
-        package: otap-df-engine
-        type: PipelineCompletionMetrics
-        field: nack_attempted
-        instrument: Counter
-        value_type: u64
-        source: crates/engine/src/control_plane_metrics.rs
-        temporality: delta
-      wire:
-        scope_name: pipeline.completion
-        metric_name: nack.attempted
 - name: pipeline.completion.nack.delivered
   brief: 'Count of Nack control messages actually delivered to upstream nodes. This
     is the delivery-side counterpart to attempted Nacks and helps distinguish routing
@@ -173,17 +107,6 @@ metrics:
       metric_value_type: int
     otap_dataflow:
       metric_set: pipeline.completion
-      rust:
-        package: otap-df-engine
-        type: PipelineCompletionMetrics
-        field: nack_delivered
-        instrument: Counter
-        value_type: u64
-        source: crates/engine/src/control_plane_metrics.rs
-        temporality: delta
-      wire:
-        scope_name: pipeline.completion
-        metric_name: nack.delivered
 - name: pipeline.completion.nack.dropped_no_interest
   brief: 'Count of Nack completions dropped because no upstream frame was interested.
     This is particularly important for liveness and correctness analysis: it means
@@ -200,17 +123,6 @@ metrics:
       metric_value_type: int
     otap_dataflow:
       metric_set: pipeline.completion
-      rust:
-        package: otap-df-engine
-        type: PipelineCompletionMetrics
-        field: nack_dropped_no_interest
-        instrument: Counter
-        value_type: u64
-        source: crates/engine/src/control_plane_metrics.rs
-        temporality: delta
-      wire:
-        scope_name: pipeline.completion
-        metric_name: nack.dropped_no_interest
 - name: pipeline.completion.pending_sends.buffered
   brief: 'Number of completion deliveries currently buffered for later retry. A sustained
     backlog here means the completion dispatcher is making progress by deferring sends
@@ -227,16 +139,6 @@ metrics:
       metric_value_type: int
     otap_dataflow:
       metric_set: pipeline.completion
-      rust:
-        package: otap-df-engine
-        type: PipelineCompletionMetrics
-        field: pending_sends_buffered
-        instrument: Gauge
-        value_type: u64
-        source: crates/engine/src/control_plane_metrics.rs
-      wire:
-        scope_name: pipeline.completion
-        metric_name: pending_sends.buffered
 - name: pipeline.completion.unwind.depth
   brief: 'Distribution of unwind stack depth consumed per completion outcome. Larger
     values indicate completions are traversing more frames before finding an interested
@@ -253,14 +155,3 @@ metrics:
       metric_value_type: double
     otap_dataflow:
       metric_set: pipeline.completion
-      rust:
-        package: otap-df-engine
-        type: PipelineCompletionMetrics
-        field: unwind_depth
-        instrument: Mmsc
-        value_type: f64
-        source: crates/engine/src/control_plane_metrics.rs
-        temporality: delta
-      wire:
-        scope_name: pipeline.completion
-        metric_name: unwind.depth

@@ -16,16 +16,7 @@ metrics:
     otap_dataflow:
       metric_set: node.producer
       rust:
-        package: otap-df-engine
-        type: ProducedMetrics
         field: produced_duration_ns
-        instrument: Mmsc
-        value_type: f64
-        source: crates/engine/src/channel_metrics.rs
-        temporality: delta
-      wire:
-        scope_name: node.producer
-        metric_name: produced.duration
 - name: node.producer.produced.failure
   brief: Produced requests that failed, this are retryable errors.
   instrument: counter
@@ -39,17 +30,6 @@ metrics:
       metric_value_type: int
     otap_dataflow:
       metric_set: node.producer
-      rust:
-        package: otap-df-engine
-        type: ProducedMetrics
-        field: produced_failure
-        instrument: Counter
-        value_type: u64
-        source: crates/engine/src/channel_metrics.rs
-        temporality: delta
-      wire:
-        scope_name: node.producer
-        metric_name: produced.failure
 - name: node.producer.produced.refused
   brief: Produced requests refused, also known as permanent failures.
   instrument: counter
@@ -63,17 +43,6 @@ metrics:
       metric_value_type: int
     otap_dataflow:
       metric_set: node.producer
-      rust:
-        package: otap-df-engine
-        type: ProducedMetrics
-        field: produced_refused
-        instrument: Counter
-        value_type: u64
-        source: crates/engine/src/channel_metrics.rs
-        temporality: delta
-      wire:
-        scope_name: node.producer
-        metric_name: produced.refused
 - name: node.producer.produced.success
   brief: Produced requests acknowledged by downstream.
   instrument: counter
@@ -87,14 +56,3 @@ metrics:
       metric_value_type: int
     otap_dataflow:
       metric_set: node.producer
-      rust:
-        package: otap-df-engine
-        type: ProducedMetrics
-        field: produced_success
-        instrument: Counter
-        value_type: u64
-        source: crates/engine/src/channel_metrics.rs
-        temporality: delta
-      wire:
-        scope_name: node.producer
-        metric_name: produced.success

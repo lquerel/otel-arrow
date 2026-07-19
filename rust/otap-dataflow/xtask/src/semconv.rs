@@ -22,11 +22,13 @@ use syn::{
 };
 
 const SEMCONV_DIR: &str = "semconv";
+const METRIC_SET_CATALOG: &str = "semconv-codegen/metric-sets.yaml";
 
 /// Checks the checked-in semantic conventions against production Rust declarations.
 pub fn check() -> Result<()> {
     let inventory = Inventory::discover(Path::new("."))?;
-    Registry::load(Path::new(SEMCONV_DIR))?.check(&inventory)?;
+    let metric_sets = MetricSetCatalog::load(Path::new(METRIC_SET_CATALOG))?;
+    Registry::load(Path::new(SEMCONV_DIR))?.check(&inventory, &metric_sets)?;
     println!(
         "Semantic-convention registry matches {} metrics, {} attribute sets, and {} events.",
         inventory.metrics.len(),
@@ -1268,6 +1270,133 @@ fn field_ident_from_key(key: &str) -> &str {
     key.rsplit('.').next().unwrap_or(key)
 }
 
+#[derive(Debug, Deserialize)]
+#[serde(deny_unknown_fields)]
+struct MetricSetCatalogFile {
+    schema: String,
+    metric_sets: Vec<MetricSetSpec>,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+#[serde(deny_unknown_fields)]
+struct MetricSetSpec {
+    id: String,
+    #[serde(default)]
+    availability: Option<String>,
+    rust: MetricSetRustSpec,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+#[serde(deny_unknown_fields)]
+struct MetricSetRustSpec {
+    package: String,
+    #[serde(default)]
+    r#type: Option<String>,
+    #[serde(default)]
+    types: Vec<MetricSetRustTypeSpec>,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+#[serde(deny_unknown_fields)]
+struct MetricSetRustTypeSpec {
+    r#type: String,
+    metrics: BTreeSet<String>,
+}
+
+#[derive(Debug, Default)]
+struct MetricSetCatalog {
+    metric_sets: BTreeMap<String, MetricSetSpec>,
+}
+
+impl MetricSetCatalog {
+    fn load(path: &Path) -> Result<Self> {
+        let contents = fs::read_to_string(path)
+            .with_context(|| format!("failed to read metric-set catalog {}", path.display()))?;
+        let catalog: MetricSetCatalogFile = serde_yaml::from_str(&contents)
+            .with_context(|| format!("failed to parse metric-set catalog {}", path.display()))?;
+        if catalog.schema != "otap-dataflow/metric-sets/1" {
+            bail!(
+                "{} uses schema {}, expected otap-dataflow/metric-sets/1",
+                path.display(),
+                catalog.schema
+            );
+        }
+
+        let mut metric_sets = BTreeMap::new();
+        for metric_set in catalog.metric_sets {
+            let id = metric_set.id.clone();
+            if metric_sets.insert(id.clone(), metric_set).is_some() {
+                bail!("duplicate metric-set definition {id} in {}", path.display());
+            }
+        }
+        Ok(Self { metric_sets })
+    }
+
+    fn rust_type_for(&self, metric_set: &str, metric: &str) -> Option<&str> {
+        let spec = self.metric_sets.get(metric_set)?;
+        if let Some(rust_type) = &spec.rust.r#type {
+            return Some(rust_type);
+        }
+        spec.rust
+            .types
+            .iter()
+            .find(|rust_type| rust_type.metrics.contains(metric))
+            .map(|rust_type| rust_type.r#type.as_str())
+    }
+
+    fn check(&self, inventory: &Inventory, errors: &mut Vec<String>) {
+        let expected_sets = inventory
+            .metrics
+            .values()
+            .map(|metric| metric.metric_set.clone())
+            .collect::<BTreeSet<_>>();
+        compare_keys(
+            "metric set",
+            expected_sets.iter(),
+            self.metric_sets.keys(),
+            errors,
+        );
+
+        for (id, spec) in &self.metric_sets {
+            let has_single_type = spec.rust.r#type.is_some();
+            let has_split_types = !spec.rust.types.is_empty();
+            if has_single_type == has_split_types {
+                errors.push(format!(
+                    "metric set {id} must define exactly one of rust.type or rust.types"
+                ));
+            }
+
+            let mut assigned_metrics = BTreeSet::new();
+            for rust_type in &spec.rust.types {
+                if rust_type.metrics.is_empty() {
+                    errors.push(format!(
+                        "metric set {id} Rust type {} has no metrics",
+                        rust_type.r#type
+                    ));
+                }
+                for metric in &rust_type.metrics {
+                    if !assigned_metrics.insert(metric.clone()) {
+                        errors.push(format!(
+                            "metric set {id} assigns metric {metric} to multiple Rust types"
+                        ));
+                    }
+                    match inventory.metrics.get(metric) {
+                        Some(definition) if definition.metric_set == *id => {}
+                        Some(definition) => errors.push(format!(
+                            "metric set {id} assigns metric {metric} from set {}",
+                            definition.metric_set
+                        )),
+                        None => errors.push(format!(
+                            "metric set {id} assigns unknown metric {metric} to Rust type {}",
+                            rust_type.r#type
+                        )),
+                    }
+                }
+            }
+        }
+    }
+}
+
 #[derive(Debug, Default)]
 struct Registry {
     attributes: BTreeMap<String, RegistryAttribute>,
@@ -1363,6 +1492,10 @@ struct OtapDataflowAnnotation {
     #[serde(default)]
     dynamic_identity: bool,
     #[serde(default)]
+    recording: Option<String>,
+    #[serde(default)]
+    availability: Option<String>,
+    #[serde(default)]
     rust: Option<RustAnnotation>,
     #[serde(default)]
     wire: Option<WireAnnotation>,
@@ -1370,9 +1503,12 @@ struct OtapDataflowAnnotation {
 
 #[derive(Debug, Clone, Default, Deserialize)]
 struct RustAnnotation {
-    package: String,
-    r#type: String,
-    source: String,
+    #[serde(default)]
+    package: Option<String>,
+    #[serde(default)]
+    r#type: Option<String>,
+    #[serde(default)]
+    source: Option<String>,
     #[serde(default)]
     field: Option<String>,
     #[serde(default)]
@@ -1389,10 +1525,6 @@ struct RustAnnotation {
 struct WireAnnotation {
     #[serde(default)]
     attribute_key: Option<String>,
-    #[serde(default)]
-    scope_name: Option<String>,
-    #[serde(default)]
-    metric_name: Option<String>,
     #[serde(default)]
     event_name: Option<String>,
     #[serde(default)]
@@ -1546,11 +1678,12 @@ impl Registry {
         Ok(registry)
     }
 
-    fn check(&self, inventory: &Inventory) -> Result<()> {
+    fn check(&self, inventory: &Inventory, metric_sets: &MetricSetCatalog) -> Result<()> {
         let mut errors = Vec::new();
         self.check_attributes(inventory, &mut errors);
         self.check_entities(inventory, &mut errors);
-        self.check_metrics(inventory, &mut errors);
+        metric_sets.check(inventory, &mut errors);
+        self.check_metrics(inventory, metric_sets, &mut errors);
         self.check_events(inventory, &mut errors);
         self.check_parent_cycles(&mut errors);
         if errors.is_empty() {
@@ -1685,7 +1818,12 @@ impl Registry {
         }
     }
 
-    fn check_metrics(&self, inventory: &Inventory, errors: &mut Vec<String>) {
+    fn check_metrics(
+        &self,
+        inventory: &Inventory,
+        metric_sets: &MetricSetCatalog,
+        errors: &mut Vec<String>,
+    ) {
         compare_keys(
             "metric",
             inventory.metrics.keys(),
@@ -1739,27 +1877,14 @@ impl Registry {
                 expected_codegen,
                 errors,
             );
-            if let Some(wire) = &annotation.wire {
-                check_equal(
-                    &format!("metric {name} wire.scope_name"),
-                    wire.scope_name.as_deref().unwrap_or_default(),
-                    &expected.metric_set,
-                    errors,
-                );
-                check_equal(
-                    &format!("metric {name} wire.metric_name"),
-                    wire.metric_name.as_deref().unwrap_or_default(),
-                    &expected.name,
-                    errors,
-                );
-            } else {
-                errors.push(format!("metric {name} is missing otap_dataflow.wire"));
-            }
-            if let Some(rust) = &annotation.rust {
-                check_rust_metric(name, expected, rust, errors);
-            } else {
-                errors.push(format!("metric {name} is missing otap_dataflow.rust"));
-            }
+            check_generated_metric_contract(
+                name,
+                expected,
+                annotation,
+                metric,
+                metric_sets,
+                errors,
+            );
             self.check_associations(
                 "metric",
                 name,
@@ -2242,20 +2367,20 @@ fn check_rust_entity(
 ) {
     check_equal(
         &format!("entity {entity} rust.package"),
-        &actual.package,
-        &expected.package,
+        actual.package.as_deref().unwrap_or_default(),
+        expected.package.as_str(),
         errors,
     );
     check_equal(
         &format!("entity {entity} rust.type"),
-        &actual.r#type,
-        &expected.rust_type,
+        actual.r#type.as_deref().unwrap_or_default(),
+        expected.rust_type.as_str(),
         errors,
     );
     check_equal(
         &format!("entity {entity} rust.source"),
-        &actual.source,
-        &expected.source,
+        actual.source.as_deref().unwrap_or_default(),
+        expected.source.as_str(),
         errors,
     );
     check_equal(
@@ -2266,60 +2391,154 @@ fn check_rust_entity(
     );
 }
 
-fn check_rust_metric(
+fn default_recording_mode(instrument: &str) -> Option<&'static str> {
+    match instrument {
+        "counter" => Some("additive"),
+        "updowncounter" => Some("observed"),
+        _ => None,
+    }
+}
+
+fn generated_metric_shape(
+    instrument: &str,
+    recording_override: Option<&str>,
+) -> Option<(&'static str, Option<&'static str>)> {
+    let recording = recording_override.or_else(|| default_recording_mode(instrument));
+    match (instrument, recording) {
+        ("counter", Some("additive")) => Some(("Counter", Some("delta"))),
+        ("counter", Some("observed")) => Some(("ObserveCounter", Some("cumulative"))),
+        ("updowncounter", Some("additive")) => Some(("UpDownCounter", Some("cumulative"))),
+        ("updowncounter", Some("observed")) => Some(("ObserveUpDownCounter", Some("cumulative"))),
+        ("gauge", None) => Some(("Gauge", None)),
+        ("histogram", None) => Some(("Mmsc", Some("delta"))),
+        _ => None,
+    }
+}
+
+fn check_generated_metric_contract(
     metric: &str,
     expected: &MetricDefinition,
-    actual: &RustAnnotation,
+    annotation: &OtapDataflowAnnotation,
+    definition: &RegistryMetric,
+    metric_sets: &MetricSetCatalog,
     errors: &mut Vec<String>,
 ) {
+    let Some(metric_set) = metric_sets.metric_sets.get(&expected.metric_set) else {
+        return;
+    };
+
     check_equal(
-        &format!("metric {metric} rust.package"),
-        &actual.package,
-        &expected.package,
+        &format!("metric set {} rust.package", expected.metric_set),
+        metric_set.rust.package.as_str(),
+        expected.package.as_str(),
         errors,
     );
     check_equal(
-        &format!("metric {metric} rust.type"),
-        &actual.r#type,
-        &expected.rust_type,
+        &format!("metric {metric} derived rust.type"),
+        metric_sets
+            .rust_type_for(&expected.metric_set, metric)
+            .unwrap_or_default(),
+        expected.rust_type.as_str(),
+        errors,
+    );
+
+    let rust = annotation.rust.as_ref();
+    let derived_field = expected.name.replace('.', "_");
+    let expected_field_override =
+        (derived_field != expected.rust_field).then_some(expected.rust_field.as_str());
+    check_equal(
+        &format!("metric {metric} rust.field override"),
+        &rust.and_then(|rust| rust.field.as_deref()),
+        &expected_field_override,
+        errors,
+    );
+
+    if let Some(rust) = rust {
+        if rust.package.is_some()
+            || rust.r#type.is_some()
+            || rust.source.is_some()
+            || rust.instrument.is_some()
+            || rust.value_type.is_some()
+            || rust.temporality.is_some()
+            || rust.availability.is_some()
+        {
+            errors.push(format!(
+                "metric {metric} contains redundant per-metric Rust metadata"
+            ));
+        }
+        if rust.field.is_none() {
+            errors.push(format!("metric {metric} has an empty rust override"));
+        }
+    }
+    if annotation.wire.is_some() {
+        errors.push(format!(
+            "metric {metric} contains redundant wire metadata; derive it from the metric-set prefix"
+        ));
+    }
+
+    let default_recording = default_recording_mode(&expected.instrument);
+    if annotation.recording.is_some() && annotation.recording.as_deref() == default_recording {
+        errors.push(format!(
+            "metric {metric} redundantly declares the default {} recording mode",
+            default_recording.unwrap_or_default()
+        ));
+    }
+    let (derived_instrument, derived_temporality) =
+        match generated_metric_shape(&expected.instrument, annotation.recording.as_deref()) {
+            Some(shape) => shape,
+            None => {
+                errors.push(format!(
+                "metric {metric} has unsupported generation mapping instrument={} recording={:?}",
+                expected.instrument, annotation.recording
+            ));
+                ("", None)
+            }
+        };
+    check_equal(
+        &format!("metric {metric} derived Rust instrument"),
+        derived_instrument,
+        expected.rust_instrument.as_str(),
         errors,
     );
     check_equal(
-        &format!("metric {metric} rust.field"),
-        actual.field.as_deref().unwrap_or_default(),
-        &expected.rust_field,
+        &format!("metric {metric} derived temporality"),
+        &derived_temporality,
+        &expected.temporality.as_deref(),
         errors,
     );
+
+    let codegen_value_type = definition
+        .annotations
+        .code_generation
+        .as_ref()
+        .map(|annotation| annotation.metric_value_type.as_str());
+    let derived_value_type = match codegen_value_type {
+        Some("int") => "u64",
+        Some("double") => "f64",
+        _ => "",
+    };
     check_equal(
-        &format!("metric {metric} rust.instrument"),
-        actual.instrument.as_deref().unwrap_or_default(),
-        &expected.rust_instrument,
+        &format!("metric {metric} derived Rust value type"),
+        derived_value_type,
+        expected.value_type.as_str(),
         errors,
     );
+
+    let effective_availability = annotation
+        .availability
+        .as_ref()
+        .or(metric_set.availability.as_ref());
     check_equal(
-        &format!("metric {metric} rust.value_type"),
-        actual.value_type.as_deref().unwrap_or_default(),
-        &expected.value_type,
+        &format!("metric {metric} effective availability"),
+        &effective_availability,
+        &expected.availability.as_ref(),
         errors,
     );
-    check_equal(
-        &format!("metric {metric} rust.source"),
-        &actual.source,
-        &expected.source,
-        errors,
-    );
-    check_equal(
-        &format!("metric {metric} rust.temporality"),
-        &actual.temporality,
-        &expected.temporality,
-        errors,
-    );
-    check_equal(
-        &format!("metric {metric} rust.availability"),
-        &actual.availability,
-        &expected.availability,
-        errors,
-    );
+    if annotation.availability.is_some() && metric_set.availability.is_some() {
+        errors.push(format!(
+            "metric {metric} redundantly overrides metric-set availability"
+        ));
+    }
 }
 
 fn compare_keys<'a>(
@@ -2381,6 +2600,33 @@ mod tests {
         assert_eq!(shape.rust_instrument, "ObserveCounter");
         assert_eq!(shape.value_type, "u64");
         assert_eq!(shape.temporality.as_deref(), Some("cumulative"));
+    }
+
+    /// Scenario: standard metric instruments use project defaults with sparse recording-mode overrides.
+    /// Guarantees: code generation selects the current Rust instrument and temporality without duplicating them per metric.
+    #[test]
+    fn metric_generation_mapping_uses_defaults_and_sparse_overrides() {
+        assert_eq!(
+            generated_metric_shape("counter", None),
+            Some(("Counter", Some("delta")))
+        );
+        assert_eq!(
+            generated_metric_shape("counter", Some("observed")),
+            Some(("ObserveCounter", Some("cumulative")))
+        );
+        assert_eq!(
+            generated_metric_shape("updowncounter", None),
+            Some(("ObserveUpDownCounter", Some("cumulative")))
+        );
+        assert_eq!(
+            generated_metric_shape("updowncounter", Some("additive")),
+            Some(("UpDownCounter", Some("cumulative")))
+        );
+        assert_eq!(
+            generated_metric_shape("histogram", None),
+            Some(("Mmsc", Some("delta")))
+        );
+        assert_eq!(generated_metric_shape("gauge", Some("observed")), None);
     }
 
     /// Scenario: an event macro contains formatted fields, primitive literals, and a log body.

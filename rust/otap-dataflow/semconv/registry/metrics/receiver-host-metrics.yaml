@@ -15,17 +15,6 @@ metrics:
       metric_value_type: int
     otap_dataflow:
       metric_set: receiver.host_metrics
-      rust:
-        package: otap-df-core-nodes
-        type: HostMetricsReceiverMetrics
-        field: batches_sent
-        instrument: Counter
-        value_type: u64
-        source: crates/core-nodes/src/receivers/host_metrics_receiver/mod.rs
-        temporality: delta
-      wire:
-        scope_name: receiver.host_metrics
-        metric_name: batches.sent
 - name: receiver.host_metrics.families.scraped
   brief: Number of due metric families processed.
   instrument: counter
@@ -41,17 +30,6 @@ metrics:
       metric_value_type: int
     otap_dataflow:
       metric_set: receiver.host_metrics
-      rust:
-        package: otap-df-core-nodes
-        type: HostMetricsReceiverMetrics
-        field: families_scraped
-        instrument: Counter
-        value_type: u64
-        source: crates/core-nodes/src/receivers/host_metrics_receiver/mod.rs
-        temporality: delta
-      wire:
-        scope_name: receiver.host_metrics
-        metric_name: families.scraped
 - name: receiver.host_metrics.partial.errors
   brief: Number of source read errors skipped because other families succeeded.
   instrument: counter
@@ -67,17 +45,6 @@ metrics:
       metric_value_type: int
     otap_dataflow:
       metric_set: receiver.host_metrics
-      rust:
-        package: otap-df-core-nodes
-        type: HostMetricsReceiverMetrics
-        field: partial_errors
-        instrument: Counter
-        value_type: u64
-        source: crates/core-nodes/src/receivers/host_metrics_receiver/mod.rs
-        temporality: delta
-      wire:
-        scope_name: receiver.host_metrics
-        metric_name: partial.errors
 - name: receiver.host_metrics.scrape.duration.ns
   brief: Wall-clock scrape duration.
   instrument: histogram
@@ -93,17 +60,6 @@ metrics:
       metric_value_type: double
     otap_dataflow:
       metric_set: receiver.host_metrics
-      rust:
-        package: otap-df-core-nodes
-        type: HostMetricsReceiverMetrics
-        field: scrape_duration_ns
-        instrument: Mmsc
-        value_type: f64
-        source: crates/core-nodes/src/receivers/host_metrics_receiver/mod.rs
-        temporality: delta
-      wire:
-        scope_name: receiver.host_metrics
-        metric_name: scrape.duration.ns
 - name: receiver.host_metrics.scrape.lag.ns
   brief: Delay between scheduled and actual scrape start.
   instrument: histogram
@@ -119,17 +75,6 @@ metrics:
       metric_value_type: double
     otap_dataflow:
       metric_set: receiver.host_metrics
-      rust:
-        package: otap-df-core-nodes
-        type: HostMetricsReceiverMetrics
-        field: scrape_lag_ns
-        instrument: Mmsc
-        value_type: f64
-        source: crates/core-nodes/src/receivers/host_metrics_receiver/mod.rs
-        temporality: delta
-      wire:
-        scope_name: receiver.host_metrics
-        metric_name: scrape.lag.ns
 - name: receiver.host_metrics.scraper.failures
   brief: Number of scraper worker failures.
   instrument: counter
@@ -145,17 +90,6 @@ metrics:
       metric_value_type: int
     otap_dataflow:
       metric_set: receiver.host_metrics
-      rust:
-        package: otap-df-core-nodes
-        type: HostMetricsReceiverMetrics
-        field: scraper_failures
-        instrument: Counter
-        value_type: u64
-        source: crates/core-nodes/src/receivers/host_metrics_receiver/mod.rs
-        temporality: delta
-      wire:
-        scope_name: receiver.host_metrics
-        metric_name: scraper.failures
 - name: receiver.host_metrics.scrapes.completed
   brief: Number of scrape ticks that built and sent a metrics batch.
   instrument: counter
@@ -171,17 +105,6 @@ metrics:
       metric_value_type: int
     otap_dataflow:
       metric_set: receiver.host_metrics
-      rust:
-        package: otap-df-core-nodes
-        type: HostMetricsReceiverMetrics
-        field: scrapes_completed
-        instrument: Counter
-        value_type: u64
-        source: crates/core-nodes/src/receivers/host_metrics_receiver/mod.rs
-        temporality: delta
-      wire:
-        scope_name: receiver.host_metrics
-        metric_name: scrapes.completed
 - name: receiver.host_metrics.scrapes.failed
   brief: Number of fatal scrape failures.
   instrument: counter
@@ -197,17 +120,6 @@ metrics:
       metric_value_type: int
     otap_dataflow:
       metric_set: receiver.host_metrics
-      rust:
-        package: otap-df-core-nodes
-        type: HostMetricsReceiverMetrics
-        field: scrapes_failed
-        instrument: Counter
-        value_type: u64
-        source: crates/core-nodes/src/receivers/host_metrics_receiver/mod.rs
-        temporality: delta
-      wire:
-        scope_name: receiver.host_metrics
-        metric_name: scrapes.failed
 - name: receiver.host_metrics.scrapes.overrun
   brief: Number of scrape ticks skipped or timed out before completion.
   instrument: counter
@@ -223,17 +135,6 @@ metrics:
       metric_value_type: int
     otap_dataflow:
       metric_set: receiver.host_metrics
-      rust:
-        package: otap-df-core-nodes
-        type: HostMetricsReceiverMetrics
-        field: scrapes_overrun
-        instrument: Counter
-        value_type: u64
-        source: crates/core-nodes/src/receivers/host_metrics_receiver/mod.rs
-        temporality: delta
-      wire:
-        scope_name: receiver.host_metrics
-        metric_name: scrapes.overrun
 - name: receiver.host_metrics.scrapes.started
   brief: Number of scrape ticks started.
   instrument: counter
@@ -249,17 +150,6 @@ metrics:
       metric_value_type: int
     otap_dataflow:
       metric_set: receiver.host_metrics
-      rust:
-        package: otap-df-core-nodes
-        type: HostMetricsReceiverMetrics
-        field: scrapes_started
-        instrument: Counter
-        value_type: u64
-        source: crates/core-nodes/src/receivers/host_metrics_receiver/mod.rs
-        temporality: delta
-      wire:
-        scope_name: receiver.host_metrics
-        metric_name: scrapes.started
 - name: receiver.host_metrics.send.failures
   brief: Number of downstream send failures.
   instrument: counter
@@ -275,17 +165,6 @@ metrics:
       metric_value_type: int
     otap_dataflow:
       metric_set: receiver.host_metrics
-      rust:
-        package: otap-df-core-nodes
-        type: HostMetricsReceiverMetrics
-        field: send_failures
-        instrument: Counter
-        value_type: u64
-        source: crates/core-nodes/src/receivers/host_metrics_receiver/mod.rs
-        temporality: delta
-      wire:
-        scope_name: receiver.host_metrics
-        metric_name: send.failures
 - name: receiver.host_metrics.source.read.errors
   brief: Number of source read errors seen during scrapes.
   instrument: counter
@@ -301,14 +180,3 @@ metrics:
       metric_value_type: int
     otap_dataflow:
       metric_set: receiver.host_metrics
-      rust:
-        package: otap-df-core-nodes
-        type: HostMetricsReceiverMetrics
-        field: source_read_errors
-        instrument: Counter
-        value_type: u64
-        source: crates/core-nodes/src/receivers/host_metrics_receiver/mod.rs
-        temporality: delta
-      wire:
-        scope_name: receiver.host_metrics
-        metric_name: source.read.errors

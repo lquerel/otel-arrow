@@ -16,17 +16,6 @@ metrics:
       metric_value_type: int
     otap_dataflow:
       metric_set: receiver.topic
-      rust:
-        package: otap-df-core-nodes
-        type: TopicReceiverMetrics
-        field: bridge_controls_ignored_propagation_disabled
-        instrument: Counter
-        value_type: u64
-        source: crates/core-nodes/src/receivers/topic_receiver/mod.rs
-        temporality: delta
-      wire:
-        scope_name: receiver.topic
-        metric_name: bridge.controls.ignored.propagation.disabled
 - name: receiver.topic.bridge.invalid.or.untracked.id
   brief: Number of downstream ACK/NACK controls carrying an id that is not currently
     tracked by the topic runtime. With the current raw `message_id` bridge this also
@@ -44,17 +33,6 @@ metrics:
       metric_value_type: int
     otap_dataflow:
       metric_set: receiver.topic
-      rust:
-        package: otap-df-core-nodes
-        type: TopicReceiverMetrics
-        field: bridge_invalid_or_untracked_id
-        instrument: Counter
-        value_type: u64
-        source: crates/core-nodes/src/receivers/topic_receiver/mod.rs
-        temporality: delta
-      wire:
-        scope_name: receiver.topic
-        metric_name: bridge.invalid.or.untracked.id
 - name: receiver.topic.bridge.missing.calldata
   brief: Number of downstream ACK/NACK controls missing the bridged topic message
     id in calldata.
@@ -71,17 +49,6 @@ metrics:
       metric_value_type: int
     otap_dataflow:
       metric_set: receiver.topic
-      rust:
-        package: otap-df-core-nodes
-        type: TopicReceiverMetrics
-        field: bridge_missing_calldata
-        instrument: Counter
-        value_type: u64
-        source: crates/core-nodes/src/receivers/topic_receiver/mod.rs
-        temporality: delta
-      wire:
-        scope_name: receiver.topic
-        metric_name: bridge.missing.calldata
 - name: receiver.topic.bridge.runtime.failures
   brief: Number of downstream ACK/NACK controls that failed to bridge for some runtime
     reason other than an unknown message id.
@@ -98,17 +65,6 @@ metrics:
       metric_value_type: int
     otap_dataflow:
       metric_set: receiver.topic
-      rust:
-        package: otap-df-core-nodes
-        type: TopicReceiverMetrics
-        field: bridge_runtime_failures
-        instrument: Counter
-        value_type: u64
-        source: crates/core-nodes/src/receivers/topic_receiver/mod.rs
-        temporality: delta
-      wire:
-        scope_name: receiver.topic
-        metric_name: bridge.runtime.failures
 - name: receiver.topic.bridged.downstream.acks
   brief: Number of downstream ACK controls successfully bridged to topic ack.
   instrument: counter
@@ -124,17 +80,6 @@ metrics:
       metric_value_type: int
     otap_dataflow:
       metric_set: receiver.topic
-      rust:
-        package: otap-df-core-nodes
-        type: TopicReceiverMetrics
-        field: bridged_downstream_acks
-        instrument: Counter
-        value_type: u64
-        source: crates/core-nodes/src/receivers/topic_receiver/mod.rs
-        temporality: delta
-      wire:
-        scope_name: receiver.topic
-        metric_name: bridged.downstream.acks
 - name: receiver.topic.bridged.downstream.nacks
   brief: Number of downstream NACK controls successfully bridged to topic nack.
   instrument: counter
@@ -150,17 +95,6 @@ metrics:
       metric_value_type: int
     otap_dataflow:
       metric_set: receiver.topic
-      rust:
-        package: otap-df-core-nodes
-        type: TopicReceiverMetrics
-        field: bridged_downstream_nacks
-        instrument: Counter
-        value_type: u64
-        source: crates/core-nodes/src/receivers/topic_receiver/mod.rs
-        temporality: delta
-      wire:
-        scope_name: receiver.topic
-        metric_name: bridged.downstream.nacks
 - name: receiver.topic.downstream.backpressure.events
   brief: Number of downstream backpressure events (>= 500ms blocked).
   instrument: counter
@@ -176,17 +110,6 @@ metrics:
       metric_value_type: int
     otap_dataflow:
       metric_set: receiver.topic
-      rust:
-        package: otap-df-core-nodes
-        type: TopicReceiverMetrics
-        field: downstream_backpressure_events
-        instrument: Counter
-        value_type: u64
-        source: crates/core-nodes/src/receivers/topic_receiver/mod.rs
-        temporality: delta
-      wire:
-        scope_name: receiver.topic
-        metric_name: downstream.backpressure.events
 - name: receiver.topic.downstream.blocked.ms
   brief: Total milliseconds blocked while forwarding to downstream.
   instrument: counter
@@ -202,17 +125,6 @@ metrics:
       metric_value_type: int
     otap_dataflow:
       metric_set: receiver.topic
-      rust:
-        package: otap-df-core-nodes
-        type: TopicReceiverMetrics
-        field: downstream_blocked_ms
-        instrument: Counter
-        value_type: u64
-        source: crates/core-nodes/src/receivers/topic_receiver/mod.rs
-        temporality: delta
-      wire:
-        scope_name: receiver.topic
-        metric_name: downstream.blocked.ms
 - name: receiver.topic.forward.failures
   brief: Number of forward failures to downstream channel.
   instrument: counter
@@ -228,17 +140,6 @@ metrics:
       metric_value_type: int
     otap_dataflow:
       metric_set: receiver.topic
-      rust:
-        package: otap-df-core-nodes
-        type: TopicReceiverMetrics
-        field: forward_failures
-        instrument: Counter
-        value_type: u64
-        source: crates/core-nodes/src/receivers/topic_receiver/mod.rs
-        temporality: delta
-      wire:
-        scope_name: receiver.topic
-        metric_name: forward.failures
 - name: receiver.topic.forwarded.messages
   brief: Number of messages forwarded to downstream.
   instrument: counter
@@ -254,17 +155,6 @@ metrics:
       metric_value_type: int
     otap_dataflow:
       metric_set: receiver.topic
-      rust:
-        package: otap-df-core-nodes
-        type: TopicReceiverMetrics
-        field: forwarded_messages
-        instrument: Counter
-        value_type: u64
-        source: crates/core-nodes/src/receivers/topic_receiver/mod.rs
-        temporality: delta
-      wire:
-        scope_name: receiver.topic
-        metric_name: forwarded.messages
 - name: receiver.topic.lag.disconnects
   brief: Number of broadcast subscriptions disconnected because of lag.
   instrument: counter
@@ -280,17 +170,6 @@ metrics:
       metric_value_type: int
     otap_dataflow:
       metric_set: receiver.topic
-      rust:
-        package: otap-df-core-nodes
-        type: TopicReceiverMetrics
-        field: lag_disconnects
-        instrument: Counter
-        value_type: u64
-        source: crates/core-nodes/src/receivers/topic_receiver/mod.rs
-        temporality: delta
-      wire:
-        scope_name: receiver.topic
-        metric_name: lag.disconnects
 - name: receiver.topic.lagged.messages
   brief: Total messages missed across lag notifications.
   instrument: counter
@@ -306,17 +185,6 @@ metrics:
       metric_value_type: int
     otap_dataflow:
       metric_set: receiver.topic
-      rust:
-        package: otap-df-core-nodes
-        type: TopicReceiverMetrics
-        field: lagged_messages
-        instrument: Counter
-        value_type: u64
-        source: crates/core-nodes/src/receivers/topic_receiver/mod.rs
-        temporality: delta
-      wire:
-        scope_name: receiver.topic
-        metric_name: lagged.messages
 - name: receiver.topic.lagged.notifications
   brief: Number of lag notifications emitted by broadcast subscriptions.
   instrument: counter
@@ -332,14 +200,3 @@ metrics:
       metric_value_type: int
     otap_dataflow:
       metric_set: receiver.topic
-      rust:
-        package: otap-df-core-nodes
-        type: TopicReceiverMetrics
-        field: lagged_notifications
-        instrument: Counter
-        value_type: u64
-        source: crates/core-nodes/src/receivers/topic_receiver/mod.rs
-        temporality: delta
-      wire:
-        scope_name: receiver.topic
-        metric_name: lagged.notifications

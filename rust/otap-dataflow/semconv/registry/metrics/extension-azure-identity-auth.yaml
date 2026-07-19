@@ -13,18 +13,6 @@ metrics:
       metric_value_type: int
     otap_dataflow:
       metric_set: extension.azure_identity_auth
-      rust:
-        package: otap-df-contrib-extensions
-        type: AzureIdentityAuthMetrics
-        field: auth_failures
-        instrument: Counter
-        value_type: u64
-        source: crates/contrib-extensions/src/azure_identity_auth/metrics.rs
-        temporality: delta
-        availability: feature = "azure-identity-auth-extension"
-      wire:
-        scope_name: extension.azure_identity_auth
-        metric_name: auth.failures
 - name: extension.azure_identity_auth.auth.success.latency
   brief: Latency of successful acquisitions in milliseconds (min/max/sum/count).
   instrument: histogram
@@ -38,18 +26,6 @@ metrics:
       metric_value_type: double
     otap_dataflow:
       metric_set: extension.azure_identity_auth
-      rust:
-        package: otap-df-contrib-extensions
-        type: AzureIdentityAuthMetrics
-        field: auth_success_latency
-        instrument: Mmsc
-        value_type: f64
-        source: crates/contrib-extensions/src/azure_identity_auth/metrics.rs
-        temporality: delta
-        availability: feature = "azure-identity-auth-extension"
-      wire:
-        scope_name: extension.azure_identity_auth
-        metric_name: auth.success.latency
 - name: extension.azure_identity_auth.auth.successes
   brief: Number of successful credential acquisitions.
   instrument: counter
@@ -63,18 +39,6 @@ metrics:
       metric_value_type: int
     otap_dataflow:
       metric_set: extension.azure_identity_auth
-      rust:
-        package: otap-df-contrib-extensions
-        type: AzureIdentityAuthMetrics
-        field: auth_successes
-        instrument: Counter
-        value_type: u64
-        source: crates/contrib-extensions/src/azure_identity_auth/metrics.rs
-        temporality: delta
-        availability: feature = "azure-identity-auth-extension"
-      wire:
-        scope_name: extension.azure_identity_auth
-        metric_name: auth.successes
 - name: extension.azure_identity_auth.auth.token.publish
   brief: Number of tokens published to consumers via the watch channel.
   instrument: counter
@@ -88,15 +52,3 @@ metrics:
       metric_value_type: int
     otap_dataflow:
       metric_set: extension.azure_identity_auth
-      rust:
-        package: otap-df-contrib-extensions
-        type: AzureIdentityAuthMetrics
-        field: auth_token_publish
-        instrument: Counter
-        value_type: u64
-        source: crates/contrib-extensions/src/azure_identity_auth/metrics.rs
-        temporality: delta
-        availability: feature = "azure-identity-auth-extension"
-      wire:
-        scope_name: extension.azure_identity_auth
-        metric_name: auth.token.publish

@@ -15,17 +15,6 @@ metrics:
       metric_value_type: int
     otap_dataflow:
       metric_set: exporter.topic
-      rust:
-        package: otap-df-core-nodes
-        type: TopicExporterMetrics
-        field: dropped_messages_on_full
-        instrument: Counter
-        value_type: u64
-        source: crates/core-nodes/src/exporters/topic_exporter/mod.rs
-        temporality: delta
-      wire:
-        scope_name: exporter.topic
-        metric_name: dropped.messages.on.full
 - name: exporter.topic.dropped.messages.on.outcome.capacity
   brief: Number of messages rejected because tracked outcome capacity was exhausted.
   instrument: counter
@@ -41,17 +30,6 @@ metrics:
       metric_value_type: int
     otap_dataflow:
       metric_set: exporter.topic
-      rust:
-        package: otap-df-core-nodes
-        type: TopicExporterMetrics
-        field: dropped_messages_on_outcome_capacity
-        instrument: Counter
-        value_type: u64
-        source: crates/core-nodes/src/exporters/topic_exporter/mod.rs
-        temporality: delta
-      wire:
-        scope_name: exporter.topic
-        metric_name: dropped.messages.on.outcome.capacity
 - name: exporter.topic.end.to.end.acks
   brief: Number of end-to-end acks bridged back to upstream.
   instrument: counter
@@ -67,17 +45,6 @@ metrics:
       metric_value_type: int
     otap_dataflow:
       metric_set: exporter.topic
-      rust:
-        package: otap-df-core-nodes
-        type: TopicExporterMetrics
-        field: end_to_end_acks
-        instrument: Counter
-        value_type: u64
-        source: crates/core-nodes/src/exporters/topic_exporter/mod.rs
-        temporality: delta
-      wire:
-        scope_name: exporter.topic
-        metric_name: end.to.end.acks
 - name: exporter.topic.end.to.end.nacks
   brief: Number of end-to-end nacks bridged back to upstream.
   instrument: counter
@@ -93,17 +60,6 @@ metrics:
       metric_value_type: int
     otap_dataflow:
       metric_set: exporter.topic
-      rust:
-        package: otap-df-core-nodes
-        type: TopicExporterMetrics
-        field: end_to_end_nacks
-        instrument: Counter
-        value_type: u64
-        source: crates/core-nodes/src/exporters/topic_exporter/mod.rs
-        temporality: delta
-      wire:
-        scope_name: exporter.topic
-        metric_name: end.to.end.nacks
 - name: exporter.topic.outcome.timeouts
   brief: 'Number of tracked publishes that resolved by timeout. Future: add an outcome-latency
     histogram once histogram instruments are available in the telemetry layer.'
@@ -120,17 +76,6 @@ metrics:
       metric_value_type: int
     otap_dataflow:
       metric_set: exporter.topic
-      rust:
-        package: otap-df-core-nodes
-        type: TopicExporterMetrics
-        field: outcome_timeouts
-        instrument: Counter
-        value_type: u64
-        source: crates/core-nodes/src/exporters/topic_exporter/mod.rs
-        temporality: delta
-      wire:
-        scope_name: exporter.topic
-        metric_name: outcome.timeouts
 - name: exporter.topic.published.messages
   brief: Number of messages published to the topic.
   instrument: counter
@@ -146,17 +91,6 @@ metrics:
       metric_value_type: int
     otap_dataflow:
       metric_set: exporter.topic
-      rust:
-        package: otap-df-core-nodes
-        type: TopicExporterMetrics
-        field: published_messages
-        instrument: Counter
-        value_type: u64
-        source: crates/core-nodes/src/exporters/topic_exporter/mod.rs
-        temporality: delta
-      wire:
-        scope_name: exporter.topic
-        metric_name: published.messages
 - name: exporter.topic.shutdown.nacks
   brief: Number of pending end-to-end messages nacked during shutdown.
   instrument: counter
@@ -172,17 +106,6 @@ metrics:
       metric_value_type: int
     otap_dataflow:
       metric_set: exporter.topic
-      rust:
-        package: otap-df-core-nodes
-        type: TopicExporterMetrics
-        field: shutdown_nacks
-        instrument: Counter
-        value_type: u64
-        source: crates/core-nodes/src/exporters/topic_exporter/mod.rs
-        temporality: delta
-      wire:
-        scope_name: exporter.topic
-        metric_name: shutdown.nacks
 - name: exporter.topic.tracked.in.flight
   brief: 'Current number of tracked publishes waiting for a terminal outcome. Future:
     add a pending-bytes gauge once retained payload size accounting is available for
@@ -200,13 +123,3 @@ metrics:
       metric_value_type: int
     otap_dataflow:
       metric_set: exporter.topic
-      rust:
-        package: otap-df-core-nodes
-        type: TopicExporterMetrics
-        field: tracked_in_flight
-        instrument: Gauge
-        value_type: u64
-        source: crates/core-nodes/src/exporters/topic_exporter/mod.rs
-      wire:
-        scope_name: exporter.topic
-        metric_name: tracked.in.flight

@@ -15,18 +15,6 @@ metrics:
       metric_value_type: int
     otap_dataflow:
       metric_set: otap.exporter.geneva
-      rust:
-        package: otap-df-contrib-nodes
-        type: ExporterMetrics
-        field: conversion_errors
-        instrument: Counter
-        value_type: u64
-        source: crates/contrib-nodes/src/exporters/geneva_exporter/mod.rs
-        temporality: delta
-        availability: feature = "geneva-exporter"
-      wire:
-        scope_name: otap.exporter.geneva
-        metric_name: conversion.errors
 - name: otap.exporter.geneva.empty.payloads.skipped
   brief: Number of empty payloads skipped (no-op ack).
   instrument: counter
@@ -42,18 +30,6 @@ metrics:
       metric_value_type: int
     otap_dataflow:
       metric_set: otap.exporter.geneva
-      rust:
-        package: otap-df-contrib-nodes
-        type: ExporterMetrics
-        field: empty_payloads_skipped
-        instrument: Counter
-        value_type: u64
-        source: crates/contrib-nodes/src/exporters/geneva_exporter/mod.rs
-        temporality: delta
-        availability: feature = "geneva-exporter"
-      wire:
-        scope_name: otap.exporter.geneva
-        metric_name: empty.payloads.skipped
 - name: otap.exporter.geneva.log.batches.encoded
   brief: Compressed log batches produced by the encoder.
   instrument: counter
@@ -69,18 +45,6 @@ metrics:
       metric_value_type: int
     otap_dataflow:
       metric_set: otap.exporter.geneva
-      rust:
-        package: otap-df-contrib-nodes
-        type: ExporterMetrics
-        field: log_batches_encoded
-        instrument: Counter
-        value_type: u64
-        source: crates/contrib-nodes/src/exporters/geneva_exporter/mod.rs
-        temporality: delta
-        availability: feature = "geneva-exporter"
-      wire:
-        scope_name: otap.exporter.geneva
-        metric_name: log.batches.encoded
 - name: otap.exporter.geneva.log.batches.failed
   brief: Log batches that failed to upload.
   instrument: counter
@@ -96,18 +60,6 @@ metrics:
       metric_value_type: int
     otap_dataflow:
       metric_set: otap.exporter.geneva
-      rust:
-        package: otap-df-contrib-nodes
-        type: ExporterMetrics
-        field: log_batches_failed
-        instrument: Counter
-        value_type: u64
-        source: crates/contrib-nodes/src/exporters/geneva_exporter/mod.rs
-        temporality: delta
-        availability: feature = "geneva-exporter"
-      wire:
-        scope_name: otap.exporter.geneva
-        metric_name: log.batches.failed
 - name: otap.exporter.geneva.log.batches.uploaded
   brief: Log batches successfully uploaded to Geneva.
   instrument: counter
@@ -123,18 +75,6 @@ metrics:
       metric_value_type: int
     otap_dataflow:
       metric_set: otap.exporter.geneva
-      rust:
-        package: otap-df-contrib-nodes
-        type: ExporterMetrics
-        field: log_batches_uploaded
-        instrument: Counter
-        value_type: u64
-        source: crates/contrib-nodes/src/exporters/geneva_exporter/mod.rs
-        temporality: delta
-        availability: feature = "geneva-exporter"
-      wire:
-        scope_name: otap.exporter.geneva
-        metric_name: log.batches.uploaded
 - name: otap.exporter.geneva.log.bytes.uploaded
   brief: Log bytes uploaded to Geneva (compressed payload size).
   instrument: counter
@@ -150,18 +90,6 @@ metrics:
       metric_value_type: int
     otap_dataflow:
       metric_set: otap.exporter.geneva
-      rust:
-        package: otap-df-contrib-nodes
-        type: ExporterMetrics
-        field: log_bytes_uploaded
-        instrument: Counter
-        value_type: u64
-        source: crates/contrib-nodes/src/exporters/geneva_exporter/mod.rs
-        temporality: delta
-        availability: feature = "geneva-exporter"
-      wire:
-        scope_name: otap.exporter.geneva
-        metric_name: log.bytes.uploaded
 - name: otap.exporter.geneva.log.encode.duration
   brief: Encode + compress latency for logs in milliseconds (min/max/sum/count).
   instrument: histogram
@@ -177,18 +105,6 @@ metrics:
       metric_value_type: double
     otap_dataflow:
       metric_set: otap.exporter.geneva
-      rust:
-        package: otap-df-contrib-nodes
-        type: ExporterMetrics
-        field: log_encode_duration
-        instrument: Mmsc
-        value_type: f64
-        source: crates/contrib-nodes/src/exporters/geneva_exporter/mod.rs
-        temporality: delta
-        availability: feature = "geneva-exporter"
-      wire:
-        scope_name: otap.exporter.geneva
-        metric_name: log.encode.duration
 - name: otap.exporter.geneva.log.records.failed
   brief: Individual log records that failed to upload.
   instrument: counter
@@ -204,18 +120,6 @@ metrics:
       metric_value_type: int
     otap_dataflow:
       metric_set: otap.exporter.geneva
-      rust:
-        package: otap-df-contrib-nodes
-        type: ExporterMetrics
-        field: log_records_failed
-        instrument: Counter
-        value_type: u64
-        source: crates/contrib-nodes/src/exporters/geneva_exporter/mod.rs
-        temporality: delta
-        availability: feature = "geneva-exporter"
-      wire:
-        scope_name: otap.exporter.geneva
-        metric_name: log.records.failed
 - name: otap.exporter.geneva.log.records.uploaded
   brief: Individual log records successfully uploaded.
   instrument: counter
@@ -231,18 +135,6 @@ metrics:
       metric_value_type: int
     otap_dataflow:
       metric_set: otap.exporter.geneva
-      rust:
-        package: otap-df-contrib-nodes
-        type: ExporterMetrics
-        field: log_records_uploaded
-        instrument: Counter
-        value_type: u64
-        source: crates/contrib-nodes/src/exporters/geneva_exporter/mod.rs
-        temporality: delta
-        availability: feature = "geneva-exporter"
-      wire:
-        scope_name: otap.exporter.geneva
-        metric_name: log.records.uploaded
 - name: otap.exporter.geneva.log.upload.failed.duration
   brief: Per-upload latency for failed log batches in milliseconds (min/max/sum/count).
   instrument: histogram
@@ -258,18 +150,6 @@ metrics:
       metric_value_type: double
     otap_dataflow:
       metric_set: otap.exporter.geneva
-      rust:
-        package: otap-df-contrib-nodes
-        type: ExporterMetrics
-        field: log_upload_failed_duration
-        instrument: Mmsc
-        value_type: f64
-        source: crates/contrib-nodes/src/exporters/geneva_exporter/mod.rs
-        temporality: delta
-        availability: feature = "geneva-exporter"
-      wire:
-        scope_name: otap.exporter.geneva
-        metric_name: log.upload.failed.duration
 - name: otap.exporter.geneva.log.upload.success.duration
   brief: Per-upload latency for successful log batches in milliseconds (min/max/sum/count).
   instrument: histogram
@@ -285,18 +165,6 @@ metrics:
       metric_value_type: double
     otap_dataflow:
       metric_set: otap.exporter.geneva
-      rust:
-        package: otap-df-contrib-nodes
-        type: ExporterMetrics
-        field: log_upload_success_duration
-        instrument: Mmsc
-        value_type: f64
-        source: crates/contrib-nodes/src/exporters/geneva_exporter/mod.rs
-        temporality: delta
-        availability: feature = "geneva-exporter"
-      wire:
-        scope_name: otap.exporter.geneva
-        metric_name: log.upload.success.duration
 - name: otap.exporter.geneva.metrics.payloads.dropped
   brief: Number of metrics payloads dropped (unsupported signal).
   instrument: counter
@@ -312,18 +180,6 @@ metrics:
       metric_value_type: int
     otap_dataflow:
       metric_set: otap.exporter.geneva
-      rust:
-        package: otap-df-contrib-nodes
-        type: ExporterMetrics
-        field: metrics_payloads_dropped
-        instrument: Counter
-        value_type: u64
-        source: crates/contrib-nodes/src/exporters/geneva_exporter/mod.rs
-        temporality: delta
-        availability: feature = "geneva-exporter"
-      wire:
-        scope_name: otap.exporter.geneva
-        metric_name: metrics.payloads.dropped
 - name: otap.exporter.geneva.trace.batches.encoded
   brief: Compressed trace batches produced by the encoder.
   instrument: counter
@@ -339,18 +195,6 @@ metrics:
       metric_value_type: int
     otap_dataflow:
       metric_set: otap.exporter.geneva
-      rust:
-        package: otap-df-contrib-nodes
-        type: ExporterMetrics
-        field: trace_batches_encoded
-        instrument: Counter
-        value_type: u64
-        source: crates/contrib-nodes/src/exporters/geneva_exporter/mod.rs
-        temporality: delta
-        availability: feature = "geneva-exporter"
-      wire:
-        scope_name: otap.exporter.geneva
-        metric_name: trace.batches.encoded
 - name: otap.exporter.geneva.trace.batches.failed
   brief: Trace batches that failed to upload.
   instrument: counter
@@ -366,18 +210,6 @@ metrics:
       metric_value_type: int
     otap_dataflow:
       metric_set: otap.exporter.geneva
-      rust:
-        package: otap-df-contrib-nodes
-        type: ExporterMetrics
-        field: trace_batches_failed
-        instrument: Counter
-        value_type: u64
-        source: crates/contrib-nodes/src/exporters/geneva_exporter/mod.rs
-        temporality: delta
-        availability: feature = "geneva-exporter"
-      wire:
-        scope_name: otap.exporter.geneva
-        metric_name: trace.batches.failed
 - name: otap.exporter.geneva.trace.batches.uploaded
   brief: Trace batches successfully uploaded to Geneva.
   instrument: counter
@@ -393,18 +225,6 @@ metrics:
       metric_value_type: int
     otap_dataflow:
       metric_set: otap.exporter.geneva
-      rust:
-        package: otap-df-contrib-nodes
-        type: ExporterMetrics
-        field: trace_batches_uploaded
-        instrument: Counter
-        value_type: u64
-        source: crates/contrib-nodes/src/exporters/geneva_exporter/mod.rs
-        temporality: delta
-        availability: feature = "geneva-exporter"
-      wire:
-        scope_name: otap.exporter.geneva
-        metric_name: trace.batches.uploaded
 - name: otap.exporter.geneva.trace.bytes.uploaded
   brief: Trace bytes uploaded to Geneva (compressed payload size).
   instrument: counter
@@ -420,18 +240,6 @@ metrics:
       metric_value_type: int
     otap_dataflow:
       metric_set: otap.exporter.geneva
-      rust:
-        package: otap-df-contrib-nodes
-        type: ExporterMetrics
-        field: trace_bytes_uploaded
-        instrument: Counter
-        value_type: u64
-        source: crates/contrib-nodes/src/exporters/geneva_exporter/mod.rs
-        temporality: delta
-        availability: feature = "geneva-exporter"
-      wire:
-        scope_name: otap.exporter.geneva
-        metric_name: trace.bytes.uploaded
 - name: otap.exporter.geneva.trace.encode.duration
   brief: Encode + compress latency for traces in milliseconds (min/max/sum/count).
   instrument: histogram
@@ -447,18 +255,6 @@ metrics:
       metric_value_type: double
     otap_dataflow:
       metric_set: otap.exporter.geneva
-      rust:
-        package: otap-df-contrib-nodes
-        type: ExporterMetrics
-        field: trace_encode_duration
-        instrument: Mmsc
-        value_type: f64
-        source: crates/contrib-nodes/src/exporters/geneva_exporter/mod.rs
-        temporality: delta
-        availability: feature = "geneva-exporter"
-      wire:
-        scope_name: otap.exporter.geneva
-        metric_name: trace.encode.duration
 - name: otap.exporter.geneva.trace.records.failed
   brief: Individual trace records (spans) that failed to upload.
   instrument: counter
@@ -474,18 +270,6 @@ metrics:
       metric_value_type: int
     otap_dataflow:
       metric_set: otap.exporter.geneva
-      rust:
-        package: otap-df-contrib-nodes
-        type: ExporterMetrics
-        field: trace_records_failed
-        instrument: Counter
-        value_type: u64
-        source: crates/contrib-nodes/src/exporters/geneva_exporter/mod.rs
-        temporality: delta
-        availability: feature = "geneva-exporter"
-      wire:
-        scope_name: otap.exporter.geneva
-        metric_name: trace.records.failed
 - name: otap.exporter.geneva.trace.records.uploaded
   brief: Individual trace records (spans) successfully uploaded.
   instrument: counter
@@ -501,18 +285,6 @@ metrics:
       metric_value_type: int
     otap_dataflow:
       metric_set: otap.exporter.geneva
-      rust:
-        package: otap-df-contrib-nodes
-        type: ExporterMetrics
-        field: trace_records_uploaded
-        instrument: Counter
-        value_type: u64
-        source: crates/contrib-nodes/src/exporters/geneva_exporter/mod.rs
-        temporality: delta
-        availability: feature = "geneva-exporter"
-      wire:
-        scope_name: otap.exporter.geneva
-        metric_name: trace.records.uploaded
 - name: otap.exporter.geneva.trace.upload.failed.duration
   brief: Per-upload latency for failed trace batches in milliseconds (min/max/sum/count).
   instrument: histogram
@@ -528,18 +300,6 @@ metrics:
       metric_value_type: double
     otap_dataflow:
       metric_set: otap.exporter.geneva
-      rust:
-        package: otap-df-contrib-nodes
-        type: ExporterMetrics
-        field: trace_upload_failed_duration
-        instrument: Mmsc
-        value_type: f64
-        source: crates/contrib-nodes/src/exporters/geneva_exporter/mod.rs
-        temporality: delta
-        availability: feature = "geneva-exporter"
-      wire:
-        scope_name: otap.exporter.geneva
-        metric_name: trace.upload.failed.duration
 - name: otap.exporter.geneva.trace.upload.success.duration
   brief: Per-upload latency for successful trace batches in milliseconds (min/max/sum/count).
   instrument: histogram
@@ -555,15 +315,3 @@ metrics:
       metric_value_type: double
     otap_dataflow:
       metric_set: otap.exporter.geneva
-      rust:
-        package: otap-df-contrib-nodes
-        type: ExporterMetrics
-        field: trace_upload_success_duration
-        instrument: Mmsc
-        value_type: f64
-        source: crates/contrib-nodes/src/exporters/geneva_exporter/mod.rs
-        temporality: delta
-        availability: feature = "geneva-exporter"
-      wire:
-        scope_name: otap.exporter.geneva
-        metric_name: trace.upload.success.duration

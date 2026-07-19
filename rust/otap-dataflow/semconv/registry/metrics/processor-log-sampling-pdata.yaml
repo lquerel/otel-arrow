@@ -15,17 +15,6 @@ metrics:
       metric_value_type: int
     otap_dataflow:
       metric_set: processor.log_sampling.pdata
-      rust:
-        package: otap-df-core-nodes
-        type: LogSamplingMetrics
-        field: filter_buffer_reclamation_failures
-        instrument: Counter
-        value_type: u64
-        source: crates/core-nodes/src/processors/log_sampling_processor/metrics.rs
-        temporality: delta
-      wire:
-        scope_name: processor.log_sampling.pdata
-        metric_name: filter.buffer.reclamation.failures
 - name: processor.log_sampling.pdata.filtering.errors
   brief: Errors encountered while filtering OTAP batches.
   instrument: counter
@@ -41,17 +30,6 @@ metrics:
       metric_value_type: int
     otap_dataflow:
       metric_set: processor.log_sampling.pdata
-      rust:
-        package: otap-df-core-nodes
-        type: LogSamplingMetrics
-        field: filtering_errors
-        instrument: Counter
-        value_type: u64
-        source: crates/core-nodes/src/processors/log_sampling_processor/metrics.rs
-        temporality: delta
-      wire:
-        scope_name: processor.log_sampling.pdata
-        metric_name: filtering.errors
 - name: processor.log_sampling.pdata.log.signals.consumed
   brief: Total log records received by the processor.
   instrument: counter
@@ -67,17 +45,6 @@ metrics:
       metric_value_type: int
     otap_dataflow:
       metric_set: processor.log_sampling.pdata
-      rust:
-        package: otap-df-core-nodes
-        type: LogSamplingMetrics
-        field: log_signals_consumed
-        instrument: Counter
-        value_type: u64
-        source: crates/core-nodes/src/processors/log_sampling_processor/metrics.rs
-        temporality: delta
-      wire:
-        scope_name: processor.log_sampling.pdata
-        metric_name: log.signals.consumed
 - name: processor.log_sampling.pdata.log.signals.dropped
   brief: Log records dropped by sampling.
   instrument: counter
@@ -93,14 +60,3 @@ metrics:
       metric_value_type: int
     otap_dataflow:
       metric_set: processor.log_sampling.pdata
-      rust:
-        package: otap-df-core-nodes
-        type: LogSamplingMetrics
-        field: log_signals_dropped
-        instrument: Counter
-        value_type: u64
-        source: crates/core-nodes/src/processors/log_sampling_processor/metrics.rs
-        temporality: delta
-      wire:
-        scope_name: processor.log_sampling.pdata
-        metric_name: log.signals.dropped

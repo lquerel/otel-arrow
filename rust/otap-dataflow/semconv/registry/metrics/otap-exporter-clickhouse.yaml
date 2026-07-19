@@ -15,18 +15,6 @@ metrics:
       metric_value_type: int
     otap_dataflow:
       metric_set: otap.exporter.clickhouse
-      rust:
-        package: otap-df-contrib-nodes
-        type: ClickhouseExporterMetrics
-        field: log_rows_written
-        instrument: Counter
-        value_type: u64
-        source: crates/contrib-nodes/src/exporters/clickhouse_exporter/metrics.rs
-        temporality: delta
-        availability: feature = "clickhouse-exporter"
-      wire:
-        scope_name: otap.exporter.clickhouse
-        metric_name: log.rows.written
 - name: otap.exporter.clickhouse.trace.rows.written
   brief: Total number of trace rows written successfully into clickhouse
   instrument: counter
@@ -42,15 +30,3 @@ metrics:
       metric_value_type: int
     otap_dataflow:
       metric_set: otap.exporter.clickhouse
-      rust:
-        package: otap-df-contrib-nodes
-        type: ClickhouseExporterMetrics
-        field: trace_rows_written
-        instrument: Counter
-        value_type: u64
-        source: crates/contrib-nodes/src/exporters/clickhouse_exporter/metrics.rs
-        temporality: delta
-        availability: feature = "clickhouse-exporter"
-      wire:
-        scope_name: otap.exporter.clickhouse
-        metric_name: trace.rows.written

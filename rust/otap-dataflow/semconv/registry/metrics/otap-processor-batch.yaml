@@ -15,17 +15,6 @@ metrics:
       metric_value_type: int
     otap_dataflow:
       metric_set: otap.processor.batch
-      rust:
-        package: otap-df-core-nodes
-        type: BatchProcessorMetrics
-        field: batching_errors
-        instrument: Counter
-        value_type: u64
-        source: crates/core-nodes/src/processors/batch_processor/mod.rs
-        temporality: delta
-      wire:
-        scope_name: otap.processor.batch
-        metric_name: batching.errors
 - name: otap.processor.batch.consumed.batches.logs
   brief: Total batches consumed for logs signal
   instrument: counter
@@ -41,17 +30,6 @@ metrics:
       metric_value_type: int
     otap_dataflow:
       metric_set: otap.processor.batch
-      rust:
-        package: otap-df-core-nodes
-        type: BatchProcessorMetrics
-        field: consumed_batches_logs
-        instrument: Counter
-        value_type: u64
-        source: crates/core-nodes/src/processors/batch_processor/mod.rs
-        temporality: delta
-      wire:
-        scope_name: otap.processor.batch
-        metric_name: consumed.batches.logs
 - name: otap.processor.batch.consumed.batches.metrics
   brief: Total batches consumed for metrics signal
   instrument: counter
@@ -67,17 +45,6 @@ metrics:
       metric_value_type: int
     otap_dataflow:
       metric_set: otap.processor.batch
-      rust:
-        package: otap-df-core-nodes
-        type: BatchProcessorMetrics
-        field: consumed_batches_metrics
-        instrument: Counter
-        value_type: u64
-        source: crates/core-nodes/src/processors/batch_processor/mod.rs
-        temporality: delta
-      wire:
-        scope_name: otap.processor.batch
-        metric_name: consumed.batches.metrics
 - name: otap.processor.batch.consumed.batches.traces
   brief: Total batches consumed for traces signal
   instrument: counter
@@ -93,17 +60,6 @@ metrics:
       metric_value_type: int
     otap_dataflow:
       metric_set: otap.processor.batch
-      rust:
-        package: otap-df-core-nodes
-        type: BatchProcessorMetrics
-        field: consumed_batches_traces
-        instrument: Counter
-        value_type: u64
-        source: crates/core-nodes/src/processors/batch_processor/mod.rs
-        temporality: delta
-      wire:
-        scope_name: otap.processor.batch
-        metric_name: consumed.batches.traces
 - name: otap.processor.batch.dropped.conversion
   brief: Number of messages dropped due to conversion failures
   instrument: counter
@@ -119,17 +75,6 @@ metrics:
       metric_value_type: int
     otap_dataflow:
       metric_set: otap.processor.batch
-      rust:
-        package: otap-df-core-nodes
-        type: BatchProcessorMetrics
-        field: dropped_conversion
-        instrument: Counter
-        value_type: u64
-        source: crates/core-nodes/src/processors/batch_processor/mod.rs
-        temporality: delta
-      wire:
-        scope_name: otap.processor.batch
-        metric_name: dropped.conversion
 - name: otap.processor.batch.flush.age.duration
   brief: Time from first pending input arrival to actual flush start
   instrument: histogram
@@ -145,17 +90,6 @@ metrics:
       metric_value_type: double
     otap_dataflow:
       metric_set: otap.processor.batch
-      rust:
-        package: otap-df-core-nodes
-        type: BatchProcessorMetrics
-        field: flush_age_duration
-        instrument: Mmsc
-        value_type: f64
-        source: crates/core-nodes/src/processors/batch_processor/mod.rs
-        temporality: delta
-      wire:
-        scope_name: otap.processor.batch
-        metric_name: flush.age.duration
 - name: otap.processor.batch.flush.output.batches
   brief: Number of output batches emitted by each flush
   instrument: histogram
@@ -171,17 +105,6 @@ metrics:
       metric_value_type: double
     otap_dataflow:
       metric_set: otap.processor.batch
-      rust:
-        package: otap-df-core-nodes
-        type: BatchProcessorMetrics
-        field: flush_output_batches
-        instrument: Mmsc
-        value_type: f64
-        source: crates/core-nodes/src/processors/batch_processor/mod.rs
-        temporality: delta
-      wire:
-        scope_name: otap.processor.batch
-        metric_name: flush.output.batches
 - name: otap.processor.batch.flush.output.bytes
   brief: Number of bytes emitted by each flush when byte size is known
   instrument: histogram
@@ -197,17 +120,6 @@ metrics:
       metric_value_type: double
     otap_dataflow:
       metric_set: otap.processor.batch
-      rust:
-        package: otap-df-core-nodes
-        type: BatchProcessorMetrics
-        field: flush_output_bytes
-        instrument: Mmsc
-        value_type: f64
-        source: crates/core-nodes/src/processors/batch_processor/mod.rs
-        temporality: delta
-      wire:
-        scope_name: otap.processor.batch
-        metric_name: flush.output.bytes
 - name: otap.processor.batch.flush.pending.bytes
   brief: Number of bytes pending at flush time when byte size is known
   instrument: histogram
@@ -223,17 +135,6 @@ metrics:
       metric_value_type: double
     otap_dataflow:
       metric_set: otap.processor.batch
-      rust:
-        package: otap-df-core-nodes
-        type: BatchProcessorMetrics
-        field: flush_pending_bytes
-        instrument: Mmsc
-        value_type: f64
-        source: crates/core-nodes/src/processors/batch_processor/mod.rs
-        temporality: delta
-      wire:
-        scope_name: otap.processor.batch
-        metric_name: flush.pending.bytes
 - name: otap.processor.batch.flush.pending.requests
   brief: Number of input requests pending at flush time
   instrument: histogram
@@ -249,17 +150,6 @@ metrics:
       metric_value_type: double
     otap_dataflow:
       metric_set: otap.processor.batch
-      rust:
-        package: otap-df-core-nodes
-        type: BatchProcessorMetrics
-        field: flush_pending_requests
-        instrument: Mmsc
-        value_type: f64
-        source: crates/core-nodes/src/processors/batch_processor/mod.rs
-        temporality: delta
-      wire:
-        scope_name: otap.processor.batch
-        metric_name: flush.pending.requests
 - name: otap.processor.batch.flush.timer.lateness.duration
   brief: Delay between scheduled timer wakeup and actual timer flush start
   instrument: histogram
@@ -275,17 +165,6 @@ metrics:
       metric_value_type: double
     otap_dataflow:
       metric_set: otap.processor.batch
-      rust:
-        package: otap-df-core-nodes
-        type: BatchProcessorMetrics
-        field: flush_timer_lateness_duration
-        instrument: Mmsc
-        value_type: f64
-        source: crates/core-nodes/src/processors/batch_processor/mod.rs
-        temporality: delta
-      wire:
-        scope_name: otap.processor.batch
-        metric_name: flush.timer.lateness.duration
 - name: otap.processor.batch.flushes.size
   brief: Number of flushes triggered by size threshold (all signals)
   instrument: counter
@@ -301,17 +180,6 @@ metrics:
       metric_value_type: int
     otap_dataflow:
       metric_set: otap.processor.batch
-      rust:
-        package: otap-df-core-nodes
-        type: BatchProcessorMetrics
-        field: flushes_size
-        instrument: Counter
-        value_type: u64
-        source: crates/core-nodes/src/processors/batch_processor/mod.rs
-        temporality: delta
-      wire:
-        scope_name: otap.processor.batch
-        metric_name: flushes.size
 - name: otap.processor.batch.flushes.timer
   brief: Number of flushes triggered by timer (all signals)
   instrument: counter
@@ -327,17 +195,6 @@ metrics:
       metric_value_type: int
     otap_dataflow:
       metric_set: otap.processor.batch
-      rust:
-        package: otap-df-core-nodes
-        type: BatchProcessorMetrics
-        field: flushes_timer
-        instrument: Counter
-        value_type: u64
-        source: crates/core-nodes/src/processors/batch_processor/mod.rs
-        temporality: delta
-      wire:
-        scope_name: otap.processor.batch
-        metric_name: flushes.timer
 - name: otap.processor.batch.nacked.inbound.slots
   brief: Number of requests nacked due to inbound slot exhaustion
   instrument: counter
@@ -353,17 +210,6 @@ metrics:
       metric_value_type: int
     otap_dataflow:
       metric_set: otap.processor.batch
-      rust:
-        package: otap-df-core-nodes
-        type: BatchProcessorMetrics
-        field: nacked_inbound_slots
-        instrument: Counter
-        value_type: u64
-        source: crates/core-nodes/src/processors/batch_processor/mod.rs
-        temporality: delta
-      wire:
-        scope_name: otap.processor.batch
-        metric_name: nacked.inbound.slots
 - name: otap.processor.batch.nacked.outbound.slots
   brief: Number of requests nacked due to inbound slot exhaustion
   instrument: counter
@@ -379,17 +225,6 @@ metrics:
       metric_value_type: int
     otap_dataflow:
       metric_set: otap.processor.batch
-      rust:
-        package: otap-df-core-nodes
-        type: BatchProcessorMetrics
-        field: nacked_outbound_slots
-        instrument: Counter
-        value_type: u64
-        source: crates/core-nodes/src/processors/batch_processor/mod.rs
-        temporality: delta
-      wire:
-        scope_name: otap.processor.batch
-        metric_name: nacked.outbound.slots
 - name: otap.processor.batch.produced.batches.logs
   brief: Total batches produced for logs signal
   instrument: counter
@@ -405,17 +240,6 @@ metrics:
       metric_value_type: int
     otap_dataflow:
       metric_set: otap.processor.batch
-      rust:
-        package: otap-df-core-nodes
-        type: BatchProcessorMetrics
-        field: produced_batches_logs
-        instrument: Counter
-        value_type: u64
-        source: crates/core-nodes/src/processors/batch_processor/mod.rs
-        temporality: delta
-      wire:
-        scope_name: otap.processor.batch
-        metric_name: produced.batches.logs
 - name: otap.processor.batch.produced.batches.metrics
   brief: Total batches produced for metrics signal
   instrument: counter
@@ -431,17 +255,6 @@ metrics:
       metric_value_type: int
     otap_dataflow:
       metric_set: otap.processor.batch
-      rust:
-        package: otap-df-core-nodes
-        type: BatchProcessorMetrics
-        field: produced_batches_metrics
-        instrument: Counter
-        value_type: u64
-        source: crates/core-nodes/src/processors/batch_processor/mod.rs
-        temporality: delta
-      wire:
-        scope_name: otap.processor.batch
-        metric_name: produced.batches.metrics
 - name: otap.processor.batch.produced.batches.traces
   brief: Total batches produced for traces signal
   instrument: counter
@@ -457,14 +270,3 @@ metrics:
       metric_value_type: int
     otap_dataflow:
       metric_set: otap.processor.batch
-      rust:
-        package: otap-df-core-nodes
-        type: BatchProcessorMetrics
-        field: produced_batches_traces
-        instrument: Counter
-        value_type: u64
-        source: crates/core-nodes/src/processors/batch_processor/mod.rs
-        temporality: delta
-      wire:
-        scope_name: otap.processor.batch
-        metric_name: produced.batches.traces

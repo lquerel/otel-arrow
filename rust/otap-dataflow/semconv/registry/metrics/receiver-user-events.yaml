@@ -15,18 +15,6 @@ metrics:
       metric_value_type: int
     otap_dataflow:
       metric_set: receiver.user_events
-      rust:
-        package: otap-df-contrib-nodes
-        type: UserEventsReceiverMetrics
-        field: downstream_send_blocked_ns
-        instrument: Counter
-        value_type: u64
-        source: crates/contrib-nodes/src/receivers/user_events_receiver/metrics.rs
-        temporality: delta
-        availability: all (feature = "user_events-receiver" , target_os = "linux")
-      wire:
-        scope_name: receiver.user_events
-        metric_name: downstream.send.blocked.ns
 - name: receiver.user_events.dropped.memory.pressure
   brief: Number of samples dropped due to process-wide memory pressure.
   instrument: counter
@@ -42,18 +30,6 @@ metrics:
       metric_value_type: int
     otap_dataflow:
       metric_set: receiver.user_events
-      rust:
-        package: otap-df-contrib-nodes
-        type: UserEventsReceiverMetrics
-        field: dropped_memory_pressure
-        instrument: Counter
-        value_type: u64
-        source: crates/contrib-nodes/src/receivers/user_events_receiver/metrics.rs
-        temporality: delta
-        availability: all (feature = "user_events-receiver" , target_os = "linux")
-      wire:
-        scope_name: receiver.user_events
-        metric_name: dropped.memory.pressure
 - name: receiver.user_events.dropped.no.subscription
   brief: Number of samples dropped because no matching subscription was found.
   instrument: counter
@@ -69,18 +45,6 @@ metrics:
       metric_value_type: int
     otap_dataflow:
       metric_set: receiver.user_events
-      rust:
-        package: otap-df-contrib-nodes
-        type: UserEventsReceiverMetrics
-        field: dropped_no_subscription
-        instrument: Counter
-        value_type: u64
-        source: crates/contrib-nodes/src/receivers/user_events_receiver/metrics.rs
-        temporality: delta
-        availability: all (feature = "user_events-receiver" , target_os = "linux")
-      wire:
-        scope_name: receiver.user_events
-        metric_name: dropped.no.subscription
 - name: receiver.user_events.dropped.pending.overflow
   brief: Number of samples dropped before allocation because the adapter pending queue
     reached its configured event or byte cap.
@@ -97,18 +61,6 @@ metrics:
       metric_value_type: int
     otap_dataflow:
       metric_set: receiver.user_events
-      rust:
-        package: otap-df-contrib-nodes
-        type: UserEventsReceiverMetrics
-        field: dropped_pending_overflow
-        instrument: Counter
-        value_type: u64
-        source: crates/contrib-nodes/src/receivers/user_events_receiver/metrics.rs
-        temporality: delta
-        availability: all (feature = "user_events-receiver" , target_os = "linux")
-      wire:
-        scope_name: receiver.user_events
-        metric_name: dropped.pending.overflow
 - name: receiver.user_events.dropped.send.error
   brief: Number of records dropped because a downstream send failed.
   instrument: counter
@@ -124,18 +76,6 @@ metrics:
       metric_value_type: int
     otap_dataflow:
       metric_set: receiver.user_events
-      rust:
-        package: otap-df-contrib-nodes
-        type: UserEventsReceiverMetrics
-        field: dropped_send_error
-        instrument: Counter
-        value_type: u64
-        source: crates/contrib-nodes/src/receivers/user_events_receiver/metrics.rs
-        temporality: delta
-        availability: all (feature = "user_events-receiver" , target_os = "linux")
-      wire:
-        scope_name: receiver.user_events
-        metric_name: dropped.send.error
 - name: receiver.user_events.flushed.batches
   brief: Number of Arrow batches flushed downstream.
   instrument: counter
@@ -151,18 +91,6 @@ metrics:
       metric_value_type: int
     otap_dataflow:
       metric_set: receiver.user_events
-      rust:
-        package: otap-df-contrib-nodes
-        type: UserEventsReceiverMetrics
-        field: flushed_batches
-        instrument: Counter
-        value_type: u64
-        source: crates/contrib-nodes/src/receivers/user_events_receiver/metrics.rs
-        temporality: delta
-        availability: all (feature = "user_events-receiver" , target_os = "linux")
-      wire:
-        scope_name: receiver.user_events
-        metric_name: flushed.batches
 - name: receiver.user_events.forwarded.samples
   brief: Number of perf samples forwarded downstream.
   instrument: counter
@@ -178,18 +106,6 @@ metrics:
       metric_value_type: int
     otap_dataflow:
       metric_set: receiver.user_events
-      rust:
-        package: otap-df-contrib-nodes
-        type: UserEventsReceiverMetrics
-        field: forwarded_samples
-        instrument: Counter
-        value_type: u64
-        source: crates/contrib-nodes/src/receivers/user_events_receiver/metrics.rs
-        temporality: delta
-        availability: all (feature = "user_events-receiver" , target_os = "linux")
-      wire:
-        scope_name: receiver.user_events
-        metric_name: forwarded.samples
 - name: receiver.user_events.late.registration.retries
   brief: Number of late-registration retries attempted while waiting for tracepoints.
   instrument: counter
@@ -205,18 +121,6 @@ metrics:
       metric_value_type: int
     otap_dataflow:
       metric_set: receiver.user_events
-      rust:
-        package: otap-df-contrib-nodes
-        type: UserEventsReceiverMetrics
-        field: late_registration_retries
-        instrument: Counter
-        value_type: u64
-        source: crates/contrib-nodes/src/receivers/user_events_receiver/metrics.rs
-        temporality: delta
-        availability: all (feature = "user_events-receiver" , target_os = "linux")
-      wire:
-        scope_name: receiver.user_events
-        metric_name: late.registration.retries
 - name: receiver.user_events.lost.perf.samples
   brief: Number of lost samples reported by the perf ring.
   instrument: counter
@@ -232,18 +136,6 @@ metrics:
       metric_value_type: int
     otap_dataflow:
       metric_set: receiver.user_events
-      rust:
-        package: otap-df-contrib-nodes
-        type: UserEventsReceiverMetrics
-        field: lost_perf_samples
-        instrument: Counter
-        value_type: u64
-        source: crates/contrib-nodes/src/receivers/user_events_receiver/metrics.rs
-        temporality: delta
-        availability: all (feature = "user_events-receiver" , target_os = "linux")
-      wire:
-        scope_name: receiver.user_events
-        metric_name: lost.perf.samples
 - name: receiver.user_events.received.samples
   brief: Number of perf samples received from the kernel ring.
   instrument: counter
@@ -259,18 +151,6 @@ metrics:
       metric_value_type: int
     otap_dataflow:
       metric_set: receiver.user_events
-      rust:
-        package: otap-df-contrib-nodes
-        type: UserEventsReceiverMetrics
-        field: received_samples
-        instrument: Counter
-        value_type: u64
-        source: crates/contrib-nodes/src/receivers/user_events_receiver/metrics.rs
-        temporality: delta
-        availability: all (feature = "user_events-receiver" , target_os = "linux")
-      wire:
-        scope_name: receiver.user_events
-        metric_name: received.samples
 - name: receiver.user_events.sessions.started
   brief: Number of receiver sessions successfully started.
   instrument: counter
@@ -286,15 +166,3 @@ metrics:
       metric_value_type: int
     otap_dataflow:
       metric_set: receiver.user_events
-      rust:
-        package: otap-df-contrib-nodes
-        type: UserEventsReceiverMetrics
-        field: sessions_started
-        instrument: Counter
-        value_type: u64
-        source: crates/contrib-nodes/src/receivers/user_events_receiver/metrics.rs
-        temporality: delta
-        availability: all (feature = "user_events-receiver" , target_os = "linux")
-      wire:
-        scope_name: receiver.user_events
-        metric_name: sessions.started

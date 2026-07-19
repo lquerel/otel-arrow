@@ -13,16 +13,6 @@ metrics:
       metric_value_type: int
     otap_dataflow:
       metric_set: controller.monitor
-      rust:
-        package: otap-df-controller
-        type: ControllerMonitorMetrics
-        field: observed_pipelines_live
-        instrument: Gauge
-        value_type: u64
-        source: crates/controller/src/controller_monitor.rs
-      wire:
-        scope_name: controller.monitor
-        metric_name: observed_pipelines.live
 - name: controller.monitor.observed_pipelines.ready
   brief: Observed logical pipelines currently considered ready.
   instrument: gauge
@@ -36,16 +26,6 @@ metrics:
       metric_value_type: int
     otap_dataflow:
       metric_set: controller.monitor
-      rust:
-        package: otap-df-controller
-        type: ControllerMonitorMetrics
-        field: observed_pipelines_ready
-        instrument: Gauge
-        value_type: u64
-        source: crates/controller/src/controller_monitor.rs
-      wire:
-        scope_name: controller.monitor
-        metric_name: observed_pipelines.ready
 - name: controller.monitor.observed_pipelines.total
   brief: Observed logical pipelines currently tracked by the controller.
   instrument: gauge
@@ -59,16 +39,6 @@ metrics:
       metric_value_type: int
     otap_dataflow:
       metric_set: controller.monitor
-      rust:
-        package: otap-df-controller
-        type: ControllerMonitorMetrics
-        field: observed_pipelines_total
-        instrument: Gauge
-        value_type: u64
-        source: crates/controller/src/controller_monitor.rs
-      wire:
-        scope_name: controller.monitor
-        metric_name: observed_pipelines.total
 - name: controller.monitor.telemetry.entities
   brief: Registered telemetry entities visible to the controller monitor.
   instrument: gauge
@@ -82,16 +52,6 @@ metrics:
       metric_value_type: int
     otap_dataflow:
       metric_set: controller.monitor
-      rust:
-        package: otap-df-controller
-        type: ControllerMonitorMetrics
-        field: telemetry_entities
-        instrument: Gauge
-        value_type: u64
-        source: crates/controller/src/controller_monitor.rs
-      wire:
-        scope_name: controller.monitor
-        metric_name: telemetry.entities
 - name: controller.monitor.telemetry.metric_sets
   brief: Registered telemetry metric sets visible to the controller monitor.
   instrument: gauge
@@ -105,13 +65,3 @@ metrics:
       metric_value_type: int
     otap_dataflow:
       metric_set: controller.monitor
-      rust:
-        package: otap-df-controller
-        type: ControllerMonitorMetrics
-        field: telemetry_metric_sets
-        instrument: Gauge
-        value_type: u64
-        source: crates/controller/src/controller_monitor.rs
-      wire:
-        scope_name: controller.monitor
-        metric_name: telemetry.metric_sets

@@ -15,17 +15,6 @@ metrics:
       metric_value_type: int
     otap_dataflow:
       metric_set: exporter.perf.pdata
-      rust:
-        package: otap-df-core-nodes
-        type: PerfExporterPdataMetrics
-        field: invalid_batches
-        instrument: Counter
-        value_type: u64
-        source: crates/core-nodes/src/exporters/perf_exporter/metrics.rs
-        temporality: delta
-      wire:
-        scope_name: exporter.perf.pdata
-        metric_name: invalid.batches
 - name: exporter.perf.pdata.logs
   brief: Number of logs received.
   instrument: counter
@@ -41,17 +30,6 @@ metrics:
       metric_value_type: int
     otap_dataflow:
       metric_set: exporter.perf.pdata
-      rust:
-        package: otap-df-core-nodes
-        type: PerfExporterPdataMetrics
-        field: logs
-        instrument: Counter
-        value_type: u64
-        source: crates/core-nodes/src/exporters/perf_exporter/metrics.rs
-        temporality: delta
-      wire:
-        scope_name: exporter.perf.pdata
-        metric_name: logs
 - name: exporter.perf.pdata.metrics
   brief: Number of metrics received.
   instrument: counter
@@ -67,17 +45,6 @@ metrics:
       metric_value_type: int
     otap_dataflow:
       metric_set: exporter.perf.pdata
-      rust:
-        package: otap-df-core-nodes
-        type: PerfExporterPdataMetrics
-        field: metrics
-        instrument: Counter
-        value_type: u64
-        source: crates/core-nodes/src/exporters/perf_exporter/metrics.rs
-        temporality: delta
-      wire:
-        scope_name: exporter.perf.pdata
-        metric_name: metrics
 - name: exporter.perf.pdata.spans
   brief: Number of spans received.
   instrument: counter
@@ -93,14 +60,3 @@ metrics:
       metric_value_type: int
     otap_dataflow:
       metric_set: exporter.perf.pdata
-      rust:
-        package: otap-df-core-nodes
-        type: PerfExporterPdataMetrics
-        field: spans
-        instrument: Counter
-        value_type: u64
-        source: crates/core-nodes/src/exporters/perf_exporter/metrics.rs
-        temporality: delta
-      wire:
-        scope_name: exporter.perf.pdata
-        metric_name: spans

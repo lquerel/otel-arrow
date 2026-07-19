@@ -15,18 +15,6 @@ metrics:
       metric_value_type: int
     otap_dataflow:
       metric_set: processor.resource_validator
-      rust:
-        package: otap-df-contrib-nodes
-        type: ResourceValidatorMetrics
-        field: batches_accepted
-        instrument: Counter
-        value_type: u64
-        source: crates/contrib-nodes/src/processors/resource_validator_processor/metrics.rs
-        temporality: delta
-        availability: feature = "resource-validator-processor"
-      wire:
-        scope_name: processor.resource_validator
-        metric_name: batches.accepted
 - name: processor.resource_validator.batches.rejected.conversion.error
   brief: Number of batches rejected due to internal conversion error
   instrument: counter
@@ -42,18 +30,6 @@ metrics:
       metric_value_type: int
     otap_dataflow:
       metric_set: processor.resource_validator
-      rust:
-        package: otap-df-contrib-nodes
-        type: ResourceValidatorMetrics
-        field: batches_rejected_conversion_error
-        instrument: Counter
-        value_type: u64
-        source: crates/contrib-nodes/src/processors/resource_validator_processor/metrics.rs
-        temporality: delta
-        availability: feature = "resource-validator-processor"
-      wire:
-        scope_name: processor.resource_validator
-        metric_name: batches.rejected.conversion.error
 - name: processor.resource_validator.batches.rejected.invalid.type
   brief: Number of batches rejected due to invalid attribute type (not a string)
   instrument: counter
@@ -69,18 +45,6 @@ metrics:
       metric_value_type: int
     otap_dataflow:
       metric_set: processor.resource_validator
-      rust:
-        package: otap-df-contrib-nodes
-        type: ResourceValidatorMetrics
-        field: batches_rejected_invalid_type
-        instrument: Counter
-        value_type: u64
-        source: crates/contrib-nodes/src/processors/resource_validator_processor/metrics.rs
-        temporality: delta
-        availability: feature = "resource-validator-processor"
-      wire:
-        scope_name: processor.resource_validator
-        metric_name: batches.rejected.invalid.type
 - name: processor.resource_validator.batches.rejected.missing
   brief: Number of batches rejected due to missing required attribute
   instrument: counter
@@ -96,18 +60,6 @@ metrics:
       metric_value_type: int
     otap_dataflow:
       metric_set: processor.resource_validator
-      rust:
-        package: otap-df-contrib-nodes
-        type: ResourceValidatorMetrics
-        field: batches_rejected_missing
-        instrument: Counter
-        value_type: u64
-        source: crates/contrib-nodes/src/processors/resource_validator_processor/metrics.rs
-        temporality: delta
-        availability: feature = "resource-validator-processor"
-      wire:
-        scope_name: processor.resource_validator
-        metric_name: batches.rejected.missing
 - name: processor.resource_validator.batches.rejected.not.allowed
   brief: Number of batches rejected due to value not in allowed list
   instrument: counter
@@ -123,18 +75,6 @@ metrics:
       metric_value_type: int
     otap_dataflow:
       metric_set: processor.resource_validator
-      rust:
-        package: otap-df-contrib-nodes
-        type: ResourceValidatorMetrics
-        field: batches_rejected_not_allowed
-        instrument: Counter
-        value_type: u64
-        source: crates/contrib-nodes/src/processors/resource_validator_processor/metrics.rs
-        temporality: delta
-        availability: feature = "resource-validator-processor"
-      wire:
-        scope_name: processor.resource_validator
-        metric_name: batches.rejected.not.allowed
 - name: processor.resource_validator.items.accepted
   brief: Number of telemetry items accepted
   instrument: counter
@@ -150,18 +90,6 @@ metrics:
       metric_value_type: int
     otap_dataflow:
       metric_set: processor.resource_validator
-      rust:
-        package: otap-df-contrib-nodes
-        type: ResourceValidatorMetrics
-        field: items_accepted
-        instrument: Counter
-        value_type: u64
-        source: crates/contrib-nodes/src/processors/resource_validator_processor/metrics.rs
-        temporality: delta
-        availability: feature = "resource-validator-processor"
-      wire:
-        scope_name: processor.resource_validator
-        metric_name: items.accepted
 - name: processor.resource_validator.items.rejected
   brief: Number of telemetry items rejected
   instrument: counter
@@ -177,15 +105,3 @@ metrics:
       metric_value_type: int
     otap_dataflow:
       metric_set: processor.resource_validator
-      rust:
-        package: otap-df-contrib-nodes
-        type: ResourceValidatorMetrics
-        field: items_rejected
-        instrument: Counter
-        value_type: u64
-        source: crates/contrib-nodes/src/processors/resource_validator_processor/metrics.rs
-        temporality: delta
-        availability: feature = "resource-validator-processor"
-      wire:
-        scope_name: processor.resource_validator
-        metric_name: items.rejected

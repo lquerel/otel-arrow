@@ -16,18 +16,6 @@ metrics:
       metric_value_type: int
     otap_dataflow:
       metric_set: receiver.etw
-      rust:
-        package: otap-df-contrib-nodes
-        type: EtwReceiverMetrics
-        field: kernel_buffers_written
-        instrument: Counter
-        value_type: u64
-        source: crates/contrib-nodes/src/receivers/etw_receiver/mod.rs
-        temporality: delta
-        availability: all (feature = "etw-receiver" , target_os = "windows")
-      wire:
-        scope_name: receiver.etw
-        metric_name: kernel.buffers.written
 - name: receiver.etw.kernel.log.buffers.lost
   brief: Log buffers that could not be flushed, from `TraceStats::log_buffers_lost`.
   instrument: counter
@@ -43,18 +31,6 @@ metrics:
       metric_value_type: int
     otap_dataflow:
       metric_set: receiver.etw
-      rust:
-        package: otap-df-contrib-nodes
-        type: EtwReceiverMetrics
-        field: kernel_log_buffers_lost
-        instrument: Counter
-        value_type: u64
-        source: crates/contrib-nodes/src/receivers/etw_receiver/mod.rs
-        temporality: delta
-        availability: all (feature = "etw-receiver" , target_os = "windows")
-      wire:
-        scope_name: receiver.etw
-        metric_name: kernel.log.buffers.lost
 - name: receiver.etw.kernel.real.time.buffers.lost
   brief: Real-time delivery buffers lost because the consumer could not drain the
     ETW real-time buffers fast enough, from `TraceStats::real_time_buffers_lost`.
@@ -71,18 +47,6 @@ metrics:
       metric_value_type: int
     otap_dataflow:
       metric_set: receiver.etw
-      rust:
-        package: otap-df-contrib-nodes
-        type: EtwReceiverMetrics
-        field: kernel_real_time_buffers_lost
-        instrument: Counter
-        value_type: u64
-        source: crates/contrib-nodes/src/receivers/etw_receiver/mod.rs
-        temporality: delta
-        availability: all (feature = "etw-receiver" , target_os = "windows")
-      wire:
-        scope_name: receiver.etw
-        metric_name: kernel.real.time.buffers.lost
 - name: receiver.etw.received.events.dropped.slow.worker
   brief: Events dropped because the consuming worker (this core's async receiver loop)
     couldn't drain the internal channel fast enough (the ETW consumer thread filled
@@ -100,18 +64,6 @@ metrics:
       metric_value_type: int
     otap_dataflow:
       metric_set: receiver.etw
-      rust:
-        package: otap-df-contrib-nodes
-        type: EtwReceiverMetrics
-        field: received_events_dropped_slow_worker
-        instrument: Counter
-        value_type: u64
-        source: crates/contrib-nodes/src/receivers/etw_receiver/mod.rs
-        temporality: delta
-        availability: all (feature = "etw-receiver" , target_os = "windows")
-      wire:
-        scope_name: receiver.etw
-        metric_name: received.events.dropped.slow.worker
 - name: receiver.etw.received.events.forward.failed
   brief: Number of ETW events that could not be forwarded downstream and were therefore
     dropped. Counts both batch `build()` failures (an encoding bug) and send failures
@@ -129,18 +81,6 @@ metrics:
       metric_value_type: int
     otap_dataflow:
       metric_set: receiver.etw
-      rust:
-        package: otap-df-contrib-nodes
-        type: EtwReceiverMetrics
-        field: received_events_forward_failed
-        instrument: Counter
-        value_type: u64
-        source: crates/contrib-nodes/src/receivers/etw_receiver/mod.rs
-        temporality: delta
-        availability: all (feature = "etw-receiver" , target_os = "windows")
-      wire:
-        scope_name: receiver.etw
-        metric_name: received.events.forward.failed
 - name: receiver.etw.received.events.forwarded
   brief: Number of ETW events successfully forwarded downstream.
   instrument: counter
@@ -156,18 +96,6 @@ metrics:
       metric_value_type: int
     otap_dataflow:
       metric_set: receiver.etw
-      rust:
-        package: otap-df-contrib-nodes
-        type: EtwReceiverMetrics
-        field: received_events_forwarded
-        instrument: Counter
-        value_type: u64
-        source: crates/contrib-nodes/src/receivers/etw_receiver/mod.rs
-        temporality: delta
-        availability: all (feature = "etw-receiver" , target_os = "windows")
-      wire:
-        scope_name: receiver.etw
-        metric_name: received.events.forwarded
 - name: receiver.etw.received.events.invalid
   brief: Number of ETW events that failed to parse.
   instrument: counter
@@ -183,18 +111,6 @@ metrics:
       metric_value_type: int
     otap_dataflow:
       metric_set: receiver.etw
-      rust:
-        package: otap-df-contrib-nodes
-        type: EtwReceiverMetrics
-        field: received_events_invalid
-        instrument: Counter
-        value_type: u64
-        source: crates/contrib-nodes/src/receivers/etw_receiver/mod.rs
-        temporality: delta
-        availability: all (feature = "etw-receiver" , target_os = "windows")
-      wire:
-        scope_name: receiver.etw
-        metric_name: received.events.invalid
 - name: receiver.etw.received.events.lost.kernel
   brief: Events lost inside the kernel ETW buffers before `one_collect` ever saw them
     (buffer overrun), from `TraceStats::events_lost`. Distinct from `received_events_dropped_slow_worker`,
@@ -212,18 +128,6 @@ metrics:
       metric_value_type: int
     otap_dataflow:
       metric_set: receiver.etw
-      rust:
-        package: otap-df-contrib-nodes
-        type: EtwReceiverMetrics
-        field: received_events_lost_kernel
-        instrument: Counter
-        value_type: u64
-        source: crates/contrib-nodes/src/receivers/etw_receiver/mod.rs
-        temporality: delta
-        availability: all (feature = "etw-receiver" , target_os = "windows")
-      wire:
-        scope_name: receiver.etw
-        metric_name: received.events.lost.kernel
 - name: receiver.etw.received.events.rejected.memory.pressure
   brief: Number of ETW events dropped due to process-wide memory pressure.
   instrument: counter
@@ -239,18 +143,6 @@ metrics:
       metric_value_type: int
     otap_dataflow:
       metric_set: receiver.etw
-      rust:
-        package: otap-df-contrib-nodes
-        type: EtwReceiverMetrics
-        field: received_events_rejected_memory_pressure
-        instrument: Counter
-        value_type: u64
-        source: crates/contrib-nodes/src/receivers/etw_receiver/mod.rs
-        temporality: delta
-        availability: all (feature = "etw-receiver" , target_os = "windows")
-      wire:
-        scope_name: receiver.etw
-        metric_name: received.events.rejected.memory.pressure
 - name: receiver.etw.received.events.total
   brief: Total number of ETW events the session **produced** - counted on the producer
     (`ProcessTrace`) side before any channel send, including events about to be dropped
@@ -270,15 +162,3 @@ metrics:
       metric_value_type: int
     otap_dataflow:
       metric_set: receiver.etw
-      rust:
-        package: otap-df-contrib-nodes
-        type: EtwReceiverMetrics
-        field: received_events_total
-        instrument: Counter
-        value_type: u64
-        source: crates/contrib-nodes/src/receivers/etw_receiver/mod.rs
-        temporality: delta
-        availability: all (feature = "etw-receiver" , target_os = "windows")
-      wire:
-        scope_name: receiver.etw
-        metric_name: received.events.total

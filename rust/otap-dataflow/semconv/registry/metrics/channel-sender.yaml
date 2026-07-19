@@ -15,17 +15,6 @@ metrics:
       metric_value_type: int
     otap_dataflow:
       metric_set: channel.sender
-      rust:
-        package: otap-df-engine
-        type: ChannelSenderMetrics
-        field: send_count
-        instrument: Counter
-        value_type: u64
-        source: crates/engine/src/channel_metrics.rs
-        temporality: delta
-      wire:
-        scope_name: channel.sender
-        metric_name: send.count
 - name: channel.sender.send.error_closed
   brief: Count of send failures due to a closed channel.
   instrument: counter
@@ -41,17 +30,6 @@ metrics:
       metric_value_type: int
     otap_dataflow:
       metric_set: channel.sender
-      rust:
-        package: otap-df-engine
-        type: ChannelSenderMetrics
-        field: send_error_closed
-        instrument: Counter
-        value_type: u64
-        source: crates/engine/src/channel_metrics.rs
-        temporality: delta
-      wire:
-        scope_name: channel.sender
-        metric_name: send.error_closed
 - name: channel.sender.send.error_full
   brief: Count of send failures due to a full channel.
   instrument: counter
@@ -67,14 +45,3 @@ metrics:
       metric_value_type: int
     otap_dataflow:
       metric_set: channel.sender
-      rust:
-        package: otap-df-engine
-        type: ChannelSenderMetrics
-        field: send_error_full
-        instrument: Counter
-        value_type: u64
-        source: crates/engine/src/channel_metrics.rs
-        temporality: delta
-      wire:
-        scope_name: channel.sender
-        metric_name: send.error_full

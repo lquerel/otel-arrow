@@ -15,17 +15,6 @@ metrics:
       metric_value_type: int
     otap_dataflow:
       metric_set: otap.processor.durable_buffer
-      rust:
-        package: otap-df-core-nodes
-        type: DurableBufferMetrics
-        field: bundles_acked
-        instrument: Counter
-        value_type: u64
-        source: crates/core-nodes/src/processors/durable_buffer_processor/mod.rs
-        temporality: delta
-      wire:
-        scope_name: otap.processor.durable_buffer
-        metric_name: bundles.acked
 - name: otap.processor.durable_buffer.bundles.nacked.deferred
   brief: Number of bundles deferred for retry after transient downstream failures.
   instrument: counter
@@ -41,17 +30,6 @@ metrics:
       metric_value_type: int
     otap_dataflow:
       metric_set: otap.processor.durable_buffer
-      rust:
-        package: otap-df-core-nodes
-        type: DurableBufferMetrics
-        field: bundles_nacked_deferred
-        instrument: Counter
-        value_type: u64
-        source: crates/core-nodes/src/processors/durable_buffer_processor/mod.rs
-        temporality: delta
-      wire:
-        scope_name: otap.processor.durable_buffer
-        metric_name: bundles.nacked.deferred
 - name: otap.processor.durable_buffer.bundles.nacked.permanent
   brief: Number of bundles permanently rejected by downstream (not retried). These
     indicate data loss due to permanent failures (e.g., malformed data).
@@ -68,17 +46,6 @@ metrics:
       metric_value_type: int
     otap_dataflow:
       metric_set: otap.processor.durable_buffer
-      rust:
-        package: otap-df-core-nodes
-        type: DurableBufferMetrics
-        field: bundles_nacked_permanent
-        instrument: Counter
-        value_type: u64
-        source: crates/core-nodes/src/processors/durable_buffer_processor/mod.rs
-        temporality: delta
-      wire:
-        scope_name: otap.processor.durable_buffer
-        metric_name: bundles.nacked.permanent
 - name: otap.processor.durable_buffer.consumed.log.records
   brief: Number of log records consumed (ingested to durable storage). For OTLP bytes,
     counted by scanning the protobuf wire format without full deserialization.
@@ -95,17 +62,6 @@ metrics:
       metric_value_type: int
     otap_dataflow:
       metric_set: otap.processor.durable_buffer
-      rust:
-        package: otap-df-core-nodes
-        type: DurableBufferMetrics
-        field: consumed_log_records
-        instrument: Counter
-        value_type: u64
-        source: crates/core-nodes/src/processors/durable_buffer_processor/mod.rs
-        temporality: delta
-      wire:
-        scope_name: otap.processor.durable_buffer
-        metric_name: consumed.log.records
 - name: otap.processor.durable_buffer.consumed.metric.points
   brief: Number of metric data points consumed (ingested to durable storage). For
     OTLP bytes, counted by scanning the protobuf wire format without full deserialization.
@@ -122,17 +78,6 @@ metrics:
       metric_value_type: int
     otap_dataflow:
       metric_set: otap.processor.durable_buffer
-      rust:
-        package: otap-df-core-nodes
-        type: DurableBufferMetrics
-        field: consumed_metric_points
-        instrument: Counter
-        value_type: u64
-        source: crates/core-nodes/src/processors/durable_buffer_processor/mod.rs
-        temporality: delta
-      wire:
-        scope_name: otap.processor.durable_buffer
-        metric_name: consumed.metric.points
 - name: otap.processor.durable_buffer.consumed.spans
   brief: Number of spans consumed (ingested to durable storage). For OTLP bytes, counted
     by scanning the protobuf wire format without full deserialization.
@@ -149,17 +94,6 @@ metrics:
       metric_value_type: int
     otap_dataflow:
       metric_set: otap.processor.durable_buffer
-      rust:
-        package: otap-df-core-nodes
-        type: DurableBufferMetrics
-        field: consumed_spans
-        instrument: Counter
-        value_type: u64
-        source: crates/core-nodes/src/processors/durable_buffer_processor/mod.rs
-        temporality: delta
-      wire:
-        scope_name: otap.processor.durable_buffer
-        metric_name: consumed.spans
 - name: otap.processor.durable_buffer.dropped.bundles
   brief: Total bundles lost due to force-dropped segments (DropOldest policy). Non-zero
     values indicate data loss.
@@ -176,17 +110,7 @@ metrics:
       metric_value_type: int
     otap_dataflow:
       metric_set: otap.processor.durable_buffer
-      rust:
-        package: otap-df-core-nodes
-        type: DurableBufferMetrics
-        field: dropped_bundles
-        instrument: ObserveCounter
-        value_type: u64
-        source: crates/core-nodes/src/processors/durable_buffer_processor/mod.rs
-        temporality: cumulative
-      wire:
-        scope_name: otap.processor.durable_buffer
-        metric_name: dropped.bundles
+      recording: observed
 - name: otap.processor.durable_buffer.dropped.items
   brief: Total individual items (log records, data points, spans) lost due to force-dropped
     segments (DropOldest policy). Non-zero values indicate data loss.
@@ -203,17 +127,7 @@ metrics:
       metric_value_type: int
     otap_dataflow:
       metric_set: otap.processor.durable_buffer
-      rust:
-        package: otap-df-core-nodes
-        type: DurableBufferMetrics
-        field: dropped_items
-        instrument: ObserveCounter
-        value_type: u64
-        source: crates/core-nodes/src/processors/durable_buffer_processor/mod.rs
-        temporality: cumulative
-      wire:
-        scope_name: otap.processor.durable_buffer
-        metric_name: dropped.items
+      recording: observed
 - name: otap.processor.durable_buffer.dropped.log.records
   brief: Log records lost due to force-dropped segments (DropOldest policy).
   instrument: counter
@@ -229,17 +143,6 @@ metrics:
       metric_value_type: int
     otap_dataflow:
       metric_set: otap.processor.durable_buffer
-      rust:
-        package: otap-df-core-nodes
-        type: DurableBufferMetrics
-        field: dropped_log_records
-        instrument: Counter
-        value_type: u64
-        source: crates/core-nodes/src/processors/durable_buffer_processor/mod.rs
-        temporality: delta
-      wire:
-        scope_name: otap.processor.durable_buffer
-        metric_name: dropped.log.records
 - name: otap.processor.durable_buffer.dropped.metric.datapoints
   brief: Metric data points lost due to force-dropped segments (DropOldest policy).
   instrument: counter
@@ -255,17 +158,6 @@ metrics:
       metric_value_type: int
     otap_dataflow:
       metric_set: otap.processor.durable_buffer
-      rust:
-        package: otap-df-core-nodes
-        type: DurableBufferMetrics
-        field: dropped_metric_datapoints
-        instrument: Counter
-        value_type: u64
-        source: crates/core-nodes/src/processors/durable_buffer_processor/mod.rs
-        temporality: delta
-      wire:
-        scope_name: otap.processor.durable_buffer
-        metric_name: dropped.metric.datapoints
 - name: otap.processor.durable_buffer.dropped.segments
   brief: Total segments force-dropped due to DropOldest retention policy. Non-zero
     values indicate data loss.
@@ -282,17 +174,7 @@ metrics:
       metric_value_type: int
     otap_dataflow:
       metric_set: otap.processor.durable_buffer
-      rust:
-        package: otap-df-core-nodes
-        type: DurableBufferMetrics
-        field: dropped_segments
-        instrument: ObserveCounter
-        value_type: u64
-        source: crates/core-nodes/src/processors/durable_buffer_processor/mod.rs
-        temporality: cumulative
-      wire:
-        scope_name: otap.processor.durable_buffer
-        metric_name: dropped.segments
+      recording: observed
 - name: otap.processor.durable_buffer.dropped.spans
   brief: Spans lost due to force-dropped segments (DropOldest policy).
   instrument: counter
@@ -308,17 +190,6 @@ metrics:
       metric_value_type: int
     otap_dataflow:
       metric_set: otap.processor.durable_buffer
-      rust:
-        package: otap-df-core-nodes
-        type: DurableBufferMetrics
-        field: dropped_spans
-        instrument: Counter
-        value_type: u64
-        source: crates/core-nodes/src/processors/durable_buffer_processor/mod.rs
-        temporality: delta
-      wire:
-        scope_name: otap.processor.durable_buffer
-        metric_name: dropped.spans
 - name: otap.processor.durable_buffer.expired.bundles
   brief: Total bundles lost due to expired segments (max_age retention). Non-zero
     values indicate data aged out before delivery.
@@ -335,17 +206,7 @@ metrics:
       metric_value_type: int
     otap_dataflow:
       metric_set: otap.processor.durable_buffer
-      rust:
-        package: otap-df-core-nodes
-        type: DurableBufferMetrics
-        field: expired_bundles
-        instrument: ObserveCounter
-        value_type: u64
-        source: crates/core-nodes/src/processors/durable_buffer_processor/mod.rs
-        temporality: cumulative
-      wire:
-        scope_name: otap.processor.durable_buffer
-        metric_name: expired.bundles
+      recording: observed
 - name: otap.processor.durable_buffer.expired.items
   brief: Total individual items (log records, data points, spans) lost due to expired
     segments (max_age retention). Non-zero values indicate data aged out before delivery.
@@ -362,17 +223,7 @@ metrics:
       metric_value_type: int
     otap_dataflow:
       metric_set: otap.processor.durable_buffer
-      rust:
-        package: otap-df-core-nodes
-        type: DurableBufferMetrics
-        field: expired_items
-        instrument: ObserveCounter
-        value_type: u64
-        source: crates/core-nodes/src/processors/durable_buffer_processor/mod.rs
-        temporality: cumulative
-      wire:
-        scope_name: otap.processor.durable_buffer
-        metric_name: expired.items
+      recording: observed
 - name: otap.processor.durable_buffer.expired.log.records
   brief: Log records lost due to expired segments (max_age retention).
   instrument: counter
@@ -388,17 +239,6 @@ metrics:
       metric_value_type: int
     otap_dataflow:
       metric_set: otap.processor.durable_buffer
-      rust:
-        package: otap-df-core-nodes
-        type: DurableBufferMetrics
-        field: expired_log_records
-        instrument: Counter
-        value_type: u64
-        source: crates/core-nodes/src/processors/durable_buffer_processor/mod.rs
-        temporality: delta
-      wire:
-        scope_name: otap.processor.durable_buffer
-        metric_name: expired.log.records
 - name: otap.processor.durable_buffer.expired.metric.datapoints
   brief: Metric data points lost due to expired segments (max_age retention).
   instrument: counter
@@ -414,17 +254,6 @@ metrics:
       metric_value_type: int
     otap_dataflow:
       metric_set: otap.processor.durable_buffer
-      rust:
-        package: otap-df-core-nodes
-        type: DurableBufferMetrics
-        field: expired_metric_datapoints
-        instrument: Counter
-        value_type: u64
-        source: crates/core-nodes/src/processors/durable_buffer_processor/mod.rs
-        temporality: delta
-      wire:
-        scope_name: otap.processor.durable_buffer
-        metric_name: expired.metric.datapoints
 - name: otap.processor.durable_buffer.expired.spans
   brief: Spans lost due to expired segments (max_age retention).
   instrument: counter
@@ -440,17 +269,6 @@ metrics:
       metric_value_type: int
     otap_dataflow:
       metric_set: otap.processor.durable_buffer
-      rust:
-        package: otap-df-core-nodes
-        type: DurableBufferMetrics
-        field: expired_spans
-        instrument: Counter
-        value_type: u64
-        source: crates/core-nodes/src/processors/durable_buffer_processor/mod.rs
-        temporality: delta
-      wire:
-        scope_name: otap.processor.durable_buffer
-        metric_name: expired.spans
 - name: otap.processor.durable_buffer.flush.failures
   brief: Number of segment finalization (flush) failures. Non-zero values indicate
     data at risk -- check logs for root cause. Data may still be recoverable via WAL
@@ -468,17 +286,6 @@ metrics:
       metric_value_type: int
     otap_dataflow:
       metric_set: otap.processor.durable_buffer
-      rust:
-        package: otap-df-core-nodes
-        type: DurableBufferMetrics
-        field: flush_failures
-        instrument: Counter
-        value_type: u64
-        source: crates/core-nodes/src/processors/durable_buffer_processor/mod.rs
-        temporality: delta
-      wire:
-        scope_name: otap.processor.durable_buffer
-        metric_name: flush.failures
 - name: otap.processor.durable_buffer.in.flight
   brief: Current number of bundles in-flight to downstream.
   instrument: gauge
@@ -494,16 +301,6 @@ metrics:
       metric_value_type: int
     otap_dataflow:
       metric_set: otap.processor.durable_buffer
-      rust:
-        package: otap-df-core-nodes
-        type: DurableBufferMetrics
-        field: in_flight
-        instrument: Gauge
-        value_type: u64
-        source: crates/core-nodes/src/processors/durable_buffer_processor/mod.rs
-      wire:
-        scope_name: otap.processor.durable_buffer
-        metric_name: in.flight
 - name: otap.processor.durable_buffer.ingest.backpressure
   brief: Number of ingest rejections due to storage backpressure (soft cap exceeded).
   instrument: counter
@@ -519,17 +316,6 @@ metrics:
       metric_value_type: int
     otap_dataflow:
       metric_set: otap.processor.durable_buffer
-      rust:
-        package: otap-df-core-nodes
-        type: DurableBufferMetrics
-        field: ingest_backpressure
-        instrument: Counter
-        value_type: u64
-        source: crates/core-nodes/src/processors/durable_buffer_processor/mod.rs
-        temporality: delta
-      wire:
-        scope_name: otap.processor.durable_buffer
-        metric_name: ingest.backpressure
 - name: otap.processor.durable_buffer.ingest.errors
   brief: Number of ingest errors (excludes backpressure/capacity rejections).
   instrument: counter
@@ -545,17 +331,6 @@ metrics:
       metric_value_type: int
     otap_dataflow:
       metric_set: otap.processor.durable_buffer
-      rust:
-        package: otap-df-core-nodes
-        type: DurableBufferMetrics
-        field: ingest_errors
-        instrument: Counter
-        value_type: u64
-        source: crates/core-nodes/src/processors/durable_buffer_processor/mod.rs
-        temporality: delta
-      wire:
-        scope_name: otap.processor.durable_buffer
-        metric_name: ingest.errors
 - name: otap.processor.durable_buffer.produced.log.records
   brief: Number of log records produced (sent downstream). For OTLP bytes, counted
     by scanning the protobuf wire format without full deserialization.
@@ -572,17 +347,6 @@ metrics:
       metric_value_type: int
     otap_dataflow:
       metric_set: otap.processor.durable_buffer
-      rust:
-        package: otap-df-core-nodes
-        type: DurableBufferMetrics
-        field: produced_log_records
-        instrument: Counter
-        value_type: u64
-        source: crates/core-nodes/src/processors/durable_buffer_processor/mod.rs
-        temporality: delta
-      wire:
-        scope_name: otap.processor.durable_buffer
-        metric_name: produced.log.records
 - name: otap.processor.durable_buffer.produced.metric.points
   brief: Number of metric data points produced (sent downstream). For OTLP bytes,
     counted by scanning the protobuf wire format without full deserialization.
@@ -599,17 +363,6 @@ metrics:
       metric_value_type: int
     otap_dataflow:
       metric_set: otap.processor.durable_buffer
-      rust:
-        package: otap-df-core-nodes
-        type: DurableBufferMetrics
-        field: produced_metric_points
-        instrument: Counter
-        value_type: u64
-        source: crates/core-nodes/src/processors/durable_buffer_processor/mod.rs
-        temporality: delta
-      wire:
-        scope_name: otap.processor.durable_buffer
-        metric_name: produced.metric.points
 - name: otap.processor.durable_buffer.produced.spans
   brief: Number of spans produced (sent downstream). For OTLP bytes, counted by scanning
     the protobuf wire format without full deserialization.
@@ -626,17 +379,6 @@ metrics:
       metric_value_type: int
     otap_dataflow:
       metric_set: otap.processor.durable_buffer
-      rust:
-        package: otap-df-core-nodes
-        type: DurableBufferMetrics
-        field: produced_spans
-        instrument: Counter
-        value_type: u64
-        source: crates/core-nodes/src/processors/durable_buffer_processor/mod.rs
-        temporality: delta
-      wire:
-        scope_name: otap.processor.durable_buffer
-        metric_name: produced.spans
 - name: otap.processor.durable_buffer.queued.log.records
   brief: Current number of log records queued (ingested but not yet ACKed).
   instrument: gauge
@@ -652,16 +394,6 @@ metrics:
       metric_value_type: int
     otap_dataflow:
       metric_set: otap.processor.durable_buffer
-      rust:
-        package: otap-df-core-nodes
-        type: DurableBufferMetrics
-        field: queued_log_records
-        instrument: Gauge
-        value_type: u64
-        source: crates/core-nodes/src/processors/durable_buffer_processor/mod.rs
-      wire:
-        scope_name: otap.processor.durable_buffer
-        metric_name: queued.log.records
 - name: otap.processor.durable_buffer.queued.metric.points
   brief: Current number of metric data points queued (ingested but not yet ACKed).
   instrument: gauge
@@ -677,16 +409,6 @@ metrics:
       metric_value_type: int
     otap_dataflow:
       metric_set: otap.processor.durable_buffer
-      rust:
-        package: otap-df-core-nodes
-        type: DurableBufferMetrics
-        field: queued_metric_points
-        instrument: Gauge
-        value_type: u64
-        source: crates/core-nodes/src/processors/durable_buffer_processor/mod.rs
-      wire:
-        scope_name: otap.processor.durable_buffer
-        metric_name: queued.metric.points
 - name: otap.processor.durable_buffer.queued.spans
   brief: Current number of spans queued (ingested but not yet ACKed).
   instrument: gauge
@@ -702,16 +424,6 @@ metrics:
       metric_value_type: int
     otap_dataflow:
       metric_set: otap.processor.durable_buffer
-      rust:
-        package: otap-df-core-nodes
-        type: DurableBufferMetrics
-        field: queued_spans
-        instrument: Gauge
-        value_type: u64
-        source: crates/core-nodes/src/processors/durable_buffer_processor/mod.rs
-      wire:
-        scope_name: otap.processor.durable_buffer
-        metric_name: queued.spans
 - name: otap.processor.durable_buffer.read.errors
   brief: Number of read errors.
   instrument: counter
@@ -727,17 +439,6 @@ metrics:
       metric_value_type: int
     otap_dataflow:
       metric_set: otap.processor.durable_buffer
-      rust:
-        package: otap-df-core-nodes
-        type: DurableBufferMetrics
-        field: read_errors
-        instrument: Counter
-        value_type: u64
-        source: crates/core-nodes/src/processors/durable_buffer_processor/mod.rs
-        temporality: delta
-      wire:
-        scope_name: otap.processor.durable_buffer
-        metric_name: read.errors
 - name: otap.processor.durable_buffer.rejected.log.records
   brief: Number of log records rejected.
   instrument: counter
@@ -753,17 +454,6 @@ metrics:
       metric_value_type: int
     otap_dataflow:
       metric_set: otap.processor.durable_buffer
-      rust:
-        package: otap-df-core-nodes
-        type: DurableBufferMetrics
-        field: rejected_log_records
-        instrument: Counter
-        value_type: u64
-        source: crates/core-nodes/src/processors/durable_buffer_processor/mod.rs
-        temporality: delta
-      wire:
-        scope_name: otap.processor.durable_buffer
-        metric_name: rejected.log.records
 - name: otap.processor.durable_buffer.rejected.metric.points
   brief: Number of metric data points rejected.
   instrument: counter
@@ -779,17 +469,6 @@ metrics:
       metric_value_type: int
     otap_dataflow:
       metric_set: otap.processor.durable_buffer
-      rust:
-        package: otap-df-core-nodes
-        type: DurableBufferMetrics
-        field: rejected_metric_points
-        instrument: Counter
-        value_type: u64
-        source: crates/core-nodes/src/processors/durable_buffer_processor/mod.rs
-        temporality: delta
-      wire:
-        scope_name: otap.processor.durable_buffer
-        metric_name: rejected.metric.points
 - name: otap.processor.durable_buffer.rejected.spans
   brief: Number of spans rejected.
   instrument: counter
@@ -805,17 +484,6 @@ metrics:
       metric_value_type: int
     otap_dataflow:
       metric_set: otap.processor.durable_buffer
-      rust:
-        package: otap-df-core-nodes
-        type: DurableBufferMetrics
-        field: rejected_spans
-        instrument: Counter
-        value_type: u64
-        source: crates/core-nodes/src/processors/durable_buffer_processor/mod.rs
-        temporality: delta
-      wire:
-        scope_name: otap.processor.durable_buffer
-        metric_name: rejected.spans
 - name: otap.processor.durable_buffer.requeued.log.records
   brief: Number of individual log records requeued for retry after NACK.
   instrument: counter
@@ -831,17 +499,6 @@ metrics:
       metric_value_type: int
     otap_dataflow:
       metric_set: otap.processor.durable_buffer
-      rust:
-        package: otap-df-core-nodes
-        type: DurableBufferMetrics
-        field: requeued_log_records
-        instrument: Counter
-        value_type: u64
-        source: crates/core-nodes/src/processors/durable_buffer_processor/mod.rs
-        temporality: delta
-      wire:
-        scope_name: otap.processor.durable_buffer
-        metric_name: requeued.log.records
 - name: otap.processor.durable_buffer.requeued.metric.points
   brief: Number of individual metric data points requeued for retry after NACK.
   instrument: counter
@@ -857,17 +514,6 @@ metrics:
       metric_value_type: int
     otap_dataflow:
       metric_set: otap.processor.durable_buffer
-      rust:
-        package: otap-df-core-nodes
-        type: DurableBufferMetrics
-        field: requeued_metric_points
-        instrument: Counter
-        value_type: u64
-        source: crates/core-nodes/src/processors/durable_buffer_processor/mod.rs
-        temporality: delta
-      wire:
-        scope_name: otap.processor.durable_buffer
-        metric_name: requeued.metric.points
 - name: otap.processor.durable_buffer.requeued.spans
   brief: Number of individual spans requeued for retry after NACK.
   instrument: counter
@@ -883,17 +529,6 @@ metrics:
       metric_value_type: int
     otap_dataflow:
       metric_set: otap.processor.durable_buffer
-      rust:
-        package: otap-df-core-nodes
-        type: DurableBufferMetrics
-        field: requeued_spans
-        instrument: Counter
-        value_type: u64
-        source: crates/core-nodes/src/processors/durable_buffer_processor/mod.rs
-        temporality: delta
-      wire:
-        scope_name: otap.processor.durable_buffer
-        metric_name: requeued.spans
 - name: otap.processor.durable_buffer.retries.scheduled
   brief: Number of retry attempts scheduled.
   instrument: counter
@@ -909,17 +544,6 @@ metrics:
       metric_value_type: int
     otap_dataflow:
       metric_set: otap.processor.durable_buffer
-      rust:
-        package: otap-df-core-nodes
-        type: DurableBufferMetrics
-        field: retries_scheduled
-        instrument: Counter
-        value_type: u64
-        source: crates/core-nodes/src/processors/durable_buffer_processor/mod.rs
-        temporality: delta
-      wire:
-        scope_name: otap.processor.durable_buffer
-        metric_name: retries.scheduled
 - name: otap.processor.durable_buffer.storage.bytes.cap
   brief: Configured storage capacity cap.
   instrument: gauge
@@ -935,16 +559,6 @@ metrics:
       metric_value_type: int
     otap_dataflow:
       metric_set: otap.processor.durable_buffer
-      rust:
-        package: otap-df-core-nodes
-        type: DurableBufferMetrics
-        field: storage_bytes_cap
-        instrument: Gauge
-        value_type: u64
-        source: crates/core-nodes/src/processors/durable_buffer_processor/mod.rs
-      wire:
-        scope_name: otap.processor.durable_buffer
-        metric_name: storage.bytes.cap
 - name: otap.processor.durable_buffer.storage.bytes.used
   brief: Current bytes used by persistent storage (WAL + segments).
   instrument: gauge
@@ -960,16 +574,6 @@ metrics:
       metric_value_type: int
     otap_dataflow:
       metric_set: otap.processor.durable_buffer
-      rust:
-        package: otap-df-core-nodes
-        type: DurableBufferMetrics
-        field: storage_bytes_used
-        instrument: Gauge
-        value_type: u64
-        source: crates/core-nodes/src/processors/durable_buffer_processor/mod.rs
-      wire:
-        scope_name: otap.processor.durable_buffer
-        metric_name: storage.bytes.used
 - name: otap.processor.durable_buffer.storage.utilization
   brief: Current storage utilization ratio (0.0 to 1.0).
   instrument: gauge
@@ -985,13 +589,3 @@ metrics:
       metric_value_type: double
     otap_dataflow:
       metric_set: otap.processor.durable_buffer
-      rust:
-        package: otap-df-core-nodes
-        type: DurableBufferMetrics
-        field: storage_utilization
-        instrument: Gauge
-        value_type: f64
-        source: crates/core-nodes/src/processors/durable_buffer_processor/mod.rs
-      wire:
-        scope_name: otap.processor.durable_buffer
-        metric_name: storage.utilization

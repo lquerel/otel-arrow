@@ -15,17 +15,6 @@ metrics:
       metric_value_type: int
     otap_dataflow:
       metric_set: receiver.otlp
-      rust:
-        package: otap-df-otap
-        type: OtlpReceiverMetrics
-        field: acks_nacks_invalid_or_expired
-        instrument: Counter
-        value_type: u64
-        source: crates/otap/src/otlp_metrics.rs
-        temporality: delta
-      wire:
-        scope_name: receiver.otlp
-        metric_name: acks.nacks.invalid.or.expired
 - name: receiver.otlp.acks.received
   brief: Number of acks received from downstream (routed back to the caller).
   instrument: counter
@@ -41,17 +30,6 @@ metrics:
       metric_value_type: int
     otap_dataflow:
       metric_set: receiver.otlp
-      rust:
-        package: otap-df-otap
-        type: OtlpReceiverMetrics
-        field: acks_received
-        instrument: Counter
-        value_type: u64
-        source: crates/otap/src/otlp_metrics.rs
-        temporality: delta
-      wire:
-        scope_name: receiver.otlp
-        metric_name: acks.received
 - name: receiver.otlp.nacks.received
   brief: Number of nacks received from downstream (routed back to the caller).
   instrument: counter
@@ -67,17 +45,6 @@ metrics:
       metric_value_type: int
     otap_dataflow:
       metric_set: receiver.otlp
-      rust:
-        package: otap-df-otap
-        type: OtlpReceiverMetrics
-        field: nacks_received
-        instrument: Counter
-        value_type: u64
-        source: crates/otap/src/otlp_metrics.rs
-        temporality: delta
-      wire:
-        scope_name: receiver.otlp
-        metric_name: nacks.received
 - name: receiver.otlp.refused.memory.pressure
   brief: Number of OTLP RPCs rejected specifically because process-wide memory pressure
     was active.
@@ -94,17 +61,6 @@ metrics:
       metric_value_type: int
     otap_dataflow:
       metric_set: receiver.otlp
-      rust:
-        package: otap-df-otap
-        type: OtlpReceiverMetrics
-        field: refused_memory_pressure
-        instrument: Counter
-        value_type: u64
-        source: crates/otap/src/otlp_metrics.rs
-        temporality: delta
-      wire:
-        scope_name: receiver.otlp
-        metric_name: refused.memory.pressure
 - name: receiver.otlp.rejected.requests
   brief: Number of OTLP RPCs rejected before entering the pipeline (e.g. slot exhaustion).
   instrument: counter
@@ -120,17 +76,6 @@ metrics:
       metric_value_type: int
     otap_dataflow:
       metric_set: receiver.otlp
-      rust:
-        package: otap-df-otap
-        type: OtlpReceiverMetrics
-        field: rejected_requests
-        instrument: Counter
-        value_type: u64
-        source: crates/otap/src/otlp_metrics.rs
-        temporality: delta
-      wire:
-        scope_name: receiver.otlp
-        metric_name: rejected.requests
 - name: receiver.otlp.request.bytes
   brief: Total decompressed payload bytes for successfully received OTLP requests.
   instrument: counter
@@ -146,17 +91,6 @@ metrics:
       metric_value_type: int
     otap_dataflow:
       metric_set: receiver.otlp
-      rust:
-        package: otap-df-otap
-        type: OtlpReceiverMetrics
-        field: request_bytes
-        instrument: Counter
-        value_type: u64
-        source: crates/otap/src/otlp_metrics.rs
-        temporality: delta
-      wire:
-        scope_name: receiver.otlp
-        metric_name: request.bytes
 - name: receiver.otlp.requests.completed
   brief: Number of OTLP RPCs completed (success + nack).
   instrument: counter
@@ -172,17 +106,6 @@ metrics:
       metric_value_type: int
     otap_dataflow:
       metric_set: receiver.otlp
-      rust:
-        package: otap-df-otap
-        type: OtlpReceiverMetrics
-        field: requests_completed
-        instrument: Counter
-        value_type: u64
-        source: crates/otap/src/otlp_metrics.rs
-        temporality: delta
-      wire:
-        scope_name: receiver.otlp
-        metric_name: requests.completed
 - name: receiver.otlp.requests.started
   brief: Number of OTLP RPCs started.
   instrument: counter
@@ -198,17 +121,6 @@ metrics:
       metric_value_type: int
     otap_dataflow:
       metric_set: receiver.otlp
-      rust:
-        package: otap-df-otap
-        type: OtlpReceiverMetrics
-        field: requests_started
-        instrument: Counter
-        value_type: u64
-        source: crates/otap/src/otlp_metrics.rs
-        temporality: delta
-      wire:
-        scope_name: receiver.otlp
-        metric_name: requests.started
 - name: receiver.otlp.transport.errors
   brief: Number of transport-level errors surfaced by tonic/server.
   instrument: counter
@@ -224,14 +136,3 @@ metrics:
       metric_value_type: int
     otap_dataflow:
       metric_set: receiver.otlp
-      rust:
-        package: otap-df-otap
-        type: OtlpReceiverMetrics
-        field: transport_errors
-        instrument: Counter
-        value_type: u64
-        source: crates/otap/src/otlp_metrics.rs
-        temporality: delta
-      wire:
-        scope_name: receiver.otlp
-        metric_name: transport.errors

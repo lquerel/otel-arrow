@@ -15,16 +15,6 @@ metrics:
       metric_value_type: int
     otap_dataflow:
       metric_set: channel.receiver
-      rust:
-        package: otap-df-engine
-        type: ChannelReceiverMetrics
-        field: capacity
-        instrument: Gauge
-        value_type: u64
-        source: crates/engine/src/channel_metrics.rs
-      wire:
-        scope_name: channel.receiver
-        metric_name: capacity
 - name: channel.receiver.recv.count
   brief: Count of messages successfully received from the channel.
   instrument: counter
@@ -40,17 +30,6 @@ metrics:
       metric_value_type: int
     otap_dataflow:
       metric_set: channel.receiver
-      rust:
-        package: otap-df-engine
-        type: ChannelReceiverMetrics
-        field: recv_count
-        instrument: Counter
-        value_type: u64
-        source: crates/engine/src/channel_metrics.rs
-        temporality: delta
-      wire:
-        scope_name: channel.receiver
-        metric_name: recv.count
 - name: channel.receiver.recv.error_closed
   brief: Count of receive attempts after the channel was closed.
   instrument: counter
@@ -66,17 +45,6 @@ metrics:
       metric_value_type: int
     otap_dataflow:
       metric_set: channel.receiver
-      rust:
-        package: otap-df-engine
-        type: ChannelReceiverMetrics
-        field: recv_error_closed
-        instrument: Counter
-        value_type: u64
-        source: crates/engine/src/channel_metrics.rs
-        temporality: delta
-      wire:
-        scope_name: channel.receiver
-        metric_name: recv.error_closed
 - name: channel.receiver.recv.error_empty
   brief: Count of receive attempts when the channel was empty.
   instrument: counter
@@ -92,14 +60,3 @@ metrics:
       metric_value_type: int
     otap_dataflow:
       metric_set: channel.receiver
-      rust:
-        package: otap-df-engine
-        type: ChannelReceiverMetrics
-        field: recv_error_empty
-        instrument: Counter
-        value_type: u64
-        source: crates/engine/src/channel_metrics.rs
-        temporality: delta
-      wire:
-        scope_name: channel.receiver
-        metric_name: recv.error_empty
