@@ -1,0 +1,137 @@
+file_format: definition/2
+events:
+- name: encoder.sdk_resource_value
+  brief: The encoder.sdk_resource_value internal telemetry event occurred.
+  stability: development
+  requirement_level: recommended
+  entity_associations:
+  - otap.engine
+  annotations:
+    otap_dataflow:
+      wire:
+        event_name: encoder.sdk_resource_value
+        scope_names:
+        - otap-df-telemetry
+        severity_levels:
+        - error
+        sources:
+        - crates/telemetry/src/self_tracing/encoder.rs
+  attributes:
+  - ref: value
+    requirement_level: required
+- name: engine.channel.disconnected
+  brief: The engine.channel.disconnected internal telemetry event occurred.
+  stability: development
+  requirement_level: recommended
+  entity_associations:
+  - otap.engine
+  annotations:
+    otap_dataflow:
+      wire:
+        event_name: engine.channel.disconnected
+        scope_names:
+        - otap-df-telemetry
+        severity_levels:
+        - error
+        sources:
+        - crates/telemetry/src/event.rs
+  attributes:
+  - ref: event
+    requirement_level: required
+- name: observed.channel.disconnected
+  brief: The observed.channel.disconnected internal telemetry event occurred.
+  stability: development
+  requirement_level: recommended
+  entity_associations:
+  - otap.engine
+  annotations:
+    otap_dataflow:
+      wire:
+        event_name: observed.channel.disconnected
+        scope_names:
+        - otap-df-telemetry
+        severity_levels:
+        - error
+        sources:
+        - crates/telemetry/src/event.rs
+  attributes:
+  - ref: event
+    requirement_level: required
+- name: observed.channel.full
+  brief: The observed.channel.full internal telemetry event occurred.
+  stability: development
+  requirement_level: recommended
+  entity_associations:
+  - otap.engine
+  annotations:
+    otap_dataflow:
+      wire:
+        event_name: observed.channel.full
+        scope_names:
+        - otap-df-telemetry
+        severity_levels:
+        - error
+        sources:
+        - crates/telemetry/src/event.rs
+  attributes:
+  - ref: event
+    requirement_level: required
+- name: observed.channel.timeout
+  brief: The observed.channel.timeout internal telemetry event occurred.
+  stability: development
+  requirement_level: recommended
+  entity_associations:
+  - otap.engine
+  annotations:
+    otap_dataflow:
+      wire:
+        event_name: observed.channel.timeout
+        scope_names:
+        - otap-df-telemetry
+        severity_levels:
+        - error
+        sources:
+        - crates/telemetry/src/event.rs
+  attributes:
+  - ref: event
+    requirement_level: required
+- name: registry.define_entity
+  brief: The registry.define_entity internal telemetry event occurred.
+  stability: development
+  requirement_level: recommended
+  entity_associations:
+  - otap.engine
+  annotations:
+    otap_dataflow:
+      wire:
+        event_name: registry.define_entity
+        scope_names:
+        - otap-df-telemetry
+        severity_levels:
+        - debug
+        sources:
+        - crates/telemetry/src/registry.rs
+  attributes:
+  - ref: definition
+    requirement_level: required
+  - ref: schema
+    requirement_level: required
+- name: tracing.subscriber.init
+  brief: The tracing.subscriber.init internal telemetry event occurred.
+  stability: development
+  requirement_level: recommended
+  entity_associations:
+  - otap.engine
+  annotations:
+    otap_dataflow:
+      wire:
+        event_name: tracing.subscriber.init
+        scope_names:
+        - otap-df-telemetry
+        severity_levels:
+        - error
+        sources:
+        - crates/telemetry/src/lib.rs
+  attributes:
+  - ref: error
+    requirement_level: required

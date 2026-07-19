@@ -1,0 +1,158 @@
+file_format: definition/2
+metrics:
+- name: processor.filter.pdata.log.signals.consumed
+  brief: Number of log signals consumed
+  instrument: counter
+  unit: "{log}"
+  stability: development
+  requirement_level: recommended
+  entity_associations:
+  - one_of:
+    - otap.node
+    - otap.node.custom
+  annotations:
+    code_generation:
+      metric_value_type: int
+    otap_dataflow:
+      metric_set: processor.filter.pdata
+      rust:
+        package: otap-df-core-nodes
+        type: FilterPdataMetrics
+        field: log_signals_consumed
+        instrument: Counter
+        value_type: u64
+        source: crates/core-nodes/src/processors/filter_processor/metrics.rs
+        temporality: delta
+      wire:
+        scope_name: processor.filter.pdata
+        metric_name: log.signals.consumed
+- name: processor.filter.pdata.log.signals.filtered
+  brief: Number of log signals filtered
+  instrument: counter
+  unit: "{log}"
+  stability: development
+  requirement_level: recommended
+  entity_associations:
+  - one_of:
+    - otap.node
+    - otap.node.custom
+  annotations:
+    code_generation:
+      metric_value_type: int
+    otap_dataflow:
+      metric_set: processor.filter.pdata
+      rust:
+        package: otap-df-core-nodes
+        type: FilterPdataMetrics
+        field: log_signals_filtered
+        instrument: Counter
+        value_type: u64
+        source: crates/core-nodes/src/processors/filter_processor/metrics.rs
+        temporality: delta
+      wire:
+        scope_name: processor.filter.pdata
+        metric_name: log.signals.filtered
+- name: processor.filter.pdata.metric.signals.consumed
+  brief: Number of metric signals consumed
+  instrument: counter
+  unit: "{metric}"
+  stability: development
+  requirement_level: recommended
+  entity_associations:
+  - one_of:
+    - otap.node
+    - otap.node.custom
+  annotations:
+    code_generation:
+      metric_value_type: int
+    otap_dataflow:
+      metric_set: processor.filter.pdata
+      rust:
+        package: otap-df-core-nodes
+        type: FilterPdataMetrics
+        field: metric_signals_consumed
+        instrument: Counter
+        value_type: u64
+        source: crates/core-nodes/src/processors/filter_processor/metrics.rs
+        temporality: delta
+      wire:
+        scope_name: processor.filter.pdata
+        metric_name: metric.signals.consumed
+- name: processor.filter.pdata.metric.signals.filtered
+  brief: Number of metric signals filtered
+  instrument: counter
+  unit: "{metric}"
+  stability: development
+  requirement_level: recommended
+  entity_associations:
+  - one_of:
+    - otap.node
+    - otap.node.custom
+  annotations:
+    code_generation:
+      metric_value_type: int
+    otap_dataflow:
+      metric_set: processor.filter.pdata
+      rust:
+        package: otap-df-core-nodes
+        type: FilterPdataMetrics
+        field: metric_signals_filtered
+        instrument: Counter
+        value_type: u64
+        source: crates/core-nodes/src/processors/filter_processor/metrics.rs
+        temporality: delta
+      wire:
+        scope_name: processor.filter.pdata
+        metric_name: metric.signals.filtered
+- name: processor.filter.pdata.span.signals.consumed
+  brief: Number of span signals consumed
+  instrument: counter
+  unit: "{span}"
+  stability: development
+  requirement_level: recommended
+  entity_associations:
+  - one_of:
+    - otap.node
+    - otap.node.custom
+  annotations:
+    code_generation:
+      metric_value_type: int
+    otap_dataflow:
+      metric_set: processor.filter.pdata
+      rust:
+        package: otap-df-core-nodes
+        type: FilterPdataMetrics
+        field: span_signals_consumed
+        instrument: Counter
+        value_type: u64
+        source: crates/core-nodes/src/processors/filter_processor/metrics.rs
+        temporality: delta
+      wire:
+        scope_name: processor.filter.pdata
+        metric_name: span.signals.consumed
+- name: processor.filter.pdata.span.signals.filtered
+  brief: Number of span signals filtered
+  instrument: counter
+  unit: "{span}"
+  stability: development
+  requirement_level: recommended
+  entity_associations:
+  - one_of:
+    - otap.node
+    - otap.node.custom
+  annotations:
+    code_generation:
+      metric_value_type: int
+    otap_dataflow:
+      metric_set: processor.filter.pdata
+      rust:
+        package: otap-df-core-nodes
+        type: FilterPdataMetrics
+        field: span_signals_filtered
+        instrument: Counter
+        value_type: u64
+        source: crates/core-nodes/src/processors/filter_processor/metrics.rs
+        temporality: delta
+      wire:
+        scope_name: processor.filter.pdata
+        metric_name: span.signals.filtered

@@ -1,0 +1,262 @@
+file_format: definition/2
+metrics:
+- name: processor.attributes.deleted.entries
+  brief: Total number of attribute entries actually deleted.
+  instrument: counter
+  unit: "{attr}"
+  stability: development
+  requirement_level: recommended
+  entity_associations:
+  - one_of:
+    - otap.node
+    - otap.node.custom
+  annotations:
+    code_generation:
+      metric_value_type: int
+    otap_dataflow:
+      metric_set: processor.attributes
+      rust:
+        package: otap-df-core-nodes
+        type: AttributesProcessorMetrics
+        field: deleted_entries
+        instrument: Counter
+        value_type: u64
+        source: crates/core-nodes/src/processors/attributes_processor/metrics.rs
+        temporality: delta
+      wire:
+        scope_name: processor.attributes
+        metric_name: deleted.entries
+- name: processor.attributes.domains.resource
+  brief: Number of times transforms were applied to resource-level payloads.
+  instrument: counter
+  unit: "{apply}"
+  stability: development
+  requirement_level: recommended
+  entity_associations:
+  - one_of:
+    - otap.node
+    - otap.node.custom
+  annotations:
+    code_generation:
+      metric_value_type: int
+    otap_dataflow:
+      metric_set: processor.attributes
+      rust:
+        package: otap-df-core-nodes
+        type: AttributesProcessorMetrics
+        field: domains_resource
+        instrument: Counter
+        value_type: u64
+        source: crates/core-nodes/src/processors/attributes_processor/metrics.rs
+        temporality: delta
+      wire:
+        scope_name: processor.attributes
+        metric_name: domains.resource
+- name: processor.attributes.domains.scope
+  brief: Number of times transforms were applied to scope-level payloads.
+  instrument: counter
+  unit: "{apply}"
+  stability: development
+  requirement_level: recommended
+  entity_associations:
+  - one_of:
+    - otap.node
+    - otap.node.custom
+  annotations:
+    code_generation:
+      metric_value_type: int
+    otap_dataflow:
+      metric_set: processor.attributes
+      rust:
+        package: otap-df-core-nodes
+        type: AttributesProcessorMetrics
+        field: domains_scope
+        instrument: Counter
+        value_type: u64
+        source: crates/core-nodes/src/processors/attributes_processor/metrics.rs
+        temporality: delta
+      wire:
+        scope_name: processor.attributes
+        metric_name: domains.scope
+- name: processor.attributes.domains.signal
+  brief: Number of times transforms were applied to signal-level payloads.
+  instrument: counter
+  unit: "{apply}"
+  stability: development
+  requirement_level: recommended
+  entity_associations:
+  - one_of:
+    - otap.node
+    - otap.node.custom
+  annotations:
+    code_generation:
+      metric_value_type: int
+    otap_dataflow:
+      metric_set: processor.attributes
+      rust:
+        package: otap-df-core-nodes
+        type: AttributesProcessorMetrics
+        field: domains_signal
+        instrument: Counter
+        value_type: u64
+        source: crates/core-nodes/src/processors/attributes_processor/metrics.rs
+        temporality: delta
+      wire:
+        scope_name: processor.attributes
+        metric_name: domains.signal
+- name: processor.attributes.hashed.entries
+  brief: Total number of attribute entries actually hashed.
+  instrument: counter
+  unit: "{attr}"
+  stability: development
+  requirement_level: recommended
+  entity_associations:
+  - one_of:
+    - otap.node
+    - otap.node.custom
+  annotations:
+    code_generation:
+      metric_value_type: int
+    otap_dataflow:
+      metric_set: processor.attributes
+      rust:
+        package: otap-df-core-nodes
+        type: AttributesProcessorMetrics
+        field: hashed_entries
+        instrument: Counter
+        value_type: u64
+        source: crates/core-nodes/src/processors/attributes_processor/metrics.rs
+        temporality: delta
+      wire:
+        scope_name: processor.attributes
+        metric_name: hashed.entries
+- name: processor.attributes.inserted.entries
+  brief: Total number of attribute entries actually inserted.
+  instrument: counter
+  unit: "{attr}"
+  stability: development
+  requirement_level: recommended
+  entity_associations:
+  - one_of:
+    - otap.node
+    - otap.node.custom
+  annotations:
+    code_generation:
+      metric_value_type: int
+    otap_dataflow:
+      metric_set: processor.attributes
+      rust:
+        package: otap-df-core-nodes
+        type: AttributesProcessorMetrics
+        field: inserted_entries
+        instrument: Counter
+        value_type: u64
+        source: crates/core-nodes/src/processors/attributes_processor/metrics.rs
+        temporality: delta
+      wire:
+        scope_name: processor.attributes
+        metric_name: inserted.entries
+- name: processor.attributes.renamed.entries
+  brief: Total number of attribute entries actually renamed.
+  instrument: counter
+  unit: "{attr}"
+  stability: development
+  requirement_level: recommended
+  entity_associations:
+  - one_of:
+    - otap.node
+    - otap.node.custom
+  annotations:
+    code_generation:
+      metric_value_type: int
+    otap_dataflow:
+      metric_set: processor.attributes
+      rust:
+        package: otap-df-core-nodes
+        type: AttributesProcessorMetrics
+        field: renamed_entries
+        instrument: Counter
+        value_type: u64
+        source: crates/core-nodes/src/processors/attributes_processor/metrics.rs
+        temporality: delta
+      wire:
+        scope_name: processor.attributes
+        metric_name: renamed.entries
+- name: processor.attributes.transform.failed
+  brief: Number of failed transform attempts.
+  instrument: counter
+  unit: "{op}"
+  stability: development
+  requirement_level: recommended
+  entity_associations:
+  - one_of:
+    - otap.node
+    - otap.node.custom
+  annotations:
+    code_generation:
+      metric_value_type: int
+    otap_dataflow:
+      metric_set: processor.attributes
+      rust:
+        package: otap-df-core-nodes
+        type: AttributesProcessorMetrics
+        field: transform_failed
+        instrument: Counter
+        value_type: u64
+        source: crates/core-nodes/src/processors/attributes_processor/metrics.rs
+        temporality: delta
+      wire:
+        scope_name: processor.attributes
+        metric_name: transform.failed
+- name: processor.attributes.updated.entries
+  brief: Total number of attribute entries actually updated.
+  instrument: counter
+  unit: "{attr}"
+  stability: development
+  requirement_level: recommended
+  entity_associations:
+  - one_of:
+    - otap.node
+    - otap.node.custom
+  annotations:
+    code_generation:
+      metric_value_type: int
+    otap_dataflow:
+      metric_set: processor.attributes
+      rust:
+        package: otap-df-core-nodes
+        type: AttributesProcessorMetrics
+        field: updated_entries
+        instrument: Counter
+        value_type: u64
+        source: crates/core-nodes/src/processors/attributes_processor/metrics.rs
+        temporality: delta
+      wire:
+        scope_name: processor.attributes
+        metric_name: updated.entries
+- name: processor.attributes.upserted.entries
+  brief: Total number of attribute entries actually upserted.
+  instrument: counter
+  unit: "{attr}"
+  stability: development
+  requirement_level: recommended
+  entity_associations:
+  - one_of:
+    - otap.node
+    - otap.node.custom
+  annotations:
+    code_generation:
+      metric_value_type: int
+    otap_dataflow:
+      metric_set: processor.attributes
+      rust:
+        package: otap-df-core-nodes
+        type: AttributesProcessorMetrics
+        field: upserted_entries
+        instrument: Counter
+        value_type: u64
+        source: crates/core-nodes/src/processors/attributes_processor/metrics.rs
+        temporality: delta
+      wire:
+        scope_name: processor.attributes
+        metric_name: upserted.entries

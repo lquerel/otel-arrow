@@ -1,0 +1,262 @@
+file_format: definition/2
+metrics:
+- name: processor.debug.pdata.events.consumed
+  brief: Number of events (structured logs) consumed
+  instrument: counter
+  unit: "{event}"
+  stability: development
+  requirement_level: recommended
+  entity_associations:
+  - one_of:
+    - otap.node
+    - otap.node.custom
+  annotations:
+    code_generation:
+      metric_value_type: int
+    otap_dataflow:
+      metric_set: processor.debug.pdata
+      rust:
+        package: otap-df-core-nodes
+        type: DebugPdataMetrics
+        field: events_consumed
+        instrument: Counter
+        value_type: u64
+        source: crates/core-nodes/src/processors/debug_processor/metrics.rs
+        temporality: delta
+      wire:
+        scope_name: processor.debug.pdata
+        metric_name: events.consumed
+- name: processor.debug.pdata.log.signals.consumed
+  brief: Number of log signals consumed
+  instrument: counter
+  unit: "{log}"
+  stability: development
+  requirement_level: recommended
+  entity_associations:
+  - one_of:
+    - otap.node
+    - otap.node.custom
+  annotations:
+    code_generation:
+      metric_value_type: int
+    otap_dataflow:
+      metric_set: processor.debug.pdata
+      rust:
+        package: otap-df-core-nodes
+        type: DebugPdataMetrics
+        field: log_signals_consumed
+        instrument: Counter
+        value_type: u64
+        source: crates/core-nodes/src/processors/debug_processor/metrics.rs
+        temporality: delta
+      wire:
+        scope_name: processor.debug.pdata
+        metric_name: log.signals.consumed
+- name: processor.debug.pdata.logs.consumed
+  brief: number of logs (batches) consumed
+  instrument: counter
+  unit: "{msg}"
+  stability: development
+  requirement_level: recommended
+  entity_associations:
+  - one_of:
+    - otap.node
+    - otap.node.custom
+  annotations:
+    code_generation:
+      metric_value_type: int
+    otap_dataflow:
+      metric_set: processor.debug.pdata
+      rust:
+        package: otap-df-core-nodes
+        type: DebugPdataMetrics
+        field: logs_consumed
+        instrument: Counter
+        value_type: u64
+        source: crates/core-nodes/src/processors/debug_processor/metrics.rs
+        temporality: delta
+      wire:
+        scope_name: processor.debug.pdata
+        metric_name: logs.consumed
+- name: processor.debug.pdata.metric.datapoints.consumed
+  brief: number of metric datapoints consumed
+  instrument: counter
+  unit: "{datapoint}"
+  stability: development
+  requirement_level: recommended
+  entity_associations:
+  - one_of:
+    - otap.node
+    - otap.node.custom
+  annotations:
+    code_generation:
+      metric_value_type: int
+    otap_dataflow:
+      metric_set: processor.debug.pdata
+      rust:
+        package: otap-df-core-nodes
+        type: DebugPdataMetrics
+        field: metric_datapoints_consumed
+        instrument: Counter
+        value_type: u64
+        source: crates/core-nodes/src/processors/debug_processor/metrics.rs
+        temporality: delta
+      wire:
+        scope_name: processor.debug.pdata
+        metric_name: metric.datapoints.consumed
+- name: processor.debug.pdata.metric.signals.consumed
+  brief: Number of metrics consumed
+  instrument: counter
+  unit: "{metric}"
+  stability: development
+  requirement_level: recommended
+  entity_associations:
+  - one_of:
+    - otap.node
+    - otap.node.custom
+  annotations:
+    code_generation:
+      metric_value_type: int
+    otap_dataflow:
+      metric_set: processor.debug.pdata
+      rust:
+        package: otap-df-core-nodes
+        type: DebugPdataMetrics
+        field: metric_signals_consumed
+        instrument: Counter
+        value_type: u64
+        source: crates/core-nodes/src/processors/debug_processor/metrics.rs
+        temporality: delta
+      wire:
+        scope_name: processor.debug.pdata
+        metric_name: metric.signals.consumed
+- name: processor.debug.pdata.metrics.consumed
+  brief: number of metrics (batches) consumed
+  instrument: counter
+  unit: "{msg}"
+  stability: development
+  requirement_level: recommended
+  entity_associations:
+  - one_of:
+    - otap.node
+    - otap.node.custom
+  annotations:
+    code_generation:
+      metric_value_type: int
+    otap_dataflow:
+      metric_set: processor.debug.pdata
+      rust:
+        package: otap-df-core-nodes
+        type: DebugPdataMetrics
+        field: metrics_consumed
+        instrument: Counter
+        value_type: u64
+        source: crates/core-nodes/src/processors/debug_processor/metrics.rs
+        temporality: delta
+      wire:
+        scope_name: processor.debug.pdata
+        metric_name: metrics.consumed
+- name: processor.debug.pdata.span.events.consumed
+  brief: number of span events (structured logs) consumed
+  instrument: counter
+  unit: "{event}"
+  stability: development
+  requirement_level: recommended
+  entity_associations:
+  - one_of:
+    - otap.node
+    - otap.node.custom
+  annotations:
+    code_generation:
+      metric_value_type: int
+    otap_dataflow:
+      metric_set: processor.debug.pdata
+      rust:
+        package: otap-df-core-nodes
+        type: DebugPdataMetrics
+        field: span_events_consumed
+        instrument: Counter
+        value_type: u64
+        source: crates/core-nodes/src/processors/debug_processor/metrics.rs
+        temporality: delta
+      wire:
+        scope_name: processor.debug.pdata
+        metric_name: span.events.consumed
+- name: processor.debug.pdata.span.links.consumed
+  brief: number of span links consumed
+  instrument: counter
+  unit: "{link}"
+  stability: development
+  requirement_level: recommended
+  entity_associations:
+  - one_of:
+    - otap.node
+    - otap.node.custom
+  annotations:
+    code_generation:
+      metric_value_type: int
+    otap_dataflow:
+      metric_set: processor.debug.pdata
+      rust:
+        package: otap-df-core-nodes
+        type: DebugPdataMetrics
+        field: span_links_consumed
+        instrument: Counter
+        value_type: u64
+        source: crates/core-nodes/src/processors/debug_processor/metrics.rs
+        temporality: delta
+      wire:
+        scope_name: processor.debug.pdata
+        metric_name: span.links.consumed
+- name: processor.debug.pdata.span.signals.consumed
+  brief: Number of span signals consumed
+  instrument: counter
+  unit: "{span}"
+  stability: development
+  requirement_level: recommended
+  entity_associations:
+  - one_of:
+    - otap.node
+    - otap.node.custom
+  annotations:
+    code_generation:
+      metric_value_type: int
+    otap_dataflow:
+      metric_set: processor.debug.pdata
+      rust:
+        package: otap-df-core-nodes
+        type: DebugPdataMetrics
+        field: span_signals_consumed
+        instrument: Counter
+        value_type: u64
+        source: crates/core-nodes/src/processors/debug_processor/metrics.rs
+        temporality: delta
+      wire:
+        scope_name: processor.debug.pdata
+        metric_name: span.signals.consumed
+- name: processor.debug.pdata.traces.consumed
+  brief: number of traces (batches) consumed
+  instrument: counter
+  unit: "{msg}"
+  stability: development
+  requirement_level: recommended
+  entity_associations:
+  - one_of:
+    - otap.node
+    - otap.node.custom
+  annotations:
+    code_generation:
+      metric_value_type: int
+    otap_dataflow:
+      metric_set: processor.debug.pdata
+      rust:
+        package: otap-df-core-nodes
+        type: DebugPdataMetrics
+        field: traces_consumed
+        instrument: Counter
+        value_type: u64
+        source: crates/core-nodes/src/processors/debug_processor/metrics.rs
+        temporality: delta
+      wire:
+        scope_name: processor.debug.pdata
+        metric_name: traces.consumed

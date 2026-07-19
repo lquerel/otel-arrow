@@ -1,0 +1,80 @@
+file_format: definition/2
+metrics:
+- name: channel.sender.send.count
+  brief: Count of messages successfully sent to the channel.
+  instrument: counter
+  unit: "{message}"
+  stability: development
+  requirement_level: recommended
+  entity_associations:
+  - one_of:
+    - otap.node.channel
+    - otap.extension.channel
+  annotations:
+    code_generation:
+      metric_value_type: int
+    otap_dataflow:
+      metric_set: channel.sender
+      rust:
+        package: otap-df-engine
+        type: ChannelSenderMetrics
+        field: send_count
+        instrument: Counter
+        value_type: u64
+        source: crates/engine/src/channel_metrics.rs
+        temporality: delta
+      wire:
+        scope_name: channel.sender
+        metric_name: send.count
+- name: channel.sender.send.error_closed
+  brief: Count of send failures due to a closed channel.
+  instrument: counter
+  unit: "{1}"
+  stability: development
+  requirement_level: recommended
+  entity_associations:
+  - one_of:
+    - otap.node.channel
+    - otap.extension.channel
+  annotations:
+    code_generation:
+      metric_value_type: int
+    otap_dataflow:
+      metric_set: channel.sender
+      rust:
+        package: otap-df-engine
+        type: ChannelSenderMetrics
+        field: send_error_closed
+        instrument: Counter
+        value_type: u64
+        source: crates/engine/src/channel_metrics.rs
+        temporality: delta
+      wire:
+        scope_name: channel.sender
+        metric_name: send.error_closed
+- name: channel.sender.send.error_full
+  brief: Count of send failures due to a full channel.
+  instrument: counter
+  unit: "{1}"
+  stability: development
+  requirement_level: recommended
+  entity_associations:
+  - one_of:
+    - otap.node.channel
+    - otap.extension.channel
+  annotations:
+    code_generation:
+      metric_value_type: int
+    otap_dataflow:
+      metric_set: channel.sender
+      rust:
+        package: otap-df-engine
+        type: ChannelSenderMetrics
+        field: send_error_full
+        instrument: Counter
+        value_type: u64
+        source: crates/engine/src/channel_metrics.rs
+        temporality: delta
+      wire:
+        scope_name: channel.sender
+        metric_name: send.error_full

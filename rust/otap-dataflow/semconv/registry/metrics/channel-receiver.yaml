@@ -1,0 +1,105 @@
+file_format: definition/2
+metrics:
+- name: channel.receiver.capacity
+  brief: Maximum channel capacity (buffer size).
+  instrument: gauge
+  unit: "{message}"
+  stability: development
+  requirement_level: recommended
+  entity_associations:
+  - one_of:
+    - otap.node.channel
+    - otap.extension.channel
+  annotations:
+    code_generation:
+      metric_value_type: int
+    otap_dataflow:
+      metric_set: channel.receiver
+      rust:
+        package: otap-df-engine
+        type: ChannelReceiverMetrics
+        field: capacity
+        instrument: Gauge
+        value_type: u64
+        source: crates/engine/src/channel_metrics.rs
+      wire:
+        scope_name: channel.receiver
+        metric_name: capacity
+- name: channel.receiver.recv.count
+  brief: Count of messages successfully received from the channel.
+  instrument: counter
+  unit: "{message}"
+  stability: development
+  requirement_level: recommended
+  entity_associations:
+  - one_of:
+    - otap.node.channel
+    - otap.extension.channel
+  annotations:
+    code_generation:
+      metric_value_type: int
+    otap_dataflow:
+      metric_set: channel.receiver
+      rust:
+        package: otap-df-engine
+        type: ChannelReceiverMetrics
+        field: recv_count
+        instrument: Counter
+        value_type: u64
+        source: crates/engine/src/channel_metrics.rs
+        temporality: delta
+      wire:
+        scope_name: channel.receiver
+        metric_name: recv.count
+- name: channel.receiver.recv.error_closed
+  brief: Count of receive attempts after the channel was closed.
+  instrument: counter
+  unit: "{1}"
+  stability: development
+  requirement_level: recommended
+  entity_associations:
+  - one_of:
+    - otap.node.channel
+    - otap.extension.channel
+  annotations:
+    code_generation:
+      metric_value_type: int
+    otap_dataflow:
+      metric_set: channel.receiver
+      rust:
+        package: otap-df-engine
+        type: ChannelReceiverMetrics
+        field: recv_error_closed
+        instrument: Counter
+        value_type: u64
+        source: crates/engine/src/channel_metrics.rs
+        temporality: delta
+      wire:
+        scope_name: channel.receiver
+        metric_name: recv.error_closed
+- name: channel.receiver.recv.error_empty
+  brief: Count of receive attempts when the channel was empty.
+  instrument: counter
+  unit: "{1}"
+  stability: development
+  requirement_level: recommended
+  entity_associations:
+  - one_of:
+    - otap.node.channel
+    - otap.extension.channel
+  annotations:
+    code_generation:
+      metric_value_type: int
+    otap_dataflow:
+      metric_set: channel.receiver
+      rust:
+        package: otap-df-engine
+        type: ChannelReceiverMetrics
+        field: recv_error_empty
+        instrument: Counter
+        value_type: u64
+        source: crates/engine/src/channel_metrics.rs
+        temporality: delta
+      wire:
+        scope_name: channel.receiver
+        metric_name: recv.error_empty

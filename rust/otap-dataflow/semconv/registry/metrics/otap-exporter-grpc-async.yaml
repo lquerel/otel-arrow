@@ -1,0 +1,288 @@
+file_format: definition/2
+metrics:
+- name: otap.exporter.grpc.async.export.rpc.duration
+  brief: End-to-end duration from yielding a batch to receiving the matching OTAP
+    stream response.
+  instrument: histogram
+  unit: ns
+  stability: development
+  requirement_level: recommended
+  entity_associations:
+  - one_of:
+    - otap.node
+    - otap.node.custom
+  annotations:
+    code_generation:
+      metric_value_type: double
+    otap_dataflow:
+      metric_set: otap.exporter.grpc.async
+      rust:
+        package: otap-df-core-nodes
+        type: OtapGrpcAsyncMetrics
+        field: export_rpc_duration_ns
+        instrument: Mmsc
+        value_type: f64
+        source: crates/core-nodes/src/exporters/otap_exporter/mod.rs
+        temporality: delta
+      wire:
+        scope_name: otap.exporter.grpc.async
+        metric_name: export.rpc.duration
+- name: otap.exporter.grpc.async.export.rpc.duration.p50
+  brief: Median outbound gRPC export response duration for the latest telemetry interval.
+  instrument: gauge
+  unit: ns
+  stability: development
+  requirement_level: recommended
+  entity_associations:
+  - one_of:
+    - otap.node
+    - otap.node.custom
+  annotations:
+    code_generation:
+      metric_value_type: double
+    otap_dataflow:
+      metric_set: otap.exporter.grpc.async
+      rust:
+        package: otap-df-core-nodes
+        type: OtapGrpcAsyncMetrics
+        field: export_rpc_duration_p50_ns
+        instrument: Gauge
+        value_type: f64
+        source: crates/core-nodes/src/exporters/otap_exporter/mod.rs
+      wire:
+        scope_name: otap.exporter.grpc.async
+        metric_name: export.rpc.duration.p50
+- name: otap.exporter.grpc.async.export.rpc.duration.p90
+  brief: 90th percentile outbound gRPC export response duration for the latest telemetry
+    interval.
+  instrument: gauge
+  unit: ns
+  stability: development
+  requirement_level: recommended
+  entity_associations:
+  - one_of:
+    - otap.node
+    - otap.node.custom
+  annotations:
+    code_generation:
+      metric_value_type: double
+    otap_dataflow:
+      metric_set: otap.exporter.grpc.async
+      rust:
+        package: otap-df-core-nodes
+        type: OtapGrpcAsyncMetrics
+        field: export_rpc_duration_p90_ns
+        instrument: Gauge
+        value_type: f64
+        source: crates/core-nodes/src/exporters/otap_exporter/mod.rs
+      wire:
+        scope_name: otap.exporter.grpc.async
+        metric_name: export.rpc.duration.p90
+- name: otap.exporter.grpc.async.export.rpc.duration.p99
+  brief: 99th percentile outbound gRPC export response duration for the latest telemetry
+    interval.
+  instrument: gauge
+  unit: ns
+  stability: development
+  requirement_level: recommended
+  entity_associations:
+  - one_of:
+    - otap.node
+    - otap.node.custom
+  annotations:
+    code_generation:
+      metric_value_type: double
+    otap_dataflow:
+      metric_set: otap.exporter.grpc.async
+      rust:
+        package: otap-df-core-nodes
+        type: OtapGrpcAsyncMetrics
+        field: export_rpc_duration_p99_ns
+        instrument: Gauge
+        value_type: f64
+        source: crates/core-nodes/src/exporters/otap_exporter/mod.rs
+      wire:
+        scope_name: otap.exporter.grpc.async
+        metric_name: export.rpc.duration.p99
+- name: otap.exporter.grpc.async.stream.correlation.depth
+  brief: Occupancy of the response correlation queue before enqueueing a yielded batch.
+  instrument: histogram
+  unit: "{batch}"
+  stability: development
+  requirement_level: recommended
+  entity_associations:
+  - one_of:
+    - otap.node
+    - otap.node.custom
+  annotations:
+    code_generation:
+      metric_value_type: double
+    otap_dataflow:
+      metric_set: otap.exporter.grpc.async
+      rust:
+        package: otap-df-core-nodes
+        type: OtapGrpcAsyncMetrics
+        field: stream_correlation_depth
+        instrument: Mmsc
+        value_type: f64
+        source: crates/core-nodes/src/exporters/otap_exporter/mod.rs
+        temporality: delta
+      wire:
+        scope_name: otap.exporter.grpc.async
+        metric_name: stream.correlation.depth
+- name: otap.exporter.grpc.async.stream.correlation.enqueue.duration
+  brief: Time spent enqueueing a yielded batch into the response correlation queue.
+  instrument: histogram
+  unit: ns
+  stability: development
+  requirement_level: recommended
+  entity_associations:
+  - one_of:
+    - otap.node
+    - otap.node.custom
+  annotations:
+    code_generation:
+      metric_value_type: double
+    otap_dataflow:
+      metric_set: otap.exporter.grpc.async
+      rust:
+        package: otap-df-core-nodes
+        type: OtapGrpcAsyncMetrics
+        field: stream_correlation_enqueue_duration_ns
+        instrument: Mmsc
+        value_type: f64
+        source: crates/core-nodes/src/exporters/otap_exporter/mod.rs
+        temporality: delta
+      wire:
+        scope_name: otap.exporter.grpc.async
+        metric_name: stream.correlation.enqueue.duration
+- name: otap.exporter.grpc.async.stream.encode.duration
+  brief: Time spent encoding an OTAP batch into outbound Arrow batch records.
+  instrument: histogram
+  unit: ns
+  stability: development
+  requirement_level: recommended
+  entity_associations:
+  - one_of:
+    - otap.node
+    - otap.node.custom
+  annotations:
+    code_generation:
+      metric_value_type: double
+    otap_dataflow:
+      metric_set: otap.exporter.grpc.async
+      rust:
+        package: otap-df-core-nodes
+        type: OtapGrpcAsyncMetrics
+        field: stream_encode_duration_ns
+        instrument: Mmsc
+        value_type: f64
+        source: crates/core-nodes/src/exporters/otap_exporter/mod.rs
+        temporality: delta
+      wire:
+        scope_name: otap.exporter.grpc.async
+        metric_name: stream.encode.duration
+- name: otap.exporter.grpc.async.stream.enqueue.depth
+  brief: Occupancy of the per-signal stream task queue before enqueueing a batch.
+  instrument: histogram
+  unit: "{batch}"
+  stability: development
+  requirement_level: recommended
+  entity_associations:
+  - one_of:
+    - otap.node
+    - otap.node.custom
+  annotations:
+    code_generation:
+      metric_value_type: double
+    otap_dataflow:
+      metric_set: otap.exporter.grpc.async
+      rust:
+        package: otap-df-core-nodes
+        type: OtapGrpcAsyncMetrics
+        field: stream_enqueue_depth
+        instrument: Mmsc
+        value_type: f64
+        source: crates/core-nodes/src/exporters/otap_exporter/mod.rs
+        temporality: delta
+      wire:
+        scope_name: otap.exporter.grpc.async
+        metric_name: stream.enqueue.depth
+- name: otap.exporter.grpc.async.stream.enqueue.duration
+  brief: Time spent waiting to enqueue a batch into the per-signal stream task.
+  instrument: histogram
+  unit: ns
+  stability: development
+  requirement_level: recommended
+  entity_associations:
+  - one_of:
+    - otap.node
+    - otap.node.custom
+  annotations:
+    code_generation:
+      metric_value_type: double
+    otap_dataflow:
+      metric_set: otap.exporter.grpc.async
+      rust:
+        package: otap-df-core-nodes
+        type: OtapGrpcAsyncMetrics
+        field: stream_enqueue_duration_ns
+        instrument: Mmsc
+        value_type: f64
+        source: crates/core-nodes/src/exporters/otap_exporter/mod.rs
+        temporality: delta
+      wire:
+        scope_name: otap.exporter.grpc.async
+        metric_name: stream.enqueue.duration
+- name: otap.exporter.grpc.async.stream.response.inflight
+  brief: Number of yielded batches awaiting a matching server response.
+  instrument: histogram
+  unit: "{batch}"
+  stability: development
+  requirement_level: recommended
+  entity_associations:
+  - one_of:
+    - otap.node
+    - otap.node.custom
+  annotations:
+    code_generation:
+      metric_value_type: double
+    otap_dataflow:
+      metric_set: otap.exporter.grpc.async
+      rust:
+        package: otap-df-core-nodes
+        type: OtapGrpcAsyncMetrics
+        field: stream_response_inflight
+        instrument: Mmsc
+        value_type: f64
+        source: crates/core-nodes/src/exporters/otap_exporter/mod.rs
+        temporality: delta
+      wire:
+        scope_name: otap.exporter.grpc.async
+        metric_name: stream.response.inflight
+- name: otap.exporter.grpc.async.stream.response.wait.duration
+  brief: Time spent waiting for the next server response on an OTAP stream.
+  instrument: histogram
+  unit: ns
+  stability: development
+  requirement_level: recommended
+  entity_associations:
+  - one_of:
+    - otap.node
+    - otap.node.custom
+  annotations:
+    code_generation:
+      metric_value_type: double
+    otap_dataflow:
+      metric_set: otap.exporter.grpc.async
+      rust:
+        package: otap-df-core-nodes
+        type: OtapGrpcAsyncMetrics
+        field: stream_response_wait_duration_ns
+        instrument: Mmsc
+        value_type: f64
+        source: crates/core-nodes/src/exporters/otap_exporter/mod.rs
+        temporality: delta
+      wire:
+        scope_name: otap.exporter.grpc.async
+        metric_name: stream.response.wait.duration

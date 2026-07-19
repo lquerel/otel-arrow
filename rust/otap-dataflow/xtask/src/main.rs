@@ -21,6 +21,7 @@ use std::time::Instant;
 
 mod diagnostics;
 mod genproto;
+mod semconv;
 mod structure_check;
 
 #[cfg(not(tarpaulin_include))]
@@ -44,6 +45,14 @@ fn main() -> anyhow::Result<()> {
                 ensure_no_extra_args("compile-proto", &args.collect::<Vec<_>>())?;
                 genproto::compile_proto()?;
                 Ok(())
+            }
+            "semconv-check" => {
+                ensure_no_extra_args("semconv-check", &args.collect::<Vec<_>>())?;
+                semconv::check()
+            }
+            "semconv-inventory" => {
+                ensure_no_extra_args("semconv-inventory", &args.collect::<Vec<_>>())?;
+                semconv::print_inventory()
             }
             "structure-check" => {
                 ensure_no_extra_args("structure-check", &args.collect::<Vec<_>>())?;
@@ -73,6 +82,8 @@ Tasks:
   - quick-check: Run a faster iterative subset: structure check, cargo fmt --all, cargo clippy --workspace --lib --bins --tests, and cargo test --workspace --lib --bins --tests --no-run. This is not a replacement for `cargo xtask check`.
   - check-benches: Lint and compile bench targets only.
   - structure-check: Validate the entire structure of the project.
+  - semconv-check: Check the v2 semantic-convention registry against production Rust telemetry declarations.
+  - semconv-inventory: Print the discovered production Rust telemetry inventory as JSON.
   - compile-proto: Compile the protobufs files
 "
     );

@@ -1,0 +1,299 @@
+file_format: definition/2
+metrics:
+- name: pipeline.context.switches.involuntary
+  brief: Number of times the pipeline thread was preempted by the scheduler since
+    start. A rising rate often indicates CPU contention or time-slice expirations.
+    When paired with `cpu_utilization`, it helps diagnose CPU time lost to preemption.
+  instrument: counter
+  unit: "{1}"
+  stability: development
+  requirement_level: recommended
+  entity_associations:
+  - otap.pipeline
+  annotations:
+    code_generation:
+      metric_value_type: int
+    otap_dataflow:
+      metric_set: pipeline
+      rust:
+        package: otap-df-engine
+        type: PipelineMetrics
+        field: context_switches_involuntary
+        instrument: ObserveCounter
+        value_type: u64
+        source: crates/engine/src/pipeline_metrics.rs
+        temporality: cumulative
+      wire:
+        scope_name: pipeline
+        metric_name: context.switches.involuntary
+- name: pipeline.context.switches.voluntary
+  brief: Number of times the pipeline thread voluntarily yielded the CPU since start.
+    A rising rate can indicate scheduling pressure due to blocking work (I/O, locks,
+    backpressure) and helps distinguish "waiting" from "CPU-bound".
+  instrument: counter
+  unit: "{1}"
+  stability: development
+  requirement_level: recommended
+  entity_associations:
+  - otap.pipeline
+  annotations:
+    code_generation:
+      metric_value_type: int
+    otap_dataflow:
+      metric_set: pipeline
+      rust:
+        package: otap-df-engine
+        type: PipelineMetrics
+        field: context_switches_voluntary
+        instrument: ObserveCounter
+        value_type: u64
+        source: crates/engine/src/pipeline_metrics.rs
+        temporality: cumulative
+      wire:
+        scope_name: pipeline
+        metric_name: context.switches.voluntary
+- name: pipeline.cpu.time
+  brief: Total CPU seconds used by the pipeline since start.
+  instrument: counter
+  unit: "{s}"
+  stability: development
+  requirement_level: recommended
+  entity_associations:
+  - otap.pipeline
+  annotations:
+    code_generation:
+      metric_value_type: double
+    otap_dataflow:
+      metric_set: pipeline
+      rust:
+        package: otap-df-engine
+        type: PipelineMetrics
+        field: cpu_time
+        instrument: Counter
+        value_type: f64
+        source: crates/engine/src/pipeline_metrics.rs
+        temporality: delta
+      wire:
+        scope_name: pipeline
+        metric_name: cpu.time
+- name: pipeline.cpu.utilization
+  brief: Difference in pipeline cpu time since the last measurement, divided by the
+    elapsed time. Reported as a ratio in the range [0, 1].
+  instrument: gauge
+  unit: "{1}"
+  stability: development
+  requirement_level: recommended
+  entity_associations:
+  - otap.pipeline
+  annotations:
+    code_generation:
+      metric_value_type: double
+    otap_dataflow:
+      metric_set: pipeline
+      rust:
+        package: otap-df-engine
+        type: PipelineMetrics
+        field: cpu_utilization
+        instrument: Gauge
+        value_type: f64
+        source: crates/engine/src/pipeline_metrics.rs
+      wire:
+        scope_name: pipeline
+        metric_name: cpu.utilization
+- name: pipeline.memory.allocated
+  brief: Memory allocated to the heap by the pipeline instance since start.
+  instrument: counter
+  unit: "{By}"
+  stability: development
+  requirement_level: recommended
+  entity_associations:
+  - otap.pipeline
+  annotations:
+    code_generation:
+      metric_value_type: int
+    otap_dataflow:
+      metric_set: pipeline
+      rust:
+        package: otap-df-engine
+        type: PipelineMetrics
+        field: memory_allocated
+        instrument: ObserveCounter
+        value_type: u64
+        source: crates/engine/src/pipeline_metrics.rs
+        temporality: cumulative
+      wire:
+        scope_name: pipeline
+        metric_name: memory.allocated
+- name: pipeline.memory.allocated.delta
+  brief: Bytes allocated to the heap by this pipeline during the last measurement
+    window.
+  instrument: counter
+  unit: "{By}"
+  stability: development
+  requirement_level: recommended
+  entity_associations:
+  - otap.pipeline
+  annotations:
+    code_generation:
+      metric_value_type: int
+    otap_dataflow:
+      metric_set: pipeline
+      rust:
+        package: otap-df-engine
+        type: PipelineMetrics
+        field: memory_allocated_delta
+        instrument: Counter
+        value_type: u64
+        source: crates/engine/src/pipeline_metrics.rs
+        temporality: delta
+      wire:
+        scope_name: pipeline
+        metric_name: memory.allocated.delta
+- name: pipeline.memory.freed
+  brief: Memory freed to the heap by the pipeline instance since start.
+  instrument: counter
+  unit: "{By}"
+  stability: development
+  requirement_level: recommended
+  entity_associations:
+  - otap.pipeline
+  annotations:
+    code_generation:
+      metric_value_type: int
+    otap_dataflow:
+      metric_set: pipeline
+      rust:
+        package: otap-df-engine
+        type: PipelineMetrics
+        field: memory_freed
+        instrument: ObserveCounter
+        value_type: u64
+        source: crates/engine/src/pipeline_metrics.rs
+        temporality: cumulative
+      wire:
+        scope_name: pipeline
+        metric_name: memory.freed
+- name: pipeline.memory.freed.delta
+  brief: Bytes returned to the heap by this pipeline during the last measurement window.
+  instrument: counter
+  unit: "{By}"
+  stability: development
+  requirement_level: recommended
+  entity_associations:
+  - otap.pipeline
+  annotations:
+    code_generation:
+      metric_value_type: int
+    otap_dataflow:
+      metric_set: pipeline
+      rust:
+        package: otap-df-engine
+        type: PipelineMetrics
+        field: memory_freed_delta
+        instrument: Counter
+        value_type: u64
+        source: crates/engine/src/pipeline_metrics.rs
+        temporality: delta
+      wire:
+        scope_name: pipeline
+        metric_name: memory.freed.delta
+- name: pipeline.memory.usage
+  brief: The amount of heap memory in use by the pipeline instance running on a specific
+    core.
+  instrument: updowncounter
+  unit: "{By}"
+  stability: development
+  requirement_level: recommended
+  entity_associations:
+  - otap.pipeline
+  annotations:
+    code_generation:
+      metric_value_type: int
+    otap_dataflow:
+      metric_set: pipeline
+      rust:
+        package: otap-df-engine
+        type: PipelineMetrics
+        field: memory_usage
+        instrument: ObserveUpDownCounter
+        value_type: u64
+        source: crates/engine/src/pipeline_metrics.rs
+        temporality: cumulative
+      wire:
+        scope_name: pipeline
+        metric_name: memory.usage
+- name: pipeline.page.faults.major
+  brief: Number of major page faults (requiring disk I/O) since start. Any non-trivial
+    rate typically indicates severe memory pressure or swapping, and correlates strongly
+    with pipeline latency spikes.
+  instrument: counter
+  unit: "{1}"
+  stability: development
+  requirement_level: recommended
+  entity_associations:
+  - otap.pipeline
+  annotations:
+    code_generation:
+      metric_value_type: int
+    otap_dataflow:
+      metric_set: pipeline
+      rust:
+        package: otap-df-engine
+        type: PipelineMetrics
+        field: page_faults_major
+        instrument: ObserveCounter
+        value_type: u64
+        source: crates/engine/src/pipeline_metrics.rs
+        temporality: cumulative
+      wire:
+        scope_name: pipeline
+        metric_name: page.faults.major
+- name: pipeline.page.faults.minor
+  brief: Number of minor page faults (served without disk I/O) since start. A rising
+    rate indicates memory access pain (poor locality, working-set churn), even if
+    heap bytes are stable.
+  instrument: counter
+  unit: "{1}"
+  stability: development
+  requirement_level: recommended
+  entity_associations:
+  - otap.pipeline
+  annotations:
+    code_generation:
+      metric_value_type: int
+    otap_dataflow:
+      metric_set: pipeline
+      rust:
+        package: otap-df-engine
+        type: PipelineMetrics
+        field: page_faults_minor
+        instrument: ObserveCounter
+        value_type: u64
+        source: crates/engine/src/pipeline_metrics.rs
+        temporality: cumulative
+      wire:
+        scope_name: pipeline
+        metric_name: page.faults.minor
+- name: pipeline.uptime
+  brief: The time the pipeline instance has been running.
+  instrument: gauge
+  unit: "{s}"
+  stability: development
+  requirement_level: recommended
+  entity_associations:
+  - otap.pipeline
+  annotations:
+    code_generation:
+      metric_value_type: double
+    otap_dataflow:
+      metric_set: pipeline
+      rust:
+        package: otap-df-engine
+        type: PipelineMetrics
+        field: uptime
+        instrument: Gauge
+        value_type: f64
+        source: crates/engine/src/pipeline_metrics.rs
+      wire:
+        scope_name: pipeline
+        metric_name: uptime

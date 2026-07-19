@@ -1,0 +1,54 @@
+file_format: definition/2
+metrics:
+- name: processor.transform.msgs.transform.failed
+  brief: Number of failed transform attempts.
+  instrument: counter
+  unit: "{msg}"
+  stability: development
+  requirement_level: recommended
+  entity_associations:
+  - one_of:
+    - otap.node
+    - otap.node.custom
+  annotations:
+    code_generation:
+      metric_value_type: int
+    otap_dataflow:
+      metric_set: processor.transform
+      rust:
+        package: otap-df-core-nodes
+        type: Metrics
+        field: msgs_transform_failed
+        instrument: Counter
+        value_type: u64
+        source: crates/core-nodes/src/processors/transform_processor/metrics.rs
+        temporality: delta
+      wire:
+        scope_name: processor.transform
+        metric_name: msgs.transform.failed
+- name: processor.transform.msgs.transformed
+  brief: Number of messages successfully transformed.
+  instrument: counter
+  unit: "{msg}"
+  stability: development
+  requirement_level: recommended
+  entity_associations:
+  - one_of:
+    - otap.node
+    - otap.node.custom
+  annotations:
+    code_generation:
+      metric_value_type: int
+    otap_dataflow:
+      metric_set: processor.transform
+      rust:
+        package: otap-df-core-nodes
+        type: Metrics
+        field: msgs_transformed
+        instrument: Counter
+        value_type: u64
+        source: crates/core-nodes/src/processors/transform_processor/metrics.rs
+        temporality: delta
+      wire:
+        scope_name: processor.transform
+        metric_name: msgs.transformed

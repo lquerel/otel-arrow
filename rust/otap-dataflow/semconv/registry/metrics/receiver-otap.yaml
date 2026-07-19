@@ -1,0 +1,132 @@
+file_format: definition/2
+metrics:
+- name: receiver.otap.acks.nacks.invalid.or.expired
+  brief: Number of invalid/expired acks/nacks.
+  instrument: counter
+  unit: "{ack_or_nack}"
+  stability: development
+  requirement_level: recommended
+  entity_associations:
+  - one_of:
+    - otap.node
+    - otap.node.custom
+  annotations:
+    code_generation:
+      metric_value_type: int
+    otap_dataflow:
+      metric_set: receiver.otap
+      rust:
+        package: otap-df-core-nodes
+        type: OtapReceiverMetrics
+        field: acks_nacks_invalid_or_expired
+        instrument: Counter
+        value_type: u64
+        source: crates/core-nodes/src/receivers/otap_receiver/mod.rs
+        temporality: delta
+      wire:
+        scope_name: receiver.otap
+        metric_name: acks.nacks.invalid.or.expired
+- name: receiver.otap.acks.sent
+  brief: Number of acks sent.
+  instrument: counter
+  unit: "{acks}"
+  stability: development
+  requirement_level: recommended
+  entity_associations:
+  - one_of:
+    - otap.node
+    - otap.node.custom
+  annotations:
+    code_generation:
+      metric_value_type: int
+    otap_dataflow:
+      metric_set: receiver.otap
+      rust:
+        package: otap-df-core-nodes
+        type: OtapReceiverMetrics
+        field: acks_sent
+        instrument: Counter
+        value_type: u64
+        source: crates/core-nodes/src/receivers/otap_receiver/mod.rs
+        temporality: delta
+      wire:
+        scope_name: receiver.otap
+        metric_name: acks.sent
+- name: receiver.otap.nacks.sent
+  brief: Number of nacks sent.
+  instrument: counter
+  unit: "{nacks}"
+  stability: development
+  requirement_level: recommended
+  entity_associations:
+  - one_of:
+    - otap.node
+    - otap.node.custom
+  annotations:
+    code_generation:
+      metric_value_type: int
+    otap_dataflow:
+      metric_set: receiver.otap
+      rust:
+        package: otap-df-core-nodes
+        type: OtapReceiverMetrics
+        field: nacks_sent
+        instrument: Counter
+        value_type: u64
+        source: crates/core-nodes/src/receivers/otap_receiver/mod.rs
+        temporality: delta
+      wire:
+        scope_name: receiver.otap
+        metric_name: nacks.sent
+- name: receiver.otap.refused.memory.pressure
+  brief: Number of OTAP RPCs rejected specifically because memory pressure was active.
+  instrument: counter
+  unit: "{requests}"
+  stability: development
+  requirement_level: recommended
+  entity_associations:
+  - one_of:
+    - otap.node
+    - otap.node.custom
+  annotations:
+    code_generation:
+      metric_value_type: int
+    otap_dataflow:
+      metric_set: receiver.otap
+      rust:
+        package: otap-df-core-nodes
+        type: OtapReceiverMetrics
+        field: refused_memory_pressure
+        instrument: Counter
+        value_type: u64
+        source: crates/core-nodes/src/receivers/otap_receiver/mod.rs
+        temporality: delta
+      wire:
+        scope_name: receiver.otap
+        metric_name: refused.memory.pressure
+- name: receiver.otap.rejected.requests
+  brief: Number of OTAP RPCs rejected before entering the pipeline.
+  instrument: counter
+  unit: "{requests}"
+  stability: development
+  requirement_level: recommended
+  entity_associations:
+  - one_of:
+    - otap.node
+    - otap.node.custom
+  annotations:
+    code_generation:
+      metric_value_type: int
+    otap_dataflow:
+      metric_set: receiver.otap
+      rust:
+        package: otap-df-core-nodes
+        type: OtapReceiverMetrics
+        field: rejected_requests
+        instrument: Counter
+        value_type: u64
+        source: crates/core-nodes/src/receivers/otap_receiver/mod.rs
+        temporality: delta
+      wire:
+        scope_name: receiver.otap
+        metric_name: rejected.requests

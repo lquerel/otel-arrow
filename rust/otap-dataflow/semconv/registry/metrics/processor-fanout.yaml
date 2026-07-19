@@ -1,0 +1,208 @@
+file_format: definition/2
+metrics:
+- name: processor.fanout.acked
+  brief: Requests acked upstream (after await_ack/fallback aggregation).
+  instrument: counter
+  unit: "{item}"
+  stability: development
+  requirement_level: recommended
+  entity_associations:
+  - one_of:
+    - otap.node
+    - otap.node.custom
+  annotations:
+    code_generation:
+      metric_value_type: int
+    otap_dataflow:
+      metric_set: processor.fanout
+      rust:
+        package: otap-df-core-nodes
+        type: FanoutMetrics
+        field: acked
+        instrument: Counter
+        value_type: u64
+        source: crates/core-nodes/src/processors/fanout_processor/mod.rs
+        temporality: delta
+      wire:
+        scope_name: processor.fanout
+        metric_name: acked
+- name: processor.fanout.in.flight
+  brief: Current number of in-flight requests tracked by the processor.
+  instrument: gauge
+  unit: "{item}"
+  stability: development
+  requirement_level: recommended
+  entity_associations:
+  - one_of:
+    - otap.node
+    - otap.node.custom
+  annotations:
+    code_generation:
+      metric_value_type: int
+    otap_dataflow:
+      metric_set: processor.fanout
+      rust:
+        package: otap-df-core-nodes
+        type: FanoutMetrics
+        field: in_flight
+        instrument: Gauge
+        value_type: u64
+        source: crates/core-nodes/src/processors/fanout_processor/mod.rs
+      wire:
+        scope_name: processor.fanout
+        metric_name: in.flight
+- name: processor.fanout.max.inflight.config
+  brief: Configured max_inflight value (0 means unlimited).
+  instrument: gauge
+  unit: "{item}"
+  stability: development
+  requirement_level: recommended
+  entity_associations:
+  - one_of:
+    - otap.node
+    - otap.node.custom
+  annotations:
+    code_generation:
+      metric_value_type: int
+    otap_dataflow:
+      metric_set: processor.fanout
+      rust:
+        package: otap-df-core-nodes
+        type: FanoutMetrics
+        field: max_inflight_config
+        instrument: Gauge
+        value_type: u64
+        source: crates/core-nodes/src/processors/fanout_processor/mod.rs
+      wire:
+        scope_name: processor.fanout
+        metric_name: max.inflight.config
+- name: processor.fanout.nacked
+  brief: Requests nacked upstream (after await_ack/fallback aggregation).
+  instrument: counter
+  unit: "{item}"
+  stability: development
+  requirement_level: recommended
+  entity_associations:
+  - one_of:
+    - otap.node
+    - otap.node.custom
+  annotations:
+    code_generation:
+      metric_value_type: int
+    otap_dataflow:
+      metric_set: processor.fanout
+      rust:
+        package: otap-df-core-nodes
+        type: FanoutMetrics
+        field: nacked
+        instrument: Counter
+        value_type: u64
+        source: crates/core-nodes/src/processors/fanout_processor/mod.rs
+        temporality: delta
+      wire:
+        scope_name: processor.fanout
+        metric_name: nacked
+- name: processor.fanout.sent
+  brief: 'Requests dispatched. Note: This is a convenience metric that overlaps with
+    channel-level send metrics. Consider removing if metric bloat is a concern.'
+  instrument: counter
+  unit: "{item}"
+  stability: development
+  requirement_level: recommended
+  entity_associations:
+  - one_of:
+    - otap.node
+    - otap.node.custom
+  annotations:
+    code_generation:
+      metric_value_type: int
+    otap_dataflow:
+      metric_set: processor.fanout
+      rust:
+        package: otap-df-core-nodes
+        type: FanoutMetrics
+        field: sent
+        instrument: Counter
+        value_type: u64
+        source: crates/core-nodes/src/processors/fanout_processor/mod.rs
+        temporality: delta
+      wire:
+        scope_name: processor.fanout
+        metric_name: sent
+- name: processor.fanout.throttle.episodes
+  brief: Increments on transition from not-throttled to throttled.
+  instrument: counter
+  unit: "{episode}"
+  stability: development
+  requirement_level: recommended
+  entity_associations:
+  - one_of:
+    - otap.node
+    - otap.node.custom
+  annotations:
+    code_generation:
+      metric_value_type: int
+    otap_dataflow:
+      metric_set: processor.fanout
+      rust:
+        package: otap-df-core-nodes
+        type: FanoutMetrics
+        field: throttle_episodes
+        instrument: Counter
+        value_type: u64
+        source: crates/core-nodes/src/processors/fanout_processor/mod.rs
+        temporality: delta
+      wire:
+        scope_name: processor.fanout
+        metric_name: throttle.episodes
+- name: processor.fanout.throttled
+  brief: 1 when fanout is currently refusing new pdata via accept_pdata(), else 0.
+  instrument: gauge
+  unit: '1'
+  stability: development
+  requirement_level: recommended
+  entity_associations:
+  - one_of:
+    - otap.node
+    - otap.node.custom
+  annotations:
+    code_generation:
+      metric_value_type: int
+    otap_dataflow:
+      metric_set: processor.fanout
+      rust:
+        package: otap-df-core-nodes
+        type: FanoutMetrics
+        field: throttled
+        instrument: Gauge
+        value_type: u64
+        source: crates/core-nodes/src/processors/fanout_processor/mod.rs
+      wire:
+        scope_name: processor.fanout
+        metric_name: throttled
+- name: processor.fanout.timed.out
+  brief: Metric for the OTAP Dataflow internal telemetry processor.fanout.timed.out.
+  instrument: counter
+  unit: "{item}"
+  stability: development
+  requirement_level: recommended
+  entity_associations:
+  - one_of:
+    - otap.node
+    - otap.node.custom
+  annotations:
+    code_generation:
+      metric_value_type: int
+    otap_dataflow:
+      metric_set: processor.fanout
+      rust:
+        package: otap-df-core-nodes
+        type: FanoutMetrics
+        field: timed_out
+        instrument: Counter
+        value_type: u64
+        source: crates/core-nodes/src/processors/fanout_processor/mod.rs
+        temporality: delta
+      wire:
+        scope_name: processor.fanout
+        metric_name: timed.out

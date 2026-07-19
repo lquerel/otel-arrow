@@ -1,0 +1,54 @@
+file_format: definition/2
+metrics:
+- name: node.completion_emission.notify_ack.routed
+  brief: Count of successful `notify_ack` routings into the shared completion lane.
+  instrument: counter
+  unit: "{message}"
+  stability: development
+  requirement_level: recommended
+  entity_associations:
+  - one_of:
+    - otap.node
+    - otap.node.custom
+  annotations:
+    code_generation:
+      metric_value_type: int
+    otap_dataflow:
+      metric_set: node.completion_emission
+      rust:
+        package: otap-df-engine
+        type: CompletionEmissionMetrics
+        field: notify_ack_routed
+        instrument: Counter
+        value_type: u64
+        source: crates/engine/src/completion_emission_metrics.rs
+        temporality: delta
+      wire:
+        scope_name: node.completion_emission
+        metric_name: notify_ack.routed
+- name: node.completion_emission.notify_nack.routed
+  brief: Count of successful `notify_nack` routings into the shared completion lane.
+  instrument: counter
+  unit: "{message}"
+  stability: development
+  requirement_level: recommended
+  entity_associations:
+  - one_of:
+    - otap.node
+    - otap.node.custom
+  annotations:
+    code_generation:
+      metric_value_type: int
+    otap_dataflow:
+      metric_set: node.completion_emission
+      rust:
+        package: otap-df-engine
+        type: CompletionEmissionMetrics
+        field: notify_nack_routed
+        instrument: Counter
+        value_type: u64
+        source: crates/engine/src/completion_emission_metrics.rs
+        temporality: delta
+      wire:
+        scope_name: node.completion_emission
+        metric_name: notify_nack.routed

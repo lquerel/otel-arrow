@@ -1,0 +1,99 @@
+file_format: definition/2
+metrics:
+- name: node.consumer.consumed.duration
+  brief: 'Duration from entry until the corresponding ack or nack is routed, in nanoseconds.
+    This is reported at the detailed level. TODO: make this Option<Box<Mmsc or Histogram>>.'
+  instrument: histogram
+  unit: ns
+  stability: development
+  requirement_level: recommended
+  entity_associations:
+  - otap.node.channel
+  annotations:
+    code_generation:
+      metric_value_type: double
+    otap_dataflow:
+      metric_set: node.consumer
+      rust:
+        package: otap-df-engine
+        type: ConsumedMetrics
+        field: consumed_duration_ns
+        instrument: Mmsc
+        value_type: f64
+        source: crates/engine/src/channel_metrics.rs
+        temporality: delta
+      wire:
+        scope_name: node.consumer
+        metric_name: consumed.duration
+- name: node.consumer.consumed.failure
+  brief: Consumed requests that failed, this are retryable errors.
+  instrument: counter
+  unit: "{requests}"
+  stability: development
+  requirement_level: recommended
+  entity_associations:
+  - otap.node.channel
+  annotations:
+    code_generation:
+      metric_value_type: int
+    otap_dataflow:
+      metric_set: node.consumer
+      rust:
+        package: otap-df-engine
+        type: ConsumedMetrics
+        field: consumed_failure
+        instrument: Counter
+        value_type: u64
+        source: crates/engine/src/channel_metrics.rs
+        temporality: delta
+      wire:
+        scope_name: node.consumer
+        metric_name: consumed.failure
+- name: node.consumer.consumed.refused
+  brief: Consumed requests refused, also known as permanent failures.
+  instrument: counter
+  unit: "{requests}"
+  stability: development
+  requirement_level: recommended
+  entity_associations:
+  - otap.node.channel
+  annotations:
+    code_generation:
+      metric_value_type: int
+    otap_dataflow:
+      metric_set: node.consumer
+      rust:
+        package: otap-df-engine
+        type: ConsumedMetrics
+        field: consumed_refused
+        instrument: Counter
+        value_type: u64
+        source: crates/engine/src/channel_metrics.rs
+        temporality: delta
+      wire:
+        scope_name: node.consumer
+        metric_name: consumed.refused
+- name: node.consumer.consumed.success
+  brief: Consumed requests successfully processed.
+  instrument: counter
+  unit: "{requests}"
+  stability: development
+  requirement_level: recommended
+  entity_associations:
+  - otap.node.channel
+  annotations:
+    code_generation:
+      metric_value_type: int
+    otap_dataflow:
+      metric_set: node.consumer
+      rust:
+        package: otap-df-engine
+        type: ConsumedMetrics
+        field: consumed_success
+        instrument: Counter
+        value_type: u64
+        source: crates/engine/src/channel_metrics.rs
+        temporality: delta
+      wire:
+        scope_name: node.consumer
+        metric_name: consumed.success

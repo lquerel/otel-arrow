@@ -11645,9 +11645,13 @@ version = "0.49.0"
 dependencies = [
  "anyhow",
  "otap-df-pdata-otlp-model",
+ "proc-macro2",
  "prost-build",
+ "quote",
  "serde",
  "serde_json",
+ "serde_yaml",
+ "syn 2.0.119",
  "toml",
  "tonic-prost-build",
 ]

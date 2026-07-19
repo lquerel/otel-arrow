@@ -1,0 +1,102 @@
+file_format: definition/2
+metrics:
+- name: flow.compute.duration
+  brief: Sum of per-node compute durations (nanoseconds) for messages traversing the
+    flow range.
+  instrument: histogram
+  unit: ns
+  stability: development
+  requirement_level: recommended
+  entity_associations:
+  - otap.flow
+  annotations:
+    code_generation:
+      metric_value_type: double
+    otap_dataflow:
+      metric_set: flow
+      rust:
+        package: otap-df-engine
+        type: FlowDurationMetrics
+        field: compute_duration
+        instrument: Mmsc
+        value_type: f64
+        source: crates/engine/src/flow_metrics.rs
+        temporality: delta
+      wire:
+        scope_name: flow
+        metric_name: compute.duration
+- name: flow.signals.dropped
+  brief: Number of signal items (log records, spans, or metric data points) a decision
+    node chose to drop.
+  instrument: histogram
+  unit: "{item}"
+  stability: development
+  requirement_level: recommended
+  entity_associations:
+  - otap.flow
+  annotations:
+    code_generation:
+      metric_value_type: double
+    otap_dataflow:
+      metric_set: flow
+      rust:
+        package: otap-df-engine
+        type: FlowSignalsDroppedMetrics
+        field: signals_dropped
+        instrument: Mmsc
+        value_type: f64
+        source: crates/engine/src/flow_metrics.rs
+        temporality: delta
+      wire:
+        scope_name: flow
+        metric_name: signals.dropped
+- name: flow.signals.incoming
+  brief: Number of signal items (log records, spans, or metric data points) entering
+    the flow range.
+  instrument: histogram
+  unit: "{item}"
+  stability: development
+  requirement_level: recommended
+  entity_associations:
+  - otap.flow
+  annotations:
+    code_generation:
+      metric_value_type: double
+    otap_dataflow:
+      metric_set: flow
+      rust:
+        package: otap-df-engine
+        type: FlowSignalsIncomingMetrics
+        field: signals_incoming
+        instrument: Mmsc
+        value_type: f64
+        source: crates/engine/src/flow_metrics.rs
+        temporality: delta
+      wire:
+        scope_name: flow
+        metric_name: signals.incoming
+- name: flow.signals.outgoing
+  brief: Number of signal items (log records, spans, or metric data points) leaving
+    the flow range.
+  instrument: histogram
+  unit: "{item}"
+  stability: development
+  requirement_level: recommended
+  entity_associations:
+  - otap.flow
+  annotations:
+    code_generation:
+      metric_value_type: double
+    otap_dataflow:
+      metric_set: flow
+      rust:
+        package: otap-df-engine
+        type: FlowSignalsOutgoingMetrics
+        field: signals_outgoing
+        instrument: Mmsc
+        value_type: f64
+        source: crates/engine/src/flow_metrics.rs
+        temporality: delta
+      wire:
+        scope_name: flow
+        metric_name: signals.outgoing

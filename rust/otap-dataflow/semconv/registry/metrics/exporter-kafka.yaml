@@ -1,0 +1,272 @@
+file_format: definition/2
+metrics:
+- name: exporter.kafka.acks.received
+  brief: Number of acks received from downstream.
+  instrument: counter
+  unit: "{batch}"
+  stability: development
+  requirement_level: recommended
+  entity_associations:
+  - one_of:
+    - otap.node
+    - otap.node.custom
+  annotations:
+    code_generation:
+      metric_value_type: int
+    otap_dataflow:
+      metric_set: exporter.kafka
+      rust:
+        package: otap-df-contrib-nodes
+        type: KafkaExporterMetrics
+        field: acks_received
+        instrument: Counter
+        value_type: u64
+        source: crates/contrib-nodes/src/exporters/kafka_exporter/metrics.rs
+        temporality: delta
+        availability: feature = "kafka-exporter"
+      wire:
+        scope_name: exporter.kafka
+        metric_name: acks.received
+- name: exporter.kafka.logs.exported
+  brief: Number of log records successfully exported to Kafka.
+  instrument: counter
+  unit: "{log}"
+  stability: development
+  requirement_level: recommended
+  entity_associations:
+  - one_of:
+    - otap.node
+    - otap.node.custom
+  annotations:
+    code_generation:
+      metric_value_type: int
+    otap_dataflow:
+      metric_set: exporter.kafka
+      rust:
+        package: otap-df-contrib-nodes
+        type: KafkaExporterMetrics
+        field: logs_exported
+        instrument: Counter
+        value_type: u64
+        source: crates/contrib-nodes/src/exporters/kafka_exporter/metrics.rs
+        temporality: delta
+        availability: feature = "kafka-exporter"
+      wire:
+        scope_name: exporter.kafka
+        metric_name: logs.exported
+- name: exporter.kafka.logs.failed
+  brief: Number of log records that failed to export to Kafka.
+  instrument: counter
+  unit: "{log}"
+  stability: development
+  requirement_level: recommended
+  entity_associations:
+  - one_of:
+    - otap.node
+    - otap.node.custom
+  annotations:
+    code_generation:
+      metric_value_type: int
+    otap_dataflow:
+      metric_set: exporter.kafka
+      rust:
+        package: otap-df-contrib-nodes
+        type: KafkaExporterMetrics
+        field: logs_failed
+        instrument: Counter
+        value_type: u64
+        source: crates/contrib-nodes/src/exporters/kafka_exporter/metrics.rs
+        temporality: delta
+        availability: feature = "kafka-exporter"
+      wire:
+        scope_name: exporter.kafka
+        metric_name: logs.failed
+- name: exporter.kafka.metrics.exported
+  brief: Number of metric data points successfully exported to Kafka.
+  instrument: counter
+  unit: "{datapoint}"
+  stability: development
+  requirement_level: recommended
+  entity_associations:
+  - one_of:
+    - otap.node
+    - otap.node.custom
+  annotations:
+    code_generation:
+      metric_value_type: int
+    otap_dataflow:
+      metric_set: exporter.kafka
+      rust:
+        package: otap-df-contrib-nodes
+        type: KafkaExporterMetrics
+        field: metrics_exported
+        instrument: Counter
+        value_type: u64
+        source: crates/contrib-nodes/src/exporters/kafka_exporter/metrics.rs
+        temporality: delta
+        availability: feature = "kafka-exporter"
+      wire:
+        scope_name: exporter.kafka
+        metric_name: metrics.exported
+- name: exporter.kafka.metrics.failed
+  brief: Number of metric data points that failed to export to Kafka.
+  instrument: counter
+  unit: "{datapoint}"
+  stability: development
+  requirement_level: recommended
+  entity_associations:
+  - one_of:
+    - otap.node
+    - otap.node.custom
+  annotations:
+    code_generation:
+      metric_value_type: int
+    otap_dataflow:
+      metric_set: exporter.kafka
+      rust:
+        package: otap-df-contrib-nodes
+        type: KafkaExporterMetrics
+        field: metrics_failed
+        instrument: Counter
+        value_type: u64
+        source: crates/contrib-nodes/src/exporters/kafka_exporter/metrics.rs
+        temporality: delta
+        availability: feature = "kafka-exporter"
+      wire:
+        scope_name: exporter.kafka
+        metric_name: metrics.failed
+- name: exporter.kafka.nacks.received
+  brief: Number of nacks received from downstream.
+  instrument: counter
+  unit: "{batch}"
+  stability: development
+  requirement_level: recommended
+  entity_associations:
+  - one_of:
+    - otap.node
+    - otap.node.custom
+  annotations:
+    code_generation:
+      metric_value_type: int
+    otap_dataflow:
+      metric_set: exporter.kafka
+      rust:
+        package: otap-df-contrib-nodes
+        type: KafkaExporterMetrics
+        field: nacks_received
+        instrument: Counter
+        value_type: u64
+        source: crates/contrib-nodes/src/exporters/kafka_exporter/metrics.rs
+        temporality: delta
+        availability: feature = "kafka-exporter"
+      wire:
+        scope_name: exporter.kafka
+        metric_name: nacks.received
+- name: exporter.kafka.topic.from.header
+  brief: Batches where topic was resolved from a transport header.
+  instrument: counter
+  unit: "{batch}"
+  stability: development
+  requirement_level: recommended
+  entity_associations:
+  - one_of:
+    - otap.node
+    - otap.node.custom
+  annotations:
+    code_generation:
+      metric_value_type: int
+    otap_dataflow:
+      metric_set: exporter.kafka
+      rust:
+        package: otap-df-contrib-nodes
+        type: KafkaExporterMetrics
+        field: topic_from_header
+        instrument: Counter
+        value_type: u64
+        source: crates/contrib-nodes/src/exporters/kafka_exporter/metrics.rs
+        temporality: delta
+        availability: feature = "kafka-exporter"
+      wire:
+        scope_name: exporter.kafka
+        metric_name: topic.from.header
+- name: exporter.kafka.topic.from.static.config
+  brief: Batches where topic was resolved from static per-signal config.
+  instrument: counter
+  unit: "{batch}"
+  stability: development
+  requirement_level: recommended
+  entity_associations:
+  - one_of:
+    - otap.node
+    - otap.node.custom
+  annotations:
+    code_generation:
+      metric_value_type: int
+    otap_dataflow:
+      metric_set: exporter.kafka
+      rust:
+        package: otap-df-contrib-nodes
+        type: KafkaExporterMetrics
+        field: topic_from_static_config
+        instrument: Counter
+        value_type: u64
+        source: crates/contrib-nodes/src/exporters/kafka_exporter/metrics.rs
+        temporality: delta
+        availability: feature = "kafka-exporter"
+      wire:
+        scope_name: exporter.kafka
+        metric_name: topic.from.static.config
+- name: exporter.kafka.traces.exported
+  brief: Number of trace spans successfully exported to Kafka.
+  instrument: counter
+  unit: "{span}"
+  stability: development
+  requirement_level: recommended
+  entity_associations:
+  - one_of:
+    - otap.node
+    - otap.node.custom
+  annotations:
+    code_generation:
+      metric_value_type: int
+    otap_dataflow:
+      metric_set: exporter.kafka
+      rust:
+        package: otap-df-contrib-nodes
+        type: KafkaExporterMetrics
+        field: traces_exported
+        instrument: Counter
+        value_type: u64
+        source: crates/contrib-nodes/src/exporters/kafka_exporter/metrics.rs
+        temporality: delta
+        availability: feature = "kafka-exporter"
+      wire:
+        scope_name: exporter.kafka
+        metric_name: traces.exported
+- name: exporter.kafka.traces.failed
+  brief: Number of trace spans that failed to export to Kafka.
+  instrument: counter
+  unit: "{span}"
+  stability: development
+  requirement_level: recommended
+  entity_associations:
+  - one_of:
+    - otap.node
+    - otap.node.custom
+  annotations:
+    code_generation:
+      metric_value_type: int
+    otap_dataflow:
+      metric_set: exporter.kafka
+      rust:
+        package: otap-df-contrib-nodes
+        type: KafkaExporterMetrics
+        field: traces_failed
+        instrument: Counter
+        value_type: u64
+        source: crates/contrib-nodes/src/exporters/kafka_exporter/metrics.rs
+        temporality: delta
+        availability: feature = "kafka-exporter"
+      wire:
+        scope_name: exporter.kafka
+        metric_name: traces.failed

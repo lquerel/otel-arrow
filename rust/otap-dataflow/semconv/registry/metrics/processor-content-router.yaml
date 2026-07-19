@@ -1,0 +1,185 @@
+file_format: definition/2
+metrics:
+- name: processor.content_router.signals.conversion.error
+  brief: Number of messages that failed due to internal conversion errors.
+  instrument: counter
+  unit: "{msg}"
+  stability: development
+  requirement_level: recommended
+  entity_associations:
+  - one_of:
+    - otap.node
+    - otap.node.custom
+  annotations:
+    code_generation:
+      metric_value_type: int
+    otap_dataflow:
+      metric_set: processor.content_router
+      rust:
+        package: otap-df-core-nodes
+        type: ContentRouterMetrics
+        field: signals_conversion_error
+        instrument: Counter
+        value_type: u64
+        source: crates/core-nodes/src/processors/content_router/mod.rs
+        temporality: delta
+      wire:
+        scope_name: processor.content_router
+        metric_name: signals.conversion.error
+- name: processor.content_router.signals.nacked
+  brief: Number of messages NACKed (no route match, missing key, mixed batch, conversion
+    error, or send failure).
+  instrument: counter
+  unit: "{msg}"
+  stability: development
+  requirement_level: recommended
+  entity_associations:
+  - one_of:
+    - otap.node
+    - otap.node.custom
+  annotations:
+    code_generation:
+      metric_value_type: int
+    otap_dataflow:
+      metric_set: processor.content_router
+      rust:
+        package: otap-df-core-nodes
+        type: ContentRouterMetrics
+        field: signals_nacked
+        instrument: Counter
+        value_type: u64
+        source: crates/core-nodes/src/processors/content_router/mod.rs
+        temporality: delta
+      wire:
+        scope_name: processor.content_router
+        metric_name: signals.nacked
+- name: processor.content_router.signals.no.routing.key
+  brief: Number of messages where the routing key was missing.
+  instrument: counter
+  unit: "{msg}"
+  stability: development
+  requirement_level: recommended
+  entity_associations:
+  - one_of:
+    - otap.node
+    - otap.node.custom
+  annotations:
+    code_generation:
+      metric_value_type: int
+    otap_dataflow:
+      metric_set: processor.content_router
+      rust:
+        package: otap-df-core-nodes
+        type: ContentRouterMetrics
+        field: signals_no_routing_key
+        instrument: Counter
+        value_type: u64
+        source: crates/core-nodes/src/processors/content_router/mod.rs
+        temporality: delta
+      wire:
+        scope_name: processor.content_router
+        metric_name: signals.no.routing.key
+- name: processor.content_router.signals.rejected.route.closed
+  brief: Number of messages rejected because the selected route was closed.
+  instrument: counter
+  unit: "{msg}"
+  stability: development
+  requirement_level: recommended
+  entity_associations:
+  - one_of:
+    - otap.node
+    - otap.node.custom
+  annotations:
+    code_generation:
+      metric_value_type: int
+    otap_dataflow:
+      metric_set: processor.content_router
+      rust:
+        package: otap-df-core-nodes
+        type: ContentRouterMetrics
+        field: signals_rejected_route_closed
+        instrument: Counter
+        value_type: u64
+        source: crates/core-nodes/src/processors/content_router/mod.rs
+        temporality: delta
+      wire:
+        scope_name: processor.content_router
+        metric_name: signals.rejected.route.closed
+- name: processor.content_router.signals.rejected.route.full
+  brief: Number of messages rejected because the selected route was full.
+  instrument: counter
+  unit: "{msg}"
+  stability: development
+  requirement_level: recommended
+  entity_associations:
+  - one_of:
+    - otap.node
+    - otap.node.custom
+  annotations:
+    code_generation:
+      metric_value_type: int
+    otap_dataflow:
+      metric_set: processor.content_router
+      rust:
+        package: otap-df-core-nodes
+        type: ContentRouterMetrics
+        field: signals_rejected_route_full
+        instrument: Counter
+        value_type: u64
+        source: crates/core-nodes/src/processors/content_router/mod.rs
+        temporality: delta
+      wire:
+        scope_name: processor.content_router
+        metric_name: signals.rejected.route.full
+- name: processor.content_router.signals.routed
+  brief: Number of messages routed to a named port.
+  instrument: counter
+  unit: "{msg}"
+  stability: development
+  requirement_level: recommended
+  entity_associations:
+  - one_of:
+    - otap.node
+    - otap.node.custom
+  annotations:
+    code_generation:
+      metric_value_type: int
+    otap_dataflow:
+      metric_set: processor.content_router
+      rust:
+        package: otap-df-core-nodes
+        type: ContentRouterMetrics
+        field: signals_routed
+        instrument: Counter
+        value_type: u64
+        source: crates/core-nodes/src/processors/content_router/mod.rs
+        temporality: delta
+      wire:
+        scope_name: processor.content_router
+        metric_name: signals.routed
+- name: processor.content_router.signals.routed.default
+  brief: Number of messages routed to the default output.
+  instrument: counter
+  unit: "{msg}"
+  stability: development
+  requirement_level: recommended
+  entity_associations:
+  - one_of:
+    - otap.node
+    - otap.node.custom
+  annotations:
+    code_generation:
+      metric_value_type: int
+    otap_dataflow:
+      metric_set: processor.content_router
+      rust:
+        package: otap-df-core-nodes
+        type: ContentRouterMetrics
+        field: signals_routed_default
+        instrument: Counter
+        value_type: u64
+        source: crates/core-nodes/src/processors/content_router/mod.rs
+        temporality: delta
+      wire:
+        scope_name: processor.content_router
+        metric_name: signals.routed.default

@@ -1,0 +1,470 @@
+file_format: definition/2
+metrics:
+- name: processor.retry.consumed.items.logs.failure
+  brief: Number of items consumed (logs) with outcome=failure
+  instrument: counter
+  unit: "{item}"
+  stability: development
+  requirement_level: recommended
+  entity_associations:
+  - one_of:
+    - otap.node
+    - otap.node.custom
+  annotations:
+    code_generation:
+      metric_value_type: int
+    otap_dataflow:
+      metric_set: processor.retry
+      rust:
+        package: otap-df-core-nodes
+        type: RetryProcessorMetrics
+        field: consumed_items_logs_failure
+        instrument: Counter
+        value_type: u64
+        source: crates/core-nodes/src/processors/retry_processor/mod.rs
+        temporality: delta
+      wire:
+        scope_name: processor.retry
+        metric_name: consumed.items.logs.failure
+- name: processor.retry.consumed.items.logs.refused
+  brief: Number of items consumed (logs) with outcome=refused
+  instrument: counter
+  unit: "{item}"
+  stability: development
+  requirement_level: recommended
+  entity_associations:
+  - one_of:
+    - otap.node
+    - otap.node.custom
+  annotations:
+    code_generation:
+      metric_value_type: int
+    otap_dataflow:
+      metric_set: processor.retry
+      rust:
+        package: otap-df-core-nodes
+        type: RetryProcessorMetrics
+        field: consumed_items_logs_refused
+        instrument: Counter
+        value_type: u64
+        source: crates/core-nodes/src/processors/retry_processor/mod.rs
+        temporality: delta
+      wire:
+        scope_name: processor.retry
+        metric_name: consumed.items.logs.refused
+- name: processor.retry.consumed.items.logs.success
+  brief: Number of items consumed (logs) with outcome=success
+  instrument: counter
+  unit: "{item}"
+  stability: development
+  requirement_level: recommended
+  entity_associations:
+  - one_of:
+    - otap.node
+    - otap.node.custom
+  annotations:
+    code_generation:
+      metric_value_type: int
+    otap_dataflow:
+      metric_set: processor.retry
+      rust:
+        package: otap-df-core-nodes
+        type: RetryProcessorMetrics
+        field: consumed_items_logs_success
+        instrument: Counter
+        value_type: u64
+        source: crates/core-nodes/src/processors/retry_processor/mod.rs
+        temporality: delta
+      wire:
+        scope_name: processor.retry
+        metric_name: consumed.items.logs.success
+- name: processor.retry.consumed.items.metrics.failure
+  brief: Number of items consumed (metrics) with outcome=failure
+  instrument: counter
+  unit: "{item}"
+  stability: development
+  requirement_level: recommended
+  entity_associations:
+  - one_of:
+    - otap.node
+    - otap.node.custom
+  annotations:
+    code_generation:
+      metric_value_type: int
+    otap_dataflow:
+      metric_set: processor.retry
+      rust:
+        package: otap-df-core-nodes
+        type: RetryProcessorMetrics
+        field: consumed_items_metrics_failure
+        instrument: Counter
+        value_type: u64
+        source: crates/core-nodes/src/processors/retry_processor/mod.rs
+        temporality: delta
+      wire:
+        scope_name: processor.retry
+        metric_name: consumed.items.metrics.failure
+- name: processor.retry.consumed.items.metrics.refused
+  brief: Number of items consumed (metrics) with outcome=refused
+  instrument: counter
+  unit: "{item}"
+  stability: development
+  requirement_level: recommended
+  entity_associations:
+  - one_of:
+    - otap.node
+    - otap.node.custom
+  annotations:
+    code_generation:
+      metric_value_type: int
+    otap_dataflow:
+      metric_set: processor.retry
+      rust:
+        package: otap-df-core-nodes
+        type: RetryProcessorMetrics
+        field: consumed_items_metrics_refused
+        instrument: Counter
+        value_type: u64
+        source: crates/core-nodes/src/processors/retry_processor/mod.rs
+        temporality: delta
+      wire:
+        scope_name: processor.retry
+        metric_name: consumed.items.metrics.refused
+- name: processor.retry.consumed.items.metrics.success
+  brief: Number of items consumed (metrics) with outcome=success
+  instrument: counter
+  unit: "{item}"
+  stability: development
+  requirement_level: recommended
+  entity_associations:
+  - one_of:
+    - otap.node
+    - otap.node.custom
+  annotations:
+    code_generation:
+      metric_value_type: int
+    otap_dataflow:
+      metric_set: processor.retry
+      rust:
+        package: otap-df-core-nodes
+        type: RetryProcessorMetrics
+        field: consumed_items_metrics_success
+        instrument: Counter
+        value_type: u64
+        source: crates/core-nodes/src/processors/retry_processor/mod.rs
+        temporality: delta
+      wire:
+        scope_name: processor.retry
+        metric_name: consumed.items.metrics.success
+- name: processor.retry.consumed.items.traces.failure
+  brief: Number of items consumed (traces) with outcome=failure
+  instrument: counter
+  unit: "{item}"
+  stability: development
+  requirement_level: recommended
+  entity_associations:
+  - one_of:
+    - otap.node
+    - otap.node.custom
+  annotations:
+    code_generation:
+      metric_value_type: int
+    otap_dataflow:
+      metric_set: processor.retry
+      rust:
+        package: otap-df-core-nodes
+        type: RetryProcessorMetrics
+        field: consumed_items_traces_failure
+        instrument: Counter
+        value_type: u64
+        source: crates/core-nodes/src/processors/retry_processor/mod.rs
+        temporality: delta
+      wire:
+        scope_name: processor.retry
+        metric_name: consumed.items.traces.failure
+- name: processor.retry.consumed.items.traces.refused
+  brief: Number of items consumed (traces) with outcome=refused
+  instrument: counter
+  unit: "{item}"
+  stability: development
+  requirement_level: recommended
+  entity_associations:
+  - one_of:
+    - otap.node
+    - otap.node.custom
+  annotations:
+    code_generation:
+      metric_value_type: int
+    otap_dataflow:
+      metric_set: processor.retry
+      rust:
+        package: otap-df-core-nodes
+        type: RetryProcessorMetrics
+        field: consumed_items_traces_refused
+        instrument: Counter
+        value_type: u64
+        source: crates/core-nodes/src/processors/retry_processor/mod.rs
+        temporality: delta
+      wire:
+        scope_name: processor.retry
+        metric_name: consumed.items.traces.refused
+- name: processor.retry.consumed.items.traces.success
+  brief: Number of items consumed (traces) with outcome=success
+  instrument: counter
+  unit: "{item}"
+  stability: development
+  requirement_level: recommended
+  entity_associations:
+  - one_of:
+    - otap.node
+    - otap.node.custom
+  annotations:
+    code_generation:
+      metric_value_type: int
+    otap_dataflow:
+      metric_set: processor.retry
+      rust:
+        package: otap-df-core-nodes
+        type: RetryProcessorMetrics
+        field: consumed_items_traces_success
+        instrument: Counter
+        value_type: u64
+        source: crates/core-nodes/src/processors/retry_processor/mod.rs
+        temporality: delta
+      wire:
+        scope_name: processor.retry
+        metric_name: consumed.items.traces.success
+- name: processor.retry.produced.items.logs.refused
+  brief: Number of items produced (logs) with outcome=refused (downstream error)
+  instrument: counter
+  unit: "{item}"
+  stability: development
+  requirement_level: recommended
+  entity_associations:
+  - one_of:
+    - otap.node
+    - otap.node.custom
+  annotations:
+    code_generation:
+      metric_value_type: int
+    otap_dataflow:
+      metric_set: processor.retry
+      rust:
+        package: otap-df-core-nodes
+        type: RetryProcessorMetrics
+        field: produced_items_logs_refused
+        instrument: Counter
+        value_type: u64
+        source: crates/core-nodes/src/processors/retry_processor/mod.rs
+        temporality: delta
+      wire:
+        scope_name: processor.retry
+        metric_name: produced.items.logs.refused
+- name: processor.retry.produced.items.logs.success
+  brief: Number of items produced (logs) with outcome=success
+  instrument: counter
+  unit: "{item}"
+  stability: development
+  requirement_level: recommended
+  entity_associations:
+  - one_of:
+    - otap.node
+    - otap.node.custom
+  annotations:
+    code_generation:
+      metric_value_type: int
+    otap_dataflow:
+      metric_set: processor.retry
+      rust:
+        package: otap-df-core-nodes
+        type: RetryProcessorMetrics
+        field: produced_items_logs_success
+        instrument: Counter
+        value_type: u64
+        source: crates/core-nodes/src/processors/retry_processor/mod.rs
+        temporality: delta
+      wire:
+        scope_name: processor.retry
+        metric_name: produced.items.logs.success
+- name: processor.retry.produced.items.metrics.refused
+  brief: Number of items produced (metrics) with outcome=refused (downstream error)
+  instrument: counter
+  unit: "{item}"
+  stability: development
+  requirement_level: recommended
+  entity_associations:
+  - one_of:
+    - otap.node
+    - otap.node.custom
+  annotations:
+    code_generation:
+      metric_value_type: int
+    otap_dataflow:
+      metric_set: processor.retry
+      rust:
+        package: otap-df-core-nodes
+        type: RetryProcessorMetrics
+        field: produced_items_metrics_refused
+        instrument: Counter
+        value_type: u64
+        source: crates/core-nodes/src/processors/retry_processor/mod.rs
+        temporality: delta
+      wire:
+        scope_name: processor.retry
+        metric_name: produced.items.metrics.refused
+- name: processor.retry.produced.items.metrics.success
+  brief: Number of items produced (metrics) with outcome=success
+  instrument: counter
+  unit: "{item}"
+  stability: development
+  requirement_level: recommended
+  entity_associations:
+  - one_of:
+    - otap.node
+    - otap.node.custom
+  annotations:
+    code_generation:
+      metric_value_type: int
+    otap_dataflow:
+      metric_set: processor.retry
+      rust:
+        package: otap-df-core-nodes
+        type: RetryProcessorMetrics
+        field: produced_items_metrics_success
+        instrument: Counter
+        value_type: u64
+        source: crates/core-nodes/src/processors/retry_processor/mod.rs
+        temporality: delta
+      wire:
+        scope_name: processor.retry
+        metric_name: produced.items.metrics.success
+- name: processor.retry.produced.items.traces.refused
+  brief: Number of items produced (traces) with outcome=refused (downstream error)
+  instrument: counter
+  unit: "{item}"
+  stability: development
+  requirement_level: recommended
+  entity_associations:
+  - one_of:
+    - otap.node
+    - otap.node.custom
+  annotations:
+    code_generation:
+      metric_value_type: int
+    otap_dataflow:
+      metric_set: processor.retry
+      rust:
+        package: otap-df-core-nodes
+        type: RetryProcessorMetrics
+        field: produced_items_traces_refused
+        instrument: Counter
+        value_type: u64
+        source: crates/core-nodes/src/processors/retry_processor/mod.rs
+        temporality: delta
+      wire:
+        scope_name: processor.retry
+        metric_name: produced.items.traces.refused
+- name: processor.retry.produced.items.traces.success
+  brief: Number of items produced (traces) with outcome=success
+  instrument: counter
+  unit: "{item}"
+  stability: development
+  requirement_level: recommended
+  entity_associations:
+  - one_of:
+    - otap.node
+    - otap.node.custom
+  annotations:
+    code_generation:
+      metric_value_type: int
+    otap_dataflow:
+      metric_set: processor.retry
+      rust:
+        package: otap-df-core-nodes
+        type: RetryProcessorMetrics
+        field: produced_items_traces_success
+        instrument: Counter
+        value_type: u64
+        source: crates/core-nodes/src/processors/retry_processor/mod.rs
+        temporality: delta
+      wire:
+        scope_name: processor.retry
+        metric_name: produced.items.traces.success
+- name: processor.retry.retry.attempts.logs
+  brief: Number of retry attempts scheduled as a result of NACKs, logs.
+  instrument: counter
+  unit: "{event}"
+  stability: development
+  requirement_level: recommended
+  entity_associations:
+  - one_of:
+    - otap.node
+    - otap.node.custom
+  annotations:
+    code_generation:
+      metric_value_type: int
+    otap_dataflow:
+      metric_set: processor.retry
+      rust:
+        package: otap-df-core-nodes
+        type: RetryProcessorMetrics
+        field: retry_attempts_logs
+        instrument: Counter
+        value_type: u64
+        source: crates/core-nodes/src/processors/retry_processor/mod.rs
+        temporality: delta
+      wire:
+        scope_name: processor.retry
+        metric_name: retry.attempts.logs
+- name: processor.retry.retry.attempts.metrics
+  brief: Number of retry attempts scheduled as a result of NACKs, metrics.
+  instrument: counter
+  unit: "{event}"
+  stability: development
+  requirement_level: recommended
+  entity_associations:
+  - one_of:
+    - otap.node
+    - otap.node.custom
+  annotations:
+    code_generation:
+      metric_value_type: int
+    otap_dataflow:
+      metric_set: processor.retry
+      rust:
+        package: otap-df-core-nodes
+        type: RetryProcessorMetrics
+        field: retry_attempts_metrics
+        instrument: Counter
+        value_type: u64
+        source: crates/core-nodes/src/processors/retry_processor/mod.rs
+        temporality: delta
+      wire:
+        scope_name: processor.retry
+        metric_name: retry.attempts.metrics
+- name: processor.retry.retry.attempts.traces
+  brief: Number of retry attempts scheduled as a result of NACKs, traces.
+  instrument: counter
+  unit: "{event}"
+  stability: development
+  requirement_level: recommended
+  entity_associations:
+  - one_of:
+    - otap.node
+    - otap.node.custom
+  annotations:
+    code_generation:
+      metric_value_type: int
+    otap_dataflow:
+      metric_set: processor.retry
+      rust:
+        package: otap-df-core-nodes
+        type: RetryProcessorMetrics
+        field: retry_attempts_traces
+        instrument: Counter
+        value_type: u64
+        source: crates/core-nodes/src/processors/retry_processor/mod.rs
+        temporality: delta
+      wire:
+        scope_name: processor.retry
+        metric_name: retry.attempts.traces
