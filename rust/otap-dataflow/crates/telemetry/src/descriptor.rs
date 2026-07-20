@@ -86,6 +86,12 @@ pub enum AttributeValueType {
     Boolean,
     /// Map attribute value (key-value pairs)
     Map,
+    /// Attribute whose concrete value type is selected at runtime.
+    ///
+    /// This corresponds to the semantic-convention `any` type. The value
+    /// stored by an [`crate::attributes::AttributeSetHandler`] still uses one
+    /// of the concrete [`crate::attributes::AttributeValue`] variants.
+    Any,
 }
 
 /// Metadata describing a single attribute field.

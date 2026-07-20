@@ -1,0 +1,230 @@
+{%- macro rust_attribute_type(attribute) -%}
+{%- if attribute.type == "string" -%}
+String
+{%- elif attribute.type == "int" -%}
+i64
+{%- elif attribute.type == "double" -%}
+f64
+{%- elif attribute.type == "boolean" -%}
+bool
+{%- else -%}
+AttributeValue
+{%- endif -%}
+{%- endmacro -%}
+
+{#-
+  Minijinja's `tojson` filter produces a correctly quoted string, but also
+  applies HTML-safe escapes that are not valid Rust Unicode escapes. Restore
+  the four ASCII characters affected by HTML-safe JSON serialization.
+-#}
+{%- macro rust_string(value) -%}
+{{- value | tojson
+    | replace("\\u0026", "&")
+    | replace("\\u0027", "'")
+    | replace("\\u003c", "<")
+    | replace("\\u003e", ">") -}}
+{%- endmacro -%}
+
+{%- macro attribute_descriptor_type(attribute) -%}
+{%- if attribute.type == "string" -%}
+AttributeValueType::String
+{%- elif attribute.type == "int" -%}
+AttributeValueType::Int
+{%- elif attribute.type == "double" -%}
+AttributeValueType::Double
+{%- elif attribute.type == "boolean" -%}
+AttributeValueType::Boolean
+{%- elif attribute.type == "map" -%}
+AttributeValueType::Map
+{%- else -%}
+AttributeValueType::Any
+{%- endif -%}
+{%- endmacro -%}
+
+{%- macro attribute_value(attribute, field_name) -%}
+{%- if attribute.type == "string" -%}
+AttributeValue::String(identity.{{ field_name }})
+{%- elif attribute.type == "int" -%}
+AttributeValue::Int(identity.{{ field_name }})
+{%- elif attribute.type == "double" -%}
+AttributeValue::Double(identity.{{ field_name }})
+{%- elif attribute.type == "boolean" -%}
+AttributeValue::Boolean(identity.{{ field_name }})
+{%- else -%}
+identity.{{ field_name }}
+{%- endif -%}
+{%- endmacro -%}
+
+{%- macro metric_short_name(metric, metric_set) -%}
+{{- metric.name | replace(metric_set ~ ".", "") -}}
+{%- endmacro -%}
+
+{%- macro metric_field_name(metric, metric_set) -%}
+{%- if metric.annotations.otap_dataflow.rust is defined and metric.annotations.otap_dataflow.rust.field is defined -%}
+{{- metric.annotations.otap_dataflow.rust.field -}}
+{%- else -%}
+{{- metric_short_name(metric, metric_set) | snake_case -}}
+{%- endif -%}
+{%- endmacro -%}
+
+{%- macro metric_rust_value_type(metric) -%}
+{%- if metric.annotations.code_generation.metric_value_type == "int" -%}
+u64
+{%- else -%}
+f64
+{%- endif -%}
+{%- endmacro -%}
+
+{%- macro metric_instrument_type(metric) -%}
+{%- if metric.instrument == "counter" -%}
+{%- if metric.annotations.otap_dataflow.recording == "observed" -%}
+otap_df_telemetry::instrument::ObserveCounter<{{ metric_rust_value_type(metric) }}>
+{%- else -%}
+otap_df_telemetry::instrument::Counter<{{ metric_rust_value_type(metric) }}>
+{%- endif -%}
+{%- elif metric.instrument == "updowncounter" -%}
+{%- if metric.annotations.otap_dataflow.recording == "additive" -%}
+otap_df_telemetry::instrument::UpDownCounter<{{ metric_rust_value_type(metric) }}>
+{%- else -%}
+otap_df_telemetry::instrument::ObserveUpDownCounter<{{ metric_rust_value_type(metric) }}>
+{%- endif -%}
+{%- elif metric.instrument == "gauge" -%}
+otap_df_telemetry::instrument::Gauge<{{ metric_rust_value_type(metric) }}>
+{%- else -%}
+otap_df_telemetry::instrument::Mmsc
+{%- endif -%}
+{%- endmacro -%}
+
+{%- macro descriptor_instrument(metric) -%}
+{%- if metric.instrument == "counter" -%}
+Instrument::Counter
+{%- elif metric.instrument == "updowncounter" -%}
+Instrument::UpDownCounter
+{%- elif metric.instrument == "gauge" -%}
+Instrument::Gauge
+{%- else -%}
+Instrument::Mmsc
+{%- endif -%}
+{%- endmacro -%}
+
+{%- macro descriptor_temporality(metric) -%}
+{%- if metric.instrument == "counter" -%}
+{%- if metric.annotations.otap_dataflow.recording == "observed" -%}
+Some(otap_df_telemetry::descriptor::Temporality::Cumulative)
+{%- else -%}
+Some(otap_df_telemetry::descriptor::Temporality::Delta)
+{%- endif -%}
+{%- elif metric.instrument == "updowncounter" -%}
+Some(otap_df_telemetry::descriptor::Temporality::Cumulative)
+{%- elif metric.instrument == "histogram" -%}
+Some(otap_df_telemetry::descriptor::Temporality::Delta)
+{%- else -%}
+None
+{%- endif -%}
+{%- endmacro -%}
+
+{%- macro descriptor_value_type(metric) -%}
+{%- if metric.annotations.code_generation.metric_value_type == "int" -%}
+MetricValueType::U64
+{%- else -%}
+MetricValueType::F64
+{%- endif -%}
+{%- endmacro -%}
+
+{%- macro rust_field_name(attribute) -%}
+{%- if attribute.key | snake_case == "type" -%}
+r#type
+{%- else -%}
+{{- attribute.key | snake_case -}}
+{%- endif -%}
+{%- endmacro -%}
+
+{%- macro event_attribute_base_type(attribute) -%}
+{%- if attribute.type == "string" -%}
+String
+{%- elif attribute.type == "int" -%}
+i64
+{%- elif attribute.type == "double" -%}
+f64
+{%- elif attribute.type == "boolean" -%}
+bool
+{%- else -%}
+otap_df_telemetry::attributes::AttributeValue
+{%- endif -%}
+{%- endmacro -%}
+
+{%- macro event_attribute_type(attribute) -%}
+{%- if attribute.requirement_level == "required" -%}
+{{- event_attribute_base_type(attribute) -}}
+{%- else -%}
+Option<{{ event_attribute_base_type(attribute) }}>
+{%- endif -%}
+{%- endmacro -%}
+
+{%- macro event_attribute_value_type(attribute) -%}
+{%- if attribute.type == "string" -%}
+otap_df_telemetry::descriptor::AttributeValueType::String
+{%- elif attribute.type == "int" -%}
+otap_df_telemetry::descriptor::AttributeValueType::Int
+{%- elif attribute.type == "double" -%}
+otap_df_telemetry::descriptor::AttributeValueType::Double
+{%- elif attribute.type == "boolean" -%}
+otap_df_telemetry::descriptor::AttributeValueType::Boolean
+{%- elif attribute.type == "map" -%}
+otap_df_telemetry::descriptor::AttributeValueType::Map
+{%- else -%}
+otap_df_telemetry::descriptor::AttributeValueType::Any
+{%- endif -%}
+{%- endmacro -%}
+
+{%- macro event_requirement_level(requirement_level) -%}
+{%- if requirement_level == "required" -%}
+EventRequirementLevel::Required
+{%- elif requirement_level == "conditionally_required" -%}
+EventRequirementLevel::ConditionallyRequired
+{%- elif requirement_level == "opt_in" -%}
+EventRequirementLevel::OptIn
+{%- else -%}
+EventRequirementLevel::Recommended
+{%- endif -%}
+{%- endmacro -%}
+
+{%- macro event_severity(severity) -%}
+{%- if severity == "debug" -%}
+EventSeverity::Debug
+{%- elif severity == "info" -%}
+EventSeverity::Info
+{%- elif severity == "warn" -%}
+EventSeverity::Warn
+{%- elif severity == "error" -%}
+EventSeverity::Error
+{%- else -%}
+EventSeverity::Dynamic
+{%- endif -%}
+{%- endmacro -%}
+
+{%- macro event_level(severity) -%}
+{%- if severity == "debug" -%}
+EventLevel::Debug
+{%- elif severity == "info" -%}
+EventLevel::Info
+{%- elif severity == "warn" -%}
+EventLevel::Warn
+{%- else -%}
+EventLevel::Error
+{%- endif -%}
+{%- endmacro -%}
+
+{%- macro event_value_ref(attribute, value, borrowed) -%}
+{%- if attribute.type == "string" -%}
+EventAttributeValueRef::String({{ value }}.as_str())
+{%- elif attribute.type == "int" -%}
+EventAttributeValueRef::Int({% if borrowed %}*{% endif %}{{ value }})
+{%- elif attribute.type == "double" -%}
+EventAttributeValueRef::Double({% if borrowed %}*{% endif %}{{ value }})
+{%- elif attribute.type == "boolean" -%}
+EventAttributeValueRef::Boolean({% if borrowed %}*{% endif %}{{ value }})
+{%- else -%}
+EventAttributeValueRef::Any({% if not borrowed %}&{% endif %}{{ value }})
+{%- endif -%}
+{%- endmacro -%}

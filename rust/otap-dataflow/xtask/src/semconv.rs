@@ -619,6 +619,9 @@ fn cargo_targets(workspace: &Path) -> Result<Vec<Target>> {
         let package_name = package["name"]
             .as_str()
             .ok_or_else(|| anyhow!("package omitted name"))?;
+        if !package_is_source_inventory(package) {
+            continue;
+        }
         for target in package["targets"]
             .as_array()
             .ok_or_else(|| anyhow!("package {package_name} omitted targets"))?
@@ -655,6 +658,13 @@ fn cargo_targets(workspace: &Path) -> Result<Vec<Target>> {
         .sort_by(|left, right| (&left.package, &left.source).cmp(&(&right.package, &right.source)));
     targets.dedup_by(|left, right| left.package == right.package && left.source == right.source);
     Ok(targets)
+}
+
+fn package_is_source_inventory(package: &serde_json::Value) -> bool {
+    package
+        .pointer("/metadata/semconv/source_inventory")
+        .and_then(serde_json::Value::as_bool)
+        .unwrap_or(true)
 }
 
 fn resolve_module(
@@ -1273,6 +1283,12 @@ fn field_ident_from_key(key: &str) -> &str {
 #[derive(Debug, Deserialize)]
 #[serde(deny_unknown_fields)]
 struct MetricSetCatalogFile {
+    params: MetricSetCatalogParams,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(deny_unknown_fields)]
+struct MetricSetCatalogParams {
     schema: String,
     metric_sets: Vec<MetricSetSpec>,
 }
@@ -1314,16 +1330,16 @@ impl MetricSetCatalog {
             .with_context(|| format!("failed to read metric-set catalog {}", path.display()))?;
         let catalog: MetricSetCatalogFile = serde_yaml::from_str(&contents)
             .with_context(|| format!("failed to parse metric-set catalog {}", path.display()))?;
-        if catalog.schema != "otap-dataflow/metric-sets/1" {
+        if catalog.params.schema != "otap-dataflow/metric-sets/1" {
             bail!(
                 "{} uses schema {}, expected otap-dataflow/metric-sets/1",
                 path.display(),
-                catalog.schema
+                catalog.params.schema
             );
         }
 
         let mut metric_sets = BTreeMap::new();
-        for metric_set in catalog.metric_sets {
+        for metric_set in catalog.params.metric_sets {
             let id = metric_set.id.clone();
             if metric_sets.insert(id.clone(), metric_set).is_some() {
                 bail!("duplicate metric-set definition {id} in {}", path.display());
@@ -2572,6 +2588,19 @@ where
 mod tests {
     use super::*;
     use quote::quote;
+
+    /// Scenario: a generated SDK package opts out of the production source inventory through Cargo metadata.
+    /// Guarantees: generated consumers can be excluded while ordinary workspace packages remain included by default.
+    #[test]
+    fn package_metadata_controls_source_inventory() {
+        let generated = serde_json::json!({
+            "metadata": {"semconv": {"source_inventory": false}}
+        });
+        let production = serde_json::json!({"metadata": {}});
+
+        assert!(!package_is_source_inventory(&generated));
+        assert!(package_is_source_inventory(&production));
+    }
 
     /// Scenario: cfg predicates combine test-only and production feature branches.
     /// Guarantees: definitely test-only code is excluded while a possible production branch remains discoverable.
