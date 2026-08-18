@@ -1,7 +1,7 @@
 // Copyright The OpenTelemetry Authors
 // SPDX-License-Identifier: Apache-2.0
 
-//! Multi-signal OTLP JSON Lines file exporter.
+//! Multi-signal OTLP JSON Lines and length-prefixed protobuf file exporter.
 //!
 //! The exporter encodes OTLP-byte or OTAP Arrow pdata through backend-agnostic views, then writes
 //! one bounded frame to a lazily opened signal-specific file. The local run loop owns all state so
@@ -16,7 +16,10 @@ pub use config::{Durability, FileExporterConfig, FileFormat, OpenMode, TailRecov
 
 use async_trait::async_trait;
 use config::RenderedPaths;
-use encoding::{FrameEncodeError, encode_logs, encode_metrics, encode_traces};
+use encoding::{
+    FrameEncodeError, encode_logs, encode_metrics, encode_proto_records, encode_traces,
+    frame_proto_bytes,
+};
 use linkme::distributed_slice;
 use metrics::{
     FileExporterExportMetrics, FileFailureMetrics, FileOperation, FileSignalMetrics,
@@ -36,11 +39,15 @@ use otap_df_engine::terminal_state::TerminalState;
 use otap_df_engine::{ConsumerEffectHandlerExtension, ExporterFactory};
 use otap_df_otap::OTAP_EXPORTER_FACTORIES;
 use otap_df_otap::pdata::OtapPdata;
+use otap_df_pdata::otlp::ProtoBuffer;
+use otap_df_pdata::otlp::logs::LogsProtoBytesEncoder;
+use otap_df_pdata::otlp::metrics::MetricsProtoBytesEncoder;
+use otap_df_pdata::otlp::traces::TracesProtoBytesEncoder;
 use otap_df_pdata::views::otap::{OtapLogsView, OtapMetricsView, OtapTracesView};
 use otap_df_pdata::views::otlp::bytes::logs::RawLogsData;
 use otap_df_pdata::views::otlp::bytes::metrics::RawMetricsData;
 use otap_df_pdata::views::otlp::bytes::traces::RawTraceData;
-use otap_df_pdata::{OtapPayload, OtapPayloadHelpers};
+use otap_df_pdata::{OtapPayload, OtapPayloadHelpers, OtlpProtoBytes};
 use otap_df_telemetry::attributes::AttributeEnum as _;
 use otap_df_telemetry::common_attributes::{Outcome, SignalAttributes, SignalOutcomeAttributes};
 use otap_df_telemetry::metrics::MeasurementMetricSet;
@@ -52,12 +59,12 @@ use writer::{SignalWriter, WriterFailure};
 /// Component URN for the file exporter.
 pub const FILE_EXPORTER_URN: &str = "urn:otel:exporter:file";
 
-/// OTLP JSON file exporter with one lazily opened writer per signal.
+/// OTLP file exporter with one lazily opened writer per signal.
 pub struct FileExporter {
     config: FileExporterConfig,
     paths: RenderedPaths,
     writers: [Option<SignalWriter>; 3],
-    frame: Vec<u8>,
+    encoder: PayloadEncoder,
     failure_active: [bool; 3],
     export_metrics: MeasurementMetricSet<FileExporterExportMetrics>,
     signal_metrics: MeasurementMetricSet<FileSignalMetrics>,
@@ -78,7 +85,7 @@ pub static FILE_EXPORTER: ExporterFactory<OtapPdata> = ExporterFactory {
         let config = FileExporterConfig::parse(&node_config.config)?;
         let paths = config.render_paths(pipeline.core_id(), pipeline.deployment_generation())?;
         let exporter = FileExporter {
-            frame: Vec::with_capacity(config.max_frame_bytes.min(8 * 1024)),
+            encoder: PayloadEncoder::new(config.max_frame_bytes),
             config,
             paths,
             writers: std::array::from_fn(|_| None),
@@ -156,11 +163,15 @@ impl FileExporter {
             self.record_export_outcome(signal, Outcome::Success);
             return Ok(());
         }
-        if let Err(error) = encode_payload(
-            pdata.payload_ref(),
-            &mut self.frame,
+        let item_count = pdata.payload_ref().num_items() as u64;
+        let (context, mut payload) = pdata.into_parts();
+        let encode_result = self.encoder.encode(
+            self.config.format,
+            &mut payload,
             self.config.max_frame_bytes,
-        ) {
+        );
+        let pdata = OtapPdata::new(context, payload);
+        if let Err(error) = encode_result {
             self.record_export_outcome(signal, Outcome::Failure);
             let reason = match error {
                 EncodeFailure::Frame(FrameEncodeError::FrameTooLarge { .. }) => {
@@ -195,7 +206,7 @@ impl FileExporter {
                 "file writer missing after successful open",
             ));
         };
-        if let Err(failure) = writer.write_frame(&self.frame).await {
+        if let Err(failure) = writer.write_frame(self.encoder.frame()).await {
             self.record_io_failure(signal, &failure);
             self.record_export_outcome(signal, Outcome::Failure);
             self.log_write_failure(signal, &failure);
@@ -223,11 +234,11 @@ impl FileExporter {
         self.signal_metrics
             .with(SignalAttributes { signal })
             .items
-            .add(pdata.payload_ref().num_items() as u64);
+            .add(item_count);
         self.signal_metrics
             .with(SignalAttributes { signal })
             .bytes
-            .add(self.frame.len() as u64);
+            .add(self.encoder.frame().len() as u64);
         self.record_export_outcome(signal, Outcome::Success);
         effect_handler.notify_ack(AckMsg::new(pdata)).await?;
         Ok(())
@@ -252,7 +263,7 @@ impl FileExporter {
                 "otelcol.node.file.tail.recover",
                 signal = signal.as_str(),
                 recovered_bytes = recovery.recovered_bytes,
-                message = "Removed an incomplete final OTLP JSON frame"
+                message = "Removed an incomplete final file frame"
             );
         }
         self.writers[index] = Some(writer);
@@ -358,25 +369,120 @@ enum EncodeFailure {
     Frame(#[from] FrameEncodeError),
 }
 
-fn encode_payload(
+struct PayloadEncoder {
+    frame: Vec<u8>,
+    proto_buffer: ProtoBuffer,
+    logs_proto: LogsProtoBytesEncoder,
+    metrics_proto: MetricsProtoBytesEncoder,
+    traces_proto: TracesProtoBytesEncoder,
+}
+
+impl PayloadEncoder {
+    fn new(max_frame_bytes: usize) -> Self {
+        let initial_capacity = max_frame_bytes.min(8 * 1024);
+        Self {
+            frame: Vec::with_capacity(initial_capacity),
+            proto_buffer: ProtoBuffer::with_capacity_and_limit(
+                initial_capacity,
+                max_frame_bytes.saturating_sub(size_of::<u32>()),
+            ),
+            logs_proto: LogsProtoBytesEncoder::new(),
+            metrics_proto: MetricsProtoBytesEncoder::new(),
+            traces_proto: TracesProtoBytesEncoder::new(),
+        }
+    }
+
+    fn frame(&self) -> &[u8] {
+        &self.frame
+    }
+
+    fn encode(
+        &mut self,
+        format: FileFormat,
+        payload: &mut OtapPayload,
+        max_frame_bytes: usize,
+    ) -> Result<(), EncodeFailure> {
+        self.frame.clear();
+        match format {
+            FileFormat::OtlpJson => encode_json_payload(payload, &mut self.frame, max_frame_bytes),
+            FileFormat::OtlpProto => self.encode_proto_payload(payload, max_frame_bytes),
+        }
+    }
+
+    fn encode_proto_payload(
+        &mut self,
+        payload: &mut OtapPayload,
+        max_frame_bytes: usize,
+    ) -> Result<(), EncodeFailure> {
+        match payload {
+            OtapPayload::OtlpBytes(bytes) => {
+                validate_otlp_bytes(bytes)?;
+                frame_proto_bytes(bytes.as_bytes(), &mut self.frame, max_frame_bytes)?;
+            }
+            OtapPayload::OtapArrowRecords(records) => match records.signal_type() {
+                SignalType::Logs => encode_proto_records(
+                    &mut self.logs_proto,
+                    records,
+                    &mut self.proto_buffer,
+                    &mut self.frame,
+                    max_frame_bytes,
+                )?,
+                SignalType::Metrics => encode_proto_records(
+                    &mut self.metrics_proto,
+                    records,
+                    &mut self.proto_buffer,
+                    &mut self.frame,
+                    max_frame_bytes,
+                )?,
+                SignalType::Traces => encode_proto_records(
+                    &mut self.traces_proto,
+                    records,
+                    &mut self.proto_buffer,
+                    &mut self.frame,
+                    max_frame_bytes,
+                )?,
+            },
+        }
+        Ok(())
+    }
+}
+
+fn validate_otlp_bytes(bytes: &OtlpProtoBytes) -> Result<(), EncodeFailure> {
+    match bytes {
+        OtlpProtoBytes::ExportLogsRequest(_) => {
+            _ = RawLogsData::try_from(bytes)
+                .map_err(|error| EncodeFailure::View(error.to_string()))?;
+        }
+        OtlpProtoBytes::ExportMetricsRequest(bytes) => {
+            _ = RawMetricsData::try_new(bytes)
+                .map_err(|error| EncodeFailure::View(error.to_string()))?;
+        }
+        OtlpProtoBytes::ExportTracesRequest(bytes) => {
+            _ = RawTraceData::try_new(bytes)
+                .map_err(|error| EncodeFailure::View(error.to_string()))?;
+        }
+    }
+    Ok(())
+}
+
+fn encode_json_payload(
     payload: &OtapPayload,
     frame: &mut Vec<u8>,
     max_frame_bytes: usize,
 ) -> Result<(), EncodeFailure> {
-    frame.clear();
     match payload {
         OtapPayload::OtlpBytes(bytes) => match bytes {
-            otap_df_pdata::OtlpProtoBytes::ExportLogsRequest(_) => {
+            OtlpProtoBytes::ExportLogsRequest(_) => {
                 let view = RawLogsData::try_from(bytes)
                     .map_err(|error| EncodeFailure::View(error.to_string()))?;
                 encode_logs(&view, frame, max_frame_bytes)?;
             }
-            otap_df_pdata::OtlpProtoBytes::ExportMetricsRequest(bytes) => {
+            OtlpProtoBytes::ExportMetricsRequest(bytes) => {
                 let view = RawMetricsData::try_new(bytes)
                     .map_err(|error| EncodeFailure::View(error.to_string()))?;
                 encode_metrics(&view, frame, max_frame_bytes)?;
             }
-            otap_df_pdata::OtlpProtoBytes::ExportTracesRequest(bytes) => {
+            OtlpProtoBytes::ExportTracesRequest(bytes) => {
                 let view = RawTraceData::try_new(bytes)
                     .map_err(|error| EncodeFailure::View(error.to_string()))?;
                 encode_traces(&view, frame, max_frame_bytes)?;
@@ -546,10 +652,12 @@ mod tests {
             OtapPayload::OtapArrowRecords(encode_spans_otap_batch(&traces).unwrap()),
         ];
         let expected_fields = ["resourceLogs", "resourceMetrics", "resourceSpans"];
-        let mut frame = Vec::new();
-        for (payload, expected_field) in payloads.iter().zip(expected_fields) {
-            encode_payload(payload, &mut frame, 4096).unwrap();
-            let value: serde_json::Value = serde_json::from_slice(&frame).unwrap();
+        let mut encoder = PayloadEncoder::new(4096);
+        for (mut payload, expected_field) in payloads.into_iter().zip(expected_fields) {
+            encoder
+                .encode(FileFormat::OtlpJson, &mut payload, 4096)
+                .unwrap();
+            let value: serde_json::Value = serde_json::from_slice(encoder.frame()).unwrap();
             assert!(value.get(expected_field).is_some());
         }
     }
@@ -558,11 +666,54 @@ mod tests {
     /// Guarantees: Validation fails without retaining bytes from an earlier encoded frame.
     #[test]
     fn malformed_otlp_payload_clears_the_reusable_frame() {
-        let payload =
+        let mut payload =
             OtapPayload::OtlpBytes(OtlpProtoBytes::new_from_bytes(SignalType::Logs, vec![0x80]));
-        let mut frame = b"previous telemetry\n".to_vec();
-        assert!(encode_payload(&payload, &mut frame, 4096).is_err());
-        assert!(frame.is_empty());
+        let mut encoder = PayloadEncoder::new(4096);
+        encoder.frame.extend_from_slice(b"previous telemetry\n");
+        assert!(
+            encoder
+                .encode(FileFormat::OtlpJson, &mut payload, 4096)
+                .is_err()
+        );
+        assert!(encoder.frame().is_empty());
+    }
+
+    /// Scenario: OTAP Arrow batches for all three signals use protobuf file encoding.
+    /// Guarantees: Every frame has a correct length prefix and a decodable OTLP request.
+    #[test]
+    fn protobuf_encoding_accepts_all_otap_signals() {
+        let logs_bytes = encoded(&log_request());
+        let metrics_bytes = encoded(&metric_request());
+        let traces_bytes = encoded(&trace_request());
+        let logs = RawLogsData::try_new(&logs_bytes).unwrap();
+        let metrics = RawMetricsData::try_new(&metrics_bytes).unwrap();
+        let traces = RawTraceData::try_new(&traces_bytes).unwrap();
+        let payloads = [
+            OtapPayload::OtapArrowRecords(encode_logs_otap_batch(&logs).unwrap()),
+            OtapPayload::OtapArrowRecords(encode_metrics_otap_batch(&metrics).unwrap()),
+            OtapPayload::OtapArrowRecords(encode_spans_otap_batch(&traces).unwrap()),
+        ];
+        let mut encoder = PayloadEncoder::new(4096);
+        for mut payload in payloads {
+            encoder
+                .encode(FileFormat::OtlpProto, &mut payload, 4096)
+                .unwrap();
+            let frame = encoder.frame();
+            let payload_len = u32::from_be_bytes(frame[..4].try_into().unwrap()) as usize;
+            assert_eq!(payload_len, frame.len() - 4);
+            match payload.signal_type() {
+                SignalType::Logs => {
+                    _ = <ExportLogsServiceRequest as prost::Message>::decode(&frame[4..]).unwrap();
+                }
+                SignalType::Metrics => {
+                    _ = <ExportMetricsServiceRequest as prost::Message>::decode(&frame[4..])
+                        .unwrap();
+                }
+                SignalType::Traces => {
+                    _ = <ExportTraceServiceRequest as prost::Message>::decode(&frame[4..]).unwrap();
+                }
+            }
+        }
     }
 
     /// Scenario: One exporter instance receives non-empty logs, metrics, and traces in sequence.
@@ -601,6 +752,44 @@ mod tests {
                     assert_eq!(content.lines().count(), 1);
                     let value: serde_json::Value = serde_json::from_str(&content).unwrap();
                     assert!(value.get(expected_field).is_some());
+                }
+            });
+    }
+
+    /// Scenario: The exporter receives one raw OTLP protobuf batch for every supported signal.
+    /// Guarantees: The `proto` alias writes one replayable length-prefixed request per signal file.
+    #[test]
+    fn exporter_writes_one_otlp_protobuf_frame_per_signal_batch() {
+        let dir = tempdir().unwrap();
+        let template = dir
+            .path()
+            .join("capture-{signal}-{core_id}-{generation}.bin");
+        let exporter = create_exporter_from_factory(
+            &FILE_EXPORTER,
+            json!({"path": template.to_string_lossy(), "format": "proto"}),
+        )
+        .unwrap();
+        let paths = [
+            dir.path().join("capture-logs-0-0.bin"),
+            dir.path().join("capture-metrics-0-0.bin"),
+            dir.path().join("capture-traces-0-0.bin"),
+        ];
+        TestRuntime::new()
+            .set_exporter(exporter)
+            .run_test(|ctx| async move {
+                for pdata in [log_pdata(), metric_pdata(), trace_pdata()] {
+                    ctx.send_pdata(pdata).await.unwrap();
+                }
+                ctx.send_shutdown(StdInstant::now() + Duration::from_secs(10), "test complete")
+                    .await
+                    .unwrap();
+            })
+            .run_validation(move |_, result| async move {
+                result.unwrap();
+                for path in paths {
+                    let frame = tokio::fs::read(path).await.unwrap();
+                    let payload_len = u32::from_be_bytes(frame[..4].try_into().unwrap()) as usize;
+                    assert_eq!(payload_len, frame.len() - 4);
                 }
             });
     }

@@ -6,7 +6,7 @@
 //! Each signal writer owns one file and a process-local path lease. Opening and rollback use
 //! bounded blocking helpers where needed, while frame writes stay ordered on the local runtime.
 
-use super::config::{Durability, FileExporterConfig, OpenMode, TailRecovery};
+use super::config::{Durability, FileExporterConfig, FileFormat, OpenMode, TailRecovery};
 use super::metrics::FileOperation;
 use std::collections::HashSet;
 use std::io;
@@ -118,7 +118,7 @@ impl SignalWriter {
         };
         let recovery = if let Some(policy) = config.effective_tail_recovery() {
             writer
-                .recover_tail(policy, config.max_frame_bytes)
+                .recover_tail(config.format, policy, config.max_frame_bytes)
                 .await
                 .map_err(|error| WriterFailure::new(FileOperation::Open, error))?
         } else {
@@ -183,6 +183,18 @@ impl SignalWriter {
 
     async fn recover_tail(
         &mut self,
+        format: FileFormat,
+        policy: TailRecovery,
+        max_frame_bytes: usize,
+    ) -> io::Result<TailRecoveryResult> {
+        match format {
+            FileFormat::OtlpJson => self.recover_json_tail(policy, max_frame_bytes).await,
+            FileFormat::OtlpProto => self.recover_proto_tail(policy, max_frame_bytes).await,
+        }
+    }
+
+    async fn recover_json_tail(
+        &mut self,
         policy: TailRecovery,
         max_frame_bytes: usize,
     ) -> io::Result<TailRecoveryResult> {
@@ -218,6 +230,65 @@ impl SignalWriter {
         self.file.sync_data().await?;
         Ok(TailRecoveryResult {
             recovered_bytes: len - recovered_len,
+        })
+    }
+
+    async fn recover_proto_tail(
+        &mut self,
+        policy: TailRecovery,
+        max_frame_bytes: usize,
+    ) -> io::Result<TailRecoveryResult> {
+        const PREFIX_BYTES: u64 = size_of::<u32>() as u64;
+
+        let len = self.file.metadata().await?.len();
+        let mut offset = 0_u64;
+        while offset < len {
+            let remaining = len - offset;
+            if remaining < PREFIX_BYTES {
+                return self.handle_partial_proto_tail(offset, len, policy).await;
+            }
+
+            _ = self.file.seek(io::SeekFrom::Start(offset)).await?;
+            let mut prefix = [0_u8; size_of::<u32>()];
+            _ = self.file.read_exact(&mut prefix).await?;
+            let payload_len = u32::from_be_bytes(prefix) as u64;
+            let frame_len = PREFIX_BYTES + payload_len;
+            if frame_len > max_frame_bytes as u64 {
+                return Err(io::Error::new(
+                    io::ErrorKind::InvalidData,
+                    "protobuf frame exceeds max_frame_bytes",
+                ));
+            }
+            if frame_len > remaining {
+                return self.handle_partial_proto_tail(offset, len, policy).await;
+            }
+            offset += frame_len;
+        }
+        Ok(TailRecoveryResult::default())
+    }
+
+    async fn handle_partial_proto_tail(
+        &mut self,
+        complete_len: u64,
+        original_len: u64,
+        policy: TailRecovery,
+    ) -> io::Result<TailRecoveryResult> {
+        if policy == TailRecovery::Fail {
+            return Err(io::Error::new(
+                io::ErrorKind::InvalidData,
+                "append target ends with an incomplete frame",
+            ));
+        }
+        if complete_len == 0 {
+            return Err(io::Error::new(
+                io::ErrorKind::InvalidData,
+                "no complete protobuf frame boundary found",
+            ));
+        }
+        self.file.set_len(complete_len).await?;
+        self.file.sync_data().await?;
+        Ok(TailRecoveryResult {
+            recovered_bytes: original_len - complete_len,
         })
     }
 }
@@ -384,6 +455,42 @@ mod tests {
         let original = b"{}\npartial";
         tokio::fs::write(&path, original).await.unwrap();
         let config = config(&template_path(dir.path()), json!({"max_frame_bytes": 4}));
+        assert!(SignalWriter::open(&path, &config).await.is_err());
+        assert_eq!(tokio::fs::read(&path).await.unwrap(), original);
+    }
+
+    /// Scenario: A protobuf file contains one complete frame and one crash-truncated frame.
+    /// Guarantees: Append recovery retains the complete length-prefixed frame and removes the tail.
+    #[tokio::test]
+    async fn append_recovers_incomplete_protobuf_frame() {
+        let dir = tempdir().unwrap();
+        let path = dir.path().join("data-logs-0-1.bin");
+        let original = [0, 0, 0, 2, b'o', b'k', 0, 0, 0, 3, b'x'];
+        tokio::fs::write(&path, original).await.unwrap();
+        let config = config(
+            &dir.path().join("data-{signal}-{core_id}-{generation}.bin"),
+            json!({"format": "otlp_proto"}),
+        );
+        let (_writer, recovery) = SignalWriter::open(&path, &config).await.unwrap();
+        assert_eq!(recovery.recovered_bytes, 5);
+        assert_eq!(
+            tokio::fs::read(&path).await.unwrap(),
+            [0, 0, 0, 2, b'o', b'k']
+        );
+    }
+
+    /// Scenario: A protobuf append target contains only an incomplete first frame.
+    /// Guarantees: Recovery refuses to erase a destination without one proven frame boundary.
+    #[tokio::test]
+    async fn append_rejects_incomplete_first_protobuf_frame() {
+        let dir = tempdir().unwrap();
+        let path = dir.path().join("data-logs-0-1.bin");
+        let original = [0, 0, 0, 3, b'x'];
+        tokio::fs::write(&path, original).await.unwrap();
+        let config = config(
+            &dir.path().join("data-{signal}-{core_id}-{generation}.bin"),
+            json!({"format": "proto"}),
+        );
         assert!(SignalWriter::open(&path, &config).await.is_err());
         assert_eq!(tokio::fs::read(&path).await.unwrap(), original);
     }

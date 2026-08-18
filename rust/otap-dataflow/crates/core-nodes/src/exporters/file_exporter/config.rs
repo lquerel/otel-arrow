@@ -12,7 +12,8 @@
 //!   `{generation}` exactly once.
 //! - `create_directories` controls whether missing parent directories are created and defaults to
 //!   `false`.
-//! - `format` selects the output encoding and currently supports only `otlp_json`.
+//! - `format` selects `otlp_json` or `otlp_proto`. The aliases `json` and `proto` match the Go
+//!   Collector file exporter names. `otlp_json` remains the default.
 //! - `open_mode` controls first-open behavior (`append`, `truncate`, or `create_new`) and defaults
 //!   to `append`.
 //! - `durability` controls whether ACK follows `write` or `sync_data` and defaults to `write`.
@@ -26,10 +27,10 @@
 //! # Future evolutions
 //!
 //! Planned configuration extensions include typed output formats such as plain text, human-readable
-//! signal renderings, framed protobuf, and structured per-record envelopes. Bounded size- and
-//! time-based rotation, backup retention, and standard file-level zstd compression may follow once
-//! their ownership, recovery, and failure semantics are defined. Profiles can be supported after
-//! OTAP provides a stable profile signal representation and file format.
+//! signal renderings, and structured per-record envelopes. Bounded size- and time-based rotation,
+//! backup retention, and standard file-level compression may follow once their ownership, recovery,
+//! and failure semantics are defined. Profiles can be supported after OTAP provides a stable profile
+//! signal representation and file format.
 
 use otap_df_config::SignalType;
 use otap_df_config::error::Error as ConfigError;
@@ -38,7 +39,7 @@ use serde::Deserialize;
 use serde_json::Value;
 use std::path::{Component, Path, PathBuf};
 
-/// Default maximum encoded JSONL frame size, including its newline.
+/// Default maximum encoded file frame size, including its delimiter or length prefix.
 const DEFAULT_MAX_FRAME_BYTES: usize = 64 * 1024 * 1024;
 /// Hard upper bound accepted for the maximum encoded frame size.
 const MAX_MAX_FRAME_BYTES: usize = 256 * 1024 * 1024;
@@ -51,7 +52,11 @@ const TOKENS: [&str; 3] = ["{signal}", "{core_id}", "{generation}"];
 pub enum FileFormat {
     /// Compact OTLP ProtoJSON with one pdata batch per line.
     #[default]
+    #[serde(alias = "json")]
     OtlpJson,
+    /// OTLP protobuf with a four-byte big-endian length prefix per pdata batch.
+    #[serde(alias = "proto")]
+    OtlpProto,
 }
 
 /// Behavior when a signal file is first opened.
@@ -107,7 +112,7 @@ pub struct FileExporterConfig {
     /// ACK durability point.
     #[serde(default)]
     pub durability: Durability,
-    /// Maximum encoded frame size, including the newline.
+    /// Maximum encoded frame size, including its newline or length prefix.
     #[serde(default = "default_max_frame_bytes")]
     pub max_frame_bytes: usize,
     /// Explicit append-mode crash-tail policy.
@@ -218,6 +223,12 @@ impl FileExporterConfig {
                 "file.max_frame_bytes must be in the range 1..={MAX_MAX_FRAME_BYTES}"
             )));
         }
+        if self.format == FileFormat::OtlpProto && self.max_frame_bytes < size_of::<u32>() {
+            return Err(invalid(format!(
+                "file.max_frame_bytes must be at least {} for format=otlp_proto",
+                size_of::<u32>()
+            )));
+        }
         if self.open_mode != OpenMode::Append && self.tail_recovery.is_some() {
             return Err(invalid(
                 "file.tail_recovery is only valid with open_mode=append",
@@ -307,6 +318,7 @@ mod tests {
     #[test]
     fn configuration_enum_attribute_values_are_stable() {
         assert_eq!(FileFormat::OtlpJson.as_str(), "otlp_json");
+        assert_eq!(FileFormat::OtlpProto.as_str(), "otlp_proto");
         assert_eq!(OpenMode::Append.as_str(), "append");
         assert_eq!(OpenMode::Truncate.as_str(), "truncate");
         assert_eq!(OpenMode::CreateNew.as_str(), "create_new");
@@ -314,6 +326,25 @@ mod tests {
         assert_eq!(Durability::SyncData.as_str(), "sync_data");
         assert_eq!(TailRecovery::TruncatePartial.as_str(), "truncate_partial");
         assert_eq!(TailRecovery::Fail.as_str(), "fail");
+    }
+
+    /// Scenario: Users select either canonical OTAP format names or Go Collector aliases.
+    /// Guarantees: Both spellings map to the same typed format while OTLP JSON remains default.
+    #[test]
+    fn format_aliases_map_to_canonical_variants() {
+        for (name, expected) in [
+            ("otlp_json", FileFormat::OtlpJson),
+            ("json", FileFormat::OtlpJson),
+            ("otlp_proto", FileFormat::OtlpProto),
+            ("proto", FileFormat::OtlpProto),
+        ] {
+            let config = FileExporterConfig::parse(&json!({
+                "path": absolute_template(),
+                "format": name
+            }))
+            .unwrap();
+            assert_eq!(config.format, expected);
+        }
     }
 
     /// Scenario: A path omits, repeats, or misspells a required runtime token.
@@ -345,6 +376,20 @@ mod tests {
         ] {
             assert!(FileExporterConfig::parse(&value).is_err());
         }
+    }
+
+    /// Scenario: Protobuf framing is configured with less space than its length prefix.
+    /// Guarantees: Configuration rejects a limit under four bytes before exporter startup.
+    #[test]
+    fn protobuf_format_requires_room_for_length_prefix() {
+        assert!(
+            FileExporterConfig::parse(&json!({
+                "path": absolute_template(),
+                "format": "proto",
+                "max_frame_bytes": 3
+            }))
+            .is_err()
+        );
     }
 
     /// Scenario: Tail recovery is explicitly configured for a destructive first-open mode.
