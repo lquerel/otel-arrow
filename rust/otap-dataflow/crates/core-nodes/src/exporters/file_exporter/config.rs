@@ -17,9 +17,11 @@
 //! - `open_mode` controls first-open behavior (`append`, `truncate`, or `create_new`) and defaults
 //!   to `append`.
 //! - `durability` controls whether ACK follows `write` or `sync_data` and defaults to `write`.
-//! - `max_frame_bytes` bounds each JSONL frame, including its newline, and defaults to 64 MiB.
+//! - `max_frame_bytes` bounds each frame, including its delimiter or prefix, and defaults to 64 MiB.
 //! - `tail_recovery` controls incomplete-tail handling in append mode (`truncate_partial` or
 //!   `fail`) and defaults to `truncate_partial`.
+//! - `rotation` optionally bounds active files by size, elapsed time, or both. Its retention policy
+//!   bounds finalized files by count and can additionally expire them by age.
 //!
 //! Unknown fields, invalid path templates, out-of-range frame limits, and `tail_recovery` outside
 //! append mode are rejected during configuration validation.
@@ -38,11 +40,16 @@ use otap_df_telemetry_macros::AttributeEnum;
 use serde::Deserialize;
 use serde_json::Value;
 use std::path::{Component, Path, PathBuf};
+use std::time::Duration;
 
 /// Default maximum encoded file frame size, including its delimiter or length prefix.
 const DEFAULT_MAX_FRAME_BYTES: usize = 64 * 1024 * 1024;
 /// Hard upper bound accepted for the maximum encoded frame size.
 const MAX_MAX_FRAME_BYTES: usize = 256 * 1024 * 1024;
+/// Maximum number of finalized files retained by one signal writer.
+const MAX_ROTATION_BACKUPS: usize = 1_000;
+/// Default number of finalized files retained when rotation is enabled.
+const DEFAULT_ROTATION_BACKUPS: usize = 10;
 /// Runtime substitution tokens required exactly once in every path template.
 const TOKENS: [&str; 3] = ["{signal}", "{core_id}", "{generation}"];
 
@@ -94,6 +101,41 @@ pub enum TailRecovery {
     Fail,
 }
 
+/// Rotation triggers and bounded retention for finalized files.
+#[derive(Debug, Clone, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct RotationConfig {
+    /// Rotate before a frame would make a non-empty active file exceed this size.
+    pub max_bytes: Option<u64>,
+    /// Rotate a non-empty active file after this elapsed time.
+    #[serde(default, with = "humantime_serde::option")]
+    pub max_duration: Option<Duration>,
+    /// Retention policy applied to finalized files.
+    #[serde(default)]
+    pub retention: RetentionConfig,
+}
+
+/// Bounded retention policy for finalized files owned by the exporter manifest.
+#[derive(Debug, Clone, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct RetentionConfig {
+    /// Maximum number of finalized backup files to retain per signal writer.
+    #[serde(default = "default_rotation_backups")]
+    pub max_backups: usize,
+    /// Delete finalized files older than this duration in addition to count pruning.
+    #[serde(default, with = "humantime_serde::option")]
+    pub max_age: Option<Duration>,
+}
+
+impl Default for RetentionConfig {
+    fn default() -> Self {
+        Self {
+            max_backups: DEFAULT_ROTATION_BACKUPS,
+            max_age: None,
+        }
+    }
+}
+
 /// Typed file exporter configuration.
 #[derive(Debug, Clone, Deserialize)]
 #[serde(deny_unknown_fields)]
@@ -118,10 +160,16 @@ pub struct FileExporterConfig {
     /// Explicit append-mode crash-tail policy.
     #[serde(default)]
     pub tail_recovery: Option<TailRecovery>,
+    /// Optional bounded file rotation and retention policy.
+    pub rotation: Option<RotationConfig>,
 }
 
 const fn default_max_frame_bytes() -> usize {
     DEFAULT_MAX_FRAME_BYTES
+}
+
+const fn default_rotation_backups() -> usize {
+    DEFAULT_ROTATION_BACKUPS
 }
 
 impl FileExporterConfig {
@@ -234,6 +282,35 @@ impl FileExporterConfig {
                 "file.tail_recovery is only valid with open_mode=append",
             ));
         }
+        if let Some(rotation) = &self.rotation {
+            if rotation.max_bytes.is_none() && rotation.max_duration.is_none() {
+                return Err(invalid(
+                    "file.rotation requires max_bytes, max_duration, or both",
+                ));
+            }
+            if let Some(max_bytes) = rotation.max_bytes
+                && max_bytes < self.max_frame_bytes as u64
+            {
+                return Err(invalid(
+                    "file.rotation.max_bytes must be at least file.max_frame_bytes",
+                ));
+            }
+            if rotation.max_duration == Some(Duration::ZERO) {
+                return Err(invalid(
+                    "file.rotation.max_duration must be greater than zero",
+                ));
+            }
+            if rotation.retention.max_backups > MAX_ROTATION_BACKUPS {
+                return Err(invalid(format!(
+                    "file.rotation.retention.max_backups must be in the range 0..={MAX_ROTATION_BACKUPS}"
+                )));
+            }
+            if rotation.retention.max_age == Some(Duration::ZERO) {
+                return Err(invalid(
+                    "file.rotation.retention.max_age must be greater than zero",
+                ));
+            }
+        }
         Ok(())
     }
 }
@@ -307,6 +384,7 @@ mod tests {
         assert_eq!(config.open_mode, OpenMode::Append);
         assert_eq!(config.durability, Durability::Write);
         assert_eq!(config.max_frame_bytes, DEFAULT_MAX_FRAME_BYTES);
+        assert!(config.rotation.is_none());
         assert_eq!(
             config.effective_tail_recovery(),
             Some(TailRecovery::TruncatePartial)
@@ -390,6 +468,48 @@ mod tests {
             }))
             .is_err()
         );
+    }
+
+    /// Scenario: Rotation uses a size trigger, a duration trigger, and an age retention limit.
+    /// Guarantees: Human-readable durations and the bounded backup count parse into typed values.
+    #[test]
+    fn parses_rotation_and_retention_configuration() {
+        let config = FileExporterConfig::parse(&json!({
+            "path": absolute_template(),
+            "max_frame_bytes": 1024,
+            "rotation": {
+                "max_bytes": 4096,
+                "max_duration": "5m",
+                "retention": {"max_backups": 4, "max_age": "2h"}
+            }
+        }))
+        .unwrap();
+        let rotation = config.rotation.unwrap();
+        assert_eq!(rotation.max_bytes, Some(4096));
+        assert_eq!(rotation.max_duration, Some(Duration::from_secs(300)));
+        assert_eq!(rotation.retention.max_backups, 4);
+        assert_eq!(rotation.retention.max_age, Some(Duration::from_secs(7200)));
+    }
+
+    /// Scenario: Rotation is untriggered, unbounded, zero-duration, or smaller than one frame.
+    /// Guarantees: Invalid or operationally unsafe rotation policies fail configuration loading.
+    #[test]
+    fn rejects_invalid_rotation_configuration() {
+        for rotation in [
+            json!({}),
+            json!({"max_bytes": DEFAULT_MAX_FRAME_BYTES - 1}),
+            json!({"max_duration": "0s"}),
+            json!({"max_duration": "1s", "retention": {"max_backups": 1001}}),
+            json!({"max_duration": "1s", "retention": {"max_age": "0s"}}),
+        ] {
+            assert!(
+                FileExporterConfig::parse(&json!({
+                    "path": absolute_template(),
+                    "rotation": rotation
+                }))
+                .is_err()
+            );
+        }
     }
 
     /// Scenario: Tail recovery is explicitly configured for a destructive first-open mode.

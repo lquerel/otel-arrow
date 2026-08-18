@@ -10,9 +10,13 @@
 mod config;
 mod encoding;
 mod metrics;
+mod rotation;
 mod writer;
 
-pub use config::{Durability, FileExporterConfig, FileFormat, OpenMode, TailRecovery};
+pub use config::{
+    Durability, FileExporterConfig, FileFormat, OpenMode, RetentionConfig, RotationConfig,
+    TailRecovery,
+};
 
 use async_trait::async_trait;
 use config::RenderedPaths;
@@ -125,7 +129,38 @@ impl Exporter<OtapPdata> for FileExporter {
             max_frame_bytes = self.config.max_frame_bytes,
         );
         loop {
-            match inbox.recv().await? {
+            let rotation_delay = match self.next_lifecycle_delay() {
+                Ok(delay) => delay,
+                Err((signal, failure)) => {
+                    self.record_io_failure(signal, &failure);
+                    self.log_write_failure(signal, &failure);
+                    return Err(exporter_error(
+                        &effect_handler,
+                        ExporterErrorKind::Transport,
+                        "file rotation clock evaluation failed",
+                    ));
+                }
+            };
+            let message = if let Some(delay) = rotation_delay {
+                tokio::select! {
+                    message = inbox.recv() => message?,
+                    () = tokio::time::sleep(delay) => {
+                        if let Err((signal, failure)) = self.maintain_writers().await {
+                            self.record_io_failure(signal, &failure);
+                            self.log_write_failure(signal, &failure);
+                            return Err(exporter_error(
+                                &effect_handler,
+                                ExporterErrorKind::Transport,
+                                "time-based file rotation failed",
+                            ));
+                        }
+                        continue;
+                    }
+                }
+            } else {
+                inbox.recv().await?
+            };
+            match message {
                 Message::Control(NodeControlMsg::CollectTelemetry {
                     mut metrics_reporter,
                 }) => {
@@ -206,29 +241,41 @@ impl FileExporter {
                 "file writer missing after successful open",
             ));
         };
-        if let Err(failure) = writer.write_frame(self.encoder.frame()).await {
-            self.record_io_failure(signal, &failure);
-            self.record_export_outcome(signal, Outcome::Failure);
-            self.log_write_failure(signal, &failure);
-            let fatal = failure.rollback_error.is_some();
-            effect_handler
-                .notify_nack(NackMsg::new(
-                    if fatal {
-                        "file write failed and rollback left file state indeterminate"
-                    } else {
-                        "file write failed and was rolled back"
-                    },
-                    pdata,
-                ))
-                .await?;
-            if fatal {
-                return Err(exporter_error(
-                    effect_handler,
-                    ExporterErrorKind::Transport,
-                    "file write rollback failed",
-                ));
+        let rotated = match writer.write_frame(self.encoder.frame()).await {
+            Ok(rotated) => rotated,
+            Err(failure) => {
+                self.record_io_failure(signal, &failure);
+                self.record_export_outcome(signal, Outcome::Failure);
+                self.log_write_failure(signal, &failure);
+                let fatal = failure.is_fatal();
+                effect_handler
+                    .notify_nack(NackMsg::new(
+                        if failure.rollback_error.is_some() {
+                            "file write failed and rollback left file state indeterminate"
+                        } else if fatal {
+                            "file lifecycle failed and requires exporter restart"
+                        } else {
+                            "file write failed and was rolled back"
+                        },
+                        pdata,
+                    ))
+                    .await?;
+                if fatal {
+                    return Err(exporter_error(
+                        effect_handler,
+                        ExporterErrorKind::Transport,
+                        if failure.rollback_error.is_some() {
+                            "file write rollback failed"
+                        } else {
+                            "file lifecycle recovery requires exporter restart"
+                        },
+                    ));
+                }
+                return Ok(());
             }
-            return Ok(());
+        };
+        if rotated {
+            self.record_rotation(signal);
         }
         self.failure_active[index] = false;
         self.signal_metrics
@@ -309,6 +356,15 @@ impl FileExporter {
                 rollback_error = rollback_error,
                 message = "File write rollback failed"
             );
+        } else if let Some(fatal_error) = failure.fatal_error.as_deref() {
+            otel_error!(
+                "otelcol.node.file.rotation.fail",
+                signal = signal.as_str(),
+                operation = failure.operation.as_str(),
+                error = failure.error.as_str(),
+                fatal_error = fatal_error,
+                message = "File lifecycle state requires exporter restart"
+            );
         } else if !self.failure_active[index] {
             otel_warn!(
                 "otelcol.node.file.operation.fail",
@@ -319,6 +375,44 @@ impl FileExporter {
             );
         }
         self.failure_active[index] = true;
+    }
+
+    fn next_lifecycle_delay(
+        &self,
+    ) -> Result<Option<std::time::Duration>, (SignalType, WriterFailure)> {
+        let mut next = None;
+        for signal in [SignalType::Logs, SignalType::Metrics, SignalType::Traces] {
+            if let Some(writer) = &self.writers[signal_index(signal)]
+                && let Some(delay) = writer
+                    .time_until_lifecycle()
+                    .map_err(|failure| (signal, failure))?
+            {
+                next = Some(next.map_or(delay, |current: std::time::Duration| current.min(delay)));
+            }
+        }
+        Ok(next)
+    }
+
+    async fn maintain_writers(&mut self) -> Result<(), (SignalType, WriterFailure)> {
+        for signal in [SignalType::Logs, SignalType::Metrics, SignalType::Traces] {
+            if let Some(writer) = &mut self.writers[signal_index(signal)]
+                && writer
+                    .maintain_if_due()
+                    .await
+                    .map_err(|failure| (signal, failure))?
+            {
+                self.record_rotation(signal);
+            }
+        }
+        Ok(())
+    }
+
+    fn record_rotation(&mut self, signal: SignalType) {
+        self.signal_metrics
+            .with(SignalAttributes { signal })
+            .rotations
+            .inc();
+        otel_info!("otelcol.node.file.rotate", signal = signal.as_str(),);
     }
 
     async fn finalize(
@@ -791,6 +885,45 @@ mod tests {
                     let payload_len = u32::from_be_bytes(frame[..4].try_into().unwrap()) as usize;
                     assert_eq!(payload_len, frame.len() - 4);
                 }
+            });
+    }
+
+    /// Scenario: A configured time deadline expires after one batch while the exporter is idle.
+    /// Guarantees: The run loop rotates without waiting for another pdata message to arrive.
+    #[test]
+    fn exporter_rotates_a_non_empty_file_on_the_idle_timer() {
+        let dir = tempdir().unwrap();
+        let template = dir
+            .path()
+            .join("capture-{signal}-{core_id}-{generation}.jsonl");
+        let exporter = create_exporter_from_factory(
+            &FILE_EXPORTER,
+            json!({
+                "path": template.to_string_lossy(),
+                "max_frame_bytes": 4096,
+                "rotation": {
+                    "max_duration": "5ms",
+                    "retention": {"max_backups": 2}
+                }
+            }),
+        )
+        .unwrap();
+        let active = dir.path().join("capture-logs-0-0.jsonl");
+        let finalized = rotation::segment_path(&active, 0);
+        TestRuntime::new()
+            .set_exporter(exporter)
+            .run_test(|ctx| async move {
+                ctx.send_pdata(log_pdata()).await.unwrap();
+                tokio::time::sleep(Duration::from_millis(25)).await;
+                ctx.send_shutdown(StdInstant::now() + Duration::from_secs(10), "test complete")
+                    .await
+                    .unwrap();
+            })
+            .run_validation(move |_, result| async move {
+                result.unwrap();
+                assert!(tokio::fs::read(active).await.unwrap().is_empty());
+                let content = tokio::fs::read_to_string(finalized).await.unwrap();
+                assert_eq!(content.lines().count(), 1);
             });
     }
 

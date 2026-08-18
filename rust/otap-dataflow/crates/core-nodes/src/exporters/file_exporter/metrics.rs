@@ -34,6 +34,8 @@ pub enum FileOperation {
     Sync,
     /// Failed-write rollback.
     Rollback,
+    /// Active-file rotation or retention cleanup.
+    Rotate,
 }
 
 /// Signal and operation dimensions for file failures.
@@ -62,6 +64,9 @@ pub struct FileSignalMetrics {
     /// Bytes removed by successful append-tail recovery.
     #[metric(unit = "By")]
     pub tail_recovered_bytes: Counter<u64>,
+    /// Active files finalized by size- or time-based rotation.
+    #[metric(unit = "{rotation}")]
+    pub rotations: Counter<u64>,
 }
 
 /// File I/O failures, partitioned by signal and bounded operation.
@@ -204,5 +209,6 @@ mod tests {
         assert_eq!(FileOperation::Write.as_str(), "write");
         assert_eq!(FileOperation::Sync.as_str(), "sync");
         assert_eq!(FileOperation::Rollback.as_str(), "rollback");
+        assert_eq!(FileOperation::Rotate.as_str(), "rotate");
     }
 }
