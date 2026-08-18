@@ -8,7 +8,8 @@
 //! update leaves the other slot readable on every supported platform. A pending rotation record
 //! makes rename/create recovery deterministic without discovering or deleting unrelated files.
 
-use super::config::{OpenMode, RotationConfig};
+use super::compression::CompressionRequest;
+use super::config::{FileCompression, OpenMode, RotationConfig};
 use serde::{Deserialize, Serialize};
 use std::ffi::OsString;
 use std::io;
@@ -48,6 +49,15 @@ struct ManifestState {
 struct SegmentRecord {
     sequence: u64,
     finalized_unix_millis: u64,
+    #[serde(default)]
+    compression: Option<SegmentCompression>,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case", tag = "state")]
+enum SegmentCompression {
+    Pending { codec: FileCompression },
+    Complete { codec: FileCompression },
 }
 
 /// Rotation and retention state for one active signal file.
@@ -165,6 +175,96 @@ impl RotationState {
         Ok(due)
     }
 
+    /// Returns one manifest-tracked compression request, marking a new candidate pending first.
+    pub async fn next_compression_request(
+        &mut self,
+        configured: Option<FileCompression>,
+    ) -> io::Result<Option<CompressionRequest>> {
+        self.reconcile_compression().await?;
+        if let Some(segment) = self.state.segments.iter().find(|segment| {
+            matches!(
+                segment.compression,
+                Some(SegmentCompression::Pending { .. })
+            )
+        }) {
+            let Some(SegmentCompression::Pending { codec }) = segment.compression else {
+                unreachable!("pending segment selected by matching predicate")
+            };
+            return Ok(Some(compression_request(
+                &self.active_path,
+                segment.sequence,
+                codec,
+            )));
+        }
+        let Some(codec) = configured else {
+            return Ok(None);
+        };
+        let Some(index) = self
+            .state
+            .segments
+            .iter()
+            .position(|segment| segment.compression.is_none())
+        else {
+            return Ok(None);
+        };
+        let source = segment_path(&self.active_path, self.state.segments[index].sequence);
+        if !try_exists(&source).await? {
+            self.prune().await?;
+            return Ok(None);
+        }
+        let request = compression_request(
+            &self.active_path,
+            self.state.segments[index].sequence,
+            codec,
+        );
+        remove_if_exists(&request.temporary).await?;
+        if try_exists(&request.destination).await? {
+            return Err(io::Error::new(
+                io::ErrorKind::AlreadyExists,
+                "compressed segment destination exists without manifest ownership",
+            ));
+        }
+        self.state.segments[index].compression = Some(SegmentCompression::Pending { codec });
+        self.persist().await?;
+        Ok(Some(request))
+    }
+
+    /// Commits a completed compressed representation before removing its source fallback.
+    pub async fn complete_compression(
+        &mut self,
+        sequence: u64,
+        codec: FileCompression,
+    ) -> io::Result<()> {
+        let index = self
+            .state
+            .segments
+            .iter()
+            .position(|segment| segment.sequence == sequence)
+            .ok_or_else(|| {
+                io::Error::new(
+                    io::ErrorKind::InvalidData,
+                    "compressed segment is absent from the rotation manifest",
+                )
+            })?;
+        if self.state.segments[index].compression != Some(SegmentCompression::Pending { codec }) {
+            return Err(io::Error::new(
+                io::ErrorKind::InvalidData,
+                "compressed segment does not match its pending manifest state",
+            ));
+        }
+        let request = compression_request(&self.active_path, sequence, codec);
+        if !try_exists(&request.destination).await? {
+            return Err(io::Error::new(
+                io::ErrorKind::NotFound,
+                "compressed segment output is missing",
+            ));
+        }
+        self.state.segments[index].compression = Some(SegmentCompression::Complete { codec });
+        self.persist().await?;
+        remove_if_exists(&request.source).await?;
+        self.prune().await
+    }
+
     /// Persists a pending record before the active file is renamed.
     pub async fn begin_rotation(&mut self) -> io::Result<PathBuf> {
         let sequence = self.state.next_sequence;
@@ -182,6 +282,7 @@ impl RotationState {
         self.state.pending = Some(SegmentRecord {
             sequence,
             finalized_unix_millis: unix_millis()?,
+            compression: None,
         });
         self.persist().await?;
         Ok(target)
@@ -229,6 +330,50 @@ impl RotationState {
         self.persist().await
     }
 
+    async fn reconcile_compression(&mut self) -> io::Result<()> {
+        let mut changed = false;
+        for index in 0..self.state.segments.len() {
+            let segment = self.state.segments[index];
+            let Some(compression) = segment.compression else {
+                continue;
+            };
+            let codec = match compression {
+                SegmentCompression::Pending { codec } | SegmentCompression::Complete { codec } => {
+                    codec
+                }
+            };
+            let request = compression_request(&self.active_path, segment.sequence, codec);
+            remove_if_exists(&request.temporary).await?;
+            let destination_exists = try_exists(&request.destination).await?;
+            let source_exists = try_exists(&request.source).await?;
+            match compression {
+                SegmentCompression::Pending { .. } if destination_exists => {
+                    self.state.segments[index].compression =
+                        Some(SegmentCompression::Complete { codec });
+                    changed = true;
+                }
+                SegmentCompression::Complete { .. } if !destination_exists && source_exists => {
+                    self.state.segments[index].compression =
+                        Some(SegmentCompression::Pending { codec });
+                    changed = true;
+                }
+                _ => {}
+            }
+        }
+        if changed {
+            self.persist().await?;
+        }
+        for segment in &self.state.segments {
+            if let Some(SegmentCompression::Complete { codec }) = segment.compression {
+                let request = compression_request(&self.active_path, segment.sequence, codec);
+                if try_exists(&request.destination).await? {
+                    remove_if_exists(&request.source).await?;
+                }
+            }
+        }
+        Ok(())
+    }
+
     async fn prune(&mut self) -> io::Result<()> {
         let now = unix_millis()?;
         let cutoff = self.config.retention.max_age.map(|max_age| {
@@ -245,15 +390,16 @@ impl RotationState {
             let expired_by_age =
                 cutoff.is_some_and(|cutoff| segment.finalized_unix_millis <= cutoff);
             if expired_by_count || expired_by_age {
-                let path = segment_path(&self.active_path, segment.sequence);
-                match tokio::fs::remove_file(path).await {
-                    Ok(()) => {}
-                    Err(error) if error.kind() == io::ErrorKind::NotFound => {}
-                    Err(error) => return Err(error),
+                if matches!(
+                    segment.compression,
+                    Some(SegmentCompression::Pending { .. })
+                ) {
+                    retained.push(segment);
+                    continue;
                 }
+                self.remove_segment_files(segment).await?;
             } else {
-                let path = segment_path(&self.active_path, segment.sequence);
-                if try_exists(path).await? {
+                if self.segment_exists(segment).await? {
                     retained.push(segment);
                 }
             }
@@ -261,6 +407,40 @@ impl RotationState {
         if retained.len() != self.state.segments.len() {
             self.state.segments = retained;
             self.persist().await?;
+        }
+        Ok(())
+    }
+
+    async fn segment_exists(&self, segment: SegmentRecord) -> io::Result<bool> {
+        match segment.compression {
+            None => try_exists(segment_path(&self.active_path, segment.sequence)).await,
+            Some(SegmentCompression::Pending { codec }) => {
+                let request = compression_request(&self.active_path, segment.sequence, codec);
+                Ok(try_exists(request.source).await? || try_exists(request.destination).await?)
+            }
+            Some(SegmentCompression::Complete { codec }) => {
+                try_exists(compressed_segment_path(
+                    &self.active_path,
+                    segment.sequence,
+                    codec,
+                ))
+                .await
+            }
+        }
+    }
+
+    async fn remove_segment_files(&self, segment: SegmentRecord) -> io::Result<()> {
+        let source = segment_path(&self.active_path, segment.sequence);
+        remove_if_exists(&source).await?;
+        if let Some(compression) = segment.compression {
+            let codec = match compression {
+                SegmentCompression::Pending { codec } | SegmentCompression::Complete { codec } => {
+                    codec
+                }
+            };
+            let request = compression_request(&self.active_path, segment.sequence, codec);
+            remove_if_exists(&request.destination).await?;
+            remove_if_exists(&request.temporary).await?;
         }
         Ok(())
     }
@@ -409,9 +589,45 @@ pub(crate) fn segment_path(active_path: &Path, sequence: u64) -> PathBuf {
     suffixed_path(active_path, &format!(".{sequence:020}"))
 }
 
+/// Returns the deterministic completed path for one compressed finalized sequence.
+pub(crate) fn compressed_segment_path(
+    active_path: &Path,
+    sequence: u64,
+    codec: FileCompression,
+) -> PathBuf {
+    let source = segment_path(active_path, sequence);
+    suffixed_path(&source, codec.suffix())
+}
+
+fn compression_request(
+    active_path: &Path,
+    sequence: u64,
+    codec: FileCompression,
+) -> CompressionRequest {
+    let source = segment_path(active_path, sequence);
+    let destination = compressed_segment_path(active_path, sequence, codec);
+    let temporary = suffixed_path(&destination, ".tmp");
+    CompressionRequest {
+        sequence,
+        codec,
+        source,
+        destination,
+        temporary,
+    }
+}
+
+async fn remove_if_exists(path: &Path) -> io::Result<()> {
+    match tokio::fs::remove_file(path).await {
+        Ok(()) => Ok(()),
+        Err(error) if error.kind() == io::ErrorKind::NotFound => Ok(()),
+        Err(error) => Err(error),
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::exporters::file_exporter::compression::CompressionWorker;
     use crate::exporters::file_exporter::config::RetentionConfig;
     use tempfile::tempdir;
 
@@ -517,5 +733,43 @@ mod tests {
 
         assert!(!finalized.exists());
         assert!(rotation.state.segments.is_empty());
+    }
+
+    /// Scenario: A process stops after installing compressed output but before committing it.
+    /// Guarantees: Manifest recovery recognizes the completed rename, commits it, and removes the
+    /// retained uncompressed fallback without recompressing the segment.
+    #[tokio::test]
+    async fn compression_recovery_commits_an_installed_output() {
+        let dir = tempdir().unwrap();
+        let active = dir.path().join("capture.jsonl");
+        tokio::fs::write(&active, b"{}\n").await.unwrap();
+        let mut rotation = RotationState::open(&active, config(10), OpenMode::Append)
+            .await
+            .unwrap();
+        let source = rotation.begin_rotation().await.unwrap();
+        tokio::fs::rename(&active, &source).await.unwrap();
+        tokio::fs::write(&active, b"").await.unwrap();
+        rotation.finish_rotation().await.unwrap();
+        let request = rotation
+            .next_compression_request(Some(FileCompression::Gzip))
+            .await
+            .unwrap()
+            .unwrap();
+        let destination = request.destination.clone();
+        _ = CompressionWorker::start(request).finish().await.unwrap();
+        drop(rotation);
+
+        let mut recovered = RotationState::open(&active, config(10), OpenMode::Append)
+            .await
+            .unwrap();
+        assert!(
+            recovered
+                .next_compression_request(Some(FileCompression::Gzip))
+                .await
+                .unwrap()
+                .is_none()
+        );
+        assert!(destination.exists());
+        assert!(!source.exists());
     }
 }

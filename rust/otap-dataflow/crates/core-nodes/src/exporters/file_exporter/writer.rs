@@ -7,7 +7,10 @@
 //! bounded blocking helpers where needed, while frame writes and optional rotation stay ordered on
 //! the local runtime.
 
-use super::config::{Durability, FileExporterConfig, FileFormat, OpenMode, TailRecovery};
+use super::compression::CompressionWorker;
+use super::config::{
+    Durability, FileCompression, FileExporterConfig, FileFormat, OpenMode, TailRecovery,
+};
 use super::metrics::FileOperation;
 use super::rotation::RotationState;
 use std::collections::HashSet;
@@ -18,6 +21,9 @@ use tokio::fs::{File, OpenOptions};
 use tokio::io::{AsyncReadExt, AsyncSeekExt, AsyncWriteExt};
 
 static PATH_LEASES: OnceLock<Mutex<HashSet<PathBuf>>> = OnceLock::new();
+
+/// Maximum delay before the run loop observes a completed background compression job.
+const COMPRESSION_POLL_INTERVAL: std::time::Duration = std::time::Duration::from_millis(100);
 
 /// Tail bytes removed while opening an append-mode writer.
 #[derive(Debug, Clone, Copy, Default)]
@@ -37,6 +43,15 @@ pub struct WriterFailure {
     pub rollback_error: Option<String>,
     /// Fatal state error that requires writer reconstruction before more data is accepted.
     pub fatal_error: Option<String>,
+}
+
+/// Lifecycle work completed while servicing a write or timer deadline.
+#[derive(Debug, Clone, Copy, Default)]
+pub struct WriterProgress {
+    /// Whether the active file was finalized by rotation.
+    pub rotated: bool,
+    /// Number of compressed files committed to the rotation manifest.
+    pub compressions: u64,
 }
 
 impl WriterFailure {
@@ -75,6 +90,8 @@ pub struct SignalWriter {
     active_bytes: u64,
     durability: Durability,
     rotation: Option<RotationState>,
+    configured_compression: Option<FileCompression>,
+    compression_worker: Option<CompressionWorker>,
     _lease: PathLease,
 }
 
@@ -138,6 +155,8 @@ impl SignalWriter {
             active_bytes: 0,
             durability: config.durability,
             rotation: None,
+            configured_compression: config.compression,
+            compression_worker: None,
             _lease: lease,
         };
         let recovery = if let Some(policy) = config.effective_tail_recovery() {
@@ -171,13 +190,18 @@ impl SignalWriter {
                     .await
                     .map_err(|error| WriterFailure::new(FileOperation::Open, error))?,
             );
+            writer
+                .start_next_compression()
+                .await
+                .map_err(|failure| WriterFailure::new(FileOperation::Open, failure.error))?;
         }
         Ok((writer, recovery))
     }
 
     /// Writes one complete frame and rolls back to the prior length on failure.
-    pub async fn write_frame(&mut self, frame: &[u8]) -> Result<bool, WriterFailure> {
-        let mut rotated = false;
+    pub async fn write_frame(&mut self, frame: &[u8]) -> Result<WriterProgress, WriterFailure> {
+        let mut progress = WriterProgress::default();
+        progress.compressions += self.finish_compression(false).await?;
         let (rotation_due, retention_due) = match &self.rotation {
             Some(rotation) => {
                 let rotation_due = rotation.size_due(self.active_bytes, frame.len())
@@ -194,9 +218,10 @@ impl SignalWriter {
             None => (false, false),
         };
         if rotation_due {
-            self.rotate().await?;
-            rotated = true;
+            progress.compressions += self.rotate().await?;
+            progress.rotated = true;
         } else if retention_due {
+            progress.compressions += self.drain_compression().await?;
             _ = self
                 .rotation
                 .as_mut()
@@ -236,7 +261,7 @@ impl SignalWriter {
             };
         }
         self.active_bytes = start_len.saturating_add(frame.len() as u64);
-        Ok(rotated)
+        Ok(progress)
     }
 
     /// Returns the duration until time rotation or age retention next needs service.
@@ -249,8 +274,13 @@ impl SignalWriter {
                 let retention_delay = rotation
                     .time_until_retention()
                     .map_err(|error| WriterFailure::new(FileOperation::Rotate, error))?;
-                Ok(match (rotation_delay, retention_delay) {
+                let lifecycle_delay = match (rotation_delay, retention_delay) {
                     (Some(rotation), Some(retention)) => Some(rotation.min(retention)),
+                    (Some(delay), None) | (None, Some(delay)) => Some(delay),
+                    (None, None) => None,
+                };
+                Ok(match (lifecycle_delay, self.compression_delay()) {
+                    (Some(lifecycle), Some(compression)) => Some(lifecycle.min(compression)),
                     (Some(delay), None) | (None, Some(delay)) => Some(delay),
                     (None, None) => None,
                 })
@@ -260,7 +290,9 @@ impl SignalWriter {
     }
 
     /// Services elapsed time rotation and age retention deadlines.
-    pub async fn maintain_if_due(&mut self) -> Result<bool, WriterFailure> {
+    pub async fn maintain_if_due(&mut self) -> Result<WriterProgress, WriterFailure> {
+        let mut progress = WriterProgress::default();
+        progress.compressions += self.finish_compression(false).await?;
         let rotation_due = self
             .rotation
             .as_ref()
@@ -270,8 +302,20 @@ impl SignalWriter {
             .flatten()
             .is_some_and(|remaining| remaining.is_zero());
         if rotation_due {
-            self.rotate().await?;
-            return Ok(true);
+            progress.compressions += self.rotate().await?;
+            progress.rotated = true;
+            return Ok(progress);
+        }
+        let retention_due = self
+            .rotation
+            .as_ref()
+            .map(|rotation| rotation.time_until_retention())
+            .transpose()
+            .map_err(|error| WriterFailure::new(FileOperation::Rotate, error))?
+            .flatten()
+            .is_some_and(|remaining| remaining.is_zero());
+        if retention_due {
+            progress.compressions += self.drain_compression().await?;
         }
         if let Some(rotation) = &mut self.rotation {
             _ = rotation.prune_if_due().await.map_err(|error| {
@@ -279,17 +323,20 @@ impl SignalWriter {
                     .with_fatal("rotation manifest requires restart recovery")
             })?;
         }
-        Ok(false)
+        Ok(progress)
     }
 
     /// Flushes and synchronizes a ready writer during graceful shutdown.
-    pub async fn finalize(&mut self) -> Result<(), WriterFailure> {
+    pub async fn finalize(&mut self) -> Result<u64, WriterFailure> {
         let flush_result = self.file_mut().flush().await;
         let sync_result = self.file_mut().sync_data().await;
         match (flush_result, sync_result) {
             (Err(error), _) => Err(WriterFailure::new(FileOperation::Write, error)),
             (Ok(()), Err(error)) => Err(WriterFailure::new(FileOperation::Sync, error)),
-            (Ok(()), Ok(())) => Ok(()),
+            (Ok(()), Ok(())) => {
+                let compressions = self.drain_compression().await?;
+                Ok(compressions)
+            }
         }
     }
 
@@ -301,10 +348,11 @@ impl SignalWriter {
         Ok(())
     }
 
-    async fn rotate(&mut self) -> Result<(), WriterFailure> {
+    async fn rotate(&mut self) -> Result<u64, WriterFailure> {
         if self.active_bytes == 0 {
-            return Ok(());
+            return Ok(0);
         }
+        let compressions = self.drain_compression().await?;
         let target = self
             .rotation
             .as_mut()
@@ -348,7 +396,78 @@ impl SignalWriter {
             return Err(WriterFailure::new(FileOperation::Rotate, error)
                 .with_fatal("rotation manifest requires restart recovery"));
         }
+        self.start_next_compression().await?;
+        Ok(compressions)
+    }
+
+    fn compression_delay(&self) -> Option<std::time::Duration> {
+        self.compression_worker.as_ref().map(|worker| {
+            if worker.is_finished() {
+                std::time::Duration::ZERO
+            } else {
+                COMPRESSION_POLL_INTERVAL
+            }
+        })
+    }
+
+    async fn start_next_compression(&mut self) -> Result<(), WriterFailure> {
+        if self.compression_worker.is_some() {
+            return Ok(());
+        }
+        let Some(rotation) = &mut self.rotation else {
+            return Ok(());
+        };
+        let request = rotation
+            .next_compression_request(self.configured_compression)
+            .await
+            .map_err(|error| {
+                WriterFailure::new(FileOperation::Compress, error)
+                    .with_fatal("compression manifest state requires restart recovery")
+            })?;
+        if let Some(request) = request {
+            self.compression_worker = Some(CompressionWorker::start(request));
+        }
         Ok(())
+    }
+
+    async fn finish_compression(&mut self, wait: bool) -> Result<u64, WriterFailure> {
+        let Some(worker) = &self.compression_worker else {
+            self.start_next_compression().await?;
+            return Ok(0);
+        };
+        if !wait && !worker.is_finished() {
+            return Ok(0);
+        }
+        let worker = self
+            .compression_worker
+            .take()
+            .expect("compression worker was checked above");
+        let request = worker.finish().await.map_err(|error| {
+            WriterFailure::new(FileOperation::Compress, error)
+                .with_fatal("background compression requires restart recovery")
+        })?;
+        self.rotation
+            .as_mut()
+            .expect("compression is paired with rotation")
+            .complete_compression(request.sequence, request.codec)
+            .await
+            .map_err(|error| {
+                WriterFailure::new(FileOperation::Compress, error)
+                    .with_fatal("compression manifest state requires restart recovery")
+            })?;
+        self.start_next_compression().await?;
+        Ok(1)
+    }
+
+    async fn drain_compression(&mut self) -> Result<u64, WriterFailure> {
+        let mut completed = 0_u64;
+        loop {
+            self.start_next_compression().await?;
+            if self.compression_worker.is_none() {
+                return Ok(completed);
+            }
+            completed = completed.saturating_add(self.finish_compression(true).await?);
+        }
     }
 
     fn file_mut(&mut self) -> &mut File {
@@ -810,9 +929,9 @@ mod tests {
             }),
         );
         let (mut writer, _) = SignalWriter::open(&path, &config).await.unwrap();
-        assert!(!writer.write_frame(b"{}\n").await.unwrap());
-        assert!(!writer.write_frame(b"{}\n").await.unwrap());
-        assert!(writer.write_frame(b"{}\n").await.unwrap());
+        assert!(!writer.write_frame(b"{}\n").await.unwrap().rotated);
+        assert!(!writer.write_frame(b"{}\n").await.unwrap().rotated);
+        assert!(writer.write_frame(b"{}\n").await.unwrap().rotated);
 
         let finalized = super::super::rotation::segment_path(&path, 0);
         assert_eq!(tokio::fs::read(finalized).await.unwrap(), b"{}\n{}\n");
@@ -838,7 +957,7 @@ mod tests {
         let (mut writer, _) = SignalWriter::open(&path, &config).await.unwrap();
         _ = writer.write_frame(b"{}\n").await.unwrap();
         tokio::time::sleep(std::time::Duration::from_millis(5)).await;
-        assert!(writer.maintain_if_due().await.unwrap());
+        assert!(writer.maintain_if_due().await.unwrap().rotated);
 
         let finalized = super::super::rotation::segment_path(&path, 0);
         assert_eq!(tokio::fs::read(finalized).await.unwrap(), b"{}\n");
@@ -865,5 +984,56 @@ mod tests {
 
         assert!(SignalWriter::open(&path, &config).await.is_err());
         assert_eq!(tokio::fs::read(target).await.unwrap(), b"{}\n");
+    }
+
+    /// Scenario: Size rotation is paired with either supported background compression codec.
+    /// Guarantees: Finalized files become standard streams, sources are removed after commit, and
+    /// the active file remains uncompressed and writable.
+    #[tokio::test]
+    async fn rotated_files_are_compressed_with_standard_codecs() {
+        use std::io::Read;
+
+        for (name, codec) in [
+            ("gzip", FileCompression::Gzip),
+            ("zstd", FileCompression::Zstd),
+        ] {
+            let dir = tempdir().unwrap();
+            let path = dir.path().join("data-logs-0-1.jsonl");
+            let config = config(
+                &template_path(dir.path()),
+                json!({
+                    "max_frame_bytes": 8,
+                    "compression": name,
+                    "rotation": {
+                        "max_bytes": 8,
+                        "retention": {"max_backups": 2}
+                    }
+                }),
+            );
+            let (mut writer, _) = SignalWriter::open(&path, &config).await.unwrap();
+            _ = writer.write_frame(b"{}\n").await.unwrap();
+            _ = writer.write_frame(b"{}\n").await.unwrap();
+            assert!(writer.write_frame(b"{}\n").await.unwrap().rotated);
+            assert!(writer.compression_worker.is_some());
+            _ = writer.finalize().await.unwrap();
+
+            let source = super::super::rotation::segment_path(&path, 0);
+            let compressed = super::super::rotation::compressed_segment_path(&path, 0, codec);
+            let decoded = match codec {
+                FileCompression::Gzip => {
+                    let mut decoder =
+                        flate2::read::GzDecoder::new(std::fs::File::open(compressed).unwrap());
+                    let mut decoded = Vec::new();
+                    _ = decoder.read_to_end(&mut decoded).unwrap();
+                    decoded
+                }
+                FileCompression::Zstd => {
+                    zstd::stream::decode_all(std::fs::File::open(compressed).unwrap()).unwrap()
+                }
+            };
+            assert_eq!(decoded, b"{}\n{}\n");
+            assert!(!source.exists());
+            assert_eq!(tokio::fs::read(path).await.unwrap(), b"{}\n");
+        }
     }
 }

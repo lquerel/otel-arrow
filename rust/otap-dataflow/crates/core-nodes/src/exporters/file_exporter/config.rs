@@ -22,6 +22,8 @@
 //!   `fail`) and defaults to `truncate_partial`.
 //! - `rotation` optionally bounds active files by size, elapsed time, or both. Its retention policy
 //!   bounds finalized files by count and can additionally expire them by age.
+//! - `compression` optionally selects standard file-level `gzip` or `zstd` compression for
+//!   finalized rotated files. It requires `rotation`; the active file stays uncompressed.
 //!
 //! Unknown fields, invalid path templates, out-of-range frame limits, and `tail_recovery` outside
 //! append mode are rejected during configuration validation.
@@ -29,15 +31,14 @@
 //! # Future evolutions
 //!
 //! Planned configuration extensions include typed output formats such as plain text, human-readable
-//! signal renderings, and structured per-record envelopes. Bounded size- and time-based rotation,
-//! backup retention, and standard file-level compression may follow once their ownership, recovery,
-//! and failure semantics are defined. Profiles can be supported after OTAP provides a stable profile
-//! signal representation and file format.
+//! signal renderings, and structured per-record envelopes. Profiles can be supported after OTAP
+//! provides a stable profile signal representation and file format. Future lifecycle work can add
+//! configurable compression levels and an explicit policy for external archival handoff.
 
 use otap_df_config::SignalType;
 use otap_df_config::error::Error as ConfigError;
 use otap_df_telemetry_macros::AttributeEnum;
-use serde::Deserialize;
+use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use std::path::{Component, Path, PathBuf};
 use std::time::Duration;
@@ -101,6 +102,27 @@ pub enum TailRecovery {
     Fail,
 }
 
+/// Standard file-level compression applied to finalized rotated files.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize, Serialize, AttributeEnum)]
+#[serde(rename_all = "snake_case")]
+pub enum FileCompression {
+    /// Standard gzip stream with the library default compression level.
+    Gzip,
+    /// Standard zstd stream with the library default compression level.
+    Zstd,
+}
+
+impl FileCompression {
+    /// Returns the conventional suffix for a completed compressed file.
+    #[must_use]
+    pub const fn suffix(self) -> &'static str {
+        match self {
+            Self::Gzip => ".gz",
+            Self::Zstd => ".zst",
+        }
+    }
+}
+
 /// Rotation triggers and bounded retention for finalized files.
 #[derive(Debug, Clone, Deserialize)]
 #[serde(deny_unknown_fields)]
@@ -162,6 +184,8 @@ pub struct FileExporterConfig {
     pub tail_recovery: Option<TailRecovery>,
     /// Optional bounded file rotation and retention policy.
     pub rotation: Option<RotationConfig>,
+    /// Optional background file-level compression for finalized rotated files.
+    pub compression: Option<FileCompression>,
 }
 
 const fn default_max_frame_bytes() -> usize {
@@ -311,6 +335,9 @@ impl FileExporterConfig {
                 ));
             }
         }
+        if self.compression.is_some() && self.rotation.is_none() {
+            return Err(invalid("file.compression requires file.rotation"));
+        }
         Ok(())
     }
 }
@@ -385,6 +412,7 @@ mod tests {
         assert_eq!(config.durability, Durability::Write);
         assert_eq!(config.max_frame_bytes, DEFAULT_MAX_FRAME_BYTES);
         assert!(config.rotation.is_none());
+        assert!(config.compression.is_none());
         assert_eq!(
             config.effective_tail_recovery(),
             Some(TailRecovery::TruncatePartial)
@@ -404,6 +432,8 @@ mod tests {
         assert_eq!(Durability::SyncData.as_str(), "sync_data");
         assert_eq!(TailRecovery::TruncatePartial.as_str(), "truncate_partial");
         assert_eq!(TailRecovery::Fail.as_str(), "fail");
+        assert_eq!(FileCompression::Gzip.as_str(), "gzip");
+        assert_eq!(FileCompression::Zstd.as_str(), "zstd");
     }
 
     /// Scenario: Users select either canonical OTAP format names or Go Collector aliases.
@@ -510,6 +540,29 @@ mod tests {
                 .is_err()
             );
         }
+    }
+
+    /// Scenario: Gzip or zstd compression is selected together with bounded file rotation.
+    /// Guarantees: Both standard codecs parse while compression without rotation is rejected.
+    #[test]
+    fn compression_requires_rotation() {
+        for compression in [FileCompression::Gzip, FileCompression::Zstd] {
+            let name = compression.as_str();
+            let config = FileExporterConfig::parse(&json!({
+                "path": absolute_template(),
+                "compression": name,
+                "rotation": {"max_duration": "1h"}
+            }))
+            .unwrap();
+            assert_eq!(config.compression, Some(compression));
+        }
+        assert!(
+            FileExporterConfig::parse(&json!({
+                "path": absolute_template(),
+                "compression": "gzip"
+            }))
+            .is_err()
+        );
     }
 
     /// Scenario: Tail recovery is explicitly configured for a destructive first-open mode.

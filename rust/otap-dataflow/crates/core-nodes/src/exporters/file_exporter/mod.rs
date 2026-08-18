@@ -7,6 +7,7 @@
 //! one bounded frame to a lazily opened signal-specific file. The local run loop owns all state so
 //! slow filesystems propagate backpressure and completion follows the engine ACK/NACK contract.
 
+mod compression;
 mod config;
 mod encoding;
 mod metrics;
@@ -14,8 +15,8 @@ mod rotation;
 mod writer;
 
 pub use config::{
-    Durability, FileExporterConfig, FileFormat, OpenMode, RetentionConfig, RotationConfig,
-    TailRecovery,
+    Durability, FileCompression, FileExporterConfig, FileFormat, OpenMode, RetentionConfig,
+    RotationConfig, TailRecovery,
 };
 
 use async_trait::async_trait;
@@ -122,6 +123,10 @@ impl Exporter<OtapPdata> for FileExporter {
             create_directories = self.config.create_directories,
             open_mode = self.config.open_mode.as_str(),
             durability = self.config.durability.as_str(),
+            compression = self
+                .config
+                .compression
+                .map_or("none", |compression| compression.as_str()),
             tail_recovery = self
                 .config
                 .effective_tail_recovery()
@@ -137,7 +142,7 @@ impl Exporter<OtapPdata> for FileExporter {
                     return Err(exporter_error(
                         &effect_handler,
                         ExporterErrorKind::Transport,
-                        "file rotation clock evaluation failed",
+                        "file lifecycle deadline evaluation failed",
                     ));
                 }
             };
@@ -151,7 +156,7 @@ impl Exporter<OtapPdata> for FileExporter {
                             return Err(exporter_error(
                                 &effect_handler,
                                 ExporterErrorKind::Transport,
-                                "time-based file rotation failed",
+                                "file lifecycle maintenance failed",
                             ));
                         }
                         continue;
@@ -241,8 +246,8 @@ impl FileExporter {
                 "file writer missing after successful open",
             ));
         };
-        let rotated = match writer.write_frame(self.encoder.frame()).await {
-            Ok(rotated) => rotated,
+        let progress = match writer.write_frame(self.encoder.frame()).await {
+            Ok(progress) => progress,
             Err(failure) => {
                 self.record_io_failure(signal, &failure);
                 self.record_export_outcome(signal, Outcome::Failure);
@@ -274,9 +279,7 @@ impl FileExporter {
                 return Ok(());
             }
         };
-        if rotated {
-            self.record_rotation(signal);
-        }
+        self.record_writer_progress(signal, progress);
         self.failure_active[index] = false;
         self.signal_metrics
             .with(SignalAttributes { signal })
@@ -358,7 +361,7 @@ impl FileExporter {
             );
         } else if let Some(fatal_error) = failure.fatal_error.as_deref() {
             otel_error!(
-                "otelcol.node.file.rotation.fail",
+                "otelcol.node.file.lifecycle.fail",
                 signal = signal.as_str(),
                 operation = failure.operation.as_str(),
                 error = failure.error.as_str(),
@@ -395,13 +398,12 @@ impl FileExporter {
 
     async fn maintain_writers(&mut self) -> Result<(), (SignalType, WriterFailure)> {
         for signal in [SignalType::Logs, SignalType::Metrics, SignalType::Traces] {
-            if let Some(writer) = &mut self.writers[signal_index(signal)]
-                && writer
+            if let Some(writer) = &mut self.writers[signal_index(signal)] {
+                let progress = writer
                     .maintain_if_due()
                     .await
-                    .map_err(|failure| (signal, failure))?
-            {
-                self.record_rotation(signal);
+                    .map_err(|failure| (signal, failure))?;
+                self.record_writer_progress(signal, progress);
             }
         }
         Ok(())
@@ -415,6 +417,23 @@ impl FileExporter {
         otel_info!("otelcol.node.file.rotate", signal = signal.as_str(),);
     }
 
+    fn record_writer_progress(&mut self, signal: SignalType, progress: writer::WriterProgress) {
+        if progress.rotated {
+            self.record_rotation(signal);
+        }
+        if progress.compressions != 0 {
+            self.signal_metrics
+                .with(SignalAttributes { signal })
+                .compressions
+                .add(progress.compressions);
+            otel_info!(
+                "otelcol.node.file.compress",
+                signal = signal.as_str(),
+                files = progress.compressions,
+            );
+        }
+    }
+
     async fn finalize(
         &mut self,
         deadline: std::time::Instant,
@@ -422,20 +441,34 @@ impl FileExporter {
     ) -> Result<(), Error> {
         let result = tokio::time::timeout_at(Instant::from_std(deadline), async {
             let mut failures = Vec::new();
+            let mut compressions = Vec::new();
             for signal in [SignalType::Logs, SignalType::Metrics, SignalType::Traces] {
                 let writer = &mut self.writers[signal_index(signal)];
-                if let Some(writer) = writer
-                    && let Err(failure) = writer.finalize().await
-                {
-                    failures.push((signal, failure));
+                if let Some(writer) = writer {
+                    match writer.finalize().await {
+                        Ok(count) if count != 0 => compressions.push((signal, count)),
+                        Ok(_) => {}
+                        Err(failure) => failures.push((signal, failure)),
+                    }
                 }
             }
-            failures
+            (failures, compressions)
         })
         .await;
         match result {
-            Ok(failures) if failures.is_empty() => Ok(()),
-            Ok(failures) => {
+            Ok((failures, compressions)) => {
+                for (signal, count) in compressions {
+                    self.record_writer_progress(
+                        signal,
+                        writer::WriterProgress {
+                            rotated: false,
+                            compressions: count,
+                        },
+                    );
+                }
+                if failures.is_empty() {
+                    return Ok(());
+                }
                 for (signal, failure) in failures {
                     self.record_io_failure(signal, &failure);
                     self.log_write_failure(signal, &failure);
@@ -443,7 +476,7 @@ impl FileExporter {
                 Err(exporter_error(
                     effect_handler,
                     ExporterErrorKind::Shutdown,
-                    "file synchronization failed during shutdown",
+                    "file synchronization or background compression failed during shutdown",
                 ))
             }
             Err(_) => Err(exporter_error(
@@ -888,10 +921,11 @@ mod tests {
             });
     }
 
-    /// Scenario: A configured time deadline expires after one batch while the exporter is idle.
-    /// Guarantees: The run loop rotates without waiting for another pdata message to arrive.
+    /// Scenario: A time deadline expires after one batch while gzip compression is configured.
+    /// Guarantees: The idle run loop rotates, commits a standard compressed file, and removes its
+    /// uncompressed finalized source without waiting for another pdata message.
     #[test]
-    fn exporter_rotates_a_non_empty_file_on_the_idle_timer() {
+    fn exporter_rotates_and_compresses_on_the_idle_timer() {
         let dir = tempdir().unwrap();
         let template = dir
             .path()
@@ -901,6 +935,7 @@ mod tests {
             json!({
                 "path": template.to_string_lossy(),
                 "max_frame_bytes": 4096,
+                "compression": "gzip",
                 "rotation": {
                     "max_duration": "5ms",
                     "retention": {"max_backups": 2}
@@ -909,12 +944,13 @@ mod tests {
         )
         .unwrap();
         let active = dir.path().join("capture-logs-0-0.jsonl");
-        let finalized = rotation::segment_path(&active, 0);
+        let source = rotation::segment_path(&active, 0);
+        let finalized = rotation::compressed_segment_path(&active, 0, FileCompression::Gzip);
         TestRuntime::new()
             .set_exporter(exporter)
             .run_test(|ctx| async move {
                 ctx.send_pdata(log_pdata()).await.unwrap();
-                tokio::time::sleep(Duration::from_millis(25)).await;
+                tokio::time::sleep(Duration::from_millis(250)).await;
                 ctx.send_shutdown(StdInstant::now() + Duration::from_secs(10), "test complete")
                     .await
                     .unwrap();
@@ -922,7 +958,11 @@ mod tests {
             .run_validation(move |_, result| async move {
                 result.unwrap();
                 assert!(tokio::fs::read(active).await.unwrap().is_empty());
-                let content = tokio::fs::read_to_string(finalized).await.unwrap();
+                assert!(!source.exists());
+                let mut decoder =
+                    flate2::read::GzDecoder::new(std::fs::File::open(finalized).unwrap());
+                let mut content = String::new();
+                _ = std::io::Read::read_to_string(&mut decoder, &mut content).unwrap();
                 assert_eq!(content.lines().count(), 1);
             });
     }

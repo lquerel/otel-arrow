@@ -36,6 +36,8 @@ pub enum FileOperation {
     Rollback,
     /// Active-file rotation or retention cleanup.
     Rotate,
+    /// Background finalized-file compression.
+    Compress,
 }
 
 /// Signal and operation dimensions for file failures.
@@ -67,6 +69,9 @@ pub struct FileSignalMetrics {
     /// Active files finalized by size- or time-based rotation.
     #[metric(unit = "{rotation}")]
     pub rotations: Counter<u64>,
+    /// Finalized files successfully replaced by a standard compressed stream.
+    #[metric(unit = "{file}")]
+    pub compressions: Counter<u64>,
 }
 
 /// File I/O failures, partitioned by signal and bounded operation.
@@ -210,5 +215,6 @@ mod tests {
         assert_eq!(FileOperation::Sync.as_str(), "sync");
         assert_eq!(FileOperation::Rollback.as_str(), "rollback");
         assert_eq!(FileOperation::Rotate.as_str(), "rotate");
+        assert_eq!(FileOperation::Compress.as_str(), "compress");
     }
 }

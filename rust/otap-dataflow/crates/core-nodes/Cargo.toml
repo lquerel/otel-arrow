@@ -35,6 +35,7 @@ chrono.workspace = true
 hashbrown.workspace = true
 data_engine_expressions.workspace = true
 data_engine_kql_parser.workspace = true
+flate2.workspace = true
 futures.workspace = true
 futures-timer.workspace = true
 hex.workspace = true
@@ -64,6 +65,7 @@ async-stream.workspace = true
 arrow-ipc.workspace = true
 uuid.workspace = true
 xxhash-rust.workspace = true
+zstd.workspace = true
 weaver_common = { workspace = true, optional = true }
 weaver_forge = { workspace = true, optional = true }
 weaver_resolved_schema = { workspace = true, optional = true }
@@ -94,12 +96,10 @@ otap-df-engine = { workspace = true, features = ["test-utils"] }
 otap-df-otap = { workspace = true, features = ["test-utils", "crypto-ring"] }
 otap-df-pdata = { workspace = true, features = ["testing"] }
 otap-df-telemetry = { workspace = true }
-flate2.workspace = true
 http-body-util.workspace = true
 hyper.workspace = true
 hyper-util.workspace = true
 tokio-stream.workspace = true
-zstd.workspace = true
 pretty_assertions.workspace = true
 tempfile.workspace = true
 otap-df-test-net.workspace = true
