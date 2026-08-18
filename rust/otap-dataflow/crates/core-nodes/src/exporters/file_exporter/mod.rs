@@ -3,9 +3,10 @@
 
 //! Multi-signal OTLP JSON Lines and length-prefixed protobuf file exporter.
 //!
-//! The exporter encodes OTLP-byte or OTAP Arrow pdata through backend-agnostic views, then writes
-//! one bounded frame to a lazily opened signal-specific file. The local run loop owns all state so
-//! slow filesystems propagate backpressure and completion follows the engine ACK/NACK contract.
+//! The exporter encodes OTLP-byte or OTAP Arrow pdata, then writes one bounded frame to a lazily
+//! opened signal-specific file. The local run loop owns active files, crash-recoverable rotation,
+//! bounded retention, and completion. Optional file-level compression uses one background task per
+//! signal writer while later lifecycle work restores backpressure and the engine ACK/NACK contract.
 
 mod compression;
 mod config;

@@ -23,16 +23,27 @@ groups:
               path: "/tmp/otel-capture-{signal}-{core_id}-{generation}.jsonl"
               # Create missing parent directories (default: false).
               # create_directories: false
-              # Encode each batch as OTLP JSON (the only supported format).
+              # Output: otlp_json/json (default) or otlp_proto/proto.
               # format: otlp_json
               # Preserve existing frames; alternatives: truncate or create_new.
               open_mode: append
               # ACK after writing; use sync_data to synchronize file data first.
               durability: write
-              # Limit each JSONL frame, including its newline (default: 64 MiB).
+              # Bound each physical frame, including framing (default: 64 MiB).
               # max_frame_bytes: 67108864
               # Repair an incomplete append-mode tail; alternative: fail.
               # tail_recovery: truncate_partial
+              # Compress finalized files with gzip or zstd; requires rotation.
+              # compression: gzip
+              # Rotate on size, elapsed time, or both; values below are examples.
+              # rotation:
+              #   max_bytes: 134217728
+              #   max_duration: 1h
+              #   retention:
+              #     # Keep at most this many finalized files (default: 10).
+              #     max_backups: 10
+              #     # Also remove finalized files older than this duration.
+              #     max_age: 168h
 
         connections:
           - from: generator

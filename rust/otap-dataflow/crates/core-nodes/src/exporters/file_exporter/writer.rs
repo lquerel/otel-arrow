@@ -3,9 +3,9 @@
 
 //! Async file lifecycle, tail recovery, and transactional frame writes.
 //!
-//! Each signal writer owns one file and a process-local path lease. Opening and rollback use
-//! bounded blocking helpers where needed, while frame writes and optional rotation stay ordered on
-//! the local runtime.
+//! Each signal writer owns one active file, a process-local path lease, and optional manifest state.
+//! Frame writes and lifecycle transitions stay ordered on the local runtime. At most one blocking
+//! compression task per writer may overlap active writes and is drained before dependent work.
 
 use super::compression::CompressionWorker;
 use super::config::{

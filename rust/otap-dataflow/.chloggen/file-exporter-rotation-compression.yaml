@@ -1,0 +1,6 @@
+change_type: enhancement
+component: pipeline
+note: "file_exporter: add OTLP protobuf output plus bounded rotation, retention, and background gzip or zstd compression."
+issues: [3773]
+subtext: |
+  Use format: otlp_proto (or proto) for length-prefixed requests. Configure size or time rotation and count or age retention; compression requires rotation and applies only to finalized files.

@@ -57,7 +57,7 @@ pub struct FileSignalMetrics {
     /// Signal items in frames successfully written before ACK routing.
     #[metric(unit = "{item}")]
     pub items: Counter<u64>,
-    /// Successfully written frame bytes, including newline delimiters.
+    /// Successfully written frame bytes, including JSON or protobuf framing.
     #[metric(unit = "By")]
     pub bytes: Counter<u64>,
     /// Append-mode partial tails successfully repaired.
@@ -81,7 +81,7 @@ pub struct FileSignalMetrics {
 )]
 #[derive(Debug, Default, Clone)]
 pub struct FileFailureMetrics {
-    /// Open, write, sync, or rollback failures.
+    /// Open, write, sync, rollback, rotation, or compression failures.
     #[metric(unit = "{failure}")]
     pub failures: Counter<u64>,
 }
