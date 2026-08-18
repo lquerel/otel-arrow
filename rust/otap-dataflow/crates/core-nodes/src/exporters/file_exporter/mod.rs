@@ -947,11 +947,24 @@ mod tests {
         let active = dir.path().join("capture-logs-0-0.jsonl");
         let source = rotation::segment_path(&active, 0);
         let finalized = rotation::compressed_segment_path(&active, 0, FileCompression::Gzip);
+        let source_for_test = source.clone();
+        let finalized_for_test = finalized.clone();
         TestRuntime::new()
             .set_exporter(exporter)
             .run_test(|ctx| async move {
                 ctx.send_pdata(log_pdata()).await.unwrap();
-                tokio::time::sleep(Duration::from_millis(250)).await;
+                tokio::time::timeout(Duration::from_secs(5), async {
+                    loop {
+                        let finalized = tokio::fs::try_exists(&finalized_for_test).await.unwrap();
+                        let source = tokio::fs::try_exists(&source_for_test).await.unwrap();
+                        if finalized && !source {
+                            break;
+                        }
+                        tokio::time::sleep(Duration::from_millis(10)).await;
+                    }
+                })
+                .await
+                .expect("timed out waiting for idle rotation and compression");
                 ctx.send_shutdown(StdInstant::now() + Duration::from_secs(10), "test complete")
                     .await
                     .unwrap();
