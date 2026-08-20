@@ -22,6 +22,8 @@ semconv/
   triggers/*.sh
 semconv-live-check/
   internal-events.yaml
+semconv-codegen/
+  metric-sets.yaml
 ```
 
 The manifest imports upstream OpenTelemetry semantic conventions when the
@@ -65,15 +67,30 @@ standard v2 fields and references.
 
 ## Validation
 
-Run the check from `rust/otap-dataflow`:
+Run both checks from `rust/otap-dataflow`:
 
 ```bash
 weaver registry check --v2 --registry semconv
+cargo xtask semconv-check
 ```
 
-The command validates the v2 registry and imported references. CI pins Weaver
-to v0.25.1, runs the static check with `--v2`, and live-checks telemetry emitted
-by an exercised engine scenario against the same registry.
+The first command validates the v2 registry and imported references. The second
+walks production Rust library and binary module graphs and compares discovered
+telemetry declarations with the registry and metric-set catalog. It excludes
+test-only modules and checks for missing, stale, or structurally different
+attributes, entities, metrics, events, generated metric shapes, availability,
+and entity associations.
+
+`cargo xtask check` includes the semantic-convention drift check through its
+structure-check step. CI pins Weaver to v0.25.1, runs the static check with
+`--v2`, checks the Rust source inventory, and live-checks telemetry emitted by
+an exercised engine scenario against the same registry.
+
+For diagnostics or generator development, print the source inventory as JSON:
+
+```bash
+cargo xtask semconv-inventory
+```
 
 ## Updating the contract
 

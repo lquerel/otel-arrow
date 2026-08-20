@@ -10,12 +10,12 @@ rust-version.workspace = true
 
 [dependencies]
 anyhow = { workspace = true }
+proc-macro2 = { workspace = true, features = ["span-locations"] }
+quote.workspace = true
 serde.workspace = true
 serde_json.workspace = true
-syn = { workspace = true }
-# `span-locations` gives us `Span::start().line` for informational file:line in
-# the inventory output (line is not part of the baseline diff).
-proc-macro2 = { workspace = true, features = ["span-locations"] }
+serde_yaml.workspace = true
+syn = { workspace = true, features = ["visit"] }
 otap-df-component-inventory-syntax = { workspace = true }
 toml = { workspace = true }
 tonic-prost-build = { workspace = true, features = ["cleanup-markdown"] }

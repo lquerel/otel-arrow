@@ -68,6 +68,10 @@ pub fn run() -> anyhow::Result<()> {
         }
     }
 
+    if let Err(error) = crate::semconv::check() {
+        errors.push(error);
+    }
+
     if !errors.is_empty() {
         for error in errors {
             eprintln!("{error}");
