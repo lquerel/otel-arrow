@@ -62,7 +62,7 @@ jobs:
       - name: Check semantic conventions against production Rust telemetry
         run: cargo xtask semconv-check
         working-directory: ./rust/otap-dataflow
-      - name: Verify generated entity and metric SDK
+      - name: Verify generated telemetry SDK
         working-directory: ./rust/otap-dataflow
         run: |
           weaver registry generate rust crates/telemetry-sdk/src/generated \

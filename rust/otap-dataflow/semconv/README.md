@@ -91,9 +91,11 @@ an exercised engine scenario against the same registry.
 
 The custom Weaver templates under `semconv-codegen/templates/registry/rust`
 generate the experimental `otap-df-telemetry-sdk` crate. The generated surface
-contains owned entity identity types, cache-aligned metric-set structs, static
-descriptors, and compile-time signal/entity association markers. The output is
-checked in for review but is not integrated into existing instrumentation.
+contains owned entity identity types, cache-aligned metric-set structs, typed
+event payloads, static descriptors, and compile-time signal/entity association
+markers. Generated events target a backend-independent sink defined by the
+experimental crate. The output is checked in for review but is not integrated
+into existing instrumentation.
 
 Run the generator from `rust/otap-dataflow` with Weaver v0.25.1:
 
@@ -105,6 +107,11 @@ weaver registry generate rust crates/telemetry-sdk/src/generated \
   --params semconv-codegen/metric-sets.yaml
 cargo fmt --all
 ```
+
+Event payloads use concrete Rust types where the registry has a concrete type
+and retain `AttributeValue` for source values currently modeled as `any`.
+Generated emission methods preserve the known call-site levels, canonical and
+wire names, scope metadata, optional attributes, and entity associations.
 
 For diagnostics or generator development, print the source inventory as JSON:
 

@@ -6,4 +6,5 @@
 //! Type-safe OTAP Dataflow telemetry generated from the semantic-convention registry.
 
 pub mod entities;
+pub mod events;
 pub mod metrics;

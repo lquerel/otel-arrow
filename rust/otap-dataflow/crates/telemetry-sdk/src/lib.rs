@@ -3,7 +3,10 @@
 
 #![doc = include_str!("../README.md")]
 
-/// Weaver-generated entity and metric-set clients.
+/// Backend-independent contracts used by generated event payloads.
+pub mod event;
+
+/// Weaver-generated entity, event, and metric-set clients.
 pub mod generated;
 
-pub use generated::{entities, metrics};
+pub use generated::{entities, events, metrics};

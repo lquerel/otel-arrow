@@ -1,6 +1,6 @@
 change_type: new_component
 component: observability
-note: "Add an experimental Weaver-generated type-safe telemetry client SDK for semantic-convention entities and metric sets."
+note: "Add an experimental Weaver-generated type-safe telemetry client SDK for semantic-convention entities, metric sets, and events."
 issues: [1613]
 subtext: |
   The generated crate is not integrated into existing instrumentation yet and is intended for API and code-generation review.

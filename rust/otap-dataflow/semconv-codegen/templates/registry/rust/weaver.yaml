@@ -19,6 +19,28 @@ templates:
   filter: ".registry.entities"
   application_mode: single
   file_name: entities.rs
+- template: events/mod.rs.j2
+  filter: >-
+    .registry.events
+    | group_by(.provenance.path)
+    | map({
+        "module": (.[0].provenance.path | split("/") | .[-1] | split(".")[0] | gsub("-"; "_")),
+        "events": .
+      })
+  application_mode: single
+  file_name: events/mod.rs
+- template: events/event_group.rs.j2
+  filter: >-
+    . as $schema
+    | $schema.registry.events
+    | group_by(.provenance.path)
+    | map(. as $events | {
+        "module": ($events[0].provenance.path | split("/") | .[-1] | split(".")[0] | gsub("-"; "_")),
+        "events": $events,
+        "entities": $schema.registry.entities
+      })
+  application_mode: each
+  file_name: "events/{{ ctx.module }}.rs"
 - template: metrics/mod.rs.j2
   filter: "$params.metric_sets"
   application_mode: single
