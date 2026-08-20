@@ -15,7 +15,7 @@ use crate::event::{
 #[derive(Debug, Clone)]
 pub struct StateMutexPoisoned {
     /// The action value recorded by OTAP Dataflow internal telemetry.
-    pub action: otap_df_telemetry::attributes::AttributeValue,
+    pub action: String,
 }
 
 /// Marker implemented only by entity types allowed by `state.mutex_poisoned`.
@@ -38,7 +38,7 @@ static STATE_MUTEX_POISONED_DESCRIPTOR: EventDescriptor = EventDescriptor {
         key: "action",
         wire_key: "action",
         brief: "The action value recorded by OTAP Dataflow internal telemetry.",
-        value_type: otap_df_telemetry::descriptor::AttributeValueType::Any,
+        value_type: otap_df_telemetry::descriptor::AttributeValueType::String,
         requirement_level: EventRequirementLevel::Required,
     }],
 };
@@ -51,7 +51,7 @@ impl EventAttributes for StateMutexPoisoned {
     ) {
         visitor(
             &STATE_MUTEX_POISONED_DESCRIPTOR.attributes[0],
-            EventAttributeValueRef::Any(&self.action),
+            EventAttributeValueRef::String(self.action.as_str()),
         );
     }
 }

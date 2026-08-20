@@ -25,7 +25,26 @@ attributes:
       wire:
         attribute_key: ack_propagation
 - key: action
-  type: any
+  type:
+    members:
+    - id: renamed
+      value: "renamed"
+      stability: development
+    - id: deleted
+      value: "deleted"
+      stability: development
+    - id: inserted
+      value: "inserted"
+      stability: development
+    - id: upserted
+      value: "upserted"
+      stability: development
+    - id: updated
+      value: "updated"
+      stability: development
+    - id: hashed
+      value: "hashed"
+      stability: development
   stability: development
   brief: The action value recorded by OTAP Dataflow internal telemetry.
   annotations:
@@ -329,7 +348,20 @@ attributes:
       wire:
         attribute_key: channel.id
 - key: channel.impl
-  type: any
+  type:
+    members:
+    - id: internal
+      value: "internal"
+      brief: "OTAP Dataflow's internal local channel implementation."
+      stability: development
+    - id: tokio
+      value: "tokio"
+      brief: "Tokio's channel implementation."
+      stability: development
+    - id: flume
+      value: "flume"
+      brief: "Flume's channel implementation."
+      stability: development
   stability: development
   brief: Channel implementation ("tokio", "flume", "internal").
   annotations:
@@ -337,7 +369,16 @@ attributes:
       wire:
         attribute_key: channel.impl
 - key: channel.kind
-  type: any
+  type:
+    members:
+    - id: control
+      value: "control"
+      brief: "Engine control messages."
+      stability: development
+    - id: pdata
+      value: "pdata"
+      brief: "Pipeline telemetry data."
+      stability: development
   stability: development
   brief: Channel payload kind ("control" or "pdata").
   annotations:
@@ -345,7 +386,16 @@ attributes:
       wire:
         attribute_key: channel.kind
 - key: channel.mode
-  type: any
+  type:
+    members:
+    - id: local
+      value: "local"
+      brief: "Both endpoints run on the same local executor."
+      stability: development
+    - id: shared
+      value: "shared"
+      brief: "The channel can cross thread or executor boundaries."
+      stability: development
   stability: development
   brief: Concurrency mode of the channel ("local" or "shared").
   annotations:
@@ -353,7 +403,16 @@ attributes:
       wire:
         attribute_key: channel.mode
 - key: channel.type
-  type: any
+  type:
+    members:
+    - id: mpsc
+      value: "mpsc"
+      brief: "Multiple producers and a single consumer."
+      stability: development
+    - id: mpmc
+      value: "mpmc"
+      brief: "Multiple producers and multiple consumers."
+      stability: development
   stability: development
   brief: Channel type ("mpsc", "mpmc", "spsc", "spmc").
   annotations:
@@ -697,7 +756,16 @@ attributes:
       wire:
         attribute_key: details
 - key: dimension
-  type: any
+  type:
+    members:
+    - id: bytes
+      value: "bytes"
+      brief: "Payload bytes, as measured by the component at its admission point."
+      stability: development
+    - id: messages
+      value: "messages"
+      brief: "Framed application messages, one unit per message."
+      stability: development
   stability: development
   brief: Weight dimension the limiter meters.
   annotations:
@@ -705,7 +773,17 @@ attributes:
       wire:
         attribute_key: dimension
 - key: domain
-  type: any
+  type:
+    members:
+    - id: signal
+      value: "signal"
+      stability: development
+    - id: resource
+      value: "resource"
+      stability: development
+    - id: scope
+      value: "scope"
+      stability: development
   stability: development
   brief: The domain value recorded by OTAP Dataflow internal telemetry.
   annotations:
@@ -801,7 +879,180 @@ attributes:
       wire:
         attribute_key: error
 - key: error.type
-  type: any
+  type:
+    members:
+    - id: authentication
+      value: "authentication"
+      brief: "Authentication credentials were absent, unusable, or rejected."
+      stability: development
+    - id: authorization
+      value: "authorization"
+      brief: "The destination denied the authenticated principal."
+      stability: development
+    - id: closed
+      value: "closed"
+      brief: "The receiving endpoint was closed."
+      stability: development
+    - id: compression
+      value: "compression"
+      brief: "The request body could not be compressed."
+      stability: development
+    - id: concurrency_limit
+      value: "concurrency_limit"
+      brief: "No configured admission or concurrency capacity is available."
+      stability: development
+    - id: encoding
+      value: "encoding"
+      brief: "An OTAP Arrow payload could not be encoded as OTLP protobuf."
+      stability: development
+    - id: formatting
+      value: "formatting"
+      brief: "The selected output formatter could not encode the logs payload."
+      stability: development
+    - id: full
+      value: "full"
+      brief: "The bounded channel had no capacity for a non-blocking send."
+      stability: development
+    - id: id_decode
+      value: "id_decode"
+      brief: "Transport-optimized identifiers could not be decoded."
+      stability: development
+    - id: inbound_capacity
+      value: "inbound_capacity"
+      brief: "No configured inbound request slot was available."
+      stability: development
+    - id: insufficient_replicas
+      value: "insufficient_replicas"
+      brief: "The broker could not meet the configured in-sync replica requirement."
+      stability: development
+    - id: internal
+      value: "internal"
+      brief: "An internal stream-coordination channel failed."
+      stability: development
+    - id: invalid_request
+      value: "invalid_request"
+      brief: "The request is malformed or otherwise invalid."
+      stability: development
+    - id: invalid_topic
+      value: "invalid_topic"
+      brief: "A dynamic topic supplied by a transport header was invalid."
+      stability: development
+    - id: memory_pressure
+      value: "memory_pressure"
+      brief: "The process is refusing ingress because memory pressure is active."
+      stability: development
+    - id: message_too_large
+      value: "message_too_large"
+      brief: "The encoded Kafka record exceeded a client or broker size limit."
+      stability: development
+    - id: offset
+      value: "offset"
+      brief: "The stored or requested consumer offset cannot be used."
+      stability: development
+    - id: otap_view_creation
+      value: "otap_view_creation"
+      brief: "An OTAP Arrow payload could not be exposed as a logs view."
+      stability: development
+    - id: other
+      value: "other"
+      brief: "The delivery failure does not fit another bounded category."
+      stability: development
+    - id: otlp_view_creation
+      value: "otlp_view_creation"
+      brief: "An OTLP byte payload could not be exposed as a logs view."
+      stability: development
+    - id: outbound_capacity
+      value: "outbound_capacity"
+      brief: "No configured outbound request slot was available."
+      stability: development
+    - id: output_send
+      value: "output_send"
+      brief: "An immediate default or routed output send failed."
+      stability: development
+    - id: partial_rejection
+      value: "partial_rejection"
+      brief: "The destination accepted only part of the export request."
+      stability: development
+    - id: payload_conversion
+      value: "payload_conversion"
+      brief: "The incoming PData payload could not be converted to OTAP Arrow records."
+      stability: development
+    - id: payload_too_large
+      value: "payload_too_large"
+      brief: "The encoded or decoded payload exceeds the configured size limit."
+      stability: development
+    - id: poll_exceeded
+      value: "poll_exceeded"
+      brief: "The consumer exceeded its configured maximum polling interval."
+      stability: development
+    - id: query_execution
+      value: "query_execution"
+      brief: "The configured query pipeline failed while executing."
+      stability: development
+    - id: queue_full
+      value: "queue_full"
+      brief: "The local librdkafka producer queue stayed full until the enqueue deadline."
+      stability: development
+    - id: rate_limit
+      value: "rate_limit"
+      brief: "The receiver-local rate limit refused the request."
+      stability: development
+    - id: rejected
+      value: "rejected"
+      brief: "The destination permanently rejected the batch."
+      stability: development
+    - id: response_decode
+      value: "response_decode"
+      brief: "The successful response body was not valid OTLP protobuf."
+      stability: development
+    - id: response_too_large
+      value: "response_too_large"
+      brief: "The successful response exceeded the configured body-size limit."
+      stability: development
+    - id: route_not_configured
+      value: "route_not_configured"
+      brief: "A query referenced an output route that is not configured."
+      stability: development
+    - id: server_error
+      value: "server_error"
+      brief: "The destination reported a server-side failure."
+      stability: development
+    - id: shutdown
+      value: "shutdown"
+      brief: "The export was abandoned during exporter shutdown."
+      stability: development
+    - id: throttled
+      value: "throttled"
+      brief: "The destination refused the batch because capacity was exhausted."
+      stability: development
+    - id: timeout
+      value: "timeout"
+      brief: "A consumer or broker request deadline expired."
+      stability: development
+    - id: transport
+      value: "transport"
+      brief: "Broker connectivity, name resolution, or network transport failed."
+      stability: development
+    - id: unavailable
+      value: "unavailable"
+      brief: "The destination or gateway was temporarily unavailable."
+      stability: development
+    - id: unconfigured_signal
+      value: "unconfigured_signal"
+      brief: "The incoming signal has no Kafka exporter configuration."
+      stability: development
+    - id: unknown_topic_or_partition
+      value: "unknown_topic_or_partition"
+      brief: "A subscribed topic or partition is unavailable."
+      stability: development
+    - id: unsupported_signal
+      value: "unsupported_signal"
+      brief: "The exporter received a signal that it cannot render."
+      stability: development
+    - id: write
+      value: "write"
+      brief: "The rendered output could not be written to stdout."
+      stability: development
   stability: development
   brief: Bounded Kafka export failure category.
   annotations:
@@ -985,7 +1236,14 @@ attributes:
       wire:
         attribute_key: failed_messages
 - key: failure
-  type: any
+  type:
+    members:
+    - id: error
+      value: "error"
+      stability: development
+    - id: backpressure
+      value: "backpressure"
+      stability: development
   stability: development
   brief: The failure value recorded by OTAP Dataflow internal telemetry.
   annotations:
@@ -1122,7 +1380,16 @@ attributes:
       wire:
         attribute_key: force_dropped_segments
 - key: format
-  type: any
+  type:
+    members:
+    - id: pretty
+      value: "pretty"
+      brief: "Human-readable hierarchical output intended for interactive inspection."
+      stability: development
+    - id: record_json
+      value: "record_json"
+      brief: "One compact log record JSON object per line."
+      stability: development
   stability: development
   brief: The format value recorded by OTAP Dataflow internal telemetry.
   annotations:
@@ -1330,7 +1597,7 @@ attributes:
       wire:
         attribute_key: journal_root_path
 - key: key
-  type: any
+  type: string
   stability: development
   brief: The key value recorded by OTAP Dataflow internal telemetry.
   annotations:
@@ -1362,7 +1629,20 @@ attributes:
       wire:
         attribute_key: kind
 - key: language
-  type: any
+  type:
+    members:
+    - id: kql
+      value: "kql"
+      brief: "Kusto Query Language."
+      stability: development
+    - id: opl
+      value: "opl"
+      brief: "OpenTelemetry Pipeline Language."
+      stability: development
+    - id: ottl
+      value: "ottl"
+      brief: "OpenTelemetry Transformation Language."
+      stability: development
   stability: development
   brief: The language value recorded by OTAP Dataflow internal telemetry.
   annotations:
@@ -1394,7 +1674,7 @@ attributes:
       wire:
         attribute_key: listed_count
 - key: listening_addr
-  type: any
+  type: string
   stability: development
   brief: The listening_addr value recorded by OTAP Dataflow internal telemetry.
   annotations:
@@ -1426,7 +1706,17 @@ attributes:
       wire:
         attribute_key: logs_endpoint
 - key: mapping
-  type: any
+  type:
+    members:
+    - id: batch_to_message
+      value: "batch_to_message"
+      stability: development
+    - id: message_to_batch
+      value: "message_to_batch"
+      stability: development
+    - id: message_to_data
+      value: "message_to_data"
+      stability: development
   stability: development
   brief: The mapping value recorded by OTAP Dataflow internal telemetry.
   annotations:
@@ -1739,7 +2029,32 @@ attributes:
       wire:
         attribute_key: open_mode
 - key: operation
-  type: any
+  type:
+    members:
+    - id: delivery
+      value: "delivery"
+      brief: "Enqueue the encoded record and wait for its broker delivery result."
+      stability: development
+    - id: encoding
+      value: "encoding"
+      brief: "Convert pdata into the configured Kafka wire encoding."
+      stability: development
+    - id: open
+      value: "open"
+      brief: "File acquisition, directory creation, open, or tail validation."
+      stability: development
+    - id: rollback
+      value: "rollback"
+      brief: "Failed-write rollback."
+      stability: development
+    - id: sync
+      value: "sync"
+      brief: "Data synchronization."
+      stability: development
+    - id: write
+      value: "write"
+      brief: "Frame write or flush."
+      stability: development
   stability: development
   brief: Timed exporter phase.
   annotations:
@@ -1771,7 +2086,29 @@ attributes:
       wire:
         attribute_key: original_key_type
 - key: outcome
-  type: any
+  type:
+    members:
+    - id: acked
+      value: "acked"
+      stability: development
+    - id: deferred
+      value: "deferred"
+      stability: development
+    - id: failure
+      value: "failure"
+      brief: "The component itself failed the operation."
+      stability: development
+    - id: permanently_rejected
+      value: "permanently_rejected"
+      stability: development
+    - id: refused
+      value: "refused"
+      brief: "A downstream component refused the operation."
+      stability: development
+    - id: success
+      value: "success"
+      brief: "The component completed the operation successfully."
+      stability: development
   stability: development
   brief: Terminal outcome of the phase.
   annotations:
@@ -1803,7 +2140,7 @@ attributes:
       wire:
         attribute_key: partitions
 - key: path
-  type: any
+  type: string
   stability: development
   brief: The path value recorded by OTAP Dataflow internal telemetry.
   annotations:
@@ -1995,7 +2332,16 @@ attributes:
       wire:
         attribute_key: projected_bytes
 - key: protocol
-  type: any
+  type:
+    members:
+    - id: grpc
+      value: "grpc"
+      brief: "OTLP over gRPC."
+      stability: development
+    - id: http
+      value: "http"
+      brief: "OTLP over HTTP."
+      stability: development
   stability: development
   brief: The protocol value recorded by OTAP Dataflow internal telemetry.
   annotations:
@@ -2091,7 +2437,110 @@ attributes:
       wire:
         attribute_key: ready_pipelines
 - key: reason
-  type: any
+  type:
+    members:
+    - id: conversion_error
+      value: "conversion_error"
+      brief: "NACKed due to an internal conversion error."
+      stability: development
+    - id: deadline
+      value: "deadline"
+      brief: "The next retry would exceed the configured deadline."
+      stability: development
+    - id: decode
+      value: "decode"
+      brief: "The payload could not be decoded using the configured signal encoding."
+      stability: development
+    - id: default_route_missing_key
+      value: "default_route_missing_key"
+      brief: "Routed to default because the routing key was missing."
+      stability: development
+    - id: default_route_no_match
+      value: "default_route_no_match"
+      brief: "Routed to default because no configured route matched."
+      stability: development
+    - id: default_route_unwired
+      value: "default_route_unwired"
+      brief: "Routed to default because named port was not connected."
+      stability: development
+    - id: drop_oldest
+      value: "drop_oldest"
+      stability: development
+    - id: empty_payload
+      value: "empty_payload"
+      brief: "The Kafka record contained no payload."
+      stability: development
+    - id: expired
+      value: "expired"
+      stability: development
+    - id: internal
+      value: "internal"
+      brief: "An unexpected receiver-local condition rejected the message."
+      stability: development
+    - id: invalid_state
+      value: "invalid_state"
+      brief: "Retry state in call data was absent or malformed."
+      stability: development
+    - id: matched_route
+      value: "matched_route"
+      brief: "Routed to a matched route."
+      stability: development
+    - id: missing_routing_key
+      value: "missing_routing_key"
+      brief: "NACKed because the routing key was missing and no default was set."
+      stability: development
+    - id: mixed_batch
+      value: "mixed_batch"
+      brief: "NACKed because the batch contained mixed destinations."
+      stability: development
+    - id: named_route
+      value: "named_route"
+      brief: "Routed to a named port."
+      stability: development
+    - id: no_available_route
+      value: "no_available_route"
+      brief: "Dropped because no matching named or default route exists."
+      stability: development
+    - id: no_matching_route
+      value: "no_matching_route"
+      brief: "NACKed because no configured route matched and no default was set."
+      stability: development
+    - id: node_shutdown
+      value: "node_shutdown"
+      brief: "NACKed because the node was shutting down."
+      stability: development
+    - id: payload_missing
+      value: "payload_missing"
+      brief: "Downstream did not return the payload required for a retry."
+      stability: development
+    - id: permanent_refusal
+      value: "permanent_refusal"
+      brief: "Downstream permanently refused the request."
+      stability: development
+    - id: retry_limit
+      value: "retry_limit"
+      brief: "The configured retry-count safety limit was reached."
+      stability: development
+    - id: route_closed
+      value: "route_closed"
+      brief: "NACKed because the selected route was closed."
+      stability: development
+    - id: route_full
+      value: "route_full"
+      brief: "NACKed because the selected route was full."
+      stability: development
+    - id: send_failure
+      value: "send_failure"
+      brief: "The processor could not send the PData message or convert the failure into a NACK."
+      stability: development
+    - id: topic_id_exhausted
+      value: "topic_id_exhausted"
+      brief: "The receiver exhausted the compact topic ID space used in acknowledgement routing."
+      stability: development
+    - id: unknown_topic
+      value: "unknown_topic"
+      brief: "The Kafka topic did not map to a configured signal."
+      stability: development
   stability: development
   brief: The reason value recorded by OTAP Dataflow internal telemetry.
   annotations:
@@ -2147,7 +2596,20 @@ attributes:
       wire:
         attribute_key: recovered_bytes
 - key: refusal
-  type: any
+  type:
+    members:
+    - id: would_throttle
+      value: "would_throttle"
+      brief: "Over limit, but enforcement was inactive so the request was still admitted."
+      stability: development
+    - id: throttle
+      value: "throttle"
+      brief: "Over limit and refused; the client may retry later."
+      stability: development
+    - id: oversized
+      value: "oversized"
+      brief: "Larger than total burst capacity; retrying cannot help."
+      stability: development
   stability: development
   brief: Why the request was declined.
   annotations:
@@ -2227,7 +2689,48 @@ attributes:
       wire:
         attribute_key: resolved_numa_nodes
 - key: response
-  type: any
+  type:
+    members:
+    - id: http_2xx
+      value: "http_2xx"
+      brief: "A successful 2xx response."
+      stability: development
+    - id: http_400
+      value: "http_400"
+      brief: "A bad-request response."
+      stability: development
+    - id: http_401
+      value: "http_401"
+      brief: "An unauthorized response."
+      stability: development
+    - id: http_403
+      value: "http_403"
+      brief: "A forbidden response."
+      stability: development
+    - id: http_404
+      value: "http_404"
+      brief: "A not-found response."
+      stability: development
+    - id: http_413
+      value: "http_413"
+      brief: "A payload-too-large response."
+      stability: development
+    - id: http_429
+      value: "http_429"
+      brief: "A rate-limited response."
+      stability: development
+    - id: http_5xx
+      value: "http_5xx"
+      brief: "A server-error response."
+      stability: development
+    - id: network_error
+      value: "network_error"
+      brief: "A transport failure before a response was received."
+      stability: development
+    - id: other
+      value: "other"
+      brief: "A response that is not otherwise classified."
+      stability: development
   stability: development
   brief: Result category for the recorded HTTP request attempt.
   annotations:
@@ -2475,7 +2978,21 @@ attributes:
       wire:
         attribute_key: setting
 - key: signal
-  type: any
+  type:
+    members:
+    - id: logs
+      value: "logs"
+      stability: development
+    - id: metrics
+      value: "metrics"
+      stability: development
+    - id: traces
+      value: "traces"
+      stability: development
+    - id: unknown
+      value: "unknown"
+      brief: "The signal could not be established before rejection."
+      stability: development
   stability: development
   brief: The signal value recorded by OTAP Dataflow internal telemetry.
   annotations:
@@ -2779,7 +3296,7 @@ attributes:
       wire:
         attribute_key: token_url
 - key: topic
-  type: any
+  type: string
   stability: development
   brief: Topic name associated with the node metrics.
   annotations:
@@ -2787,7 +3304,16 @@ attributes:
       wire:
         attribute_key: topic
 - key: topic.source
-  type: any
+  type:
+    members:
+    - id: header
+      value: "header"
+      brief: "A captured transport header supplied the destination topic."
+      stability: development
+    - id: static_config
+      value: "static_config"
+      brief: "Static per-signal configuration supplied the destination topic."
+      stability: development
   stability: development
   brief: Bounded source of the resolved topic.
   annotations:

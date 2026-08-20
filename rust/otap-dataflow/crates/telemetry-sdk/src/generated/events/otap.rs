@@ -69,7 +69,7 @@ pub struct GrpcClientStaticHeaderCollision {
     /// The header_name value recorded by OTAP Dataflow internal telemetry.
     pub header_name: otap_df_telemetry::attributes::AttributeValue,
     /// The reason value recorded by OTAP Dataflow internal telemetry.
-    pub reason: otap_df_telemetry::attributes::AttributeValue,
+    pub reason: String,
 }
 
 /// Marker implemented only by entity types allowed by `grpc.client.static_header_collision`.
@@ -102,7 +102,7 @@ static GRPC_CLIENT_STATIC_HEADER_COLLISION_DESCRIPTOR: EventDescriptor = EventDe
             key: "reason",
             wire_key: "reason",
             brief: "The reason value recorded by OTAP Dataflow internal telemetry.",
-            value_type: otap_df_telemetry::descriptor::AttributeValueType::Any,
+            value_type: otap_df_telemetry::descriptor::AttributeValueType::String,
             requirement_level: EventRequirementLevel::Required,
         },
     ],
@@ -120,7 +120,7 @@ impl EventAttributes for GrpcClientStaticHeaderCollision {
         );
         visitor(
             &GRPC_CLIENT_STATIC_HEADER_COLLISION_DESCRIPTOR.attributes[1],
-            EventAttributeValueRef::Any(&self.reason),
+            EventAttributeValueRef::String(self.reason.as_str()),
         );
     }
 }
@@ -150,7 +150,7 @@ pub struct GrpcClientStaticHeaderSkip {
     /// The header_name value recorded by OTAP Dataflow internal telemetry.
     pub header_name: otap_df_telemetry::attributes::AttributeValue,
     /// The reason value recorded by OTAP Dataflow internal telemetry.
-    pub reason: otap_df_telemetry::attributes::AttributeValue,
+    pub reason: String,
 }
 
 /// Marker implemented only by entity types allowed by `grpc.client.static_header_skip`.
@@ -183,7 +183,7 @@ static GRPC_CLIENT_STATIC_HEADER_SKIP_DESCRIPTOR: EventDescriptor = EventDescrip
             key: "reason",
             wire_key: "reason",
             brief: "The reason value recorded by OTAP Dataflow internal telemetry.",
-            value_type: otap_df_telemetry::descriptor::AttributeValueType::Any,
+            value_type: otap_df_telemetry::descriptor::AttributeValueType::String,
             requirement_level: EventRequirementLevel::Required,
         },
     ],
@@ -201,7 +201,7 @@ impl EventAttributes for GrpcClientStaticHeaderSkip {
         );
         visitor(
             &GRPC_CLIENT_STATIC_HEADER_SKIP_DESCRIPTOR.attributes[1],
-            EventAttributeValueRef::Any(&self.reason),
+            EventAttributeValueRef::String(self.reason.as_str()),
         );
     }
 }
@@ -1972,9 +1972,9 @@ impl OtlpHttpReceiverConnectionError {
 #[derive(Debug, Clone)]
 pub struct OtlpHttpReceiverPipelineSendFailed {
     /// The path value recorded by OTAP Dataflow internal telemetry.
-    pub path: otap_df_telemetry::attributes::AttributeValue,
+    pub path: String,
     /// The signal value recorded by OTAP Dataflow internal telemetry.
-    pub signal: otap_df_telemetry::attributes::AttributeValue,
+    pub signal: String,
 }
 
 /// Marker implemented only by entity types allowed by `otlp_http_receiver.pipeline_send_failed`.
@@ -2000,14 +2000,14 @@ static OTLP_HTTP_RECEIVER_PIPELINE_SEND_FAILED_DESCRIPTOR: EventDescriptor = Eve
             key: "path",
             wire_key: "path",
             brief: "The path value recorded by OTAP Dataflow internal telemetry.",
-            value_type: otap_df_telemetry::descriptor::AttributeValueType::Any,
+            value_type: otap_df_telemetry::descriptor::AttributeValueType::String,
             requirement_level: EventRequirementLevel::Required,
         },
         EventAttributeDescriptor {
             key: "signal",
             wire_key: "signal",
             brief: "The signal value recorded by OTAP Dataflow internal telemetry.",
-            value_type: otap_df_telemetry::descriptor::AttributeValueType::Any,
+            value_type: otap_df_telemetry::descriptor::AttributeValueType::String,
             requirement_level: EventRequirementLevel::Required,
         },
     ],
@@ -2021,11 +2021,11 @@ impl EventAttributes for OtlpHttpReceiverPipelineSendFailed {
     ) {
         visitor(
             &OTLP_HTTP_RECEIVER_PIPELINE_SEND_FAILED_DESCRIPTOR.attributes[0],
-            EventAttributeValueRef::Any(&self.path),
+            EventAttributeValueRef::String(self.path.as_str()),
         );
         visitor(
             &OTLP_HTTP_RECEIVER_PIPELINE_SEND_FAILED_DESCRIPTOR.attributes[1],
-            EventAttributeValueRef::Any(&self.signal),
+            EventAttributeValueRef::String(self.signal.as_str()),
         );
     }
 }
@@ -2054,9 +2054,9 @@ impl OtlpHttpReceiverPipelineSendFailed {
 #[derive(Debug, Clone)]
 pub struct OtlpHttpReceiverRequestNacked {
     /// The reason value recorded by OTAP Dataflow internal telemetry.
-    pub reason: otap_df_telemetry::attributes::AttributeValue,
+    pub reason: String,
     /// The signal value recorded by OTAP Dataflow internal telemetry.
-    pub signal: otap_df_telemetry::attributes::AttributeValue,
+    pub signal: String,
 }
 
 /// Marker implemented only by entity types allowed by `otlp_http_receiver.request_nacked`.
@@ -2082,14 +2082,14 @@ static OTLP_HTTP_RECEIVER_REQUEST_NACKED_DESCRIPTOR: EventDescriptor = EventDesc
             key: "reason",
             wire_key: "reason",
             brief: "The reason value recorded by OTAP Dataflow internal telemetry.",
-            value_type: otap_df_telemetry::descriptor::AttributeValueType::Any,
+            value_type: otap_df_telemetry::descriptor::AttributeValueType::String,
             requirement_level: EventRequirementLevel::Required,
         },
         EventAttributeDescriptor {
             key: "signal",
             wire_key: "signal",
             brief: "The signal value recorded by OTAP Dataflow internal telemetry.",
-            value_type: otap_df_telemetry::descriptor::AttributeValueType::Any,
+            value_type: otap_df_telemetry::descriptor::AttributeValueType::String,
             requirement_level: EventRequirementLevel::Required,
         },
     ],
@@ -2103,11 +2103,11 @@ impl EventAttributes for OtlpHttpReceiverRequestNacked {
     ) {
         visitor(
             &OTLP_HTTP_RECEIVER_REQUEST_NACKED_DESCRIPTOR.attributes[0],
-            EventAttributeValueRef::Any(&self.reason),
+            EventAttributeValueRef::String(self.reason.as_str()),
         );
         visitor(
             &OTLP_HTTP_RECEIVER_REQUEST_NACKED_DESCRIPTOR.attributes[1],
-            EventAttributeValueRef::Any(&self.signal),
+            EventAttributeValueRef::String(self.signal.as_str()),
         );
     }
 }
@@ -2142,9 +2142,9 @@ pub struct OtlpHttpReceiverRequestRejected {
     /// The max_len value recorded by OTAP Dataflow internal telemetry.
     pub max_len: Option<otap_df_telemetry::attributes::AttributeValue>,
     /// The path value recorded by OTAP Dataflow internal telemetry.
-    pub path: Option<otap_df_telemetry::attributes::AttributeValue>,
+    pub path: Option<String>,
     /// The reason value recorded by OTAP Dataflow internal telemetry.
-    pub reason: otap_df_telemetry::attributes::AttributeValue,
+    pub reason: String,
     /// The size_hint value recorded by OTAP Dataflow internal telemetry.
     pub size_hint: Option<otap_df_telemetry::attributes::AttributeValue>,
     /// The timeout_ms value recorded by OTAP Dataflow internal telemetry.
@@ -2202,14 +2202,14 @@ static OTLP_HTTP_RECEIVER_REQUEST_REJECTED_DESCRIPTOR: EventDescriptor = EventDe
             key: "path",
             wire_key: "path",
             brief: "The path value recorded by OTAP Dataflow internal telemetry.",
-            value_type: otap_df_telemetry::descriptor::AttributeValueType::Any,
+            value_type: otap_df_telemetry::descriptor::AttributeValueType::String,
             requirement_level: EventRequirementLevel::Recommended,
         },
         EventAttributeDescriptor {
             key: "reason",
             wire_key: "reason",
             brief: "The reason value recorded by OTAP Dataflow internal telemetry.",
-            value_type: otap_df_telemetry::descriptor::AttributeValueType::Any,
+            value_type: otap_df_telemetry::descriptor::AttributeValueType::String,
             requirement_level: EventRequirementLevel::Required,
         },
         EventAttributeDescriptor {
@@ -2262,12 +2262,12 @@ impl EventAttributes for OtlpHttpReceiverRequestRejected {
         if let Some(value) = &self.path {
             visitor(
                 &OTLP_HTTP_RECEIVER_REQUEST_REJECTED_DESCRIPTOR.attributes[4],
-                EventAttributeValueRef::Any(value),
+                EventAttributeValueRef::String(value.as_str()),
             );
         }
         visitor(
             &OTLP_HTTP_RECEIVER_REQUEST_REJECTED_DESCRIPTOR.attributes[5],
-            EventAttributeValueRef::Any(&self.reason),
+            EventAttributeValueRef::String(self.reason.as_str()),
         );
         if let Some(value) = &self.size_hint {
             visitor(
@@ -2315,9 +2315,9 @@ impl OtlpHttpReceiverRequestRejected {
 #[derive(Debug, Clone)]
 pub struct OtlpHttpReceiverRequestTimeout {
     /// The path value recorded by OTAP Dataflow internal telemetry.
-    pub path: otap_df_telemetry::attributes::AttributeValue,
+    pub path: String,
     /// The signal value recorded by OTAP Dataflow internal telemetry.
-    pub signal: otap_df_telemetry::attributes::AttributeValue,
+    pub signal: String,
     /// The timeout_ms value recorded by OTAP Dataflow internal telemetry.
     pub timeout_ms: otap_df_telemetry::attributes::AttributeValue,
 }
@@ -2345,14 +2345,14 @@ static OTLP_HTTP_RECEIVER_REQUEST_TIMEOUT_DESCRIPTOR: EventDescriptor = EventDes
             key: "path",
             wire_key: "path",
             brief: "The path value recorded by OTAP Dataflow internal telemetry.",
-            value_type: otap_df_telemetry::descriptor::AttributeValueType::Any,
+            value_type: otap_df_telemetry::descriptor::AttributeValueType::String,
             requirement_level: EventRequirementLevel::Required,
         },
         EventAttributeDescriptor {
             key: "signal",
             wire_key: "signal",
             brief: "The signal value recorded by OTAP Dataflow internal telemetry.",
-            value_type: otap_df_telemetry::descriptor::AttributeValueType::Any,
+            value_type: otap_df_telemetry::descriptor::AttributeValueType::String,
             requirement_level: EventRequirementLevel::Required,
         },
         EventAttributeDescriptor {
@@ -2373,11 +2373,11 @@ impl EventAttributes for OtlpHttpReceiverRequestTimeout {
     ) {
         visitor(
             &OTLP_HTTP_RECEIVER_REQUEST_TIMEOUT_DESCRIPTOR.attributes[0],
-            EventAttributeValueRef::Any(&self.path),
+            EventAttributeValueRef::String(self.path.as_str()),
         );
         visitor(
             &OTLP_HTTP_RECEIVER_REQUEST_TIMEOUT_DESCRIPTOR.attributes[1],
-            EventAttributeValueRef::Any(&self.signal),
+            EventAttributeValueRef::String(self.signal.as_str()),
         );
         visitor(
             &OTLP_HTTP_RECEIVER_REQUEST_TIMEOUT_DESCRIPTOR.attributes[2],
@@ -2410,7 +2410,7 @@ pub struct OtlpHttpReceiverSemaphoreClosed {
     /// The kind value recorded by OTAP Dataflow internal telemetry.
     pub kind: String,
     /// The path value recorded by OTAP Dataflow internal telemetry.
-    pub path: otap_df_telemetry::attributes::AttributeValue,
+    pub path: String,
 }
 
 /// Marker implemented only by entity types allowed by `otlp_http_receiver.semaphore_closed`.
@@ -2443,7 +2443,7 @@ static OTLP_HTTP_RECEIVER_SEMAPHORE_CLOSED_DESCRIPTOR: EventDescriptor = EventDe
             key: "path",
             wire_key: "path",
             brief: "The path value recorded by OTAP Dataflow internal telemetry.",
-            value_type: otap_df_telemetry::descriptor::AttributeValueType::Any,
+            value_type: otap_df_telemetry::descriptor::AttributeValueType::String,
             requirement_level: EventRequirementLevel::Required,
         },
     ],
@@ -2461,7 +2461,7 @@ impl EventAttributes for OtlpHttpReceiverSemaphoreClosed {
         );
         visitor(
             &OTLP_HTTP_RECEIVER_SEMAPHORE_CLOSED_DESCRIPTOR.attributes[1],
-            EventAttributeValueRef::Any(&self.path),
+            EventAttributeValueRef::String(self.path.as_str()),
         );
     }
 }
@@ -3130,7 +3130,7 @@ pub struct TlsCertReloaded {
     /// The cert value recorded by OTAP Dataflow internal telemetry.
     pub cert: String,
     /// The key value recorded by OTAP Dataflow internal telemetry.
-    pub key: otap_df_telemetry::attributes::AttributeValue,
+    pub key: String,
 }
 
 /// Marker implemented only by entity types allowed by `tls.cert_reloaded`.
@@ -3163,7 +3163,7 @@ static TLS_CERT_RELOADED_DESCRIPTOR: EventDescriptor = EventDescriptor {
             key: "key",
             wire_key: "key",
             brief: "The key value recorded by OTAP Dataflow internal telemetry.",
-            value_type: otap_df_telemetry::descriptor::AttributeValueType::Any,
+            value_type: otap_df_telemetry::descriptor::AttributeValueType::String,
             requirement_level: EventRequirementLevel::Required,
         },
     ],
@@ -3181,7 +3181,7 @@ impl EventAttributes for TlsCertReloaded {
         );
         visitor(
             &TLS_CERT_RELOADED_DESCRIPTOR.attributes[1],
-            EventAttributeValueRef::Any(&self.key),
+            EventAttributeValueRef::String(self.key.as_str()),
         );
     }
 }
@@ -3998,7 +3998,7 @@ impl TlsFileWatcherReloadInProgress {
 #[derive(Debug, Clone)]
 pub struct TlsFileWatcherReloadStart {
     /// The path value recorded by OTAP Dataflow internal telemetry.
-    pub path: otap_df_telemetry::attributes::AttributeValue,
+    pub path: String,
 }
 
 /// Marker implemented only by entity types allowed by `tls.file_watcher.reload_start`.
@@ -4023,7 +4023,7 @@ static TLS_FILE_WATCHER_RELOAD_START_DESCRIPTOR: EventDescriptor = EventDescript
         key: "path",
         wire_key: "path",
         brief: "The path value recorded by OTAP Dataflow internal telemetry.",
-        value_type: otap_df_telemetry::descriptor::AttributeValueType::Any,
+        value_type: otap_df_telemetry::descriptor::AttributeValueType::String,
         requirement_level: EventRequirementLevel::Required,
     }],
 };
@@ -4036,7 +4036,7 @@ impl EventAttributes for TlsFileWatcherReloadStart {
     ) {
         visitor(
             &TLS_FILE_WATCHER_RELOAD_START_DESCRIPTOR.attributes[0],
-            EventAttributeValueRef::Any(&self.path),
+            EventAttributeValueRef::String(self.path.as_str()),
         );
     }
 }

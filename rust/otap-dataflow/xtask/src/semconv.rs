@@ -17,8 +17,8 @@ use syn::punctuated::Punctuated;
 use syn::visit::{self, Visit};
 use syn::{
     Attribute, Expr, ExprArray, ExprLit, ExprMacro, ExprReference, ExprStruct, FieldValue,
-    GenericArgument, Item, ItemConst, ItemImpl, ItemStatic, ItemStruct, Lit, Meta, PathArguments,
-    Token, Type,
+    GenericArgument, Item, ItemConst, ItemEnum, ItemImpl, ItemStatic, ItemStruct, Lit, Meta,
+    PathArguments, Token, Type,
 };
 
 const SEMCONV_DIR: &str = "semconv";
@@ -41,7 +41,15 @@ pub fn check() -> Result<()> {
 /// Prints the source inventory used by the drift checker.
 pub fn print_inventory() -> Result<()> {
     let inventory = Inventory::discover(Path::new("."))?;
-    println!("{}", serde_json::to_string_pretty(&inventory)?);
+    let mut report = serde_json::to_value(&inventory)?;
+    report
+        .as_object_mut()
+        .ok_or_else(|| anyhow!("source inventory report must be a JSON object"))?
+        .insert(
+            "resolved_attributes".to_owned(),
+            serde_json::to_value(expected_attributes(&inventory))?,
+        );
+    println!("{}", serde_json::to_string_pretty(&report)?);
     Ok(())
 }
 
@@ -50,6 +58,8 @@ struct Inventory {
     metrics: BTreeMap<String, MetricDefinition>,
     attribute_sets: BTreeMap<String, AttributeSetDefinition>,
     events: BTreeMap<String, EventDefinition>,
+    #[serde(skip)]
+    attribute_enums: BTreeMap<String, BTreeMap<String, AttributeType>>,
     #[serde(skip)]
     constants: BTreeMap<String, BTreeSet<String>>,
     #[serde(skip)]
@@ -94,9 +104,75 @@ struct AttributeSetDefinition {
 struct AttributeFieldDefinition {
     key: String,
     brief: String,
-    r#type: String,
+    r#type: AttributeType,
     rust_field: String,
     availability: Option<String>,
+}
+
+#[derive(Debug, Clone, Eq, Ord, PartialEq, PartialOrd, Deserialize, Serialize)]
+#[serde(untagged)]
+enum AttributeType {
+    Primitive(String),
+    Enum { members: Vec<AttributeEnumMember> },
+}
+
+#[derive(Debug, Clone, Eq, Ord, PartialEq, PartialOrd, Deserialize, Serialize)]
+struct AttributeEnumMember {
+    id: String,
+    value: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    brief: Option<String>,
+    stability: String,
+}
+
+impl AttributeType {
+    fn any() -> Self {
+        Self::Primitive("any".to_owned())
+    }
+
+    fn merge(&mut self, incoming: &Self) {
+        if self == incoming {
+            return;
+        }
+        match (&mut *self, incoming) {
+            (Self::Enum { .. }, Self::Primitive(incoming)) if incoming == "string" => {}
+            (Self::Primitive(base), Self::Enum { .. }) if base == "string" => {
+                self.clone_from(incoming);
+            }
+            (Self::Enum { members }, Self::Enum { members: additions }) => {
+                let mut merged = members
+                    .iter()
+                    .cloned()
+                    .map(|member| (member.value.clone(), member))
+                    .collect::<BTreeMap<_, _>>();
+                for member in additions {
+                    merged
+                        .entry(member.value.clone())
+                        .and_modify(|current| {
+                            if member < current {
+                                current.clone_from(member);
+                            }
+                        })
+                        .or_insert_with(|| member.clone());
+                }
+                *members = merged.into_values().collect();
+            }
+            _ => *self = Self::any(),
+        }
+    }
+
+    fn merge_observation(&mut self, incoming: &Self) {
+        if incoming != &Self::any() {
+            self.merge(incoming);
+        }
+    }
+
+    fn wire_type(&self) -> &str {
+        match self {
+            Self::Primitive(r#type) => r#type,
+            Self::Enum { .. } => "string",
+        }
+    }
 }
 
 #[derive(Debug, Clone, Default, Serialize)]
@@ -119,6 +195,7 @@ struct Target {
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 enum ScanPhase {
+    Types,
     Definitions,
     Events,
 }
@@ -128,7 +205,7 @@ impl Inventory {
         let targets = cargo_targets(workspace)?;
         let mut inventory = Self::default();
 
-        for phase in [ScanPhase::Definitions, ScanPhase::Events] {
+        for phase in [ScanPhase::Types, ScanPhase::Definitions, ScanPhase::Events] {
             let mut visited = HashSet::new();
             for target in &targets {
                 let source = target.source.canonicalize().with_context(|| {
@@ -169,7 +246,7 @@ impl Inventory {
         visited: &mut HashSet<(String, PathBuf, String)>,
     ) -> Result<()> {
         let scope_key = match phase {
-            ScanPhase::Definitions => String::new(),
+            ScanPhase::Types | ScanPhase::Definitions => String::new(),
             ScanPhase::Events => parent_event_scope.to_owned(),
         };
         let visit_key = (package.to_owned(), path.to_path_buf(), scope_key);
@@ -261,6 +338,7 @@ impl Inventory {
 
             let source = display_source(workspace, source_path);
             match phase {
+                ScanPhase::Types => self.scan_type_item(item, package)?,
                 ScanPhase::Definitions => {
                     self.scan_definition_item(item, package, &source, &guards)?;
                 }
@@ -281,6 +359,121 @@ impl Inventory {
             }
         }
         Ok(())
+    }
+
+    fn scan_type_item(&mut self, item: &Item, package: &str) -> Result<()> {
+        match item {
+            Item::Enum(item_enum) => self.scan_attribute_enum(item_enum, package),
+            Item::Impl(item_impl) => self.scan_attribute_enum_impl(item_impl, package),
+            _ => Ok(()),
+        }
+    }
+
+    fn scan_attribute_enum(&mut self, item: &ItemEnum, package: &str) -> Result<()> {
+        if !derives_trait(&item.attrs, "AttributeEnum")? {
+            return Ok(());
+        }
+
+        let mut members = Vec::new();
+        for variant in &item.variants {
+            if is_test_only(&variant.attrs)? {
+                continue;
+            }
+            if !matches!(variant.fields, syn::Fields::Unit) {
+                bail!(
+                    "AttributeEnum {} contains non-unit variant {}",
+                    item.ident,
+                    variant.ident
+                );
+            }
+            let default_value = to_snake_case(&variant.ident.to_string());
+            let value = variant
+                .attrs
+                .iter()
+                .find(|attr| attr.path().is_ident("attribute_value"))
+                .map(parse_attribute_value)
+                .transpose()?
+                .unwrap_or(default_value);
+            let brief = doc_brief(&variant.attrs);
+            members.push(AttributeEnumMember {
+                id: enum_member_id(&value),
+                value,
+                brief: (!brief.is_empty()).then_some(brief),
+                stability: "development".to_owned(),
+            });
+        }
+        self.insert_attribute_enum(package, item.ident.to_string(), members)
+    }
+
+    fn scan_attribute_enum_impl(&mut self, item: &ItemImpl, package: &str) -> Result<()> {
+        let Some((_, trait_path, _)) = &item.trait_ else {
+            return Ok(());
+        };
+        if trait_path
+            .segments
+            .last()
+            .is_none_or(|segment| segment.ident != "AttributeEnum")
+        {
+            return Ok(());
+        }
+        let rust_type = type_name(&item.self_ty)?;
+        let Some(variants) = item.items.iter().find_map(|item| {
+            let syn::ImplItem::Const(item_const) = item else {
+                return None;
+            };
+            (item_const.ident == "VARIANTS").then_some(&item_const.expr)
+        }) else {
+            return Ok(());
+        };
+        let values = string_array(variants).ok_or_else(|| {
+            anyhow!("AttributeEnum implementation for {rust_type} has a non-literal VARIANTS value")
+        })?;
+        let members = values
+            .into_iter()
+            .map(|value| AttributeEnumMember {
+                id: enum_member_id(&value),
+                value,
+                brief: None,
+                stability: "development".to_owned(),
+            })
+            .collect();
+        self.insert_attribute_enum(package, rust_type, members)
+    }
+
+    fn insert_attribute_enum(
+        &mut self,
+        package: &str,
+        rust_type: String,
+        members: Vec<AttributeEnumMember>,
+    ) -> Result<()> {
+        let definition = AttributeType::Enum { members };
+        let definitions = self.attribute_enums.entry(rust_type.clone()).or_default();
+        if let Some(previous) = definitions.insert(package.to_owned(), definition.clone())
+            && previous != definition
+        {
+            bail!("conflicting AttributeEnum definitions for {package}::{rust_type}");
+        }
+        Ok(())
+    }
+
+    fn resolve_attribute_type(&self, package: &str, ty: &Type) -> AttributeType {
+        if let Some(primitive) = primitive_attribute_type(ty) {
+            return AttributeType::Primitive(primitive.to_owned());
+        }
+        let Ok(rust_type) = type_name(ty) else {
+            return AttributeType::any();
+        };
+        let Some(definitions) = self.attribute_enums.get(&rust_type) else {
+            return AttributeType::any();
+        };
+        if let Some(definition) = definitions.get(package) {
+            return definition.clone();
+        }
+        let unique = definitions.values().collect::<BTreeSet<_>>();
+        if let [definition] = unique.into_iter().collect::<Vec<_>>().as_slice() {
+            return (*definition).clone();
+        }
+        AttributeType::any()
     }
 
     fn scan_definition_item(
@@ -466,7 +659,7 @@ impl Inventory {
             definition.fields.push(AttributeFieldDefinition {
                 key,
                 brief: doc_brief(&field.attrs),
-                r#type: attribute_type(&field.ty),
+                r#type: self.resolve_attribute_type(package, &field.ty),
                 rust_field: ident,
                 availability: guard_string(&field_guards),
             });
@@ -947,14 +1140,22 @@ fn optional_type_value(attr: &Attribute, name: &str) -> Result<Option<String>> {
 }
 
 fn parse_attribute_key(attr: &Attribute) -> Result<String> {
+    parse_string_name_value_attr(attr, "attribute_key")
+}
+
+fn parse_attribute_value(attr: &Attribute) -> Result<String> {
+    parse_string_name_value_attr(attr, "attribute_value")
+}
+
+fn parse_string_name_value_attr(attr: &Attribute, name: &str) -> Result<String> {
     let Meta::NameValue(value) = &attr.meta else {
-        bail!("attribute_key must be a name-value attribute");
+        bail!("{name} must be a name-value attribute");
     };
     let Expr::Lit(ExprLit {
         lit: Lit::Str(key), ..
     }) = &value.value
     else {
-        bail!("attribute_key value must be a string literal");
+        bail!("{name} value must be a string literal");
     };
     Ok(key.value())
 }
@@ -989,17 +1190,97 @@ fn type_name(ty: &Type) -> Result<String> {
         .ok_or_else(|| anyhow!("empty type path"))
 }
 
-fn attribute_type(ty: &Type) -> String {
-    let name = type_name(ty).unwrap_or_else(|_| ty.to_token_stream().to_string());
-    match name.as_str() {
+fn primitive_attribute_type(ty: &Type) -> Option<&'static str> {
+    if let Type::Reference(reference) = ty {
+        return primitive_attribute_type(&reference.elem);
+    }
+    let name = type_name(ty).ok()?;
+    Some(match name.as_str() {
         "String" | "str" | "Cow" | "PathBuf" => "string",
         "bool" => "boolean",
         "f32" | "f64" => "double",
         "i8" | "i16" | "i32" | "i64" | "i128" | "isize" | "u8" | "u16" | "u32" | "u64" | "u128"
         | "usize" => "int",
-        _ => "any",
+        _ => return None,
+    })
+}
+
+fn derives_trait(attrs: &[Attribute], trait_name: &str) -> Result<bool> {
+    let mut found = false;
+    for attr in attrs.iter().filter(|attr| attr.path().is_ident("derive")) {
+        attr.parse_nested_meta(|meta| {
+            if meta
+                .path
+                .segments
+                .last()
+                .is_some_and(|segment| segment.ident == trait_name)
+            {
+                found = true;
+            }
+            Ok(())
+        })?;
     }
-    .to_owned()
+    Ok(found)
+}
+
+fn string_array(expr: &Expr) -> Option<Vec<String>> {
+    match expr {
+        Expr::Reference(reference) => string_array(&reference.expr),
+        Expr::Paren(paren) => string_array(&paren.expr),
+        Expr::Group(group) => string_array(&group.expr),
+        Expr::Array(array) => array
+            .elems
+            .iter()
+            .map(|element| match element {
+                Expr::Lit(ExprLit {
+                    lit: Lit::Str(value),
+                    ..
+                }) => Some(value.value()),
+                _ => None,
+            })
+            .collect(),
+        _ => None,
+    }
+}
+
+fn enum_member_id(value: &str) -> String {
+    let mut id = String::with_capacity(value.len());
+    let mut previous_was_separator = false;
+    for character in value.chars() {
+        if character.is_ascii_alphanumeric() {
+            id.push(character.to_ascii_lowercase());
+            previous_was_separator = false;
+        } else if !id.is_empty() && !previous_was_separator {
+            id.push('_');
+            previous_was_separator = true;
+        }
+    }
+    while id.ends_with('_') {
+        id.pop();
+    }
+    if id.is_empty() {
+        "value".to_owned()
+    } else {
+        id
+    }
+}
+
+fn to_snake_case(ident: &str) -> String {
+    let mut result = String::with_capacity(ident.len() + 4);
+    let mut previous_lower_or_digit = false;
+    for character in ident.chars() {
+        if character.is_uppercase() {
+            if previous_lower_or_digit {
+                result.push('_');
+            }
+            result.extend(character.to_lowercase());
+            previous_lower_or_digit = false;
+        } else {
+            result.push(character);
+            previous_lower_or_digit = character.is_lowercase() || character.is_ascii_digit();
+        }
+    }
+    result
 }
 
 fn display_source(workspace: &Path, path: &Path) -> String {
@@ -1080,7 +1361,7 @@ fn parse_manual_descriptor(expr: &ExprStruct) -> Result<AttributeSetDefinition> 
         definition.fields.push(AttributeFieldDefinition {
             key,
             brief,
-            r#type,
+            r#type: AttributeType::Primitive(r#type),
             rust_field: String::new(),
             availability: None,
         });
@@ -1232,11 +1513,7 @@ impl EventVisitor<'_> {
                     event
                         .attributes
                         .entry(key)
-                        .and_modify(|current| {
-                            if current != &value_type {
-                                *current = "any".to_owned();
-                            }
-                        })
+                        .and_modify(|current| merge_primitive_type(current, &value_type))
                         .or_insert(value_type);
                 }
                 event.scopes.insert(scope.to_owned());
@@ -1337,11 +1614,7 @@ fn parse_event_macro(
             if key != "message" {
                 attributes
                     .entry(key)
-                    .and_modify(|current| {
-                        if current != &value_type {
-                            *current = "any".to_owned();
-                        }
-                    })
+                    .and_modify(|current| merge_primitive_type(current, &value_type))
                     .or_insert(value_type);
             }
         }
@@ -1621,7 +1894,7 @@ struct DefinitionFile {
 #[derive(Debug, Clone, Deserialize)]
 struct RegistryAttribute {
     key: String,
-    r#type: String,
+    r#type: AttributeType,
     brief: String,
     stability: String,
     annotations: RegistryAnnotations,
@@ -2191,7 +2464,7 @@ impl Registry {
                 let value_type = self
                     .attributes
                     .get(&reference.r#ref)
-                    .map(|attribute| attribute.r#type.clone())
+                    .map(|attribute| attribute.r#type.wire_type().to_owned())
                     .unwrap_or_else(|| "upstream".to_owned());
                 actual_attributes.insert(key.clone(), value_type);
                 let expected_requirement = if expected
@@ -2221,7 +2494,7 @@ impl Registry {
                     .filter_map(|key| {
                         global_attributes
                             .get(key)
-                            .map(|value_type| (key.clone(), value_type.clone()))
+                            .map(|value_type| (key.clone(), value_type.wire_type().to_owned()))
                     })
                     .collect::<BTreeMap<_, _>>(),
                 errors,
@@ -2340,7 +2613,7 @@ fn insert_unique<T>(
     Ok(())
 }
 
-fn expected_attributes(inventory: &Inventory) -> BTreeMap<String, String> {
+fn expected_attributes(inventory: &Inventory) -> BTreeMap<String, AttributeType> {
     let mut expected = BTreeMap::new();
     for set in inventory.attribute_sets.values() {
         for field in &set.fields {
@@ -2349,21 +2622,32 @@ fn expected_attributes(inventory: &Inventory) -> BTreeMap<String, String> {
     }
     for event in inventory.events.values() {
         for (key, value_type) in &event.attributes {
-            merge_attribute_type(&mut expected, key, value_type);
+            let observation = AttributeType::Primitive(value_type.clone());
+            expected
+                .entry(key.clone())
+                .and_modify(|current| current.merge_observation(&observation))
+                .or_insert(observation);
         }
     }
     expected
 }
 
-fn merge_attribute_type(attributes: &mut BTreeMap<String, String>, key: &str, value_type: &str) {
+fn merge_attribute_type(
+    attributes: &mut BTreeMap<String, AttributeType>,
+    key: &str,
+    value_type: &AttributeType,
+) {
     attributes
         .entry(key.to_owned())
-        .and_modify(|current| {
-            if current != value_type {
-                *current = "any".to_owned();
-            }
-        })
-        .or_insert_with(|| value_type.to_owned());
+        .and_modify(|current| current.merge(value_type))
+        .or_insert_with(|| value_type.clone());
+}
+
+fn merge_primitive_type(current: &mut String, incoming: &str) {
+    if current != incoming {
+        current.clear();
+        current.push_str("any");
+    }
 }
 
 fn flatten_attribute_set(
@@ -2833,6 +3117,111 @@ where
 mod tests {
     use super::*;
     use quote::quote;
+
+    /// Scenario: an attribute field uses an enum deriving AttributeEnum with a custom wire value.
+    /// Guarantees: the inventory preserves every member value, member description, and development stability.
+    #[test]
+    fn derived_attribute_enum_is_inferred() {
+        let item: ItemEnum = syn::parse_quote! {
+            #[derive(Debug, AttributeEnum)]
+            enum Response {
+                /// Successful response.
+                #[attribute_value = "http_2xx"]
+                Http2xx,
+                /// Transport failed.
+                NetworkError,
+            }
+        };
+        let mut inventory = Inventory::default();
+        inventory
+            .scan_attribute_enum(&item, "otap-df-telemetry")
+            .unwrap();
+
+        let AttributeType::Enum { members } =
+            inventory.resolve_attribute_type("otap-df-telemetry", &syn::parse_quote!(Response))
+        else {
+            panic!("Response must resolve as an enum attribute");
+        };
+        assert_eq!(
+            members,
+            vec![
+                AttributeEnumMember {
+                    id: "http_2xx".to_owned(),
+                    value: "http_2xx".to_owned(),
+                    brief: Some("Successful response.".to_owned()),
+                    stability: "development".to_owned(),
+                },
+                AttributeEnumMember {
+                    id: "network_error".to_owned(),
+                    value: "network_error".to_owned(),
+                    brief: Some("Transport failed.".to_owned()),
+                    stability: "development".to_owned(),
+                },
+            ]
+        );
+    }
+
+    /// Scenario: a foreign enum implements AttributeEnum manually with a literal VARIANTS list.
+    /// Guarantees: the inventory recognizes the implementation as the string enum used by local attribute sets.
+    #[test]
+    fn manual_attribute_enum_implementation_is_inferred() {
+        let item: ItemImpl = syn::parse_quote! {
+            impl AttributeEnum for SignalType {
+                const CARDINALITY: usize = 3;
+                const VARIANTS: &'static [&'static str] = &["traces", "metrics", "logs"];
+
+                fn variant_index(self) -> usize {
+                    0
+                }
+            }
+        };
+        let mut inventory = Inventory::default();
+        inventory
+            .scan_attribute_enum_impl(&item, "otap-df-telemetry")
+            .unwrap();
+
+        let AttributeType::Enum { members } =
+            inventory.resolve_attribute_type("otap-df-telemetry", &syn::parse_quote!(SignalType))
+        else {
+            panic!("SignalType must resolve as an enum attribute");
+        };
+        assert_eq!(
+            members
+                .iter()
+                .map(|member| member.value.as_str())
+                .collect::<Vec<_>>(),
+            ["traces", "metrics", "logs"]
+        );
+    }
+
+    /// Scenario: an enum-backed declaration shares a key with unknown and plain string call sites.
+    /// Guarantees: compatible wire observations retain and union the enum while true primitive conflicts degrade to any.
+    #[test]
+    fn attribute_type_merge_preserves_compatible_enum_information() {
+        let member = |value: &str| AttributeEnumMember {
+            id: value.to_owned(),
+            value: value.to_owned(),
+            brief: None,
+            stability: "development".to_owned(),
+        };
+        let mut r#type = AttributeType::Enum {
+            members: vec![member("success")],
+        };
+        r#type.merge_observation(&AttributeType::any());
+        r#type.merge_observation(&AttributeType::Primitive("string".to_owned()));
+        r#type.merge(&AttributeType::Enum {
+            members: vec![member("failure")],
+        });
+        assert_eq!(
+            r#type,
+            AttributeType::Enum {
+                members: vec![member("failure"), member("success")],
+            }
+        );
+
+        r#type.merge(&AttributeType::Primitive("int".to_owned()));
+        assert_eq!(r#type, AttributeType::any());
+    }
 
     /// Scenario: a generated SDK package opts out of the production source inventory through Cargo metadata.
     /// Guarantees: generated consumers can be excluded while ordinary workspace packages remain included by default.

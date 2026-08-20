@@ -1,5 +1,5 @@
 {%- macro rust_attribute_type(attribute) -%}
-{%- if attribute.type == "string" -%}
+{%- if attribute.type == "string" or attribute.type.members is defined -%}
 String
 {%- elif attribute.type == "int" -%}
 i64
@@ -38,7 +38,7 @@ AttributeValue
 {%- endmacro -%}
 
 {%- macro attribute_descriptor_type(attribute) -%}
-{%- if attribute.type == "string" -%}
+{%- if attribute.type == "string" or attribute.type.members is defined -%}
 AttributeValueType::String
 {%- elif attribute.type == "int" -%}
 AttributeValueType::Int
@@ -54,7 +54,7 @@ AttributeValueType::Any
 {%- endmacro -%}
 
 {%- macro attribute_value(attribute, field_name) -%}
-{%- if attribute.type == "string" -%}
+{%- if attribute.type == "string" or attribute.type.members is defined -%}
 AttributeValue::String(identity.{{ field_name }})
 {%- elif attribute.type == "int" -%}
 AttributeValue::Int(identity.{{ field_name }})
@@ -156,7 +156,7 @@ r#type
 {%- endmacro -%}
 
 {%- macro event_attribute_base_type(attribute) -%}
-{%- if attribute.type == "string" -%}
+{%- if attribute.type == "string" or attribute.type.members is defined -%}
 String
 {%- elif attribute.type == "int" -%}
 i64
@@ -178,7 +178,7 @@ Option<{{ event_attribute_base_type(attribute) }}>
 {%- endmacro -%}
 
 {%- macro event_attribute_value_type(attribute) -%}
-{%- if attribute.type == "string" -%}
+{%- if attribute.type == "string" or attribute.type.members is defined -%}
 otap_df_telemetry::descriptor::AttributeValueType::String
 {%- elif attribute.type == "int" -%}
 otap_df_telemetry::descriptor::AttributeValueType::Int
@@ -232,7 +232,7 @@ EventLevel::Error
 {%- endmacro -%}
 
 {%- macro event_value_ref(attribute, value, borrowed) -%}
-{%- if attribute.type == "string" -%}
+{%- if attribute.type == "string" or attribute.type.members is defined -%}
 EventAttributeValueRef::String({{ value }}.as_str())
 {%- elif attribute.type == "int" -%}
 EventAttributeValueRef::Int({% if borrowed %}*{% endif %}{{ value }})

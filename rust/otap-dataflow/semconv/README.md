@@ -87,6 +87,15 @@ structure-check step. CI pins Weaver to v0.25.1, runs the static check with
 `--v2`, checks the Rust source inventory, and live-checks telemetry emitted by
 an exercised engine scenario against the same registry.
 
+The source inventory derives attribute types from their Rust declarations.
+Primitive fields map to the corresponding OpenTelemetry scalar type. Unit
+enums using `#[derive(AttributeEnum)]` map to v2 semantic-convention enums,
+including `#[attribute_value = "..."]` overrides and variant documentation.
+Manual `AttributeEnum::VARIANTS` implementations are recognized as well. When
+multiple Rust enums use the same wire key, their known members are combined;
+because semantic-convention enums are open, compatible string observations do
+not discard the known member set. Truly dynamic values continue to use `any`.
+
 ## Client SDK generation
 
 The custom Weaver templates under `semconv-codegen/templates/registry/rust`
@@ -110,6 +119,9 @@ cargo fmt --all
 
 Event payloads use concrete Rust types where the registry has a concrete type
 and retain `AttributeValue` for source values currently modeled as `any`.
+Enum-backed attributes use `String`, their underlying OTLP wire type, while the
+registry retains the known enum members for validation and future specialized
+code generation.
 Generated emission methods preserve the known call-site levels, canonical and
 wire names, scope metadata, optional attributes, and entity associations.
 

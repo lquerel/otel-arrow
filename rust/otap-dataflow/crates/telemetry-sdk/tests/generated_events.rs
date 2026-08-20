@@ -4,12 +4,15 @@
 //! Contract tests for Weaver-generated semantic events.
 
 use otap_df_telemetry::attributes::{AttributeSetHandler, AttributeValue};
+use otap_df_telemetry::descriptor::AttributeValueType;
 use otap_df_telemetry_sdk::entities::{NodeAttributeSet, NodeAttributeSetIdentity};
 use otap_df_telemetry_sdk::event::{
     EventAttributes, EventClient, EventDescriptor, EventLevel, EventSeverity, EventSink,
 };
 use otap_df_telemetry_sdk::events::contrib_nodes::RecordsetKqlProcessorQueryOutput;
-use otap_df_telemetry_sdk::events::otap::OtapSocketKeepaliveRetriesIgnored;
+use otap_df_telemetry_sdk::events::otap::{
+    OtapSocketKeepaliveRetriesIgnored, OtlpHttpReceiverPipelineSendFailed,
+};
 use otap_df_telemetry_sdk::events::quiver::QuiverEngineInit;
 
 #[derive(Debug)]
@@ -87,6 +90,31 @@ fn generated_event_preserves_registry_and_wire_metadata() {
     assert_eq!(
         recorded.attributes,
         vec![("platform", AttributeValue::String("linux".to_owned()))]
+    );
+}
+
+/// Scenario: an event attribute is backed by a semantic-convention string enum inferred from Rust.
+/// Guarantees: generated payloads expose a concrete String and report the enum's string wire type instead of AttributeValue::Any.
+#[test]
+fn generated_event_uses_enum_wire_type() {
+    let event = OtlpHttpReceiverPipelineSendFailed {
+        path: "/v1/logs".to_owned(),
+        signal: "logs".to_owned(),
+    };
+    let mut client = EventClient::new(RecordingSink::default());
+
+    event.emit_warn(&mut client, &node_entity());
+
+    assert_eq!(
+        OtlpHttpReceiverPipelineSendFailed::DESCRIPTOR.attributes[1].value_type,
+        AttributeValueType::String
+    );
+    assert_eq!(
+        client.sink().events[0].attributes,
+        vec![
+            ("path", AttributeValue::String("/v1/logs".to_owned())),
+            ("signal", AttributeValue::String("logs".to_owned())),
+        ]
     );
 }
 

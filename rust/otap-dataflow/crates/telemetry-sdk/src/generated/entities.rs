@@ -423,9 +423,9 @@ pub struct ExtensionChannelAttributeSetIdentity {
     /// Unique channel identifier within the host scope.
     pub channel_id: String,
     /// Channel implementation ("tokio", "flume", "internal").
-    pub channel_impl: AttributeValue,
+    pub channel_impl: String,
     /// Concurrency mode of the channel ("local" or "shared").
-    pub channel_mode: AttributeValue,
+    pub channel_mode: String,
     /// Core identifier.
     pub core_id: i64,
     /// Deployment generation for this runtime instance.
@@ -473,8 +473,8 @@ impl ExtensionChannelAttributeSet {
         Self {
             values: [
                 AttributeValue::String(identity.channel_id),
-                identity.channel_impl,
-                identity.channel_mode,
+                AttributeValue::String(identity.channel_impl),
+                AttributeValue::String(identity.channel_mode),
                 AttributeValue::Int(identity.core_id),
                 AttributeValue::Int(identity.deployment_generation),
                 AttributeValue::String(identity.extension_id),
@@ -500,12 +500,12 @@ static EXTENSION_CHANNEL_ATTRIBUTE_SET_DESCRIPTOR: AttributesDescriptor = Attrib
         AttributeField {
             key: "channel.impl",
             brief: "Channel implementation (\"tokio\", \"flume\", \"internal\").",
-            r#type: AttributeValueType::Any,
+            r#type: AttributeValueType::String,
         },
         AttributeField {
             key: "channel.mode",
             brief: "Concurrency mode of the channel (\"local\" or \"shared\").",
-            r#type: AttributeValueType::Any,
+            r#type: AttributeValueType::String,
         },
         AttributeField {
             key: "core.id",
@@ -1034,13 +1034,13 @@ pub struct NodeChannelAttributeSetIdentity {
     /// Unique channel identifier within the host scope.
     pub channel_id: String,
     /// Channel implementation ("tokio", "flume", "internal").
-    pub channel_impl: AttributeValue,
+    pub channel_impl: String,
     /// Channel payload kind ("control" or "pdata").
-    pub channel_kind: AttributeValue,
+    pub channel_kind: String,
     /// Concurrency mode of the channel ("local" or "shared").
-    pub channel_mode: AttributeValue,
+    pub channel_mode: String,
     /// Channel type ("mpsc", "mpmc", "spsc", "spmc").
-    pub channel_type: AttributeValue,
+    pub channel_type: String,
     /// Core identifier.
     pub core_id: i64,
     /// Deployment generation for this runtime instance.
@@ -1090,10 +1090,10 @@ impl NodeChannelAttributeSet {
         Self {
             values: [
                 AttributeValue::String(identity.channel_id),
-                identity.channel_impl,
-                identity.channel_kind,
-                identity.channel_mode,
-                identity.channel_type,
+                AttributeValue::String(identity.channel_impl),
+                AttributeValue::String(identity.channel_kind),
+                AttributeValue::String(identity.channel_mode),
+                AttributeValue::String(identity.channel_type),
                 AttributeValue::Int(identity.core_id),
                 AttributeValue::Int(identity.deployment_generation),
                 AttributeValue::String(identity.node_id),
@@ -1120,22 +1120,22 @@ static NODE_CHANNEL_ATTRIBUTE_SET_DESCRIPTOR: AttributesDescriptor = AttributesD
         AttributeField {
             key: "channel.impl",
             brief: "Channel implementation (\"tokio\", \"flume\", \"internal\").",
-            r#type: AttributeValueType::Any,
+            r#type: AttributeValueType::String,
         },
         AttributeField {
             key: "channel.kind",
             brief: "Channel payload kind (\"control\" or \"pdata\").",
-            r#type: AttributeValueType::Any,
+            r#type: AttributeValueType::String,
         },
         AttributeField {
             key: "channel.mode",
             brief: "Concurrency mode of the channel (\"local\" or \"shared\").",
-            r#type: AttributeValueType::Any,
+            r#type: AttributeValueType::String,
         },
         AttributeField {
             key: "channel.type",
             brief: "Channel type (\"mpsc\", \"mpmc\", \"spsc\", \"spmc\").",
-            r#type: AttributeValueType::Any,
+            r#type: AttributeValueType::String,
         },
         AttributeField {
             key: "core.id",
@@ -1407,7 +1407,7 @@ pub struct NodeWithCustomTopicAttributeSetIdentity {
     /// The string ID of the service instance.
     pub service_instance_id: String,
     /// Topic name associated with the node metrics.
-    pub topic: AttributeValue,
+    pub topic: String,
 }
 
 /// An OTAP Dataflow node custom topic telemetry entity.
@@ -1446,7 +1446,7 @@ impl NodeWithCustomTopicAttributeSet {
                 AttributeValue::String(identity.pipeline_group_id),
                 AttributeValue::String(identity.pipeline_id),
                 AttributeValue::String(identity.service_instance_id),
-                identity.topic,
+                AttributeValue::String(identity.topic),
             ],
         }
     }
@@ -1509,7 +1509,7 @@ static NODE_WITH_CUSTOM_TOPIC_ATTRIBUTE_SET_DESCRIPTOR: AttributesDescriptor =
             AttributeField {
                 key: "topic",
                 brief: "Topic name associated with the node metrics.",
-                r#type: AttributeValueType::Any,
+                r#type: AttributeValueType::String,
             },
         ],
     };
@@ -1570,7 +1570,7 @@ pub struct NodeWithTopicAttributeSetIdentity {
     /// The string ID of the service instance.
     pub service_instance_id: String,
     /// Topic name associated with the node metrics.
-    pub topic: AttributeValue,
+    pub topic: String,
 }
 
 /// An OTAP Dataflow node topic telemetry entity.
@@ -1608,7 +1608,7 @@ impl NodeWithTopicAttributeSet {
                 AttributeValue::String(identity.pipeline_group_id),
                 AttributeValue::String(identity.pipeline_id),
                 AttributeValue::String(identity.service_instance_id),
-                identity.topic,
+                AttributeValue::String(identity.topic),
             ],
         }
     }
@@ -1665,7 +1665,7 @@ static NODE_WITH_TOPIC_ATTRIBUTE_SET_DESCRIPTOR: AttributesDescriptor = Attribut
         AttributeField {
             key: "topic",
             brief: "Topic name associated with the node metrics.",
-            r#type: AttributeValueType::Any,
+            r#type: AttributeValueType::String,
         },
     ],
 };

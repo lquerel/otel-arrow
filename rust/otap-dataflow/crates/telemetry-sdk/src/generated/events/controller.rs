@@ -1439,7 +1439,7 @@ pub struct ControllerTopicModeInferred {
     /// The selection_policy value recorded by OTAP Dataflow internal telemetry.
     pub selection_policy: otap_df_telemetry::attributes::AttributeValue,
     /// Topic name associated with the node metrics.
-    pub topic: otap_df_telemetry::attributes::AttributeValue,
+    pub topic: String,
     /// The topology_mode value recorded by OTAP Dataflow internal telemetry.
     pub topology_mode: otap_df_telemetry::attributes::AttributeValue,
 }
@@ -1514,7 +1514,7 @@ static CONTROLLER_TOPIC_MODE_INFERRED_DESCRIPTOR: EventDescriptor = EventDescrip
             key: "topic",
             wire_key: "topic",
             brief: "Topic name associated with the node metrics.",
-            value_type: otap_df_telemetry::descriptor::AttributeValueType::Any,
+            value_type: otap_df_telemetry::descriptor::AttributeValueType::String,
             requirement_level: EventRequirementLevel::Required,
         },
         EventAttributeDescriptor {
@@ -1563,7 +1563,7 @@ impl EventAttributes for ControllerTopicModeInferred {
         );
         visitor(
             &CONTROLLER_TOPIC_MODE_INFERRED_DESCRIPTOR.attributes[7],
-            EventAttributeValueRef::Any(&self.topic),
+            EventAttributeValueRef::String(self.topic.as_str()),
         );
         visitor(
             &CONTROLLER_TOPIC_MODE_INFERRED_DESCRIPTOR.attributes[8],
@@ -1973,7 +1973,7 @@ impl InternalPipelineStarted {
 #[derive(Debug, Clone)]
 pub struct OpampControllerMessageIgnoredConfig {
     /// The key value recorded by OTAP Dataflow internal telemetry.
-    pub key: otap_df_telemetry::attributes::AttributeValue,
+    pub key: String,
 }
 
 /// Marker implemented only by entity types allowed by `opamp.controller.message.ignored_config`.
@@ -2007,7 +2007,7 @@ static OPAMP_CONTROLLER_MESSAGE_IGNORED_CONFIG_DESCRIPTOR: EventDescriptor = Eve
         key: "key",
         wire_key: "key",
         brief: "The key value recorded by OTAP Dataflow internal telemetry.",
-        value_type: otap_df_telemetry::descriptor::AttributeValueType::Any,
+        value_type: otap_df_telemetry::descriptor::AttributeValueType::String,
         requirement_level: EventRequirementLevel::Required,
     }],
 };
@@ -2020,7 +2020,7 @@ impl EventAttributes for OpampControllerMessageIgnoredConfig {
     ) {
         visitor(
             &OPAMP_CONTROLLER_MESSAGE_IGNORED_CONFIG_DESCRIPTOR.attributes[0],
-            EventAttributeValueRef::Any(&self.key),
+            EventAttributeValueRef::String(self.key.as_str()),
         );
     }
 }
