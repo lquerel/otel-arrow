@@ -48,11 +48,13 @@ Each metric records only its numeric `code_generation.metric_value_type`, its
 The standard metric fields remain the source of truth for the instrument, unit,
 and description.
 
-Events retain an existing wire name as their convention name when it is valid
-v2 syntax. An invalid wire name receives a normalized `otap.*` convention name,
-while `otap_dataflow.wire.event_name` preserves the emitted value. Event
-definitions include every statically declared attribute, scope, severity, and
-source location.
+Attributes use their standard `key` as the wire key. An exceptional
+`otap_dataflow.wire.attribute_key` override is needed only when the emitted key
+differs. Events similarly use their standard `name` as the wire name. An
+invalid legacy wire name receives a normalized `otap.*` convention name, while
+an exceptional `otap_dataflow.wire.event_name` override preserves the emitted
+value. Event definitions include every statically declared attribute, scope,
+severity, and source location.
 
 The `semconv-live-check/` manifests describe the signals that a particular CI
 runtime scenario must exercise. They are coverage expectations, not

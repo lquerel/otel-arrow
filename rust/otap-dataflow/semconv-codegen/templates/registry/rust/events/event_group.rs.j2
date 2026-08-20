@@ -53,7 +53,7 @@ pub trait {{ type_name }}AssociatedEntity: entities::SemanticEntity {}
 
 static {{ type_name | screaming_snake_case }}_DESCRIPTOR: EventDescriptor = EventDescriptor {
     name: {{ sdk.rust_string(event.name) }},
-    wire_name: {{ sdk.rust_string(event.annotations.otap_dataflow.wire.event_name) }},
+    wire_name: {{ sdk.rust_string(sdk.event_wire_name(event)) }},
     brief: {{ sdk.rust_string(event.brief) }},
     stability: {{ sdk.rust_string(event.stability) }},
     requirement_level: {{ sdk.event_requirement_level(event.requirement_level) }},

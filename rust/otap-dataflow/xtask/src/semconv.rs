@@ -1897,7 +1897,19 @@ struct RegistryAttribute {
     r#type: AttributeType,
     brief: String,
     stability: String,
+    #[serde(default)]
     annotations: RegistryAnnotations,
+}
+
+impl RegistryAttribute {
+    fn wire_key(&self) -> &str {
+        self.annotations
+            .otap_dataflow
+            .wire
+            .as_ref()
+            .and_then(|wire| wire.attribute_key.as_deref())
+            .unwrap_or(&self.key)
+    }
 }
 
 #[derive(Debug, Clone, Deserialize)]
@@ -1936,6 +1948,17 @@ struct RegistryEvent {
     annotations: RegistryAnnotations,
 }
 
+impl RegistryEvent {
+    fn wire_name(&self) -> &str {
+        self.annotations
+            .otap_dataflow
+            .wire
+            .as_ref()
+            .and_then(|wire| wire.event_name.as_deref())
+            .unwrap_or(&self.name)
+    }
+}
+
 #[derive(Debug, Clone, Deserialize)]
 struct RegistryAttributeRef {
     r#ref: String,
@@ -1947,6 +1970,7 @@ struct RegistryAttributeRef {
 struct RegistryAnnotations {
     #[serde(default)]
     code_generation: Option<CodeGenerationAnnotation>,
+    #[serde(default)]
     otap_dataflow: OtapDataflowAnnotation,
 }
 
@@ -2177,16 +2201,7 @@ impl Registry {
         let actual = self
             .attributes
             .values()
-            .filter_map(|attribute| {
-                let wire = attribute
-                    .annotations
-                    .otap_dataflow
-                    .wire
-                    .as_ref()?
-                    .attribute_key
-                    .as_ref()?;
-                Some((wire.clone(), attribute))
-            })
+            .map(|attribute| (attribute.wire_key().to_owned(), attribute))
             .collect::<BTreeMap<_, _>>();
         compare_keys("attribute", expected.keys(), actual.keys(), errors);
         for (wire_key, expected_type) in expected {
@@ -2384,17 +2399,8 @@ impl Registry {
         let global_attributes = expected_attributes(inventory);
         let mut by_wire = BTreeMap::new();
         for event in self.events.values() {
-            let Some(wire_name) = event
-                .annotations
-                .otap_dataflow
-                .wire
-                .as_ref()
-                .and_then(|wire| wire.event_name.as_ref())
-            else {
-                errors.push(format!("event {} is missing wire.event_name", event.name));
-                continue;
-            };
-            if by_wire.insert(wire_name.clone(), event).is_some() {
+            let wire_name = event.wire_name();
+            if by_wire.insert(wire_name.to_owned(), event).is_some() {
                 errors.push(format!("wire event {wire_name} has multiple definitions"));
             }
         }
@@ -2422,12 +2428,12 @@ impl Registry {
                 &canonical_event_name(wire_name),
                 errors,
             );
-            let wire = event
-                .annotations
-                .otap_dataflow
-                .wire
-                .as_ref()
-                .expect("checked above");
+            let Some(wire) = event.annotations.otap_dataflow.wire.as_ref() else {
+                errors.push(format!(
+                    "event {wire_name} is missing otap_dataflow.wire metadata"
+                ));
+                continue;
+            };
             check_equal(
                 &format!("event {wire_name} scope_names"),
                 &wire.scope_names,
@@ -2548,14 +2554,7 @@ impl Registry {
                 )
                 .then(|| reference.to_owned())
             },
-            |attribute| {
-                attribute
-                    .annotations
-                    .otap_dataflow
-                    .wire
-                    .as_ref()
-                    .and_then(|wire| wire.attribute_key.clone())
-            },
+            |attribute| Some(attribute.wire_key().to_owned()),
         )
     }
 
@@ -3221,6 +3220,41 @@ mod tests {
 
         r#type.merge(&AttributeType::Primitive("int".to_owned()));
         assert_eq!(r#type, AttributeType::any());
+    }
+
+    /// Scenario: registry attributes and events omit redundant wire identifier annotations.
+    /// Guarantees: standard identifiers become wire defaults while explicit compatibility overrides still win.
+    #[test]
+    fn registry_wire_identifiers_use_standard_defaults_and_explicit_overrides() {
+        let mut attribute = RegistryAttribute {
+            key: "core.id".to_owned(),
+            r#type: AttributeType::Primitive("int".to_owned()),
+            brief: "Core identifier.".to_owned(),
+            stability: "development".to_owned(),
+            annotations: RegistryAnnotations::default(),
+        };
+        assert_eq!(attribute.wire_key(), "core.id");
+        attribute.annotations.otap_dataflow.wire = Some(WireAnnotation {
+            attribute_key: Some("legacy_core_id".to_owned()),
+            ..WireAnnotation::default()
+        });
+        assert_eq!(attribute.wire_key(), "legacy_core_id");
+
+        let mut event = RegistryEvent {
+            name: "pipeline.started".to_owned(),
+            brief: "Pipeline started.".to_owned(),
+            stability: "development".to_owned(),
+            requirement_level: "recommended".to_owned(),
+            attributes: Vec::new(),
+            entity_associations: Vec::new(),
+            annotations: RegistryAnnotations::default(),
+        };
+        assert_eq!(event.wire_name(), "pipeline.started");
+        event.annotations.otap_dataflow.wire = Some(WireAnnotation {
+            event_name: Some("Legacy.PipelineStarted".to_owned()),
+            ..WireAnnotation::default()
+        });
+        assert_eq!(event.wire_name(), "Legacy.PipelineStarted");
     }
 
     /// Scenario: a generated SDK package opts out of the production source inventory through Cargo metadata.

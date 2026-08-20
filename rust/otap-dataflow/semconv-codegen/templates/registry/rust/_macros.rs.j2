@@ -25,6 +25,18 @@ AttributeValue
     | replace("\\u003e", ">") -}}
 {%- endmacro -%}
 
+{# The standard event name is also the wire name unless compatibility requires an override. #}
+{%- macro event_wire_name(event) -%}
+{%- if event.annotations is defined
+    and event.annotations.otap_dataflow is defined
+    and event.annotations.otap_dataflow.wire is defined
+    and event.annotations.otap_dataflow.wire.event_name is defined -%}
+{{- event.annotations.otap_dataflow.wire.event_name -}}
+{%- else -%}
+{{- event.name -}}
+{%- endif -%}
+{%- endmacro -%}
+
 {# Imported OTel attributes do not carry the project-owned wire annotation. #}
 {%- macro attribute_wire_key(attribute) -%}
 {%- if attribute.annotations is defined
