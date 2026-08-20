@@ -24,6 +24,7 @@ semconv-live-check/
   internal-events.yaml
 semconv-codegen/
   metric-sets.yaml
+  templates/registry/rust/
 ```
 
 The manifest imports upstream OpenTelemetry semantic conventions when the
@@ -85,6 +86,25 @@ and entity associations.
 structure-check step. CI pins Weaver to v0.25.1, runs the static check with
 `--v2`, checks the Rust source inventory, and live-checks telemetry emitted by
 an exercised engine scenario against the same registry.
+
+## Client SDK generation
+
+The custom Weaver templates under `semconv-codegen/templates/registry/rust`
+generate the experimental `otap-df-telemetry-sdk` crate. The generated surface
+contains owned entity identity types, cache-aligned metric-set structs, static
+descriptors, and compile-time signal/entity association markers. The output is
+checked in for review but is not integrated into existing instrumentation.
+
+Run the generator from `rust/otap-dataflow` with Weaver v0.25.1:
+
+```bash
+weaver registry generate rust crates/telemetry-sdk/src/generated \
+  --v2 \
+  --registry semconv \
+  --templates semconv-codegen/templates \
+  --params semconv-codegen/metric-sets.yaml
+cargo fmt --all
+```
 
 For diagnostics or generator development, print the source inventory as JSON:
 

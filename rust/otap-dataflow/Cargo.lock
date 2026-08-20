@@ -7965,6 +7965,13 @@ dependencies = [
 ]
 
 [[package]]
+name = "otap-df-telemetry-sdk"
+version = "0.51.0"
+dependencies = [
+ "otap-df-telemetry",
+]
+
+[[package]]
 name = "otap-df-test-net"
 version = "0.51.0"
 

@@ -278,6 +278,7 @@ const fn attribute_value_type_rank(value_type: AttributeValueType) -> u8 {
         AttributeValueType::Double => 2,
         AttributeValueType::Boolean => 3,
         AttributeValueType::Map => 4,
+        AttributeValueType::Any => 5,
     }
 }
 

@@ -1,0 +1,39 @@
+whitespace_control:
+  trim_blocks: true
+  lstrip_blocks: true
+  keep_trailing_newline: true
+
+comment_formats:
+  rust:
+    format: markdown
+    prefix: "/// "
+    trim: true
+default_comment_format: rust
+
+templates:
+- template: generated/mod.rs.j2
+  filter: "."
+  application_mode: single
+  file_name: mod.rs
+- template: entities.rs.j2
+  filter: ".registry.entities"
+  application_mode: single
+  file_name: entities.rs
+- template: metrics/mod.rs.j2
+  filter: "$params.metric_sets"
+  application_mode: single
+  file_name: metrics/mod.rs
+- template: metrics/metric_set.rs.j2
+  filter: >-
+    . as $schema
+    | $params.metric_sets
+    | map(. as $spec | {
+        "spec": $spec,
+        "metrics": [
+          $schema.registry.metrics[]
+          | select(.annotations.otap_dataflow.metric_set == $spec.id)
+        ],
+        "entities": $schema.registry.entities
+      })
+  application_mode: each
+  file_name: "metrics/{{ ctx.spec.id | snake_case }}.rs"

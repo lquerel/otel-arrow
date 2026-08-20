@@ -62,6 +62,16 @@ jobs:
       - name: Check semantic conventions against production Rust telemetry
         run: cargo xtask semconv-check
         working-directory: ./rust/otap-dataflow
+      - name: Verify generated entity and metric SDK
+        working-directory: ./rust/otap-dataflow
+        run: |
+          weaver registry generate rust crates/telemetry-sdk/src/generated \
+            --v2 \
+            --registry semconv \
+            --templates semconv-codegen/templates \
+            --params semconv-codegen/metric-sets.yaml
+          cargo fmt --all
+          git diff --exit-code -- crates/telemetry-sdk/src/generated
       - name: Generate self-signed TLS cert
         run: |
           set -euo pipefail
