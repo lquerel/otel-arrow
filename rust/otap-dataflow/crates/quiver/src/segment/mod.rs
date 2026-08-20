@@ -20,7 +20,7 @@
 //!    with a completely different schema.
 //!
 //! 2. **Schema evolution within a payload type**: Even for a single slot, the
-//!    schema can change between bundles—optional columns may appear/disappear,
+//!    schema can change between bundles--optional columns may appear/disappear,
 //!    and dictionary-encoded columns may switch between `Dictionary<u8, Utf8>`,
 //!    `Dictionary<u16, Utf8>`, or native `Utf8` based on cardinality.
 //!
@@ -85,7 +85,7 @@ mod writer;
 
 pub use error::SegmentError;
 pub use open_segment::{OpenSegment, OpenSegmentBundleSummary};
-pub use reader::{ReconstructedBundle, SegmentReader};
+pub use reader::{ReconstructedBundle, SegmentLossSummary, SegmentReader};
 pub use stream_accumulator::StreamAccumulator;
 pub use types::{
     ChunkIndex, ManifestEntry, SegmentSeq, SlotChunkRef, StreamId, StreamKey, StreamMetadata,

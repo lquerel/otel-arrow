@@ -33,12 +33,6 @@ impl AssociatedEntity for entities::NodeWithCustomAttributeSet {}
 pub struct BatchProcessorMetrics {
     /// Number of batches for which errors encountered
     pub batching_errors: otap_df_telemetry::instrument::Counter<u64>,
-    /// Total batches consumed for logs signal
-    pub consumed_batches_logs: otap_df_telemetry::instrument::Counter<u64>,
-    /// Total batches consumed for metrics signal
-    pub consumed_batches_metrics: otap_df_telemetry::instrument::Counter<u64>,
-    /// Total batches consumed for traces signal
-    pub consumed_batches_traces: otap_df_telemetry::instrument::Counter<u64>,
     /// Number of messages dropped due to conversion failures
     pub dropped_conversion: otap_df_telemetry::instrument::Counter<u64>,
     /// Time from first pending input arrival to actual flush start
@@ -61,21 +55,12 @@ pub struct BatchProcessorMetrics {
     pub nacked_inbound_slots: otap_df_telemetry::instrument::Counter<u64>,
     /// Number of requests nacked due to inbound slot exhaustion
     pub nacked_outbound_slots: otap_df_telemetry::instrument::Counter<u64>,
-    /// Total batches produced for logs signal
-    pub produced_batches_logs: otap_df_telemetry::instrument::Counter<u64>,
-    /// Total batches produced for metrics signal
-    pub produced_batches_metrics: otap_df_telemetry::instrument::Counter<u64>,
-    /// Total batches produced for traces signal
-    pub produced_batches_traces: otap_df_telemetry::instrument::Counter<u64>,
+    /// Number of oversize resource entries emitted whole (best-effort) because splitting them would have exceeded the configured fragment budget.
+    pub split_budget_fallbacks: otap_df_telemetry::instrument::Counter<u64>,
 }
 
 /// Per-field conditional availability in descriptor order.
 pub const BATCH_PROCESSOR_METRICS_METRIC_AVAILABILITY: &[Option<&str>] = &[
-    AVAILABILITY,
-    AVAILABILITY,
-    AVAILABILITY,
-    AVAILABILITY,
-    AVAILABILITY,
     AVAILABILITY,
     AVAILABILITY,
     AVAILABILITY,
@@ -98,30 +83,6 @@ static BATCH_PROCESSOR_METRICS_DESCRIPTOR: MetricsDescriptor = MetricsDescriptor
             name: "batching.errors",
             unit: "{error}",
             brief: "Number of batches for which errors encountered",
-            instrument: Instrument::Counter,
-            temporality: Some(otap_df_telemetry::descriptor::Temporality::Delta),
-            value_type: MetricValueType::U64,
-        },
-        MetricsField {
-            name: "consumed.batches.logs",
-            unit: "{item}",
-            brief: "Total batches consumed for logs signal",
-            instrument: Instrument::Counter,
-            temporality: Some(otap_df_telemetry::descriptor::Temporality::Delta),
-            value_type: MetricValueType::U64,
-        },
-        MetricsField {
-            name: "consumed.batches.metrics",
-            unit: "{item}",
-            brief: "Total batches consumed for metrics signal",
-            instrument: Instrument::Counter,
-            temporality: Some(otap_df_telemetry::descriptor::Temporality::Delta),
-            value_type: MetricValueType::U64,
-        },
-        MetricsField {
-            name: "consumed.batches.traces",
-            unit: "{item}",
-            brief: "Total batches consumed for traces signal",
             instrument: Instrument::Counter,
             temporality: Some(otap_df_telemetry::descriptor::Temporality::Delta),
             value_type: MetricValueType::U64,
@@ -215,25 +176,9 @@ static BATCH_PROCESSOR_METRICS_DESCRIPTOR: MetricsDescriptor = MetricsDescriptor
             value_type: MetricValueType::U64,
         },
         MetricsField {
-            name: "produced.batches.logs",
-            unit: "{item}",
-            brief: "Total batches produced for logs signal",
-            instrument: Instrument::Counter,
-            temporality: Some(otap_df_telemetry::descriptor::Temporality::Delta),
-            value_type: MetricValueType::U64,
-        },
-        MetricsField {
-            name: "produced.batches.metrics",
-            unit: "{item}",
-            brief: "Total batches produced for metrics signal",
-            instrument: Instrument::Counter,
-            temporality: Some(otap_df_telemetry::descriptor::Temporality::Delta),
-            value_type: MetricValueType::U64,
-        },
-        MetricsField {
-            name: "produced.batches.traces",
-            unit: "{item}",
-            brief: "Total batches produced for traces signal",
+            name: "split.budget.fallbacks",
+            unit: "{entry}",
+            brief: "Number of oversize resource entries emitted whole (best-effort) because splitting them would have exceeded the configured fragment budget.",
             instrument: Instrument::Counter,
             temporality: Some(otap_df_telemetry::descriptor::Temporality::Delta),
             value_type: MetricValueType::U64,
@@ -251,9 +196,6 @@ impl MetricSetHandler for BatchProcessorMetrics {
     fn snapshot_values(&self) -> Vec<MetricValue> {
         vec![
             MetricValue::from(self.batching_errors.get()),
-            MetricValue::from(self.consumed_batches_logs.get()),
-            MetricValue::from(self.consumed_batches_metrics.get()),
-            MetricValue::from(self.consumed_batches_traces.get()),
             MetricValue::from(self.dropped_conversion.get()),
             MetricValue::from(self.flush_age_duration.get()),
             MetricValue::from(self.flush_output_batches.get()),
@@ -265,18 +207,13 @@ impl MetricSetHandler for BatchProcessorMetrics {
             MetricValue::from(self.flushes_timer.get()),
             MetricValue::from(self.nacked_inbound_slots.get()),
             MetricValue::from(self.nacked_outbound_slots.get()),
-            MetricValue::from(self.produced_batches_logs.get()),
-            MetricValue::from(self.produced_batches_metrics.get()),
-            MetricValue::from(self.produced_batches_traces.get()),
+            MetricValue::from(self.split_budget_fallbacks.get()),
         ]
     }
 
     #[inline]
     fn clear_values(&mut self) {
         self.batching_errors.reset();
-        self.consumed_batches_logs.reset();
-        self.consumed_batches_metrics.reset();
-        self.consumed_batches_traces.reset();
         self.dropped_conversion.reset();
         self.flush_age_duration.reset();
         self.flush_output_batches.reset();
@@ -288,23 +225,12 @@ impl MetricSetHandler for BatchProcessorMetrics {
         self.flushes_timer.reset();
         self.nacked_inbound_slots.reset();
         self.nacked_outbound_slots.reset();
-        self.produced_batches_logs.reset();
-        self.produced_batches_metrics.reset();
-        self.produced_batches_traces.reset();
+        self.split_budget_fallbacks.reset();
     }
 
     #[inline]
     fn needs_flush(&self) -> bool {
         if !MetricValue::from(self.batching_errors.get()).is_zero() {
-            return true;
-        }
-        if !MetricValue::from(self.consumed_batches_logs.get()).is_zero() {
-            return true;
-        }
-        if !MetricValue::from(self.consumed_batches_metrics.get()).is_zero() {
-            return true;
-        }
-        if !MetricValue::from(self.consumed_batches_traces.get()).is_zero() {
             return true;
         }
         if !MetricValue::from(self.dropped_conversion.get()).is_zero() {
@@ -340,13 +266,7 @@ impl MetricSetHandler for BatchProcessorMetrics {
         if !MetricValue::from(self.nacked_outbound_slots.get()).is_zero() {
             return true;
         }
-        if !MetricValue::from(self.produced_batches_logs.get()).is_zero() {
-            return true;
-        }
-        if !MetricValue::from(self.produced_batches_metrics.get()).is_zero() {
-            return true;
-        }
-        if !MetricValue::from(self.produced_batches_traces.get()).is_zero() {
+        if !MetricValue::from(self.split_budget_fallbacks.get()).is_zero() {
             return true;
         }
         false

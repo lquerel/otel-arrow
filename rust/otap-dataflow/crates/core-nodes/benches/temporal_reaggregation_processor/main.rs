@@ -42,7 +42,7 @@ use otap_df_core_nodes::processors::temporal_reaggregation_processor::{
 const NUM_BATCHES: usize = 50;
 const METRICS_PER_BATCH: usize = 100;
 
-/// Fraction of metrics per batch that are aggregatable (0.0–1.0).
+/// Fraction of metrics per batch that are aggregatable (0.0-1.0).
 /// The remainder are non-aggregatable (passthrough).
 const AGGREGATABLE_FRACTION: f64 = 0.5;
 
@@ -233,7 +233,7 @@ async fn run_scenario(messages: Vec<OtapPdata>, state: &mut ProcessorState) {
 
 /// Generate all benchmark data.
 ///
-/// Returns `(otlp_messages, otap_messages)` — the same logical data encoded as
+/// Returns `(otlp_messages, otap_messages)` -- the same logical data encoded as
 /// OTLP protobuf bytes and OTAP Arrow record batches respectively.
 fn generate_bench_data() -> (Vec<OtapPdata>, Vec<OtapPdata>) {
     let otlp_data: Vec<MetricsData> = (0..NUM_BATCHES).map(build_batch_metrics_data).collect();
@@ -243,7 +243,7 @@ fn generate_bench_data() -> (Vec<OtapPdata>, Vec<OtapPdata>) {
         .map(|md| {
             let msg = OtlpProtoMessage::Metrics(md.clone());
             let otlp_bytes = otlp_message_to_bytes(&msg);
-            OtapPdata::new_default(OtapPayload::OtlpBytes(otlp_bytes))
+            OtapPdata::new_default(OtapPayload::from(otlp_bytes))
         })
         .collect();
 
@@ -252,7 +252,7 @@ fn generate_bench_data() -> (Vec<OtapPdata>, Vec<OtapPdata>) {
         .map(|md| {
             let msg = OtlpProtoMessage::Metrics(md.clone());
             let otap_records = otlp_to_otap(&msg);
-            OtapPdata::new_default(OtapPayload::OtapArrowRecords(otap_records))
+            OtapPdata::new_default(OtapPayload::from(otap_records))
         })
         .collect();
 

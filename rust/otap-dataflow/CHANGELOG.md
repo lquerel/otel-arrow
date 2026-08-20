@@ -12,6 +12,554 @@ changes. See [`RELEASING.md`](../../RELEASING.md) for the versioning policy.
 
 <!-- next version -->
 
+## v0.51.0
+
+### :stop_sign: Breaking changes :stop_sign:
+
+- `engine`: Add the `BearerTokenAuthorizer` capability and move bearer-token capabilities to `capability::auth`. ([#3494](https://github.com/open-telemetry/otel-arrow/issues/3494))
+  Migration: Update imports from `capability::bearer_token_provider` to `capability::auth::bearer_token_provider`, import `BearerToken` from `capability::auth`, and handle `BearerTokenAuthorizer` errors with a fail-closed path.
+
+- `engine`: Replace flow `signals.incoming`, `signals.outgoing`, and `signals.dropped` metrics with `consumed.items`, `produced.items`, and `dropped.items` counters. ([#3300](https://github.com/open-telemetry/otel-arrow/issues/3300))
+  Migration: Update dashboards, alerts, and queries to use `flow.consumed.items`, `flow.produced.items`, and `flow.dropped.items`, filtering on `signal` and retaining `flow.node.decision` when analyzing drops.
+
+- `engine`: Self-telemetry resource attributes are now produced by configurable ResourceDetectors (`engine.telemetry.detectors`), replacing the bespoke host/container/instance detection. ([#3177](https://github.com/open-telemetry/otel-arrow/issues/3177))
+  Migration: to keep `host.id`/`container.id` on self-telemetry, add the `host`/`container`
+  detectors to `engine.telemetry.detectors`, or set them under `engine.telemetry.resource`.
+  Defaults now run only `service_instance`, `env`, and `service_name`.
+
+- `engine`: Add NUMA-aware topology discovery, controller-owned non-overlapping core_count placement, and listener-group placement metadata. ([#1837](https://github.com/open-telemetry/otel-arrow/issues/1837))
+  Migration: Update `core_count` and `core_set` policies to fit process-visible, unreserved cores. Reduce oversized counts, remove hidden cores, and stage shrink or delete operations before growth when another pipeline must release cores.
+
+- `engine`: Add `signal` and `outcome` attributes to node message metrics and add opt-in item counters. ([#3300](https://github.com/open-telemetry/otel-arrow/issues/3300), [#3436](https://github.com/open-telemetry/otel-arrow/issues/3436))
+  Migration: Update dashboards, alerts, and queries to group or filter `node.producer.produced.messages` and `node.consumer.consumed.messages` by `signal` and `outcome`; enable `telemetry.runtime_metrics: detailed` or `policies.telemetry.item_counts: true` where item-level metrics are required.
+
+- `engine`: Replace channel counters with bounded message outcome, send failure classification, and queue depth metrics. ([#3530](https://github.com/open-telemetry/otel-arrow/issues/3530))
+  Migration: Replace `channel.sender.send.*` and `channel.receiver.recv.*`
+  queries with `channel.sender.messages`, `channel.sender.failures`, and
+  `channel.receiver.messages`; filter by `signal`, `outcome`, and `error.type`.
+
+- `observability`: Invalid internal log-level settings now cause startup or reconciliation to fail. ([#3387](https://github.com/open-telemetry/otel-arrow/issues/3387))
+  Migration: Review `engine.telemetry.logs.level` and fix values that do not use the supported severity or target syntax before upgrading. See [log-level configuration](crates/telemetry/README.md#internal-telemetry-collection).
+- `observability`: Remove the direct OpenTelemetry client SDK metrics path and Prometheus pull export. ([#2409](https://github.com/open-telemetry/otel-arrow/issues/2409))
+  Migration: Use `receiver:internal_telemetry` for periodic export and views; replace Prometheus pull readers with `engine.http_admin.bind_address` and `/api/v1/metrics`. See [configuration migration guide](docs/configuration.md#migrating-internal-metrics-from-the-rust-opentelemetry-sdk).
+
+- `pipeline`: Migrate filter_processor metrics to use enum attributes. ([#3530](https://github.com/open-telemetry/otel-arrow/issues/3530))
+  Migration: The `signals_consumed` and `signals_filtered` metrics for `filter_processor` have been removed. Use the `dropped.items` metric and engine-level consumed metrics instead.
+
+- `pipeline`: Replace durable buffer processor metric series with bounded metric sets for item flow, bundle outcomes, and loss reasons. ([#3300](https://github.com/open-telemetry/otel-arrow/issues/3300))
+  Migration: Update dashboards, alerts, and queries to use the `processor.durable_buffer` metric sets, filtering on `signal`, `outcome`, and `reason` instead of the removed durable buffer metric names.
+
+- `pipeline`: Geneva PKCS#12 certificate authentication is now disabled by default and requires an explicit build feature. ([#3408](https://github.com/open-telemetry/otel-arrow/issues/3408))
+  Migration: Prefer managed identity, workload identity, or agent-fed authentication. Builds that still require `auth.type: certificate` must enable the `geneva-certificate-auth` feature.
+
+- `pipeline`: Remove debug processor request and primary item metrics, retaining only event and link metrics under `processor.debug`. ([#3432](https://github.com/open-telemetry/otel-arrow/issues/3432), [#3649](https://github.com/open-telemetry/otel-arrow/issues/3649))
+  Migration: Replace `processor.debug.pdata.consumed.requests` with `node.consumer.consumed.messages` and `processor.debug.pdata.consumed.items` with `node.consumer.consumed.items`. Rename `processor.debug.pdata.consumed.{events,links}` to `processor.debug.consumed.{events,links}`.
+
+- `pipeline`: Migrate kafka exporter metrics to use signal attribute enums instead of separate signal-specific counters ([#3530](https://github.com/open-telemetry/otel-arrow/issues/3530))
+  Replaced `logs_exported`, `metrics_exported`, etc with `exporter.kafka.exports.messages` partitioned by `SignalOutcomeAttributes`.
+  Migration: Update dashboards/alerts to use `exporter.kafka.exports.messages` instead of signal-specific counters.
+
+- `pipeline`: Refactored log sampling metrics to use standard `processor.log_sampling.dropped.items` metric instead of separate consumed/dropped counters. ([#3530](https://github.com/open-telemetry/otel-arrow/issues/3530))
+  Migration: Replace `log_signals_dropped` with `processor.log_sampling.dropped.items`. Replace `log_signals_consumed` with engine-level `node.consumer.consumed.items`, enabling item counts as needed.
+
+- `pipeline`: Replace individual content_router metrics (e.g., signals_routed, signals_nacked) with new metric set partitioned by `outcome` and `reason` attributes ([#3530](https://github.com/open-telemetry/otel-arrow/issues/3530))
+  Migration: Update dashboards, alerts, and queries to use the new `processor.content_router.messages` metric with `outcome` and `reason` attributes instead of the removed individual content_router metrics.
+
+- `pipeline`: Replace shared PData exporter outcome and OTLP receiver metric series with bounded metric sets. ([#3300](https://github.com/open-telemetry/otel-arrow/issues/3300))
+  Migration: Update dashboards, alerts, and queries to use `exporter.pdata.exports.messages` and the `receiver.otlp` metric sets, filtering on `signal`, `outcome`, `protocol`, and `error.type` instead of the removed metric names.
+
+- `pipeline`: Consolidate durable buffer retention loss as delta counters under one metric family. ([#3397](https://github.com/open-telemetry/otel-arrow/issues/3397))
+  Migration: Rename `item_loss.items{signal,reason}` to `loss.items{signal,reason}`. Sum across signal to replace former aggregate item queries.
+
+- `pipeline`: Replace the partition processor's separate success and failure counters with `processor.partition.operations`, partitioned by `outcome`, using unit `{operation}`. ([#3530](https://github.com/open-telemetry/otel-arrow/issues/3530))
+  Migration: Replace `processor.partition.partition_operations_succeeded` queries with `processor.partition.operations` filtered by `outcome=success`, and `processor.partition.partition_operations_failed` queries with the same metric filtered by `outcome=failure`.
+
+- `pipeline`: Remove the batch processor's per-signal `consumed.batches.*` and `produced.batches.*` counters. ([#3530](https://github.com/open-telemetry/otel-arrow/issues/3530))
+  Migration: Update dashboards, alerts, and queries to use `node.consumer.consumed.messages` and `node.producer.produced.messages` instead of the removed counters.
+
+- `pipeline`: Remove the perf exporter counters `exporter.perf.pdata.logs`, `exporter.perf.pdata.spans`, `exporter.perf.pdata.metrics`, and `exporter.perf.pdata.invalid_batches`. ([#3530](https://github.com/open-telemetry/otel-arrow/issues/3530))
+  Migration: If you use these metrics, query `node.consumer.consumed.items` for the perf exporter node with matching `signal` and `outcome=success`. Enable global `runtime_metrics: normal` and per-node `item_counts: true`, or global `runtime_metrics: detailed`.
+
+- `pipeline`: Replace individual attributes_processor metrics (e.g., deleted_entries, inserted_entries, domains_signal) with new metric sets partitioned by `action` and `domain`" ([#3593](https://github.com/open-telemetry/otel-arrow/issues/3593), [#3530](https://github.com/open-telemetry/otel-arrow/issues/3530))
+  Migration: Update dashboards, alerts, and queries to use the new `processor.attributes.modified` and `processor.attributes.transforms` metrics instead of the removed individual attributes_processor metrics.
+
+- `pipeline`: Replace Azure Monitor exporter completion, HTTP, state-mapping, and heartbeat metric series with bounded metric sets. ([#3300](https://github.com/open-telemetry/otel-arrow/issues/3300))
+  Migration: Update dashboards, alerts, and queries to use the `exporter.azure_monitor` metric sets, filtering on `signal`, `outcome`, `response`, and `mapping` instead of the removed Azure Monitor exporter metric names.
+
+- `pipeline`: Replace retry processor per-signal item-outcome and retry-attempt counters with engine node metrics and bounded scheduled, recovered, and terminated metrics. ([#3530](https://github.com/open-telemetry/otel-arrow/issues/3530))
+  Migration: Replace `processor.retry.{consumed_items_*,produced_items_*}` with `node.{consumer,producer}` message/item metrics. Replace `processor.retry.retry_attempts_*` with `processor.retry.retries.scheduled{signal}`; use `processor.retry.messages.{recovered,terminated}` for message outcomes.
+
+- `pipeline`: Refactor signal_type_router telemetry to use standard outcome-and-reason enum attributes instead of discrete named metrics. ([#3716](https://github.com/open-telemetry/otel-arrow/issues/3716))
+  Migration: The `processor.type_router.signals.*` discrete metrics have been removed. Use `processor.type_router.signals.decision` (with `signal`, `outcome`, and `reason` attributes) instead.
+
+- `pipeline`: Replace transform processor message counters with bounded operation outcome and failure classification metrics. ([#3530](https://github.com/open-telemetry/otel-arrow/issues/3530))
+  Migration: In dashboards, alerts, and queries, replace
+  `processor.transform.msgs.transformed` and `processor.transform.msgs.transform.failed`
+  with `processor.transform.operations` and `processor.transform.failures`.
+  Filter by `language`, `signal`, `outcome`, and `error.type`.
+
+### :rocket: New components :rocket:
+
+- `pipeline`: Add the `oauth2_client_auth` extension, a `BearerTokenProvider` backed by the OAuth 2.0 client-credentials and JWT-bearer grants. ([#3479](https://github.com/open-telemetry/otel-arrow/issues/3479))
+  Feature `oauth2-client-auth-extension`, URN
+  `urn:otel:extension:oauth2_client_auth`. Supports the client-credentials and
+  JWT-bearer grants over TLS (custom CA, mTLS). Credentials may be inline or
+  in files re-read on each acquisition for rotation without a restart.
+  Tokens are refreshed ahead of expiry.
+
+- `pipeline`: Add the experimental wasm-host processor plugin runtime with a host-kernel WASM processor node ([#2973](https://github.com/open-telemetry/otel-arrow/issues/2973), [#3227](https://github.com/open-telemetry/otel-arrow/issues/3227))
+  Adds a Wasmtime host for `.wasm` processor plugins that run OTel-semantic
+  kernels on host-owned Arrow data. The initial release supports record-scope
+  filtering and rejects unsupported scopes and invalid pdata handles.
+
+### :bulb: Enhancements :bulb:
+
+- `dependencies`: Upgrade various Rust dependencies. ([#3526](https://github.com/open-telemetry/otel-arrow/issues/3526), [#3536](https://github.com/open-telemetry/otel-arrow/issues/3536), [#3546](https://github.com/open-telemetry/otel-arrow/issues/3546), [#3570](https://github.com/open-telemetry/otel-arrow/issues/3570), [#3592](https://github.com/open-telemetry/otel-arrow/issues/3592), [#3601](https://github.com/open-telemetry/otel-arrow/issues/3601), [#3629](https://github.com/open-telemetry/otel-arrow/issues/3629), [#3633](https://github.com/open-telemetry/otel-arrow/issues/3633), [#3642](https://github.com/open-telemetry/otel-arrow/issues/3642), [#3699](https://github.com/open-telemetry/otel-arrow/issues/3699), [#3700](https://github.com/open-telemetry/otel-arrow/issues/3700), [#3702](https://github.com/open-telemetry/otel-arrow/issues/3702), [#3703](https://github.com/open-telemetry/otel-arrow/issues/3703))
+- `engine`: Add the `#[component_inventory]` attribute macro and `inventory` module (RFC 0001, Phase 1) ([#3435](https://github.com/open-telemetry/otel-arrow/issues/3435))
+  Adds a zero-cost, offline-tooling inventory for receiver, exporter, processor,
+  and extension factories. It does not change runtime, API, or configuration
+  behavior for existing components.
+
+- `engine`: Add the `AgentFedCredentialProvider` capability, which supplies a bearer token and its vendor-defined routing attributes as one atomically-published snapshot. ([#3275](https://github.com/open-telemetry/otel-arrow/issues/3275))
+  The capability returns an immutable token/routing snapshot from one host-state
+  read, preventing mixed generations during rotation. The existing
+  `bearer_token_provider` and `vendor_bundle` capabilities remain available
+  when atomic pairing is unnecessary.
+
+- `engine`: Add the `VendorBundle` capability so an agent-fed extension can hand an opaque, vendor-defined attribute bag (a JSON object) to data-path nodes. ([#3477](https://github.com/open-telemetry/otel-arrow/issues/3477))
+  The capability carries host-resolved, vendor-defined attributes through
+  data-path nodes, allowing consumers to skip a config-service handshake.
+
+- `engine`: Generalize `AuthorizedIdentity` into a scheme-agnostic claims model: a `principal`, a `scheme` tag, and a `claims` map of single- or multi-valued `ClaimValue` keyed by name. ([#3494](https://github.com/open-telemetry/otel-arrow/issues/3494))
+  One identity type serves every auth method (Kubernetes SAT, OIDC/JWT, mutual
+  TLS). Claim names follow JWT registered names (`sub`, `aud`, `groups`) or are
+  scheme-namespaced (`k8s.*`, `x509.*`). `subject()`/`audience()` remain as
+  `sub`/`aud` accessors. Stays `#[non_exhaustive]`.
+
+- `engine`: Add CPU profiling endpoint at `/api/v1/debug/pprof/profile` that collects a CPU profile in pprof format. ([#3692](https://github.com/open-telemetry/otel-arrow/issues/3692))
+- `engine`: Remove the unimplemented `processor_chain` node kind, which the engine never supported and always rejected at build time. ([#2556](https://github.com/open-telemetry/otel-arrow/issues/2556))
+  No configuration change is required: `processor_chain` was never a valid node type URN, so no pipeline could declare one. Node kinds remain `receiver`, `processor`, and `exporter`.
+
+- `engine`: Add component inventory annotations across engine components and non-factory categories (RFC 0001, Phase 2) ([#3435](https://github.com/open-telemetry/otel-arrow/issues/3435))
+  Annotates core components and non-factory categories (Admin, Controller, Cli,
+  Subsystem, Safety) with #[component_inventory] metadata, and adds the
+  `cargo xtask component-inventory` baseline scanner (wired into `cargo xtask
+  check`) that detects component drift against components-baseline.json.
+
+- `engine`: Add heap profiling endpoint at `/api/v1/debug/pprof/heap` that dumps jemalloc heap allocations in pprof format. ([#3660](https://github.com/open-telemetry/otel-arrow/issues/3660))
+- `engine`: Wire the broadcast `all` (consensus) Ack/Nack mode into the topic engine ([#2252](https://github.com/open-telemetry/otel-arrow/issues/2252))
+  Every eligible broadcast subscriber must Ack an `all`-mode tracked message. Any required Nack,
+  disconnect, or unrecoverable lag resolves it as Nack. Configuration support follows in #2252.
+
+- `engine`: Default self-telemetry `service.name`/`service.version` now come from build info (binary name and version) instead of `unknown_service`, seeded beneath config and the `OTEL_*` env detectors. ([#3177](https://github.com/open-telemetry/otel-arrow/issues/3177))
+  Precedence is config > `OTEL_SERVICE_NAME` > `OTEL_RESOURCE_ATTRIBUTES` > build-info defaults.
+  The `service_name` detector now reads `OTEL_SERVICE_NAME` only, with no `unknown_service` fallback.
+
+- `engine`: Hardened security response headers (`X-Content-Type-Options: nosniff`, `X-Frame-Options: DENY`, `Referrer-Policy: no-referrer`, `Cache-Control: no-store, no-cache, must-revalidate`) are now applied to all `/api/v1/*` API endpoints via an Axum `map_response` middleware layer. Previously these headers were only set on static UI routes in `dashboard.rs`. ([#3445](https://github.com/open-telemetry/otel-arrow/issues/3445))
+- `observability`: Require the `scope` keyword on scope `attribute_set` declarations and remove support for named measurement attribute sets. ([#3513](https://github.com/open-telemetry/otel-arrow/issues/3513))
+  As there is currently no published crate, this is considered an enhancement rather than a breaking change.
+
+- `observability`: OpenTelemetry exponential histogram in Metrics ITS ([#2428](https://github.com/open-telemetry/otel-arrow/issues/2428), [#2458](https://github.com/open-telemetry/otel-arrow/issues/2458))
+  Implements an exact logarithm table lookup function and fixed-space
+  auto-widening histogram aggregator for non-negative values.
+  Moves the existing Mmsc into basic level instrumentation.
+
+- `observability`: Apply reconciled internal log-level changes without restarting the engine. ([#3387](https://github.com/open-telemetry/otel-arrow/issues/3387))
+  Supports temporary severity and target-directive changes through admin or OpAMP. The first successful reconciliation replaces a valid startup RUST_LOG filter, even when logs.level is unchanged.
+- `pipeline`: Run up to 10 ClickHouse inserts concurrently by default and allow max_in_flight to tune the limit. ([#3512](https://github.com/open-telemetry/otel-arrow/issues/3512))
+  Set max_in_flight to 1 to retain serialized inserts. Values greater than 1 overlap synchronous HTTP inserts and may complete out of order. Shutdown drains accepted inserts only until the engine deadline.
+
+- `pipeline`: OTLP HTTP exporter can consume the `bearer_token_provider` capability to inject a refreshed `Authorization: Bearer` header. ([#3356](https://github.com/open-telemetry/otel-arrow/issues/3356))
+  When bound to the exporter node, a `bearer_token_provider` injects a fresh
+  OAuth token on each request and overrides a static `authorization` header.
+  Without a binding, the exporter keeps its default no-auth behavior.
+
+- `pipeline`: ETW receiver now accepts provider names in addition to GUIDs. ([#2783](https://github.com/open-telemetry/otel-arrow/issues/2783))
+- `pipeline`: Report persisted bytes removed by durable-buffer runtime retention. ([#2884](https://github.com/open-telemetry/otel-arrow/issues/2884))
+  The new `processor.durable_buffer.loss.bytes` counter is partitioned by `reason=drop_oldest|expired`.
+- `pipeline`: Geneva exporter now supports separate, configurable event names for logs and spans via `logs.default_event_name` and `spans.default_event_name` to control which Geneva tables telemetry routes to. ([#3600](https://github.com/open-telemetry/otel-arrow/issues/3600))
+  Each of `logs.default_event_name` and `spans.default_event_name` is optional, defaulting to "Log" or "Span" respectively. This separates log and trace routing so each signal type maps to its own Geneva table.
+
+- `pipeline`: Geneva exporter can route logs and spans to different tables based on an attribute value via `event_name_mapping`, using resource, scope, or record/span attributes (and `event_name` for logs). ([#3600](https://github.com/open-telemetry/otel-arrow/issues/3600))
+  Add an optional `event_name_mapping` under `logs`/`spans` mapping a routing-key attribute value to a destination table (null value uses the source value). Also renames internal `LogConfig`/`SpanConfig` to `LogsConfig`/`TracesConfig` and makes `logs`/`spans` optional to match `GenevaClientConfig`.
+
+- `pipeline`: Geneva exporter accepts an optional `obo` configuration to upload telemetry on behalf of multiple customer identities, keyed by event/table name. ([#3754](https://github.com/open-telemetry/otel-arrow/issues/3754))
+  Add an optional top-level `obo.events` map to the Geneva exporter config. Each entry sets a customer `identity` (onbehalfid) and an optional `annotations` recipe (onbehalfannotations) for the matching event/table name. Events not listed, or an omitted `obo`, keep the previous behavior.
+
+- `pipeline`: Switch the Geneva exporter TLS backend from native-tls/OpenSSL to rustls ([#3408](https://github.com/open-telemetry/otel-arrow/issues/3408))
+  `geneva-exporter` no longer pulls in OpenSSL. Consumers must install a rustls
+  `CryptoProvider` before using the exporter; otherwise construction fails with
+  an error listing the required `crypto-*` features.
+
+- `pipeline`: Add consumer-group observability metrics and structured logs to the Kafka receiver. ([#3535](https://github.com/open-telemetry/otel-arrow/issues/3535))
+  Adds `rebalances_total`, `partition_assignments`, optional `consumer_lag`, and
+  consumer-group lifecycle logs. Breaking: `partitions_assigned` is now a
+  current-ownership gauge; cumulative assignments moved to
+  `partition_assignments`; `partitions_revoked` was renamed
+  `partition_revocations`.
+
+- `pipeline`: Added an in-process Kafka test suite for the contrib-nodes Kafka receiver and exporter. Built on librdkafka's mock cluster, it needs no external broker and provides a test cluster with declarative topics, test producers and consumers, consumer-group rebalancing, broker fault injection, read-only broker/group inspection, node harnesses that wire the receiver/exporter against the mock broker, and fluent record assertions. ([#3540](https://github.com/open-telemetry/otel-arrow/issues/3540))
+  The suite is gated behind the `kafka-receiver` and `kafka-exporter` features and compiles only under test, so it adds no runtime dependencies.
+- `pipeline`: Resolve resource policy members independently across configuration scopes. ([#3529](https://github.com/open-telemetry/otel-arrow/issues/3529))
+  A narrower core_allocation, memory_limiter, or rate_limiters declaration no longer suppresses unrelated resource members inherited from broader scopes. The rate_limiters named map still resolves as one policy family.
+- `pipeline`: Add pretty and record_json output formats to the console exporter, including newline-delimited structured log records and separate internal telemetry log and metric example configurations. ([#3611](https://github.com/open-telemetry/otel-arrow/issues/3611))
+- `pipeline`: The OTLP gRPC exporter can now authenticate with a refreshed OAuth bearer token by binding the `bearer_token_provider` capability. ([#3479](https://github.com/open-telemetry/otel-arrow/issues/3479))
+  Binding is optional; without it behavior is unchanged. The token overrides any
+  configured `authorization` header. The exporter back-pressures while no usable
+  token is cached, and an `UNAUTHENTICATED` response drops the rejected token and
+  retries once the provider publishes its next one.
+
+- `pipeline`: Add bounded outcome and error type metrics to the console exporter, with actionable warnings for unsupported signals. ([#3300](https://github.com/open-telemetry/otel-arrow/issues/3300))
+- `pipeline`: Reduce CPU used to transform OTAP logs in the ClickHouse exporter. ([#3512](https://github.com/open-telemetry/otel-arrow/issues/3512))
+  Canonical OTAP log batches use a specialized shape-preserving path. Unsupported layouts automatically use the existing generic transformer.
+
+- `pipeline`: Add pressure-aware rate throttling for OTLP and Syslog receivers. ([#3484](https://github.com/open-telemetry/otel-arrow/issues/3484))
+  Configure named limiters under policies.resources.rate_limiters using request_bytes or messages, then explicitly bind one with node rate_limiters: [name]. Omit the field or use an empty list to leave a node unbound. V1 limits each receiver instance while memory pressure is active.
+- `pipeline`: Let the Geneva exporter use an atomic `AgentFedCredentialProvider` snapshot instead of driving its own config-service handshake. ([#3275](https://github.com/open-telemetry/otel-arrow/issues/3275))
+  Agent-fed auth gets endpoint, moniker, and token from one atomic snapshot.
+  It requires HTTPS and an exact-account/default URL-safe moniker, rejects
+  invalid or near-expiry data, supports rotation, and uses zeroizing token/header
+  buffers. Other auth modes still reject blank endpoint or region.
+
+- `pipeline`: Auto-inject `TimeGenerated` from the log record event time when no Azure Monitor mapping targets it. An explicit mapping or passthrough attribute takes precedence. ([#3407](https://github.com/open-telemetry/otel-arrow/issues/3407))
+  The value uses `time_unix_nano`, then `observed_time_unix_nano`, then the
+  current time. This preserves event time instead of Azure ingestion time.
+
+- `pipeline`: Add an Azure Monitor attribute passthrough mode that emits each log-record attribute as a top-level column. ([#3407](https://github.com/open-telemetry/otel-arrow/issues/3407))
+  Set `schema.log_record_mapping.attributes` to `passthrough` to emit every
+  log-record attribute as a top-level column named by its attribute key. See
+  the exporter README for scoping, collision, and DCR-column-name rules.
+
+- `pipeline`: Add export byte counter to `azure_monitor_exporter` partitioned by `signal` and `outcome`. ([#3519](https://github.com/open-telemetry/otel-arrow/issues/3519))
+  Add the `exporter.azure_monitor.exports.bytes` metric, natural follow-up to metric changes in
+- `pipeline`: Add support for Arc-connected servers to azure_identity_auth extension ([#3549](https://github.com/open-telemetry/otel-arrow/issues/3549))
+- `pipeline`: Add pressure-aware messages-per-second rate limiting for the Syslog / CEF receiver. ([#3484](https://github.com/open-telemetry/otel-arrow/issues/3484))
+  UDP datagrams and emitted TCP records are counted before parsing. Normal TCP lines count once; oversized lines emitted as multiple bounded-read fragments count once per emitted fragment. Over-limit UDP datagrams are dropped; over-limit TCP messages are dropped while keeping the connection open.
+- `query-engine`: Add support for concrete metric types in OPL type hierarchy ([#3721](https://github.com/open-telemetry/otel-arrow/issues/3721))
+
+### :toolbox: Bug fixes :toolbox:
+
+- `engine`: Include configured custom identity attributes in channel node metrics. ([#3645](https://github.com/open-telemetry/otel-arrow/issues/3645))
+  Ensures that metrics like `produced.items` properly carry the identity attributes defined in `entity.extend.identity_attributes`, bringing them to parity with standard node metrics.
+- `engine`: Reject invalid node rate limiter bindings during configuration-only validation. ([#3529](https://github.com/open-telemetry/otel-arrow/issues/3529))
+  --validate-and-exit now rejects unknown limiter names and V1 node bindings that select more than one limiter.
+- `engine`: Automatically recover failed regular pipeline cores with bounded per-core restart policies, and fail the process when recovery is exhausted. ([#3561](https://github.com/open-telemetry/otel-arrow/issues/3561), [#3567](https://github.com/open-telemetry/otel-arrow/issues/3567))
+- `engine`: Size the default memory-limiter hysteresis as `min(hard_limit - soft_limit, soft_limit / 10)` so an omitted hysteresis recovers from Soft once usage falls modestly below the soft limit. ([#2425](https://github.com/open-telemetry/otel-arrow/issues/2425))
+  Previously a wide soft-to-hard gap defaulted the band to `soft_limit - 1`, so the
+  limiter reported Soft pressure until usage fell to nearly zero. Policies with an
+  explicit `hysteresis`, and `source: auto` setups where the gap is already narrow,
+  are unaffected.
+
+- `engine`: Report pending processor and flow metrics before returning a processing error. ([#3632](https://github.com/open-telemetry/otel-arrow/issues/3632))
+  Processor failures now flush pending flow metrics and processor-local telemetry
+  before shutdown. The original processing error remains the reported failure.
+
+- `observability`: Expose metric data point attributes from the admin metrics JSON endpoint. ([#3300](https://github.com/open-telemetry/otel-arrow/issues/3300))
+  The admin metrics JSON endpoint now properly includes data point attributes, matching the existing prometheus endpoint behavior.
+- `pdata`: Prevent metrics encoding panics from missing resources or misaligned scope schema rows. ([#3565](https://github.com/open-telemetry/otel-arrow/issues/3565))
+- `pdata`: Best-effort split of a single oversize OTLP resource entry when batching by bytes, descending to scopes then individual records; an indivisible unit may still exceed max_size. ([#3661](https://github.com/open-telemetry/otel-arrow/issues/3661))
+  Previously make_bytes_batches only cut at top-level resource-entry boundaries,
+  so a request with a single ResourceLogs/Spans/Metrics was emitted whole regardless
+  of max_size. Splitting is best-effort: an indivisible unit (a lone record, or a
+  metric with many data points) may still exceed max_size.
+
+- `pdata`: Harden OTLP proto byte-view field decoding against malformed input so truncated LEN and fixed-width fields are treated as absent instead of producing out-of-range reads or hanging. ([#3661](https://github.com/open-telemetry/otel-arrow/issues/3661))
+  field_value_range now bounds-checks LEN, FIXED64 and FIXED32 payloads and
+  returns None for truncated/invalid fields, and RawKeyValue::advance advances
+  past unparseable bytes so key()/value() no longer loop forever on malformed
+  KeyValue protobuf.
+
+- `pdata`: Prevent dictionary key overflow from panicking during OTAP batch concatenation. ([#3566](https://github.com/open-telemetry/otel-arrow/issues/3566))
+- `pdata`: fixes panic proto decoding `common::KeyValue` with invalid field lengths ([#3672](https://github.com/open-telemetry/otel-arrow/issues/3672))
+- `pipeline`: Bound journald filtered follow waits so unrelated journal activity cannot indefinitely delay batch flushes or shutdown. ([#3399](https://github.com/open-telemetry/otel-arrow/issues/3399))
+  Adds behavior-level regression coverage for start_at: end follow startup, idle timeouts, non-matching wakeups, and systemd errors.
+- `pipeline`: kafka_receiver: bound the shutdown drain of an in-flight consumer-lag worker by the tighter of the worker's own deadline and the pipeline shutdown deadline, and signal cooperative cancellation to the worker.
+ ([#3616](https://github.com/open-telemetry/otel-arrow/issues/3616))
+  Previously a recently-started lag refresh could delay shutdown by up to its
+  full 15s lag deadline, and an expired-deadline drain dropped the join handle
+  while the non-cancellable spawn_blocking task kept running and could outlive the
+  receiver (holding the broker connection).
+
+- `pipeline`: kafka_receiver: fix committed-offset rollback across consumer-group rebalances when a partition is revoked and reassigned to the same consumer. The offset tracker now resets a partition's pending/high-water-mark state on an ownership generation change, and the stale-ack guard drops feedback whose generation is older than the partition's currently-assigned generation (not only the tracked generation).
+ ([#3505](https://github.com/open-telemetry/otel-arrow/issues/3505))
+  Previously, stale ownership-period state (a stale ack arriving after reassignment
+  could drive a commit below an offset already committed by another group member,
+  rolling the committed offset backward and re-delivering records.
+
+- `pipeline`: kafka_receiver: reprocess messages redelivered under a newer consumer-group generation instead of dropping them as duplicates, and bound the consumer close at shutdown to the shutdown deadline.
+ ([#3505](https://github.com/open-telemetry/otel-arrow/issues/3505))
+  Fixes silent record loss when a revoke-and-reassign redelivered an offset, and
+  a shutdown hang when the broker was unreachable. Also adds a records_in_flight
+  up/down counter (manual commit) and validates timeouts:
+  session/heartbeat/max_fetch_wait > 0 and heartbeat < session.
+
+- `pipeline`: WASM processor filtering now preserves OTAP parent-child batch relationships instead of filtering only the root batch. ([#3478](https://github.com/open-telemetry/otel-arrow/issues/3478))
+  Adds minimal CollectTelemetry metrics for guest process calls, errors, and drop decisions in the experimental wasm_processor.
+- `pipeline`: Preserve bytes, arrays, maps, and empty values that cannot be condensed by the Condense Attributes processor. ([#1694](https://github.com/open-telemetry/otel-arrow/issues/1694))
+- `pipeline`: Attribute Ack/Nack ownership of byte-split OTLP fragments to the originating input so no fragment is untracked, and bound split fan-out with fragment and byte-amplification budgets. ([#3661](https://github.com/open-telemetry/otel-arrow/issues/3661))
+  Byte splitting duplicates resource/scope headers, so output exceeds input.
+  Ack/Nack subscribers are apportioned by each output's input-byte ownership weight,
+  so every fragment is tracked. Per-entry fan-out/bytes and a per-flush output cap
+  bound the split; over-limit entries are emitted whole.
+
+- `pipeline`: Retain transport headers and peer address on outbound batches when the transform processor splits a batch ([#3501](https://github.com/open-telemetry/otel-arrow/issues/3501))
+  Batches sent to a `route_to` port, and the batch sent to the default port alongside them, were
+  given an empty context. Downstream components lost request metadata such as tenant ID, auth and
+  originating peer whenever a query split the batch.
+
+- `pipeline`: Reject unsupported live changes to the process-wide memory limiter. ([#3529](https://github.com/open-telemetry/otel-arrow/issues/3529))
+  Live reconciliation cannot rebuild the process-wide pressure monitor. A memory_limiter change now returns an error instead of accepting configuration that the running monitor cannot apply. Restart the process to change it.
+- `pipeline`: Clarify Azure Monitor exporter metric descriptions for completed export attempts. ([#3625](https://github.com/open-telemetry/otel-arrow/issues/3625))
+- `query-engine`: Parse standard RFC 822 named time zones in date-time expressions. ([#2047](https://github.com/open-telemetry/otel-arrow/issues/2047))
+- `query-engine`: Prevent scalar predicate results from terminating attribute filters. ([#3605](https://github.com/open-telemetry/otel-arrow/issues/3605))
+- `query-engine`: Fix panics parsing OPL empty query and escape sequences ([#3658](https://github.com/open-telemetry/otel-arrow/issues/3658))
+
+<!-- previous-version -->
+
+## v0.50.0
+
+### :stop_sign: Breaking changes :stop_sign:
+
+- `engine`: Scope capability exports by capability module so every item has a single public path. Capability data types and registration handles move from the flat `capability::` namespace to `capability::<name>` (e.g. `capability::bearer_token_provider::BearerToken`), and trait variants move to `{local,shared}::capability::<name>`. `BearerToken::expose_secret` is renamed to `expose_token`. ([#3492](https://github.com/open-telemetry/otel-arrow/issues/3492))
+  The `#[capability]` macro now emits its `local`/`shared` trait modules as
+  `pub(crate)`; the traits are made public only through the hand-written
+  `{local,shared}::capability` re-exports, so no capability item is reachable via
+  two paths. Shared framework infrastructure (`CapabilityError`,
+  `CapabilityErrorSource`, the instance-factory types, `ExtensionCapability`, and
+  `KNOWN_CAPABILITIES`) remains flat at `capability::`.
+
+- `pipeline`: Rename ETW receiver attribute keys to use dot notation for consistency (e.g. `etw.event_id` -> `etw.event.id`, `etw.process_id` -> `etw.process.id`, `etw.thread_id` -> `etw.thread.id`). ([#3346](https://github.com/open-telemetry/otel-arrow/issues/3346))
+  Downstream queries or processors that reference the previous underscore-style
+  keys must be updated to use the new dot-notation keys.
+
+- `pipeline`: The Azure Monitor exporter now authenticates via the `bearer_token_provider` capability instead of an in-config `auth` block. ([#3356](https://github.com/open-telemetry/otel-arrow/issues/3356))
+  Authentication is no longer configured on the exporter. It obtains bearer
+  tokens from the `azure_identity_auth` extension bound via the
+  `bearer_token_provider` capability. This is a breaking config change:
+  existing configs that set an `auth:` block under the exporter now fail to
+  deserialize (`unknown field `auth``). To migrate, declare an
+  `azure_identity_auth` extension in the pipeline's `extensions:` section and
+  bind it on the exporter node with
+  `capabilities: { bearer_token_provider: <instance-name> }`. The exporter README
+  and sample configs are updated accordingly.
+
+### :rocket: New components :rocket:
+
+- `engine`: Initial implementation of OpAMP Agent Controller Extension ([#3387](https://github.com/open-telemetry/otel-arrow/issues/3387))
+- `pipeline`: Add an experimental ClickHouse exporter (`urn:otel:exporter:clickhouse`) ([#3291](https://github.com/open-telemetry/otel-arrow/issues/3291))
+  Exports OTAP logs and traces to ClickHouse over HTTP using the official
+  `clickhouse` client with `FORMAT ArrowStream`. OTAP Arrow batches are
+  reshaped into the otel-collector-contrib ClickHouse schema (attributes as
+  `Map(LowCardinality(String), String)`, events/links as `Array(...)`,
+  hex-encoded trace/span ids), and the target database and tables are created
+  automatically. Opt-in behind the `clickhouse-exporter` feature; the endpoint,
+  database, credentials, `async_insert`, and per-table engine/TTL are
+  configurable, and `password` supports `${env:VAR}` substitution.
+
+- `pipeline`: Add a Kafka exporter (`urn:otel:exporter:kafka`) for exporting traces, metrics, and logs to Apache Kafka. ([#3249](https://github.com/open-telemetry/otel-arrow/issues/3249))
+  Supports per-signal topic and encoding (`otlp_proto` / `otap_proto`), dynamic
+  topic routing and partition-key derivation from transport headers, SASL
+  authentication (including AWS MSK IAM OAUTHBEARER), and producer tuning
+  (`required_acks`, `max_message_bytes`, `linger_ms`) with a `producer_config`
+  escape hatch for arbitrary librdkafka settings.
+
+- `pipeline`: Add partition processor ([#3273](https://github.com/open-telemetry/otel-arrow/issues/3273))
+- `pipeline`: Add the `azure_identity_auth` extension, a `BearerTokenProvider` backed by Azure identity flows. ([#3356](https://github.com/open-telemetry/otel-arrow/issues/3356))
+  New `otap-df-contrib-extensions` crate (feature `azure-identity-auth-extension`,
+  URN `urn:microsoft:extension:azure_identity_auth`) that acquires and refreshes
+  Azure access tokens and exposes them to data-path nodes via the shared
+  `BearerTokenProvider` capability. Supports Managed Identity, developer tooling
+  (`development`), and Workload Identity Federation auth methods. Tokens are
+  cached and refreshed ahead of expiry in a background task, concurrent cache
+  misses are coalesced onto a single credential call, and the extension gates
+  pipeline startup on the first successful token publish. Emits success/failure/
+  publish counters and acquisition-latency telemetry.
+
+### :bulb: Enhancements :bulb:
+
+- `dependencies`: Upgrade various Rust dependencies. ([#3329](https://github.com/open-telemetry/otel-arrow/issues/3329), [#3341](https://github.com/open-telemetry/otel-arrow/issues/3341), [#3362](https://github.com/open-telemetry/otel-arrow/issues/3362), [#3376](https://github.com/open-telemetry/otel-arrow/issues/3376), [#3384](https://github.com/open-telemetry/otel-arrow/issues/3384), [#3390](https://github.com/open-telemetry/otel-arrow/issues/3390), [#3414](https://github.com/open-telemetry/otel-arrow/issues/3414), [#3415](https://github.com/open-telemetry/otel-arrow/issues/3415), [#3419](https://github.com/open-telemetry/otel-arrow/issues/3419), [#3458](https://github.com/open-telemetry/otel-arrow/issues/3458), [#3459](https://github.com/open-telemetry/otel-arrow/issues/3459), [#3461](https://github.com/open-telemetry/otel-arrow/issues/3461), [#3463](https://github.com/open-telemetry/otel-arrow/issues/3463), [#3474](https://github.com/open-telemetry/otel-arrow/issues/3474), [#3485](https://github.com/open-telemetry/otel-arrow/issues/3485), [#3498](https://github.com/open-telemetry/otel-arrow/issues/3498), [#3508](https://github.com/open-telemetry/otel-arrow/issues/3508))
+- `engine`: Add opt-in extension readiness probe to gate pipeline startup on per-extension readiness signals. ([#3143](https://github.com/open-telemetry/otel-arrow/issues/3143))
+  Active and background extensions can now opt in to startup gating via
+  `active().with_readiness_probe().shared(...).local(...)` (or the
+  background twin), which applies the default 5-second readiness
+  timeout. The timeout can be overridden (shorter or longer) with
+  `with_readiness_probe_timeout_override(t)`, which emits an `INFO`
+  event (`extension.readiness.timeout_override`) when set; a zero
+  timeout is rejected at build time. The engine threads a
+  `ReadinessSignaller` into each variant's `EffectHandler`; the
+  extension fires it via `EffectHandler::signal_ready()` once it is
+  ready to serve. The controller awaits all opted-in probes (in
+  parallel) after the spawn barrier and before tipping nodes into their
+  runtime, failing fast with a named laggard on timeout, dropped
+  signaller, or an extension that exits during the readiness window.
+  Extensions that do not opt in pay zero cost: `signal_ready()` is a
+  silent no-op when no probe is registered.
+
+- `engine`: Add an opt-in "Full width" layout toggle to the admin dashboard UI. ([#3373](https://github.com/open-telemetry/otel-arrow/issues/3373))
+  The dashboard defaults to the centered, capped column. The toggle lets the
+  page shell use the full viewport width and persists the choice per browser
+  via localStorage.
+
+- `engine`: `otap-df-ctl` now lets library embedders override the CLI identity used in output. A new `Branding` type (binary name + output-envelope `schemaVersion`) and a `run_with_terminal_and_diagnostics_branded` entrypoint allow a downstream binary that embeds the library to emit help, shell completions, and machine-readable JSON envelopes under its own identity instead of `dfctl`. The standalone `dfctl` binary and the existing public entrypoints are unchanged; they use the default `dfctl` / `dfctl/v1` branding. ([#3370](https://github.com/open-telemetry/otel-arrow/issues/3370))
+  Initial scope covers the binary name and envelope `schemaVersion`. Schema catalog identifiers, schema `$id` URLs, `DFCTL_*` environment-variable prefixes, and the interactive TUI command hints remain `dfctl`-branded and may be addressed in follow-ups.
+- `engine`: Add the `BearerTokenProvider` capability (with `BearerToken` and `CapabilityError`) so extensions can hand OAuth bearer tokens to data-path nodes. ([#3356](https://github.com/open-telemetry/otel-arrow/issues/3356))
+  Defines the engine-side capability surface: the `#[capability]`-generated
+  `BearerTokenProvider` trait (`get_token` and `token_stream`), the
+  secret-redacting `BearerToken` type, and `CapabilityError` /
+  `CapabilityErrorSource` for attributing runtime capability failures to the
+  failing `(extension, capability)` pair. No provider implementation is
+  included.
+
+- `engine`: Add internal primitives for a broadcast `all` (consensus) Ack/Nack mode for topic hops ([#2252](https://github.com/open-telemetry/otel-arrow/issues/2252))
+  Not yet usable: this is internal-only foundation work with no behavior change. It adds the
+  `TopicBroadcastAckMode` enum, a consensus-capable publish tracker, and a reserve/commit ring split,
+  all gated behind callers that still pass `First`. The `all` mode is not wired into the broadcast
+  engine and is not configurable yet - those land in follow-up PRs under #2252.
+
+- `engine`: Add `signals.dropped` flow metric recorded per drop decision node ([#2859](https://github.com/open-telemetry/otel-arrow/issues/2859))
+  Flow metrics declared in the telemetry policy can now enable `signals_dropped`.
+  A processor that declares the drop capability and lies within such a flow records
+  its dropped count, attributed per decision node via the new `flow.node.decision`
+  scope attribute (so a flow may contain multiple decision nodes). Flow-wide kept is
+  read from `signals.outgoing`. `filter_processor` and `log_sampling_processor` are
+  the first consumers. Single-node flow ranges (`start == end`) are now supported.
+
+- `observability`: Add item-level enum-attribute mechanism for metric sets (codegen, export path, and compile-time cardinality check). ([#3430](https://github.com/open-telemetry/otel-arrow/issues/3430), [#3454](https://github.com/open-telemetry/otel-arrow/issues/3454), [#3499](https://github.com/open-telemetry/otel-arrow/issues/3499))
+  Adds bounded enum dimensions to metric items, including export support and compile-time
+  cardinality and key-conflict checks. Components use
+  `#[attribute_set(item, registration|measurement)]` and generated `register(...)`;
+  named measurement attribute sets remain supported for compatibility.
+
+- `observability`: Route internal metrics through the Internal Telemetry System with receiver-configurable periodic emission and metric views, without requiring the OpenTelemetry client SDK. ([#2408](https://github.com/open-telemetry/otel-arrow/issues/2408))
+  The internal telemetry receiver supports exact scope name, scalar scope attribute, and instrument selectors with metric name and description overrides.
+
+- `pdata`: Add retained-memory byte estimates for OTAP Arrow records and payloads. ([#3442](https://github.com/open-telemetry/otel-arrow/issues/3442))
+- `pipeline`: Enhance durable_buffer observability with storage utilization and per-signal data loss metrics. ([#3117](https://github.com/open-telemetry/otel-arrow/issues/3117))
+- `pipeline`: Add ETW receiver telemetry counters for produced events, slow-worker drops, and decode failures, with an explicit counter-algebra contract. ([#3361](https://github.com/open-telemetry/otel-arrow/issues/3361))
+  The ETW receiver now records (emitted under the `receiver.etw` metric set;
+  the names below are the exact field names you query):
+  - `received_events_total`: every event the session produced, counted on the
+    producer (`ProcessTrace`) side before the per-core channel send. This is
+    the single ingress denominator.
+  - `received_events_dropped_slow_worker`: events dropped when an internal
+    per-core channel is full (previously only logged), bridged from the
+    `!Send` ProcessTrace callback via a shared atomic.
+  - `received_events_invalid`: TDH decode failures (the counter existed but was
+    never incremented; the failing decode path now feeds it).
+  Counter algebra (the exact relationships; the authoritative copy lives in the
+  doc comment on `EtwReceiverMetrics` in
+  `rust/otap-dataflow/crates/contrib-nodes/src/receivers/etw_receiver/mod.rs`):
+  - `received_events_total = received_events_forwarded + received_events_forward_failed
+    + received_events_dropped_slow_worker` plus any events still buffered in the
+    per-core channel and/or in the in-flight builder at snapshot time.
+  - Slow-worker drop rate = `received_events_dropped_slow_worker / received_events_total`.
+  - Forward-failure rate = `received_events_forward_failed / received_events_total`.
+  - `received_events_invalid` is orthogonal: a decode failure does not drop the
+    event (it is still forwarded with empty fields), so it is not subtracted
+    from `received_events_total`.
+
+  The producer-side counters are session-scoped (shared across all per-core
+  receivers of a `session_name`); each field is claimed via an independent
+  `swap(0)`, so concurrent per-core drains never double-count and the registry
+  sums the per-core snapshots into one exact session-wide series. A residual
+  delta produced after the last core's terminal snapshot is acceptably dropped
+  at teardown.
+- `pipeline`: The journald receiver no longer double-copies each entry's `MESSAGE` payload. The decoded log body now references the `MESSAGE` value already stored in the entry's field list instead of cloning it into a second buffer, removing one allocation and copy of the message (typically the largest field) per record. Emitted OTLP output is unchanged. ([#3398](https://github.com/open-telemetry/otel-arrow/issues/3398))
+- `pipeline`: Add a Kafka receiver to the contrib nodes. ([#3248](https://github.com/open-telemetry/otel-arrow/issues/3248))
+  Consumes OTLP and OTAP messages from Apache Kafka topics with per-signal
+  topic routing, optional header-to-resource-attribute extraction, manual or
+  auto offset commit, and consumer-group rebalance handling (commit-before-revoke
+  with in-memory offset tracking). Supports SASL (PLAIN, SCRAM, AWS MSK IAM) and
+  TLS.
+
+- `pipeline`: Add Workload Identity Federation authentication support to the Azure Monitor exporter ([#3336](https://github.com/open-telemetry/otel-arrow/issues/3336))
+  Adds a new `workload_identity` (aliases: `wif`, `workload_identity`) auth
+  method that exchanges a projected federated ServiceAccount token with Entra
+  ID for an access token. New optional `tenant_id` and `token_file_path`
+  config fields fall back to the `AZURE_TENANT_ID` and
+  `AZURE_FEDERATED_TOKEN_FILE` environment variables, and `client_id` falls
+  back to `AZURE_CLIENT_ID`. This enables Azure Monitor export from Kubernetes
+  workloads that do not have a managed identity (e.g. self-hosted or
+  non-AKS clusters using Workload Identity Federation).
+
+- `pipeline`: Static exporter `headers` values are now wrapped in `secrecy::SecretString` and marked sensitive on the wire, so a header credential (e.g. an `Authorization` token or tenant API key) is redacted in the `Debug`/telemetry output of the typed `HttpClientSettings` / `GrpcClientSettings` and excluded from HTTP/2 HPACK indexing. The cleartext is read only via an explicit `expose_secret()` accessor (during validation and when building the request); behavior is otherwise unchanged. ([#3306](https://github.com/open-telemetry/otel-arrow/issues/3306))
+  Scope: this protects the typed settings and the values placed on the wire. It does not redact the raw configuration snapshot returned by the admin config endpoints (e.g. `GET /api/v1/config`), which still serialize the original config value; that broader redaction is tracked in #3328. `user_agent` is intentionally left a plain `String` as a non-credential client identifier.
+- `pipeline`: Add additional details to auth handler creation error for azure monitor exporter ([#3409](https://github.com/open-telemetry/otel-arrow/issues/3409))
+- `pipeline`: Record the `signals.dropped` flow metric from the transform processor ([#2859](https://github.com/open-telemetry/otel-arrow/issues/2859))
+  The transform processor now declares the drop-decision capability and records the
+  number of records removed by the query engine's filter (`where`) stages, so a
+  telemetry policy that enables `signals_dropped` can observe dropped counts for a
+  transform node.
+
+- `pipeline`: Record the `signals.dropped` flow metric from the recordset_kql processor ([#2859](https://github.com/open-telemetry/otel-arrow/issues/2859))
+  The recordset_kql processor now declares the drop-decision capability and records
+  the number of records it filters out, so a telemetry policy that enables
+  `signals_dropped` can observe dropped counts for the node (e.g. a KQL `where`
+  filter). Records folded into a `summarize` aggregation are excluded from the
+  dropped count: the recordset engine now reports summarized records separately from
+  genuinely filtered ones, so aggregation is no longer miscounted as dropping.
+
+- `query-engine`: Add nested path assignment support for serialized Map and Slice attribute values in OPL transforms ([#3343](https://github.com/open-telemetry/otel-arrow/issues/3343))
+
+### :toolbox: Bug fixes :toolbox:
+
+- `engine`: Use flume's async interface in the shared MPMC channel so `SharedSender::send` and `SharedReceiver::recv` no longer block the Tokio worker thread ([#1704](https://github.com/open-telemetry/otel-arrow/issues/1704))
+  The MPMC variant of the shared channel called flume's synchronous `send()`/`recv()`
+  from inside `async fn`, which parked the underlying async runtime thread instead of
+  yielding cooperatively. These now use `send_async().await` / `recv_async().await`,
+  matching the local channel abstraction.
+
+- `engine`: Credential header values are now redacted from the admin config snapshot APIs (`GET /api/v1/config`, the per-group detail endpoint, and the per-pipeline detail endpoint). Static exporter `headers` values (e.g. an `Authorization` token or tenant API key) were previously returned in cleartext from the raw node `config`, bypassing the `secrecy::SecretString` protection on the typed settings; they are now replaced with `[REDACTED]` in the response while the header keys are preserved so operators can still see which headers are configured. ([#3328](https://github.com/open-telemetry/otel-arrow/issues/3328))
+  Redaction is applied to the API response only; the controller's stored configuration retains the original values, so reconciliation and runtime behavior are unchanged.
+- `engine`: `AttributeValue` serialization now emits plain scalars/sequences, fixing YAML/JSON round-trip failures for telemetry resource attributes. ([#3358](https://github.com/open-telemetry/otel-arrow/issues/3358))
+  The derived Serialize on AttributeValue and AttributeValueArray produced
+  externally-tagged enum output (e.g. `!String value` in YAML) that the custom
+  Deserialize implementation could not parse back. Replaced with custom Serialize
+  impls that emit plain values matching the Deserialize expectations.
+
+- `observability`: Suppress noisy per-scrape `MetricValidationFailed` warnings from the Prometheus pull exporter ([#2734](https://github.com/open-telemetry/otel-arrow/issues/2734))
+  The `opentelemetry-prometheus` crate flattens OpenTelemetry
+  instrumentation scopes into a single namespace keyed by metric name (scope is
+  exposed only as the `otel_scope_name` label, per the OTel/Prometheus interop
+  spec). When two scopes emit the same metric name with different descriptions
+  (e.g. `cpu_utilization`, `pending_sends.buffered`), the exporter keeps the
+  first `# HELP` and logs an "Instrument description conflict" warning on every
+  scrape. No data is lost - each scope remains a distinct time series - so the
+  warning was pure noise. The internal-telemetry log filter now adds a
+  field-scoped directive
+  (`opentelemetry-prometheus[{metric_description}]=error`) that silences only
+  that benign description-conflict warning. The sibling type-conflict warning
+  (which carries a `metric_type` field and *does* drop data) and every other
+  diagnostic from the crate remain visible at their original level.
+
+- `otap`: `GrpcServerSettings::default()` now binds the loopback interface (`127.0.0.1:0`) instead of all interfaces (`0.0.0.0:0`). Production is unaffected because `listening_addr` is a required config field; the default is only reached when a gRPC server is built programmatically via `..Default::default()`, where the previous all-interfaces default tripped the Windows Defender Firewall prompt during `cargo test` and exposed builder-constructed servers to the local network. ([#3400](https://github.com/open-telemetry/otel-arrow/issues/3400))
+- `pdata`: OTAP logs/metrics/traces views and OTLP encoders now accept a missing root payload and produce 0 rows / an empty result instead of erroring, matching the updated spec where a missing payload is semantically equivalent to one with 0 rows. ([#3444](https://github.com/open-telemetry/otel-arrow/issues/3444))
+- `pdata`: Fix silent attribute loss when decoding OTAP batches whose root IDs are not monotonic in resource/scope visitation order ([#3448](https://github.com/open-telemetry/otel-arrow/issues/3448))
+  The OTLP decoder joined child records (attributes, datapoints, span
+  events/links) to parents with a shared forward-only cursor that assumed parent
+  IDs were visited in ascending order. When root IDs are not monotonic along
+  `(resource_id, scope_id, id)` visitation order, a later-visited smaller-ID
+  record's child rows were skipped, silently dropping all of that record's
+  attributes with no error. `ChildIndexIter::new` now binary-searches
+  (`SortedBatchCursor::seek_to_parent`) to each parent's rows, making the join
+  order-independent for logs, metrics, and traces.
+
+- `pipeline`: Report durable buffer per-signal data-loss metrics as synchronous Counters, lowers cost to export delta temporality. ([#3117](https://github.com/open-telemetry/otel-arrow/issues/3117))
+  The per-signal dropped/expired metrics (`dropped_{log_records,spans,metric_datapoints}`
+  and `expired_{log_records,spans,metric_datapoints}`) were `ObserveCounter`s exported as
+  cumulative regardless of the configured temporality. Their source
+  (`engine.drain_*_pending()`) is delta-native, so they are now plain `Counter`s: a Delta
+  exporter reports per-interval loss and a cumulative exporter still reports a monotonic Sum.
+- `pipeline`: The journald receiver now follows newly appended entries when `start_at: end` and no checkpoint exists - including on an empty journal, or one whose filters match none of the existing entries. Previously it sought the journal tail but never anchored the read head, so the follow loop never advanced onto new entries: a fresh `start_at: end` receiver emitted no records and never committed a checkpoint. ([#3395](https://github.com/open-telemetry/otel-arrow/issues/3395))
+  `sd_journal_seek_tail()` parks the read head after the most recent entry without making any entry current; from there a bare `sd_journal_next()` advances toward a following entry, finds none, and returns `0` (the EOF marker) without anchoring; it does not move backward. (It is `sd_journal_step_one()`, not `sd_journal_next()`, that libsystemd documents as behaving like `sd_journal_previous()` at the tail.) The fresh `StartAt::End` start now issues `sd_journal_seek_tail()` then a single `sd_journal_previous()` to anchor on the last existing entry, so the worker's first `next()` steps forward onto genuinely new entries. When `previous()` finds no entry (empty or fully-filtered journal) the head is repositioned with `sd_journal_seek_head()` to avoid a permanent stall at the tail. This is the accepted best-effort idiom (see systemd/systemd#17662); across rotated or multi-file journals the tail position is approximate, and `start_at: end` has no durable resume anchor until the first checkpoint commit.
+- `pipeline`: Fix shutdown deadlock in OTAPExporter when stream queues are full and the downstream receiver is unreachable. ([#3411](https://github.com/open-telemetry/otel-arrow/issues/3411))
+  The exporter's enqueue loop now checks for shutdown signals while waiting for
+  queue capacity, and gRPC connection attempts are abortable on shutdown.
+
+- `pipeline`: OTLP gRPC exporter now classifies gRPC status codes as retryable or permanent per the OTLP specification. The OTLP gRPC receiver maps permanent NACKs to INTERNAL and transient NACKs to UNAVAILABLE. ([#1920](https://github.com/open-telemetry/otel-arrow/issues/1920))
+
+<!-- previous-version -->
+
 ## v0.49.0
 
 ### :stop_sign: Breaking changes :stop_sign:

@@ -9,6 +9,24 @@ pub mod auth;
 pub mod aws;
 pub mod security;
 
+// A reusable, in-process Kafka test suite built on `rdkafka::mocking::MockCluster`.
+//
+// The test suite is broker-only and node-agnostic; the component wrappers in
+// `node_harness` consume it to drive the Kafka exporter and receiver. Both are
+// test-only and are never compiled into the shipping library. They live here in
+// `common/kafka` (which only compiles when a `kafka-*` feature is enabled, so
+// `rdkafka` is always present) so that the exporter's and receiver's inline
+// `#[cfg(test)]` test modules can share them via `crate::common::kafka::...`.
+// The test suite is a deliberately broad, reusable test-support API: not every
+// helper is exercised by the current tests, so `dead_code` is expected and
+// allowed here rather than sprinkling per-item attributes.
+#[cfg(test)]
+#[allow(dead_code)]
+pub(crate) mod node_harness;
+#[cfg(test)]
+#[allow(dead_code)]
+pub(crate) mod test;
+
 /// TLS configuration for Kafka broker connections.
 ///
 /// All file-path fields are optional so that callers can configure only the
@@ -164,7 +182,7 @@ impl TlsConfig {
     /// - `key_password` is set without `key_file`.
     /// - Any provided path string is empty.
     pub fn validate(&self) -> Result<(), String> {
-        // Reject empty strings — likely a config typo.
+        // Reject empty strings -- likely a config typo.
         if self.ca_file.as_deref() == Some("") {
             return Err("'ca_file' must not be empty".to_string());
         }
@@ -425,6 +443,38 @@ pub fn validate_kafka_topic(topic: &str) -> Result<(), String> {
     Ok(())
 }
 
+/// Maximum length (in characters) of a client/tenant-controlled value rendered
+/// into a log line by [`sanitize_for_log`].
+pub const MAX_SANITIZED_LOG_LEN: usize = 64;
+
+/// Bounds and escapes a potentially adversarial, client- or tenant-controlled
+/// string for safe inclusion in a log line or structured event.
+///
+/// Header-supplied topic values and downstream nack reasons can carry arbitrary
+/// bytes (e.g. an invalid routing header rendered via `from_utf8_lossy`). To
+/// avoid log injection (control characters, newlines that forge log records) and
+/// unbounded log growth, this:
+///
+/// - escapes the value with [`str::escape_default`] (control characters, quotes,
+///   and non-ASCII become ASCII escapes), and
+/// - truncates the escaped result to [`MAX_SANITIZED_LOG_LEN`], appending an
+///   ellipsis marker when truncation occurred.
+///
+/// The escaped output is pure ASCII, so byte-index truncation always lands on a
+/// char boundary. The (bounded) value is kept human-readable so operators can
+/// still diagnose routing problems; it is not redacted.
+#[must_use]
+pub fn sanitize_for_log(value: &str) -> String {
+    // clean up escape chars
+    let mut escaped: String = value.escape_default().collect();
+    let truncated = escaped.len() > MAX_SANITIZED_LOG_LEN;
+    escaped.truncate(MAX_SANITIZED_LOG_LEN);
+    if truncated {
+        escaped.push_str("...");
+    }
+    escaped
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -525,8 +575,46 @@ mod tests {
 
     #[test]
     fn validate_rejects_non_ascii() {
-        let err = validate_kafka_topic("topic-café").unwrap_err();
+        let err = validate_kafka_topic("topic-caf\u{E9}").unwrap_err();
         assert!(err.contains("invalid character"), "unexpected error: {err}");
+    }
+
+    // ---- sanitize_for_log ----
+
+    /// Scenario: sanitize a benign, short value for a log line.
+    /// Guarantees: a normal topic-like value passes through unchanged so
+    /// operators still see the real value.
+    #[test]
+    fn sanitize_for_log_passes_through_benign_value() {
+        assert_eq!(sanitize_for_log("tenant_a-logs.v1"), "tenant_a-logs.v1");
+    }
+
+    /// Scenario: sanitize a value containing control characters and a newline.
+    /// Guarantees: control characters are escaped so an adversarial value cannot
+    /// forge a new log record (no raw newline/carriage-return survives).
+    #[test]
+    fn sanitize_for_log_escapes_control_characters() {
+        let out = sanitize_for_log("a\nb\tc\rd\0e");
+        assert!(!out.contains('\n'), "raw newline must be escaped: {out:?}");
+        assert!(!out.contains('\r'), "raw CR must be escaped: {out:?}");
+        assert!(!out.contains('\t'), "raw tab must be escaped: {out:?}");
+        assert!(!out.contains('\0'), "raw NUL must be escaped: {out:?}");
+        assert!(out.contains("\\n"), "newline should render as \\n: {out:?}");
+    }
+
+    /// Scenario: sanitize a value longer than the log bound.
+    /// Guarantees: the output is bounded to MAX_SANITIZED_LOG_LEN characters
+    /// (plus a truncation marker) so a client cannot cause unbounded log growth.
+    #[test]
+    fn sanitize_for_log_truncates_overlong_value() {
+        let long = "a".repeat(MAX_SANITIZED_LOG_LEN * 3);
+        let out = sanitize_for_log(&long);
+        assert!(out.ends_with("..."), "truncation marker expected: {out:?}");
+        let body_len = out.trim_end_matches("...").chars().count();
+        assert_eq!(
+            body_len, MAX_SANITIZED_LOG_LEN,
+            "sanitized body must be bounded to MAX_SANITIZED_LOG_LEN"
+        );
     }
 
     // ---- LogLevel ----

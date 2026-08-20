@@ -30,210 +30,32 @@ impl AssociatedEntity for entities::NodeWithCustomAttributeSet {}
 /// Strongly typed values for the `processor.retry` metric set.
 #[derive(Debug, Default, Clone)]
 #[repr(C, align(64))]
-pub struct RetryProcessorMetrics {
-    /// Number of items consumed (logs) with outcome=failure
-    pub consumed_items_logs_failure: otap_df_telemetry::instrument::Counter<u64>,
-    /// Number of items consumed (logs) with outcome=refused
-    pub consumed_items_logs_refused: otap_df_telemetry::instrument::Counter<u64>,
-    /// Number of items consumed (logs) with outcome=success
-    pub consumed_items_logs_success: otap_df_telemetry::instrument::Counter<u64>,
-    /// Number of items consumed (metrics) with outcome=failure
-    pub consumed_items_metrics_failure: otap_df_telemetry::instrument::Counter<u64>,
-    /// Number of items consumed (metrics) with outcome=refused
-    pub consumed_items_metrics_refused: otap_df_telemetry::instrument::Counter<u64>,
-    /// Number of items consumed (metrics) with outcome=success
-    pub consumed_items_metrics_success: otap_df_telemetry::instrument::Counter<u64>,
-    /// Number of items consumed (traces) with outcome=failure
-    pub consumed_items_traces_failure: otap_df_telemetry::instrument::Counter<u64>,
-    /// Number of items consumed (traces) with outcome=refused
-    pub consumed_items_traces_refused: otap_df_telemetry::instrument::Counter<u64>,
-    /// Number of items consumed (traces) with outcome=success
-    pub consumed_items_traces_success: otap_df_telemetry::instrument::Counter<u64>,
-    /// Number of items produced (logs) with outcome=refused (downstream error)
-    pub produced_items_logs_refused: otap_df_telemetry::instrument::Counter<u64>,
-    /// Number of items produced (logs) with outcome=success
-    pub produced_items_logs_success: otap_df_telemetry::instrument::Counter<u64>,
-    /// Number of items produced (metrics) with outcome=refused (downstream error)
-    pub produced_items_metrics_refused: otap_df_telemetry::instrument::Counter<u64>,
-    /// Number of items produced (metrics) with outcome=success
-    pub produced_items_metrics_success: otap_df_telemetry::instrument::Counter<u64>,
-    /// Number of items produced (traces) with outcome=refused (downstream error)
-    pub produced_items_traces_refused: otap_df_telemetry::instrument::Counter<u64>,
-    /// Number of items produced (traces) with outcome=success
-    pub produced_items_traces_success: otap_df_telemetry::instrument::Counter<u64>,
-    /// Number of retry attempts scheduled as a result of NACKs, logs.
-    pub retry_attempts_logs: otap_df_telemetry::instrument::Counter<u64>,
-    /// Number of retry attempts scheduled as a result of NACKs, metrics.
-    pub retry_attempts_metrics: otap_df_telemetry::instrument::Counter<u64>,
-    /// Number of retry attempts scheduled as a result of NACKs, traces.
-    pub retry_attempts_traces: otap_df_telemetry::instrument::Counter<u64>,
+pub struct RetryOperationalMetrics {
+    /// Number of PData messages accepted downstream after at least one retry.
+    pub messages_recovered: otap_df_telemetry::instrument::Counter<u64>,
+    /// Number of retries successfully scheduled after a downstream refusal.
+    pub retries_scheduled: otap_df_telemetry::instrument::Counter<u64>,
 }
 
 /// Per-field conditional availability in descriptor order.
-pub const RETRY_PROCESSOR_METRICS_METRIC_AVAILABILITY: &[Option<&str>] = &[
-    AVAILABILITY,
-    AVAILABILITY,
-    AVAILABILITY,
-    AVAILABILITY,
-    AVAILABILITY,
-    AVAILABILITY,
-    AVAILABILITY,
-    AVAILABILITY,
-    AVAILABILITY,
-    AVAILABILITY,
-    AVAILABILITY,
-    AVAILABILITY,
-    AVAILABILITY,
-    AVAILABILITY,
-    AVAILABILITY,
-    AVAILABILITY,
-    AVAILABILITY,
-    AVAILABILITY,
-];
+pub const RETRY_OPERATIONAL_METRICS_METRIC_AVAILABILITY: &[Option<&str>] =
+    &[AVAILABILITY, AVAILABILITY];
 
-static RETRY_PROCESSOR_METRICS_DESCRIPTOR: MetricsDescriptor = MetricsDescriptor {
+static RETRY_OPERATIONAL_METRICS_DESCRIPTOR: MetricsDescriptor = MetricsDescriptor {
     name: METRIC_SET,
     metrics: &[
         MetricsField {
-            name: "consumed.items.logs.failure",
-            unit: "{item}",
-            brief: "Number of items consumed (logs) with outcome=failure",
+            name: "messages.recovered",
+            unit: "{message}",
+            brief: "Number of PData messages accepted downstream after at least one retry.",
             instrument: Instrument::Counter,
             temporality: Some(otap_df_telemetry::descriptor::Temporality::Delta),
             value_type: MetricValueType::U64,
         },
         MetricsField {
-            name: "consumed.items.logs.refused",
-            unit: "{item}",
-            brief: "Number of items consumed (logs) with outcome=refused",
-            instrument: Instrument::Counter,
-            temporality: Some(otap_df_telemetry::descriptor::Temporality::Delta),
-            value_type: MetricValueType::U64,
-        },
-        MetricsField {
-            name: "consumed.items.logs.success",
-            unit: "{item}",
-            brief: "Number of items consumed (logs) with outcome=success",
-            instrument: Instrument::Counter,
-            temporality: Some(otap_df_telemetry::descriptor::Temporality::Delta),
-            value_type: MetricValueType::U64,
-        },
-        MetricsField {
-            name: "consumed.items.metrics.failure",
-            unit: "{item}",
-            brief: "Number of items consumed (metrics) with outcome=failure",
-            instrument: Instrument::Counter,
-            temporality: Some(otap_df_telemetry::descriptor::Temporality::Delta),
-            value_type: MetricValueType::U64,
-        },
-        MetricsField {
-            name: "consumed.items.metrics.refused",
-            unit: "{item}",
-            brief: "Number of items consumed (metrics) with outcome=refused",
-            instrument: Instrument::Counter,
-            temporality: Some(otap_df_telemetry::descriptor::Temporality::Delta),
-            value_type: MetricValueType::U64,
-        },
-        MetricsField {
-            name: "consumed.items.metrics.success",
-            unit: "{item}",
-            brief: "Number of items consumed (metrics) with outcome=success",
-            instrument: Instrument::Counter,
-            temporality: Some(otap_df_telemetry::descriptor::Temporality::Delta),
-            value_type: MetricValueType::U64,
-        },
-        MetricsField {
-            name: "consumed.items.traces.failure",
-            unit: "{item}",
-            brief: "Number of items consumed (traces) with outcome=failure",
-            instrument: Instrument::Counter,
-            temporality: Some(otap_df_telemetry::descriptor::Temporality::Delta),
-            value_type: MetricValueType::U64,
-        },
-        MetricsField {
-            name: "consumed.items.traces.refused",
-            unit: "{item}",
-            brief: "Number of items consumed (traces) with outcome=refused",
-            instrument: Instrument::Counter,
-            temporality: Some(otap_df_telemetry::descriptor::Temporality::Delta),
-            value_type: MetricValueType::U64,
-        },
-        MetricsField {
-            name: "consumed.items.traces.success",
-            unit: "{item}",
-            brief: "Number of items consumed (traces) with outcome=success",
-            instrument: Instrument::Counter,
-            temporality: Some(otap_df_telemetry::descriptor::Temporality::Delta),
-            value_type: MetricValueType::U64,
-        },
-        MetricsField {
-            name: "produced.items.logs.refused",
-            unit: "{item}",
-            brief: "Number of items produced (logs) with outcome=refused (downstream error)",
-            instrument: Instrument::Counter,
-            temporality: Some(otap_df_telemetry::descriptor::Temporality::Delta),
-            value_type: MetricValueType::U64,
-        },
-        MetricsField {
-            name: "produced.items.logs.success",
-            unit: "{item}",
-            brief: "Number of items produced (logs) with outcome=success",
-            instrument: Instrument::Counter,
-            temporality: Some(otap_df_telemetry::descriptor::Temporality::Delta),
-            value_type: MetricValueType::U64,
-        },
-        MetricsField {
-            name: "produced.items.metrics.refused",
-            unit: "{item}",
-            brief: "Number of items produced (metrics) with outcome=refused (downstream error)",
-            instrument: Instrument::Counter,
-            temporality: Some(otap_df_telemetry::descriptor::Temporality::Delta),
-            value_type: MetricValueType::U64,
-        },
-        MetricsField {
-            name: "produced.items.metrics.success",
-            unit: "{item}",
-            brief: "Number of items produced (metrics) with outcome=success",
-            instrument: Instrument::Counter,
-            temporality: Some(otap_df_telemetry::descriptor::Temporality::Delta),
-            value_type: MetricValueType::U64,
-        },
-        MetricsField {
-            name: "produced.items.traces.refused",
-            unit: "{item}",
-            brief: "Number of items produced (traces) with outcome=refused (downstream error)",
-            instrument: Instrument::Counter,
-            temporality: Some(otap_df_telemetry::descriptor::Temporality::Delta),
-            value_type: MetricValueType::U64,
-        },
-        MetricsField {
-            name: "produced.items.traces.success",
-            unit: "{item}",
-            brief: "Number of items produced (traces) with outcome=success",
-            instrument: Instrument::Counter,
-            temporality: Some(otap_df_telemetry::descriptor::Temporality::Delta),
-            value_type: MetricValueType::U64,
-        },
-        MetricsField {
-            name: "retry.attempts.logs",
-            unit: "{event}",
-            brief: "Number of retry attempts scheduled as a result of NACKs, logs.",
-            instrument: Instrument::Counter,
-            temporality: Some(otap_df_telemetry::descriptor::Temporality::Delta),
-            value_type: MetricValueType::U64,
-        },
-        MetricsField {
-            name: "retry.attempts.metrics",
-            unit: "{event}",
-            brief: "Number of retry attempts scheduled as a result of NACKs, metrics.",
-            instrument: Instrument::Counter,
-            temporality: Some(otap_df_telemetry::descriptor::Temporality::Delta),
-            value_type: MetricValueType::U64,
-        },
-        MetricsField {
-            name: "retry.attempts.traces",
-            unit: "{event}",
-            brief: "Number of retry attempts scheduled as a result of NACKs, traces.",
+            name: "retries.scheduled",
+            unit: "{retry}",
+            brief: "Number of retries successfully scheduled after a downstream refusal.",
             instrument: Instrument::Counter,
             temporality: Some(otap_df_telemetry::descriptor::Temporality::Delta),
             value_type: MetricValueType::U64,
@@ -241,119 +63,39 @@ static RETRY_PROCESSOR_METRICS_DESCRIPTOR: MetricsDescriptor = MetricsDescriptor
     ],
 };
 
-impl MetricSetHandler for RetryProcessorMetrics {
+impl MetricSetHandler for RetryOperationalMetrics {
     #[inline]
     fn descriptor(&self) -> &'static MetricsDescriptor {
-        &RETRY_PROCESSOR_METRICS_DESCRIPTOR
+        &RETRY_OPERATIONAL_METRICS_DESCRIPTOR
     }
 
     #[inline]
     fn snapshot_values(&self) -> Vec<MetricValue> {
         vec![
-            MetricValue::from(self.consumed_items_logs_failure.get()),
-            MetricValue::from(self.consumed_items_logs_refused.get()),
-            MetricValue::from(self.consumed_items_logs_success.get()),
-            MetricValue::from(self.consumed_items_metrics_failure.get()),
-            MetricValue::from(self.consumed_items_metrics_refused.get()),
-            MetricValue::from(self.consumed_items_metrics_success.get()),
-            MetricValue::from(self.consumed_items_traces_failure.get()),
-            MetricValue::from(self.consumed_items_traces_refused.get()),
-            MetricValue::from(self.consumed_items_traces_success.get()),
-            MetricValue::from(self.produced_items_logs_refused.get()),
-            MetricValue::from(self.produced_items_logs_success.get()),
-            MetricValue::from(self.produced_items_metrics_refused.get()),
-            MetricValue::from(self.produced_items_metrics_success.get()),
-            MetricValue::from(self.produced_items_traces_refused.get()),
-            MetricValue::from(self.produced_items_traces_success.get()),
-            MetricValue::from(self.retry_attempts_logs.get()),
-            MetricValue::from(self.retry_attempts_metrics.get()),
-            MetricValue::from(self.retry_attempts_traces.get()),
+            MetricValue::from(self.messages_recovered.get()),
+            MetricValue::from(self.retries_scheduled.get()),
         ]
     }
 
     #[inline]
     fn clear_values(&mut self) {
-        self.consumed_items_logs_failure.reset();
-        self.consumed_items_logs_refused.reset();
-        self.consumed_items_logs_success.reset();
-        self.consumed_items_metrics_failure.reset();
-        self.consumed_items_metrics_refused.reset();
-        self.consumed_items_metrics_success.reset();
-        self.consumed_items_traces_failure.reset();
-        self.consumed_items_traces_refused.reset();
-        self.consumed_items_traces_success.reset();
-        self.produced_items_logs_refused.reset();
-        self.produced_items_logs_success.reset();
-        self.produced_items_metrics_refused.reset();
-        self.produced_items_metrics_success.reset();
-        self.produced_items_traces_refused.reset();
-        self.produced_items_traces_success.reset();
-        self.retry_attempts_logs.reset();
-        self.retry_attempts_metrics.reset();
-        self.retry_attempts_traces.reset();
+        self.messages_recovered.reset();
+        self.retries_scheduled.reset();
     }
 
     #[inline]
     fn needs_flush(&self) -> bool {
-        if !MetricValue::from(self.consumed_items_logs_failure.get()).is_zero() {
+        if !MetricValue::from(self.messages_recovered.get()).is_zero() {
             return true;
         }
-        if !MetricValue::from(self.consumed_items_logs_refused.get()).is_zero() {
-            return true;
-        }
-        if !MetricValue::from(self.consumed_items_logs_success.get()).is_zero() {
-            return true;
-        }
-        if !MetricValue::from(self.consumed_items_metrics_failure.get()).is_zero() {
-            return true;
-        }
-        if !MetricValue::from(self.consumed_items_metrics_refused.get()).is_zero() {
-            return true;
-        }
-        if !MetricValue::from(self.consumed_items_metrics_success.get()).is_zero() {
-            return true;
-        }
-        if !MetricValue::from(self.consumed_items_traces_failure.get()).is_zero() {
-            return true;
-        }
-        if !MetricValue::from(self.consumed_items_traces_refused.get()).is_zero() {
-            return true;
-        }
-        if !MetricValue::from(self.consumed_items_traces_success.get()).is_zero() {
-            return true;
-        }
-        if !MetricValue::from(self.produced_items_logs_refused.get()).is_zero() {
-            return true;
-        }
-        if !MetricValue::from(self.produced_items_logs_success.get()).is_zero() {
-            return true;
-        }
-        if !MetricValue::from(self.produced_items_metrics_refused.get()).is_zero() {
-            return true;
-        }
-        if !MetricValue::from(self.produced_items_metrics_success.get()).is_zero() {
-            return true;
-        }
-        if !MetricValue::from(self.produced_items_traces_refused.get()).is_zero() {
-            return true;
-        }
-        if !MetricValue::from(self.produced_items_traces_success.get()).is_zero() {
-            return true;
-        }
-        if !MetricValue::from(self.retry_attempts_logs.get()).is_zero() {
-            return true;
-        }
-        if !MetricValue::from(self.retry_attempts_metrics.get()).is_zero() {
-            return true;
-        }
-        if !MetricValue::from(self.retry_attempts_traces.get()).is_zero() {
+        if !MetricValue::from(self.retries_scheduled.get()).is_zero() {
             return true;
         }
         false
     }
 }
 
-impl RetryProcessorMetrics {
+impl RetryOperationalMetrics {
     /// Registers this metric set against a semantically compatible entity.
     #[must_use]
     pub fn register<E>(registry: &TelemetryRegistryHandle, entity: E) -> MetricSet<Self>

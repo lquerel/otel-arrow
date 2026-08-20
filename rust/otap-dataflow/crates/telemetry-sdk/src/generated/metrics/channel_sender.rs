@@ -30,47 +30,83 @@ impl AssociatedEntity for entities::ExtensionChannelAttributeSet {}
 /// Strongly typed values for the `channel.sender` metric set.
 #[derive(Debug, Default, Clone)]
 #[repr(C, align(64))]
-pub struct ChannelSenderMetrics {
-    /// Count of messages successfully sent to the channel.
-    pub send_count: otap_df_telemetry::instrument::Counter<u64>,
-    /// Count of send failures due to a closed channel.
-    pub send_error_closed: otap_df_telemetry::instrument::Counter<u64>,
-    /// Count of send failures due to a full channel.
-    pub send_error_full: otap_df_telemetry::instrument::Counter<u64>,
+pub struct ChannelSenderFailureMetrics {
+    /// Failed or refused immediate send attempts.
+    pub failures: otap_df_telemetry::instrument::Counter<u64>,
 }
 
 /// Per-field conditional availability in descriptor order.
-pub const CHANNEL_SENDER_METRICS_METRIC_AVAILABILITY: &[Option<&str>] =
-    &[AVAILABILITY, AVAILABILITY, AVAILABILITY];
+pub const CHANNEL_SENDER_FAILURE_METRICS_METRIC_AVAILABILITY: &[Option<&str>] = &[AVAILABILITY];
+
+static CHANNEL_SENDER_FAILURE_METRICS_DESCRIPTOR: MetricsDescriptor = MetricsDescriptor {
+    name: METRIC_SET,
+    metrics: &[MetricsField {
+        name: "failures",
+        unit: "{message}",
+        brief: "Failed or refused immediate send attempts.",
+        instrument: Instrument::Counter,
+        temporality: Some(otap_df_telemetry::descriptor::Temporality::Delta),
+        value_type: MetricValueType::U64,
+    }],
+};
+
+impl MetricSetHandler for ChannelSenderFailureMetrics {
+    #[inline]
+    fn descriptor(&self) -> &'static MetricsDescriptor {
+        &CHANNEL_SENDER_FAILURE_METRICS_DESCRIPTOR
+    }
+
+    #[inline]
+    fn snapshot_values(&self) -> Vec<MetricValue> {
+        vec![MetricValue::from(self.failures.get())]
+    }
+
+    #[inline]
+    fn clear_values(&mut self) {
+        self.failures.reset();
+    }
+
+    #[inline]
+    fn needs_flush(&self) -> bool {
+        if !MetricValue::from(self.failures.get()).is_zero() {
+            return true;
+        }
+        false
+    }
+}
+
+impl ChannelSenderFailureMetrics {
+    /// Registers this metric set against a semantically compatible entity.
+    #[must_use]
+    pub fn register<E>(registry: &TelemetryRegistryHandle, entity: E) -> MetricSet<Self>
+    where
+        E: AssociatedEntity,
+    {
+        registry.register_metric_set(entity)
+    }
+}
+
+/// Strongly typed values for the `channel.sender` metric set.
+#[derive(Debug, Default, Clone)]
+#[repr(C, align(64))]
+pub struct ChannelSenderMetrics {
+    /// Messages whose immediate channel send attempt terminated.
+    pub messages: otap_df_telemetry::instrument::Counter<u64>,
+}
+
+/// Per-field conditional availability in descriptor order.
+pub const CHANNEL_SENDER_METRICS_METRIC_AVAILABILITY: &[Option<&str>] = &[AVAILABILITY];
 
 static CHANNEL_SENDER_METRICS_DESCRIPTOR: MetricsDescriptor = MetricsDescriptor {
     name: METRIC_SET,
-    metrics: &[
-        MetricsField {
-            name: "send.count",
-            unit: "{message}",
-            brief: "Count of messages successfully sent to the channel.",
-            instrument: Instrument::Counter,
-            temporality: Some(otap_df_telemetry::descriptor::Temporality::Delta),
-            value_type: MetricValueType::U64,
-        },
-        MetricsField {
-            name: "send.error_closed",
-            unit: "{1}",
-            brief: "Count of send failures due to a closed channel.",
-            instrument: Instrument::Counter,
-            temporality: Some(otap_df_telemetry::descriptor::Temporality::Delta),
-            value_type: MetricValueType::U64,
-        },
-        MetricsField {
-            name: "send.error_full",
-            unit: "{1}",
-            brief: "Count of send failures due to a full channel.",
-            instrument: Instrument::Counter,
-            temporality: Some(otap_df_telemetry::descriptor::Temporality::Delta),
-            value_type: MetricValueType::U64,
-        },
-    ],
+    metrics: &[MetricsField {
+        name: "messages",
+        unit: "{message}",
+        brief: "Messages whose immediate channel send attempt terminated.",
+        instrument: Instrument::Counter,
+        temporality: Some(otap_df_telemetry::descriptor::Temporality::Delta),
+        value_type: MetricValueType::U64,
+    }],
 };
 
 impl MetricSetHandler for ChannelSenderMetrics {
@@ -81,29 +117,17 @@ impl MetricSetHandler for ChannelSenderMetrics {
 
     #[inline]
     fn snapshot_values(&self) -> Vec<MetricValue> {
-        vec![
-            MetricValue::from(self.send_count.get()),
-            MetricValue::from(self.send_error_closed.get()),
-            MetricValue::from(self.send_error_full.get()),
-        ]
+        vec![MetricValue::from(self.messages.get())]
     }
 
     #[inline]
     fn clear_values(&mut self) {
-        self.send_count.reset();
-        self.send_error_closed.reset();
-        self.send_error_full.reset();
+        self.messages.reset();
     }
 
     #[inline]
     fn needs_flush(&self) -> bool {
-        if !MetricValue::from(self.send_count.get()).is_zero() {
-            return true;
-        }
-        if !MetricValue::from(self.send_error_closed.get()).is_zero() {
-            return true;
-        }
-        if !MetricValue::from(self.send_error_full.get()).is_zero() {
+        if !MetricValue::from(self.messages.get()).is_zero() {
             return true;
         }
         false
@@ -111,6 +135,125 @@ impl MetricSetHandler for ChannelSenderMetrics {
 }
 
 impl ChannelSenderMetrics {
+    /// Registers this metric set against a semantically compatible entity.
+    #[must_use]
+    pub fn register<E>(registry: &TelemetryRegistryHandle, entity: E) -> MetricSet<Self>
+    where
+        E: AssociatedEntity,
+    {
+        registry.register_metric_set(entity)
+    }
+}
+
+/// Strongly typed values for the `channel.sender` metric set.
+#[derive(Debug, Default, Clone)]
+#[repr(C, align(64))]
+pub struct ControlChannelSenderFailureMetrics {
+    /// Failed or refused immediate send attempts.
+    pub failures: otap_df_telemetry::instrument::Counter<u64>,
+}
+
+/// Per-field conditional availability in descriptor order.
+pub const CONTROL_CHANNEL_SENDER_FAILURE_METRICS_METRIC_AVAILABILITY: &[Option<&str>] =
+    &[AVAILABILITY];
+
+static CONTROL_CHANNEL_SENDER_FAILURE_METRICS_DESCRIPTOR: MetricsDescriptor = MetricsDescriptor {
+    name: METRIC_SET,
+    metrics: &[MetricsField {
+        name: "failures",
+        unit: "{message}",
+        brief: "Failed or refused immediate send attempts.",
+        instrument: Instrument::Counter,
+        temporality: Some(otap_df_telemetry::descriptor::Temporality::Delta),
+        value_type: MetricValueType::U64,
+    }],
+};
+
+impl MetricSetHandler for ControlChannelSenderFailureMetrics {
+    #[inline]
+    fn descriptor(&self) -> &'static MetricsDescriptor {
+        &CONTROL_CHANNEL_SENDER_FAILURE_METRICS_DESCRIPTOR
+    }
+
+    #[inline]
+    fn snapshot_values(&self) -> Vec<MetricValue> {
+        vec![MetricValue::from(self.failures.get())]
+    }
+
+    #[inline]
+    fn clear_values(&mut self) {
+        self.failures.reset();
+    }
+
+    #[inline]
+    fn needs_flush(&self) -> bool {
+        if !MetricValue::from(self.failures.get()).is_zero() {
+            return true;
+        }
+        false
+    }
+}
+
+impl ControlChannelSenderFailureMetrics {
+    /// Registers this metric set against a semantically compatible entity.
+    #[must_use]
+    pub fn register<E>(registry: &TelemetryRegistryHandle, entity: E) -> MetricSet<Self>
+    where
+        E: AssociatedEntity,
+    {
+        registry.register_metric_set(entity)
+    }
+}
+
+/// Strongly typed values for the `channel.sender` metric set.
+#[derive(Debug, Default, Clone)]
+#[repr(C, align(64))]
+pub struct ControlChannelSenderMetrics {
+    /// Messages whose immediate channel send attempt terminated.
+    pub messages: otap_df_telemetry::instrument::Counter<u64>,
+}
+
+/// Per-field conditional availability in descriptor order.
+pub const CONTROL_CHANNEL_SENDER_METRICS_METRIC_AVAILABILITY: &[Option<&str>] = &[AVAILABILITY];
+
+static CONTROL_CHANNEL_SENDER_METRICS_DESCRIPTOR: MetricsDescriptor = MetricsDescriptor {
+    name: METRIC_SET,
+    metrics: &[MetricsField {
+        name: "messages",
+        unit: "{message}",
+        brief: "Messages whose immediate channel send attempt terminated.",
+        instrument: Instrument::Counter,
+        temporality: Some(otap_df_telemetry::descriptor::Temporality::Delta),
+        value_type: MetricValueType::U64,
+    }],
+};
+
+impl MetricSetHandler for ControlChannelSenderMetrics {
+    #[inline]
+    fn descriptor(&self) -> &'static MetricsDescriptor {
+        &CONTROL_CHANNEL_SENDER_METRICS_DESCRIPTOR
+    }
+
+    #[inline]
+    fn snapshot_values(&self) -> Vec<MetricValue> {
+        vec![MetricValue::from(self.messages.get())]
+    }
+
+    #[inline]
+    fn clear_values(&mut self) {
+        self.messages.reset();
+    }
+
+    #[inline]
+    fn needs_flush(&self) -> bool {
+        if !MetricValue::from(self.messages.get()).is_zero() {
+            return true;
+        }
+        false
+    }
+}
+
+impl ControlChannelSenderMetrics {
     /// Registers this metric set against a semantically compatible entity.
     #[must_use]
     pub fn register<E>(registry: &TelemetryRegistryHandle, entity: E) -> MetricSet<Self>

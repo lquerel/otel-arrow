@@ -30,78 +30,38 @@ impl AssociatedEntity for entities::NodeWithCustomAttributeSet {}
 /// Strongly typed values for the `processor.fanout` metric set.
 #[derive(Debug, Default, Clone)]
 #[repr(C, align(64))]
-pub struct FanoutMetrics {
-    /// Requests acked upstream (after await_ack/fallback aggregation).
-    pub acked: otap_df_telemetry::instrument::Counter<u64>,
-    /// Current number of in-flight requests tracked by the processor.
-    pub in_flight: otap_df_telemetry::instrument::Gauge<u64>,
+pub struct FanoutOperationalMetrics {
+    /// Current number of active pipeline messages tracked by the processor.
+    pub active: otap_df_telemetry::instrument::Gauge<u64>,
     /// Configured max_inflight value (0 means unlimited).
     pub max_inflight_config: otap_df_telemetry::instrument::Gauge<u64>,
-    /// Requests nacked upstream (after await_ack/fallback aggregation).
-    pub nacked: otap_df_telemetry::instrument::Counter<u64>,
-    /// Requests dispatched. Note: This is a convenience metric that overlaps with channel-level send metrics. Consider removing if metric bloat is a concern.
-    pub sent: otap_df_telemetry::instrument::Counter<u64>,
     /// Increments on transition from not-throttled to throttled.
     pub throttle_episodes: otap_df_telemetry::instrument::Counter<u64>,
     /// 1 when fanout is currently refusing new pdata via accept_pdata(), else 0.
     pub throttled: otap_df_telemetry::instrument::Gauge<u64>,
-    /// Metric for the OTAP Dataflow internal telemetry processor.fanout.timed.out.
-    pub timed_out: otap_df_telemetry::instrument::Counter<u64>,
 }
 
 /// Per-field conditional availability in descriptor order.
-pub const FANOUT_METRICS_METRIC_AVAILABILITY: &[Option<&str>] = &[
-    AVAILABILITY,
-    AVAILABILITY,
-    AVAILABILITY,
-    AVAILABILITY,
-    AVAILABILITY,
-    AVAILABILITY,
-    AVAILABILITY,
-    AVAILABILITY,
-];
+pub const FANOUT_OPERATIONAL_METRICS_METRIC_AVAILABILITY: &[Option<&str>] =
+    &[AVAILABILITY, AVAILABILITY, AVAILABILITY, AVAILABILITY];
 
-static FANOUT_METRICS_DESCRIPTOR: MetricsDescriptor = MetricsDescriptor {
+static FANOUT_OPERATIONAL_METRICS_DESCRIPTOR: MetricsDescriptor = MetricsDescriptor {
     name: METRIC_SET,
     metrics: &[
         MetricsField {
-            name: "acked",
-            unit: "{item}",
-            brief: "Requests acked upstream (after await_ack/fallback aggregation).",
-            instrument: Instrument::Counter,
-            temporality: Some(otap_df_telemetry::descriptor::Temporality::Delta),
-            value_type: MetricValueType::U64,
-        },
-        MetricsField {
-            name: "in.flight",
-            unit: "{item}",
-            brief: "Current number of in-flight requests tracked by the processor.",
+            name: "active",
+            unit: "{message}",
+            brief: "Current number of active pipeline messages tracked by the processor.",
             instrument: Instrument::Gauge,
             temporality: None,
             value_type: MetricValueType::U64,
         },
         MetricsField {
             name: "max.inflight.config",
-            unit: "{item}",
+            unit: "{message}",
             brief: "Configured max_inflight value (0 means unlimited).",
             instrument: Instrument::Gauge,
             temporality: None,
-            value_type: MetricValueType::U64,
-        },
-        MetricsField {
-            name: "nacked",
-            unit: "{item}",
-            brief: "Requests nacked upstream (after await_ack/fallback aggregation).",
-            instrument: Instrument::Counter,
-            temporality: Some(otap_df_telemetry::descriptor::Temporality::Delta),
-            value_type: MetricValueType::U64,
-        },
-        MetricsField {
-            name: "sent",
-            unit: "{item}",
-            brief: "Requests dispatched. Note: This is a convenience metric that overlaps with channel-level send metrics. Consider removing if metric bloat is a concern.",
-            instrument: Instrument::Counter,
-            temporality: Some(otap_df_telemetry::descriptor::Temporality::Delta),
             value_type: MetricValueType::U64,
         },
         MetricsField {
@@ -120,68 +80,99 @@ static FANOUT_METRICS_DESCRIPTOR: MetricsDescriptor = MetricsDescriptor {
             temporality: None,
             value_type: MetricValueType::U64,
         },
-        MetricsField {
-            name: "timed.out",
-            unit: "{item}",
-            brief: "Metric for the OTAP Dataflow internal telemetry processor.fanout.timed.out.",
-            instrument: Instrument::Counter,
-            temporality: Some(otap_df_telemetry::descriptor::Temporality::Delta),
-            value_type: MetricValueType::U64,
-        },
     ],
 };
 
-impl MetricSetHandler for FanoutMetrics {
+impl MetricSetHandler for FanoutOperationalMetrics {
     #[inline]
     fn descriptor(&self) -> &'static MetricsDescriptor {
-        &FANOUT_METRICS_DESCRIPTOR
+        &FANOUT_OPERATIONAL_METRICS_DESCRIPTOR
     }
 
     #[inline]
     fn snapshot_values(&self) -> Vec<MetricValue> {
         vec![
-            MetricValue::from(self.acked.get()),
-            MetricValue::from(self.in_flight.get()),
+            MetricValue::from(self.active.get()),
             MetricValue::from(self.max_inflight_config.get()),
-            MetricValue::from(self.nacked.get()),
-            MetricValue::from(self.sent.get()),
             MetricValue::from(self.throttle_episodes.get()),
             MetricValue::from(self.throttled.get()),
-            MetricValue::from(self.timed_out.get()),
         ]
     }
 
     #[inline]
     fn clear_values(&mut self) {
-        self.acked.reset();
-        self.nacked.reset();
-        self.sent.reset();
         self.throttle_episodes.reset();
-        self.timed_out.reset();
     }
 
     #[inline]
     fn needs_flush(&self) -> bool {
-        if !MetricValue::from(self.acked.get()).is_zero() {
-            return true;
-        }
-        if !MetricValue::from(self.nacked.get()).is_zero() {
-            return true;
-        }
-        if !MetricValue::from(self.sent.get()).is_zero() {
-            return true;
-        }
         if !MetricValue::from(self.throttle_episodes.get()).is_zero() {
-            return true;
-        }
-        if !MetricValue::from(self.timed_out.get()).is_zero() {
             return true;
         }
         true
     }
 }
 
-impl FanoutMetrics {
+impl FanoutOperationalMetrics {
+    /// Registers this metric set against a semantically compatible entity.
+    #[must_use]
+    pub fn register<E>(registry: &TelemetryRegistryHandle, entity: E) -> MetricSet<Self>
+    where
+        E: AssociatedEntity,
+    {
+        registry.register_metric_set(entity)
+    }
+}
+
+/// Strongly typed values for the `processor.fanout` metric set.
+#[derive(Debug, Default, Clone)]
+#[repr(C, align(64))]
+pub struct FanoutTimeoutMetrics {
+    /// Destination message attempts that timed out.
+    pub timed_out: otap_df_telemetry::instrument::Counter<u64>,
+}
+
+/// Per-field conditional availability in descriptor order.
+pub const FANOUT_TIMEOUT_METRICS_METRIC_AVAILABILITY: &[Option<&str>] = &[AVAILABILITY];
+
+static FANOUT_TIMEOUT_METRICS_DESCRIPTOR: MetricsDescriptor = MetricsDescriptor {
+    name: METRIC_SET,
+    metrics: &[MetricsField {
+        name: "timed.out",
+        unit: "{message}",
+        brief: "Destination message attempts that timed out.",
+        instrument: Instrument::Counter,
+        temporality: Some(otap_df_telemetry::descriptor::Temporality::Delta),
+        value_type: MetricValueType::U64,
+    }],
+};
+
+impl MetricSetHandler for FanoutTimeoutMetrics {
+    #[inline]
+    fn descriptor(&self) -> &'static MetricsDescriptor {
+        &FANOUT_TIMEOUT_METRICS_DESCRIPTOR
+    }
+
+    #[inline]
+    fn snapshot_values(&self) -> Vec<MetricValue> {
+        vec![MetricValue::from(self.timed_out.get())]
+    }
+
+    #[inline]
+    fn clear_values(&mut self) {
+        self.timed_out.reset();
+    }
+
+    #[inline]
+    fn needs_flush(&self) -> bool {
+        if !MetricValue::from(self.timed_out.get()).is_zero() {
+            return true;
+        }
+        false
+    }
+}
+
+impl FanoutTimeoutMetrics {
     /// Registers this metric set against a semantically compatible entity.
     #[must_use]
     pub fn register<E>(registry: &TelemetryRegistryHandle, entity: E) -> MetricSet<Self>

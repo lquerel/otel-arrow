@@ -68,6 +68,10 @@ impl Unwindable for DstPData {
         self.frames.pop()
     }
 
+    fn signal(&self) -> Option<otap_df_config::SignalType> {
+        None
+    }
+
     fn drop_payload(&mut self) {
         self.payload = None;
     }
@@ -82,6 +86,8 @@ pub(super) fn frame(node_id: usize, interests: Interests, tag: u64) -> Frame {
             entry_time_ns: clock::nanos_since_birth(),
             output_port_index: 0,
         },
+        produced_items: 0,
+        consumed_items: 0,
     }
 }
 
@@ -126,6 +132,7 @@ pub(super) fn build_manager<PData>(
         core_id: 0,
         num_cores: 1,
         thread_id: 0,
+        numa_node_id: 0,
     };
     let pipeline_context = PipelineContext::new(controller_context, pipeline_context_params);
     let pipeline_entity_key = pipeline_context.register_pipeline_entity();
@@ -154,6 +161,7 @@ pub(super) fn build_manager<PData>(
             tokio_metrics: false,
             flow_metrics: Vec::new(),
         },
+        Vec::new(),
         Vec::new(),
         empty_node_metric_handles(),
         crate::terminal_state::TerminalMetricsDeadline::default(),

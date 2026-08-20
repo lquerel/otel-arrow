@@ -6,23 +6,28 @@
 use futures::future::BoxFuture;
 use http::{Request, Response};
 use otap_df_engine::memory_limiter::SharedReceiverAdmissionState;
-use otap_df_telemetry::metrics::MetricSet;
 use parking_lot::Mutex;
 use std::sync::Arc;
 use std::task::{Context, Poll};
 use tonic::{Code, Status, body::Body, metadata::MetadataMap};
 use tower::{Layer, Service};
 
-use crate::otlp_metrics::OtlpReceiverMetrics;
+use crate::otlp_metrics::{OtlpProtocol, OtlpReceiverMetrics};
+use otap_df_telemetry::common_attributes::ReceiverRejectionErrorType;
 
 /// Records request rejections before they enter the pipeline.
 pub trait ReceiverRejectionMetrics: Send + Sync {
-    /// Records one request rejected before entering the pipeline.
-    fn record_rejection(&self);
+    /// Records one transport request or stream rejected before entering the pipeline.
+    fn record_rejection(&self, error_type: ReceiverRejectionErrorType);
+
+    /// Records one item within a streaming request rejected before entering the pipeline.
+    fn record_item_rejection(&self, error_type: ReceiverRejectionErrorType) {
+        self.record_rejection(error_type);
+    }
 
     /// Records one request rejected before entering the pipeline due to hard memory pressure.
     fn record_memory_pressure_rejection(&self) {
-        self.record_rejection();
+        self.record_rejection(ReceiverRejectionErrorType::MemoryPressure);
     }
 }
 
@@ -41,15 +46,9 @@ pub fn grpc_memory_pressure_status(state: &SharedReceiverAdmissionState) -> Stat
     Status::with_metadata(Code::ResourceExhausted, "memory pressure", metadata)
 }
 
-impl ReceiverRejectionMetrics for Mutex<MetricSet<OtlpReceiverMetrics>> {
-    fn record_rejection(&self) {
-        self.lock().rejected_requests.inc();
-    }
-
-    fn record_memory_pressure_rejection(&self) {
-        let mut metrics = self.lock();
-        metrics.rejected_requests.inc();
-        metrics.refused_memory_pressure.inc();
+impl ReceiverRejectionMetrics for Mutex<OtlpReceiverMetrics> {
+    fn record_rejection(&self, error_type: ReceiverRejectionErrorType) {
+        self.lock().record_rejection(OtlpProtocol::Grpc, error_type);
     }
 }
 
@@ -89,7 +88,7 @@ impl MemoryPressureLayer {
     #[must_use]
     pub fn with_otlp_metrics(
         state: SharedReceiverAdmissionState,
-        metrics: Arc<Mutex<MetricSet<OtlpReceiverMetrics>>>,
+        metrics: Arc<Mutex<OtlpReceiverMetrics>>,
     ) -> Self {
         Self::with_metrics(state, metrics)
     }

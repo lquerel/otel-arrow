@@ -28,6 +28,124 @@ impl AssociatedEntity for entities::FlowAttributeSet {}
 /// Strongly typed values for the `flow` metric set.
 #[derive(Debug, Default, Clone)]
 #[repr(C, align(64))]
+pub struct FlowConsumedItemsMetrics {
+    /// Number of signal items (log records, spans, or metric data points) entering the flow range.
+    pub consumed_items: otap_df_telemetry::instrument::Counter<u64>,
+}
+
+/// Per-field conditional availability in descriptor order.
+pub const FLOW_CONSUMED_ITEMS_METRICS_METRIC_AVAILABILITY: &[Option<&str>] = &[AVAILABILITY];
+
+static FLOW_CONSUMED_ITEMS_METRICS_DESCRIPTOR: MetricsDescriptor = MetricsDescriptor {
+    name: METRIC_SET,
+    metrics: &[MetricsField {
+        name: "consumed.items",
+        unit: "{item}",
+        brief: "Number of signal items (log records, spans, or metric data points) entering the flow range.",
+        instrument: Instrument::Counter,
+        temporality: Some(otap_df_telemetry::descriptor::Temporality::Delta),
+        value_type: MetricValueType::U64,
+    }],
+};
+
+impl MetricSetHandler for FlowConsumedItemsMetrics {
+    #[inline]
+    fn descriptor(&self) -> &'static MetricsDescriptor {
+        &FLOW_CONSUMED_ITEMS_METRICS_DESCRIPTOR
+    }
+
+    #[inline]
+    fn snapshot_values(&self) -> Vec<MetricValue> {
+        vec![MetricValue::from(self.consumed_items.get())]
+    }
+
+    #[inline]
+    fn clear_values(&mut self) {
+        self.consumed_items.reset();
+    }
+
+    #[inline]
+    fn needs_flush(&self) -> bool {
+        if !MetricValue::from(self.consumed_items.get()).is_zero() {
+            return true;
+        }
+        false
+    }
+}
+
+impl FlowConsumedItemsMetrics {
+    /// Registers this metric set against a semantically compatible entity.
+    #[must_use]
+    pub fn register<E>(registry: &TelemetryRegistryHandle, entity: E) -> MetricSet<Self>
+    where
+        E: AssociatedEntity,
+    {
+        registry.register_metric_set(entity)
+    }
+}
+
+/// Strongly typed values for the `flow` metric set.
+#[derive(Debug, Default, Clone)]
+#[repr(C, align(64))]
+pub struct FlowDroppedItemsMetrics {
+    /// Number of signal items (log records, spans, or metric data points) a decision node chose to drop.
+    pub dropped_items: otap_df_telemetry::instrument::Counter<u64>,
+}
+
+/// Per-field conditional availability in descriptor order.
+pub const FLOW_DROPPED_ITEMS_METRICS_METRIC_AVAILABILITY: &[Option<&str>] = &[AVAILABILITY];
+
+static FLOW_DROPPED_ITEMS_METRICS_DESCRIPTOR: MetricsDescriptor = MetricsDescriptor {
+    name: METRIC_SET,
+    metrics: &[MetricsField {
+        name: "dropped.items",
+        unit: "{item}",
+        brief: "Number of signal items (log records, spans, or metric data points) a decision node chose to drop.",
+        instrument: Instrument::Counter,
+        temporality: Some(otap_df_telemetry::descriptor::Temporality::Delta),
+        value_type: MetricValueType::U64,
+    }],
+};
+
+impl MetricSetHandler for FlowDroppedItemsMetrics {
+    #[inline]
+    fn descriptor(&self) -> &'static MetricsDescriptor {
+        &FLOW_DROPPED_ITEMS_METRICS_DESCRIPTOR
+    }
+
+    #[inline]
+    fn snapshot_values(&self) -> Vec<MetricValue> {
+        vec![MetricValue::from(self.dropped_items.get())]
+    }
+
+    #[inline]
+    fn clear_values(&mut self) {
+        self.dropped_items.reset();
+    }
+
+    #[inline]
+    fn needs_flush(&self) -> bool {
+        if !MetricValue::from(self.dropped_items.get()).is_zero() {
+            return true;
+        }
+        false
+    }
+}
+
+impl FlowDroppedItemsMetrics {
+    /// Registers this metric set against a semantically compatible entity.
+    #[must_use]
+    pub fn register<E>(registry: &TelemetryRegistryHandle, entity: E) -> MetricSet<Self>
+    where
+        E: AssociatedEntity,
+    {
+        registry.register_metric_set(entity)
+    }
+}
+
+/// Strongly typed values for the `flow` metric set.
+#[derive(Debug, Default, Clone)]
+#[repr(C, align(64))]
 pub struct FlowDurationMetrics {
     /// Sum of per-node compute durations (nanoseconds) for messages traversing the flow range.
     pub compute_duration: otap_df_telemetry::instrument::Mmsc,
@@ -87,170 +205,52 @@ impl FlowDurationMetrics {
 /// Strongly typed values for the `flow` metric set.
 #[derive(Debug, Default, Clone)]
 #[repr(C, align(64))]
-pub struct FlowSignalsDroppedMetrics {
-    /// Number of signal items (log records, spans, or metric data points) a decision node chose to drop.
-    pub signals_dropped: otap_df_telemetry::instrument::Mmsc,
-}
-
-/// Per-field conditional availability in descriptor order.
-pub const FLOW_SIGNALS_DROPPED_METRICS_METRIC_AVAILABILITY: &[Option<&str>] = &[AVAILABILITY];
-
-static FLOW_SIGNALS_DROPPED_METRICS_DESCRIPTOR: MetricsDescriptor = MetricsDescriptor {
-    name: METRIC_SET,
-    metrics: &[MetricsField {
-        name: "signals.dropped",
-        unit: "{item}",
-        brief: "Number of signal items (log records, spans, or metric data points) a decision node chose to drop.",
-        instrument: Instrument::Mmsc,
-        temporality: Some(otap_df_telemetry::descriptor::Temporality::Delta),
-        value_type: MetricValueType::F64,
-    }],
-};
-
-impl MetricSetHandler for FlowSignalsDroppedMetrics {
-    #[inline]
-    fn descriptor(&self) -> &'static MetricsDescriptor {
-        &FLOW_SIGNALS_DROPPED_METRICS_DESCRIPTOR
-    }
-
-    #[inline]
-    fn snapshot_values(&self) -> Vec<MetricValue> {
-        vec![MetricValue::from(self.signals_dropped.get())]
-    }
-
-    #[inline]
-    fn clear_values(&mut self) {
-        self.signals_dropped.reset();
-    }
-
-    #[inline]
-    fn needs_flush(&self) -> bool {
-        if !MetricValue::from(self.signals_dropped.get()).is_zero() {
-            return true;
-        }
-        false
-    }
-}
-
-impl FlowSignalsDroppedMetrics {
-    /// Registers this metric set against a semantically compatible entity.
-    #[must_use]
-    pub fn register<E>(registry: &TelemetryRegistryHandle, entity: E) -> MetricSet<Self>
-    where
-        E: AssociatedEntity,
-    {
-        registry.register_metric_set(entity)
-    }
-}
-
-/// Strongly typed values for the `flow` metric set.
-#[derive(Debug, Default, Clone)]
-#[repr(C, align(64))]
-pub struct FlowSignalsIncomingMetrics {
-    /// Number of signal items (log records, spans, or metric data points) entering the flow range.
-    pub signals_incoming: otap_df_telemetry::instrument::Mmsc,
-}
-
-/// Per-field conditional availability in descriptor order.
-pub const FLOW_SIGNALS_INCOMING_METRICS_METRIC_AVAILABILITY: &[Option<&str>] = &[AVAILABILITY];
-
-static FLOW_SIGNALS_INCOMING_METRICS_DESCRIPTOR: MetricsDescriptor = MetricsDescriptor {
-    name: METRIC_SET,
-    metrics: &[MetricsField {
-        name: "signals.incoming",
-        unit: "{item}",
-        brief: "Number of signal items (log records, spans, or metric data points) entering the flow range.",
-        instrument: Instrument::Mmsc,
-        temporality: Some(otap_df_telemetry::descriptor::Temporality::Delta),
-        value_type: MetricValueType::F64,
-    }],
-};
-
-impl MetricSetHandler for FlowSignalsIncomingMetrics {
-    #[inline]
-    fn descriptor(&self) -> &'static MetricsDescriptor {
-        &FLOW_SIGNALS_INCOMING_METRICS_DESCRIPTOR
-    }
-
-    #[inline]
-    fn snapshot_values(&self) -> Vec<MetricValue> {
-        vec![MetricValue::from(self.signals_incoming.get())]
-    }
-
-    #[inline]
-    fn clear_values(&mut self) {
-        self.signals_incoming.reset();
-    }
-
-    #[inline]
-    fn needs_flush(&self) -> bool {
-        if !MetricValue::from(self.signals_incoming.get()).is_zero() {
-            return true;
-        }
-        false
-    }
-}
-
-impl FlowSignalsIncomingMetrics {
-    /// Registers this metric set against a semantically compatible entity.
-    #[must_use]
-    pub fn register<E>(registry: &TelemetryRegistryHandle, entity: E) -> MetricSet<Self>
-    where
-        E: AssociatedEntity,
-    {
-        registry.register_metric_set(entity)
-    }
-}
-
-/// Strongly typed values for the `flow` metric set.
-#[derive(Debug, Default, Clone)]
-#[repr(C, align(64))]
-pub struct FlowSignalsOutgoingMetrics {
+pub struct FlowProducedItemsMetrics {
     /// Number of signal items (log records, spans, or metric data points) leaving the flow range.
-    pub signals_outgoing: otap_df_telemetry::instrument::Mmsc,
+    pub produced_items: otap_df_telemetry::instrument::Counter<u64>,
 }
 
 /// Per-field conditional availability in descriptor order.
-pub const FLOW_SIGNALS_OUTGOING_METRICS_METRIC_AVAILABILITY: &[Option<&str>] = &[AVAILABILITY];
+pub const FLOW_PRODUCED_ITEMS_METRICS_METRIC_AVAILABILITY: &[Option<&str>] = &[AVAILABILITY];
 
-static FLOW_SIGNALS_OUTGOING_METRICS_DESCRIPTOR: MetricsDescriptor = MetricsDescriptor {
+static FLOW_PRODUCED_ITEMS_METRICS_DESCRIPTOR: MetricsDescriptor = MetricsDescriptor {
     name: METRIC_SET,
     metrics: &[MetricsField {
-        name: "signals.outgoing",
+        name: "produced.items",
         unit: "{item}",
         brief: "Number of signal items (log records, spans, or metric data points) leaving the flow range.",
-        instrument: Instrument::Mmsc,
+        instrument: Instrument::Counter,
         temporality: Some(otap_df_telemetry::descriptor::Temporality::Delta),
-        value_type: MetricValueType::F64,
+        value_type: MetricValueType::U64,
     }],
 };
 
-impl MetricSetHandler for FlowSignalsOutgoingMetrics {
+impl MetricSetHandler for FlowProducedItemsMetrics {
     #[inline]
     fn descriptor(&self) -> &'static MetricsDescriptor {
-        &FLOW_SIGNALS_OUTGOING_METRICS_DESCRIPTOR
+        &FLOW_PRODUCED_ITEMS_METRICS_DESCRIPTOR
     }
 
     #[inline]
     fn snapshot_values(&self) -> Vec<MetricValue> {
-        vec![MetricValue::from(self.signals_outgoing.get())]
+        vec![MetricValue::from(self.produced_items.get())]
     }
 
     #[inline]
     fn clear_values(&mut self) {
-        self.signals_outgoing.reset();
+        self.produced_items.reset();
     }
 
     #[inline]
     fn needs_flush(&self) -> bool {
-        if !MetricValue::from(self.signals_outgoing.get()).is_zero() {
+        if !MetricValue::from(self.produced_items.get()).is_zero() {
             return true;
         }
         false
     }
 }
 
-impl FlowSignalsOutgoingMetrics {
+impl FlowProducedItemsMetrics {
     /// Registers this metric set against a semantically compatible entity.
     #[must_use]
     pub fn register<E>(registry: &TelemetryRegistryHandle, entity: E) -> MetricSet<Self>

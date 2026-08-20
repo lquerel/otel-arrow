@@ -29,21 +29,21 @@ impl AssociatedEntity for entities::ExtensionAttributeSet {}
 #[derive(Debug, Default, Clone)]
 #[repr(C, align(64))]
 pub struct ExtensionLifecycleMetrics {
-    /// Metric for the OTAP Dataflow internal telemetry extension.lifecycle.completed.cancelled.
+    /// Number of extension tasks that completed because they were cancelled.
     pub completed_cancelled: otap_df_telemetry::instrument::Counter<u64>,
-    /// Metric for the OTAP Dataflow internal telemetry extension.lifecycle.completed.error.
+    /// Number of extension tasks that completed with an error.
     pub completed_error: otap_df_telemetry::instrument::Counter<u64>,
-    /// Metric for the OTAP Dataflow internal telemetry extension.lifecycle.completed.ok.
+    /// Number of extension tasks that completed successfully.
     pub completed_ok: otap_df_telemetry::instrument::Counter<u64>,
-    /// Metric for the OTAP Dataflow internal telemetry extension.lifecycle.completed.panic.
+    /// Number of extension tasks that completed because the task panicked.
     pub completed_panic: otap_df_telemetry::instrument::Counter<u64>,
-    /// Metric for the OTAP Dataflow internal telemetry extension.lifecycle.shutdown.sent.
+    /// Number of shutdown signals sent to extension tasks.
     pub shutdown_sent: otap_df_telemetry::instrument::Counter<u64>,
-    /// Metric for the OTAP Dataflow internal telemetry extension.lifecycle.shutdown.timeout.
+    /// Number of extension tasks that exceeded their shutdown deadline.
     pub shutdown_timeout: otap_df_telemetry::instrument::Counter<u64>,
-    /// Metric for the OTAP Dataflow internal telemetry extension.lifecycle.spawned.
+    /// Number of extension tasks spawned by the engine.
     pub spawned: otap_df_telemetry::instrument::Counter<u64>,
-    /// Metric for the OTAP Dataflow internal telemetry extension.lifecycle.state.
+    /// Current lifecycle state of an extension task.
     pub state: otap_df_telemetry::instrument::Gauge<u64>,
 }
 
@@ -65,7 +65,7 @@ static EXTENSION_LIFECYCLE_METRICS_DESCRIPTOR: MetricsDescriptor = MetricsDescri
         MetricsField {
             name: "completed.cancelled",
             unit: "{completion}",
-            brief: "Metric for the OTAP Dataflow internal telemetry extension.lifecycle.completed.cancelled.",
+            brief: "Number of extension tasks that completed because they were cancelled.",
             instrument: Instrument::Counter,
             temporality: Some(otap_df_telemetry::descriptor::Temporality::Delta),
             value_type: MetricValueType::U64,
@@ -73,7 +73,7 @@ static EXTENSION_LIFECYCLE_METRICS_DESCRIPTOR: MetricsDescriptor = MetricsDescri
         MetricsField {
             name: "completed.error",
             unit: "{completion}",
-            brief: "Metric for the OTAP Dataflow internal telemetry extension.lifecycle.completed.error.",
+            brief: "Number of extension tasks that completed with an error.",
             instrument: Instrument::Counter,
             temporality: Some(otap_df_telemetry::descriptor::Temporality::Delta),
             value_type: MetricValueType::U64,
@@ -81,7 +81,7 @@ static EXTENSION_LIFECYCLE_METRICS_DESCRIPTOR: MetricsDescriptor = MetricsDescri
         MetricsField {
             name: "completed.ok",
             unit: "{completion}",
-            brief: "Metric for the OTAP Dataflow internal telemetry extension.lifecycle.completed.ok.",
+            brief: "Number of extension tasks that completed successfully.",
             instrument: Instrument::Counter,
             temporality: Some(otap_df_telemetry::descriptor::Temporality::Delta),
             value_type: MetricValueType::U64,
@@ -89,7 +89,7 @@ static EXTENSION_LIFECYCLE_METRICS_DESCRIPTOR: MetricsDescriptor = MetricsDescri
         MetricsField {
             name: "completed.panic",
             unit: "{completion}",
-            brief: "Metric for the OTAP Dataflow internal telemetry extension.lifecycle.completed.panic.",
+            brief: "Number of extension tasks that completed because the task panicked.",
             instrument: Instrument::Counter,
             temporality: Some(otap_df_telemetry::descriptor::Temporality::Delta),
             value_type: MetricValueType::U64,
@@ -97,7 +97,7 @@ static EXTENSION_LIFECYCLE_METRICS_DESCRIPTOR: MetricsDescriptor = MetricsDescri
         MetricsField {
             name: "shutdown.sent",
             unit: "{shutdown}",
-            brief: "Metric for the OTAP Dataflow internal telemetry extension.lifecycle.shutdown.sent.",
+            brief: "Number of shutdown signals sent to extension tasks.",
             instrument: Instrument::Counter,
             temporality: Some(otap_df_telemetry::descriptor::Temporality::Delta),
             value_type: MetricValueType::U64,
@@ -105,7 +105,7 @@ static EXTENSION_LIFECYCLE_METRICS_DESCRIPTOR: MetricsDescriptor = MetricsDescri
         MetricsField {
             name: "shutdown.timeout",
             unit: "{timeout}",
-            brief: "Metric for the OTAP Dataflow internal telemetry extension.lifecycle.shutdown.timeout.",
+            brief: "Number of extension tasks that exceeded their shutdown deadline.",
             instrument: Instrument::Counter,
             temporality: Some(otap_df_telemetry::descriptor::Temporality::Delta),
             value_type: MetricValueType::U64,
@@ -113,7 +113,7 @@ static EXTENSION_LIFECYCLE_METRICS_DESCRIPTOR: MetricsDescriptor = MetricsDescri
         MetricsField {
             name: "spawned",
             unit: "{spawn}",
-            brief: "Metric for the OTAP Dataflow internal telemetry extension.lifecycle.spawned.",
+            brief: "Number of extension tasks spawned by the engine.",
             instrument: Instrument::Counter,
             temporality: Some(otap_df_telemetry::descriptor::Temporality::Delta),
             value_type: MetricValueType::U64,
@@ -121,7 +121,7 @@ static EXTENSION_LIFECYCLE_METRICS_DESCRIPTOR: MetricsDescriptor = MetricsDescri
         MetricsField {
             name: "state",
             unit: "{state}",
-            brief: "Metric for the OTAP Dataflow internal telemetry extension.lifecycle.state.",
+            brief: "Current lifecycle state of an extension task.",
             instrument: Instrument::Gauge,
             temporality: None,
             value_type: MetricValueType::U64,

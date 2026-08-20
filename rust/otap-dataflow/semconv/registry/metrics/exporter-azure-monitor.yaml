@@ -1,8 +1,8 @@
 file_format: definition/2
 metrics:
 - name: exporter.azure_monitor.batch.size
-  brief: Compressed batch size in bytes (min/max/sum/count). Recorded once per batch;
-    HTTP retries do not produce additional observations.
+  brief: Compressed batch size in bytes (min/max/sum/count). Recorded once per batch; HTTP retries do
+    not produce additional observations.
   instrument: histogram
   unit: By
   stability: development
@@ -14,26 +14,10 @@ metrics:
   annotations:
     code_generation:
       metric_value_type: double
-    otap_dataflow:
-      metric_set: exporter.azure_monitor
-- name: exporter.azure_monitor.batch.to.msg.count
-  brief: Current number of batch-to-message mappings (leak detector).
-  instrument: gauge
-  unit: "{entry}"
-  stability: development
-  requirement_level: recommended
-  entity_associations:
-  - one_of:
-    - otap.node
-    - otap.node.custom
-  annotations:
-    code_generation:
-      metric_value_type: int
     otap_dataflow:
       metric_set: exporter.azure_monitor
 - name: exporter.azure_monitor.batch.uncompressed.size
-  brief: Uncompressed batch size in bytes (min/max/sum/count). Recorded once per batch,
-    before compression.
+  brief: Uncompressed batch size in bytes (min/max/sum/count). Recorded once per batch, before compression.
   instrument: histogram
   unit: By
   stability: development
@@ -45,72 +29,12 @@ metrics:
   annotations:
     code_generation:
       metric_value_type: double
-    otap_dataflow:
-      metric_set: exporter.azure_monitor
-- name: exporter.azure_monitor.failed.batches
-  brief: Number of batches that failed to export.
-  instrument: counter
-  unit: "{batch}"
-  stability: development
-  requirement_level: recommended
-  entity_associations:
-  - one_of:
-    - otap.node
-    - otap.node.custom
-  annotations:
-    code_generation:
-      metric_value_type: int
-    otap_dataflow:
-      metric_set: exporter.azure_monitor
-- name: exporter.azure_monitor.failed.messages
-  brief: Number of messages that failed to export.
-  instrument: counter
-  unit: "{message}"
-  stability: development
-  requirement_level: recommended
-  entity_associations:
-  - one_of:
-    - otap.node
-    - otap.node.custom
-  annotations:
-    code_generation:
-      metric_value_type: int
-    otap_dataflow:
-      metric_set: exporter.azure_monitor
-- name: exporter.azure_monitor.failed.rows
-  brief: Number of rows that failed to export.
-  instrument: counter
-  unit: "{row}"
-  stability: development
-  requirement_level: recommended
-  entity_associations:
-  - one_of:
-    - otap.node
-    - otap.node.custom
-  annotations:
-    code_generation:
-      metric_value_type: int
-    otap_dataflow:
-      metric_set: exporter.azure_monitor
-- name: exporter.azure_monitor.heartbeats
-  brief: Number of successful heartbeat sends.
-  instrument: counter
-  unit: "{heartbeat}"
-  stability: development
-  requirement_level: recommended
-  entity_associations:
-  - one_of:
-    - otap.node
-    - otap.node.custom
-  annotations:
-    code_generation:
-      metric_value_type: int
     otap_dataflow:
       metric_set: exporter.azure_monitor
 - name: exporter.azure_monitor.in.flight.exports
   brief: Current number of in-flight export requests.
   instrument: gauge
-  unit: "{export}"
+  unit: '{export}'
   stability: development
   requirement_level: recommended
   entity_associations:
@@ -123,131 +47,10 @@ metrics:
     otap_dataflow:
       metric_set: exporter.azure_monitor
 - name: exporter.azure_monitor.in.flight.log.records
-  brief: Current number of log records in-flight at the exporter (enqueued export
-    requests awaiting completion, including records being retried).
+  brief: Current number of log records in-flight at the exporter (enqueued export requests awaiting completion,
+    including records being retried).
   instrument: gauge
-  unit: "{log}"
-  stability: development
-  requirement_level: recommended
-  entity_associations:
-  - one_of:
-    - otap.node
-    - otap.node.custom
-  annotations:
-    code_generation:
-      metric_value_type: int
-    otap_dataflow:
-      metric_set: exporter.azure_monitor
-- name: exporter.azure_monitor.laclient.http.2xx
-  brief: Number of HTTP 2xx (success) responses.
-  instrument: counter
-  unit: "{response}"
-  stability: development
-  requirement_level: recommended
-  entity_associations:
-  - one_of:
-    - otap.node
-    - otap.node.custom
-  annotations:
-    code_generation:
-      metric_value_type: int
-    otap_dataflow:
-      metric_set: exporter.azure_monitor
-- name: exporter.azure_monitor.laclient.http.401
-  brief: Number of HTTP 401 (unauthorized) responses.
-  instrument: counter
-  unit: "{response}"
-  stability: development
-  requirement_level: recommended
-  entity_associations:
-  - one_of:
-    - otap.node
-    - otap.node.custom
-  annotations:
-    code_generation:
-      metric_value_type: int
-    otap_dataflow:
-      metric_set: exporter.azure_monitor
-- name: exporter.azure_monitor.laclient.http.403
-  brief: Number of HTTP 403 (forbidden) responses.
-  instrument: counter
-  unit: "{response}"
-  stability: development
-  requirement_level: recommended
-  entity_associations:
-  - one_of:
-    - otap.node
-    - otap.node.custom
-  annotations:
-    code_generation:
-      metric_value_type: int
-    otap_dataflow:
-      metric_set: exporter.azure_monitor
-- name: exporter.azure_monitor.laclient.http.413
-  brief: Number of HTTP 413 (payload too large) responses.
-  instrument: counter
-  unit: "{response}"
-  stability: development
-  requirement_level: recommended
-  entity_associations:
-  - one_of:
-    - otap.node
-    - otap.node.custom
-  annotations:
-    code_generation:
-      metric_value_type: int
-    otap_dataflow:
-      metric_set: exporter.azure_monitor
-- name: exporter.azure_monitor.laclient.http.429
-  brief: Number of HTTP 429 (rate limited) responses.
-  instrument: counter
-  unit: "{response}"
-  stability: development
-  requirement_level: recommended
-  entity_associations:
-  - one_of:
-    - otap.node
-    - otap.node.custom
-  annotations:
-    code_generation:
-      metric_value_type: int
-    otap_dataflow:
-      metric_set: exporter.azure_monitor
-- name: exporter.azure_monitor.laclient.http.5xx
-  brief: Number of HTTP 5xx (server error) responses.
-  instrument: counter
-  unit: "{response}"
-  stability: development
-  requirement_level: recommended
-  entity_associations:
-  - one_of:
-    - otap.node
-    - otap.node.custom
-  annotations:
-    code_generation:
-      metric_value_type: int
-    otap_dataflow:
-      metric_set: exporter.azure_monitor
-- name: exporter.azure_monitor.laclient.http.success.latency
-  brief: Client HTTP success latency in milliseconds (min/max/sum/count).
-  instrument: histogram
-  unit: ms
-  stability: development
-  requirement_level: recommended
-  entity_associations:
-  - one_of:
-    - otap.node
-    - otap.node.custom
-  annotations:
-    code_generation:
-      metric_value_type: double
-    otap_dataflow:
-      metric_set: exporter.azure_monitor
-- name: exporter.azure_monitor.laclient.network.errors
-  brief: Number of network errors (connect, timeout, etc.) before receiving an HTTP
-    response.
-  instrument: counter
-  unit: "{error}"
+  unit: '{log}'
   stability: development
   requirement_level: recommended
   entity_associations:
@@ -262,82 +65,7 @@ metrics:
 - name: exporter.azure_monitor.log.entries.too.large
   brief: Number of log entries rejected for exceeding the batch size limit.
   instrument: counter
-  unit: "{entry}"
-  stability: development
-  requirement_level: recommended
-  entity_associations:
-  - one_of:
-    - otap.node
-    - otap.node.custom
-  annotations:
-    code_generation:
-      metric_value_type: int
-    otap_dataflow:
-      metric_set: exporter.azure_monitor
-- name: exporter.azure_monitor.msg.to.batch.count
-  brief: Current number of message-to-batch mappings (leak detector).
-  instrument: gauge
-  unit: "{entry}"
-  stability: development
-  requirement_level: recommended
-  entity_associations:
-  - one_of:
-    - otap.node
-    - otap.node.custom
-  annotations:
-    code_generation:
-      metric_value_type: int
-    otap_dataflow:
-      metric_set: exporter.azure_monitor
-- name: exporter.azure_monitor.msg.to.data.count
-  brief: Current number of message-to-data mappings (leak detector).
-  instrument: gauge
-  unit: "{entry}"
-  stability: development
-  requirement_level: recommended
-  entity_associations:
-  - one_of:
-    - otap.node
-    - otap.node.custom
-  annotations:
-    code_generation:
-      metric_value_type: int
-    otap_dataflow:
-      metric_set: exporter.azure_monitor
-- name: exporter.azure_monitor.successful.batches
-  brief: Number of batches successfully exported.
-  instrument: counter
-  unit: "{batch}"
-  stability: development
-  requirement_level: recommended
-  entity_associations:
-  - one_of:
-    - otap.node
-    - otap.node.custom
-  annotations:
-    code_generation:
-      metric_value_type: int
-    otap_dataflow:
-      metric_set: exporter.azure_monitor
-- name: exporter.azure_monitor.successful.messages
-  brief: Number of messages successfully exported.
-  instrument: counter
-  unit: "{message}"
-  stability: development
-  requirement_level: recommended
-  entity_associations:
-  - one_of:
-    - otap.node
-    - otap.node.custom
-  annotations:
-    code_generation:
-      metric_value_type: int
-    otap_dataflow:
-      metric_set: exporter.azure_monitor
-- name: exporter.azure_monitor.successful.rows
-  brief: Number of rows successfully exported.
-  instrument: counter
-  unit: "{row}"
+  unit: '{entry}'
   stability: development
   requirement_level: recommended
   entity_associations:

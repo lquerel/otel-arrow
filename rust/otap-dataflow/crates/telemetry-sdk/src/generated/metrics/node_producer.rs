@@ -28,20 +28,74 @@ impl AssociatedEntity for entities::NodeChannelAttributeSet {}
 /// Strongly typed values for the `node.producer` metric set.
 #[derive(Debug, Default, Clone)]
 #[repr(C, align(64))]
-pub struct ProducedMetrics {
-    /// Duration from production until the corresponding ack or nack is routed, in nanoseconds. This is reported at the detailed level, only in receivers. Processors report consumed_refused. TODO: make this Option<Box<Mmsc or Histogram>>.
-    pub produced_duration_ns: otap_df_telemetry::instrument::Mmsc,
-    /// Produced requests that failed, this are retryable errors.
-    pub produced_failure: otap_df_telemetry::instrument::Counter<u64>,
-    /// Produced requests refused, also known as permanent failures.
-    pub produced_refused: otap_df_telemetry::instrument::Counter<u64>,
-    /// Produced requests acknowledged by downstream.
-    pub produced_success: otap_df_telemetry::instrument::Counter<u64>,
+pub struct ProducedItemMetrics {
+    /// Produced signal items, grouped by the `signal` datapoint attribute.
+    pub produced_items: otap_df_telemetry::instrument::Counter<u64>,
 }
 
 /// Per-field conditional availability in descriptor order.
-pub const PRODUCED_METRICS_METRIC_AVAILABILITY: &[Option<&str>] =
-    &[AVAILABILITY, AVAILABILITY, AVAILABILITY, AVAILABILITY];
+pub const PRODUCED_ITEM_METRICS_METRIC_AVAILABILITY: &[Option<&str>] = &[AVAILABILITY];
+
+static PRODUCED_ITEM_METRICS_DESCRIPTOR: MetricsDescriptor = MetricsDescriptor {
+    name: METRIC_SET,
+    metrics: &[MetricsField {
+        name: "produced.items",
+        unit: "{item}",
+        brief: "Produced signal items, grouped by the `signal` datapoint attribute.",
+        instrument: Instrument::Counter,
+        temporality: Some(otap_df_telemetry::descriptor::Temporality::Delta),
+        value_type: MetricValueType::U64,
+    }],
+};
+
+impl MetricSetHandler for ProducedItemMetrics {
+    #[inline]
+    fn descriptor(&self) -> &'static MetricsDescriptor {
+        &PRODUCED_ITEM_METRICS_DESCRIPTOR
+    }
+
+    #[inline]
+    fn snapshot_values(&self) -> Vec<MetricValue> {
+        vec![MetricValue::from(self.produced_items.get())]
+    }
+
+    #[inline]
+    fn clear_values(&mut self) {
+        self.produced_items.reset();
+    }
+
+    #[inline]
+    fn needs_flush(&self) -> bool {
+        if !MetricValue::from(self.produced_items.get()).is_zero() {
+            return true;
+        }
+        false
+    }
+}
+
+impl ProducedItemMetrics {
+    /// Registers this metric set against a semantically compatible entity.
+    #[must_use]
+    pub fn register<E>(registry: &TelemetryRegistryHandle, entity: E) -> MetricSet<Self>
+    where
+        E: AssociatedEntity,
+    {
+        registry.register_metric_set(entity)
+    }
+}
+
+/// Strongly typed values for the `node.producer` metric set.
+#[derive(Debug, Default, Clone)]
+#[repr(C, align(64))]
+pub struct ProducedMetrics {
+    /// Duration from production until the corresponding ack or nack is routed, in nanoseconds. This is reported at the detailed level, only in receivers. Processors report `consumed.messages`. TODO: make this Option<Box<Mmsc or Histogram>>.
+    pub produced_duration_ns: otap_df_telemetry::instrument::Mmsc,
+    /// Produced messages, grouped by `signal` and `outcome` datapoint attributes.
+    pub produced_messages: otap_df_telemetry::instrument::Counter<u64>,
+}
+
+/// Per-field conditional availability in descriptor order.
+pub const PRODUCED_METRICS_METRIC_AVAILABILITY: &[Option<&str>] = &[AVAILABILITY, AVAILABILITY];
 
 static PRODUCED_METRICS_DESCRIPTOR: MetricsDescriptor = MetricsDescriptor {
     name: METRIC_SET,
@@ -49,31 +103,15 @@ static PRODUCED_METRICS_DESCRIPTOR: MetricsDescriptor = MetricsDescriptor {
         MetricsField {
             name: "produced.duration",
             unit: "ns",
-            brief: "Duration from production until the corresponding ack or nack is routed, in nanoseconds. This is reported at the detailed level, only in receivers. Processors report consumed_refused. TODO: make this Option<Box<Mmsc or Histogram>>.",
+            brief: "Duration from production until the corresponding ack or nack is routed, in nanoseconds. This is reported at the detailed level, only in receivers. Processors report `consumed.messages`. TODO: make this Option<Box<Mmsc or Histogram>>.",
             instrument: Instrument::Mmsc,
             temporality: Some(otap_df_telemetry::descriptor::Temporality::Delta),
             value_type: MetricValueType::F64,
         },
         MetricsField {
-            name: "produced.failure",
-            unit: "{requests}",
-            brief: "Produced requests that failed, this are retryable errors.",
-            instrument: Instrument::Counter,
-            temporality: Some(otap_df_telemetry::descriptor::Temporality::Delta),
-            value_type: MetricValueType::U64,
-        },
-        MetricsField {
-            name: "produced.refused",
-            unit: "{requests}",
-            brief: "Produced requests refused, also known as permanent failures.",
-            instrument: Instrument::Counter,
-            temporality: Some(otap_df_telemetry::descriptor::Temporality::Delta),
-            value_type: MetricValueType::U64,
-        },
-        MetricsField {
-            name: "produced.success",
-            unit: "{requests}",
-            brief: "Produced requests acknowledged by downstream.",
+            name: "produced.messages",
+            unit: "{message}",
+            brief: "Produced messages, grouped by `signal` and `outcome` datapoint attributes.",
             instrument: Instrument::Counter,
             temporality: Some(otap_df_telemetry::descriptor::Temporality::Delta),
             value_type: MetricValueType::U64,
@@ -91,18 +129,14 @@ impl MetricSetHandler for ProducedMetrics {
     fn snapshot_values(&self) -> Vec<MetricValue> {
         vec![
             MetricValue::from(self.produced_duration_ns.get()),
-            MetricValue::from(self.produced_failure.get()),
-            MetricValue::from(self.produced_refused.get()),
-            MetricValue::from(self.produced_success.get()),
+            MetricValue::from(self.produced_messages.get()),
         ]
     }
 
     #[inline]
     fn clear_values(&mut self) {
         self.produced_duration_ns.reset();
-        self.produced_failure.reset();
-        self.produced_refused.reset();
-        self.produced_success.reset();
+        self.produced_messages.reset();
     }
 
     #[inline]
@@ -110,13 +144,7 @@ impl MetricSetHandler for ProducedMetrics {
         if !MetricValue::from(self.produced_duration_ns.get()).is_zero() {
             return true;
         }
-        if !MetricValue::from(self.produced_failure.get()).is_zero() {
-            return true;
-        }
-        if !MetricValue::from(self.produced_refused.get()).is_zero() {
-            return true;
-        }
-        if !MetricValue::from(self.produced_success.get()).is_zero() {
+        if !MetricValue::from(self.produced_messages.get()).is_zero() {
             return true;
         }
         false

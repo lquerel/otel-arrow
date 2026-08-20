@@ -588,53 +588,106 @@ impl ControllerGlobalShutdownAsyncPhaseFailed {
     }
 }
 
-/// The controller.its_provider_without_pipeline internal telemetry event occurred.
+/// Emitted by OTAP Dataflow as `controller.listener_group.addr_skipped`.
 #[derive(Debug, Clone)]
-pub struct ControllerItsProviderWithoutPipeline;
+pub struct ControllerListenerGroupAddrSkipped {
+    /// The config_path value recorded by OTAP Dataflow internal telemetry.
+    pub config_path: otap_df_telemetry::attributes::AttributeValue,
+    /// The error value recorded by OTAP Dataflow internal telemetry.
+    pub error: otap_df_telemetry::attributes::AttributeValue,
+    /// The node_id value recorded by OTAP Dataflow internal telemetry.
+    pub node_id: otap_df_telemetry::attributes::AttributeValue,
+    /// The receiver_urn value recorded by OTAP Dataflow internal telemetry.
+    pub receiver_urn: otap_df_telemetry::attributes::AttributeValue,
+}
 
-/// Marker implemented only by entity types allowed by `controller.its_provider_without_pipeline`.
-pub trait ControllerItsProviderWithoutPipelineAssociatedEntity: entities::SemanticEntity {}
+/// Marker implemented only by entity types allowed by `controller.listener_group.addr_skipped`.
+pub trait ControllerListenerGroupAddrSkippedAssociatedEntity: entities::SemanticEntity {}
 
-impl ControllerItsProviderWithoutPipelineAssociatedEntity for entities::EngineEntityAttributeSet {}
+impl ControllerListenerGroupAddrSkippedAssociatedEntity for entities::EngineEntityAttributeSet {}
 
-static CONTROLLER_ITS_PROVIDER_WITHOUT_PIPELINE_DESCRIPTOR: EventDescriptor = EventDescriptor {
-    name: "controller.its_provider_without_pipeline",
-    wire_name: "controller.its_provider_without_pipeline",
-    brief: "The controller.its_provider_without_pipeline internal telemetry event occurred.",
+static CONTROLLER_LISTENER_GROUP_ADDR_SKIPPED_DESCRIPTOR: EventDescriptor = EventDescriptor {
+    name: "controller.listener_group.addr_skipped",
+    wire_name: "controller.listener_group.addr_skipped",
+    brief: "Emitted by OTAP Dataflow as `controller.listener_group.addr_skipped`.",
     stability: "development",
     requirement_level: EventRequirementLevel::Recommended,
     scope_names: &["otap-df-controller"],
     severity_levels: &[EventSeverity::Warn],
-    sources: &["crates/controller/src/lib.rs"],
+    sources: &["crates/controller/src/listener_group.rs"],
     availability: &[],
     entity_associations: &["otap.engine"],
-    attributes: &[],
+    attributes: &[
+        EventAttributeDescriptor {
+            key: "config_path",
+            wire_key: "config_path",
+            brief: "The config_path value recorded by OTAP Dataflow internal telemetry.",
+            value_type: otap_df_telemetry::descriptor::AttributeValueType::Any,
+            requirement_level: EventRequirementLevel::Required,
+        },
+        EventAttributeDescriptor {
+            key: "error",
+            wire_key: "error",
+            brief: "The error value recorded by OTAP Dataflow internal telemetry.",
+            value_type: otap_df_telemetry::descriptor::AttributeValueType::Any,
+            requirement_level: EventRequirementLevel::Required,
+        },
+        EventAttributeDescriptor {
+            key: "node_id",
+            wire_key: "node_id",
+            brief: "The node_id value recorded by OTAP Dataflow internal telemetry.",
+            value_type: otap_df_telemetry::descriptor::AttributeValueType::Any,
+            requirement_level: EventRequirementLevel::Required,
+        },
+        EventAttributeDescriptor {
+            key: "receiver_urn",
+            wire_key: "receiver_urn",
+            brief: "The receiver_urn value recorded by OTAP Dataflow internal telemetry.",
+            value_type: otap_df_telemetry::descriptor::AttributeValueType::Any,
+            requirement_level: EventRequirementLevel::Required,
+        },
+    ],
 };
 
-impl EventAttributes for ControllerItsProviderWithoutPipeline {
+impl EventAttributes for ControllerListenerGroupAddrSkipped {
     #[inline]
     fn visit_attributes(
         &self,
-        _visitor: &mut dyn FnMut(&'static EventAttributeDescriptor, EventAttributeValueRef<'_>),
+        visitor: &mut dyn FnMut(&'static EventAttributeDescriptor, EventAttributeValueRef<'_>),
     ) {
+        visitor(
+            &CONTROLLER_LISTENER_GROUP_ADDR_SKIPPED_DESCRIPTOR.attributes[0],
+            EventAttributeValueRef::Any(&self.config_path),
+        );
+        visitor(
+            &CONTROLLER_LISTENER_GROUP_ADDR_SKIPPED_DESCRIPTOR.attributes[1],
+            EventAttributeValueRef::Any(&self.error),
+        );
+        visitor(
+            &CONTROLLER_LISTENER_GROUP_ADDR_SKIPPED_DESCRIPTOR.attributes[2],
+            EventAttributeValueRef::Any(&self.node_id),
+        );
+        visitor(
+            &CONTROLLER_LISTENER_GROUP_ADDR_SKIPPED_DESCRIPTOR.attributes[3],
+            EventAttributeValueRef::Any(&self.receiver_urn),
+        );
     }
 }
 
-impl SemanticEvent for ControllerItsProviderWithoutPipeline {
-    const DESCRIPTOR: &'static EventDescriptor =
-        &CONTROLLER_ITS_PROVIDER_WITHOUT_PIPELINE_DESCRIPTOR;
+impl SemanticEvent for ControllerListenerGroupAddrSkipped {
+    const DESCRIPTOR: &'static EventDescriptor = &CONTROLLER_LISTENER_GROUP_ADDR_SKIPPED_DESCRIPTOR;
 }
 
-impl ControllerItsProviderWithoutPipeline {
+impl ControllerListenerGroupAddrSkipped {
     /// Static semantic-convention descriptor for this event.
     pub const DESCRIPTOR: &'static EventDescriptor =
-        &CONTROLLER_ITS_PROVIDER_WITHOUT_PIPELINE_DESCRIPTOR;
+        &CONTROLLER_LISTENER_GROUP_ADDR_SKIPPED_DESCRIPTOR;
 
     /// Sends this payload at the `warn` level with a compatible entity.
     pub fn emit_warn<S, E>(&self, client: &mut EventClient<S>, entity: &E)
     where
         S: EventSink,
-        E: ControllerItsProviderWithoutPipelineAssociatedEntity,
+        E: ControllerListenerGroupAddrSkippedAssociatedEntity,
     {
         client.emit(entity, self, EventLevel::Warn);
     }
@@ -831,6 +884,97 @@ impl ControllerMonitorUnregisterFailed {
         E: ControllerMonitorUnregisterFailedAssociatedEntity,
     {
         client.emit(entity, self, EventLevel::Warn);
+    }
+}
+
+/// Emitted by OTAP Dataflow as `controller.numa_topology.detected`.
+#[derive(Debug, Clone)]
+pub struct ControllerNumaTopologyDetected {
+    /// The completeness value recorded by OTAP Dataflow internal telemetry.
+    pub completeness: otap_df_telemetry::attributes::AttributeValue,
+    /// The visible_cpu_count value recorded by OTAP Dataflow internal telemetry.
+    pub visible_cpu_count: otap_df_telemetry::attributes::AttributeValue,
+    /// The visible_node_count value recorded by OTAP Dataflow internal telemetry.
+    pub visible_node_count: otap_df_telemetry::attributes::AttributeValue,
+}
+
+/// Marker implemented only by entity types allowed by `controller.numa_topology.detected`.
+pub trait ControllerNumaTopologyDetectedAssociatedEntity: entities::SemanticEntity {}
+
+impl ControllerNumaTopologyDetectedAssociatedEntity for entities::EngineEntityAttributeSet {}
+
+static CONTROLLER_NUMA_TOPOLOGY_DETECTED_DESCRIPTOR: EventDescriptor = EventDescriptor {
+    name: "controller.numa_topology.detected",
+    wire_name: "controller.numa_topology.detected",
+    brief: "Emitted by OTAP Dataflow as `controller.numa_topology.detected`.",
+    stability: "development",
+    requirement_level: EventRequirementLevel::Recommended,
+    scope_names: &["otap-df-controller"],
+    severity_levels: &[EventSeverity::Info],
+    sources: &["crates/controller/src/lib.rs"],
+    availability: &[],
+    entity_associations: &["otap.engine"],
+    attributes: &[
+        EventAttributeDescriptor {
+            key: "completeness",
+            wire_key: "completeness",
+            brief: "The completeness value recorded by OTAP Dataflow internal telemetry.",
+            value_type: otap_df_telemetry::descriptor::AttributeValueType::Any,
+            requirement_level: EventRequirementLevel::Required,
+        },
+        EventAttributeDescriptor {
+            key: "visible_cpu_count",
+            wire_key: "visible_cpu_count",
+            brief: "The visible_cpu_count value recorded by OTAP Dataflow internal telemetry.",
+            value_type: otap_df_telemetry::descriptor::AttributeValueType::Any,
+            requirement_level: EventRequirementLevel::Required,
+        },
+        EventAttributeDescriptor {
+            key: "visible_node_count",
+            wire_key: "visible_node_count",
+            brief: "The visible_node_count value recorded by OTAP Dataflow internal telemetry.",
+            value_type: otap_df_telemetry::descriptor::AttributeValueType::Any,
+            requirement_level: EventRequirementLevel::Required,
+        },
+    ],
+};
+
+impl EventAttributes for ControllerNumaTopologyDetected {
+    #[inline]
+    fn visit_attributes(
+        &self,
+        visitor: &mut dyn FnMut(&'static EventAttributeDescriptor, EventAttributeValueRef<'_>),
+    ) {
+        visitor(
+            &CONTROLLER_NUMA_TOPOLOGY_DETECTED_DESCRIPTOR.attributes[0],
+            EventAttributeValueRef::Any(&self.completeness),
+        );
+        visitor(
+            &CONTROLLER_NUMA_TOPOLOGY_DETECTED_DESCRIPTOR.attributes[1],
+            EventAttributeValueRef::Any(&self.visible_cpu_count),
+        );
+        visitor(
+            &CONTROLLER_NUMA_TOPOLOGY_DETECTED_DESCRIPTOR.attributes[2],
+            EventAttributeValueRef::Any(&self.visible_node_count),
+        );
+    }
+}
+
+impl SemanticEvent for ControllerNumaTopologyDetected {
+    const DESCRIPTOR: &'static EventDescriptor = &CONTROLLER_NUMA_TOPOLOGY_DETECTED_DESCRIPTOR;
+}
+
+impl ControllerNumaTopologyDetected {
+    /// Static semantic-convention descriptor for this event.
+    pub const DESCRIPTOR: &'static EventDescriptor = &CONTROLLER_NUMA_TOPOLOGY_DETECTED_DESCRIPTOR;
+
+    /// Sends this payload at the `info` level with a compatible entity.
+    pub fn emit_info<S, E>(&self, client: &mut EventClient<S>, entity: &E)
+    where
+        S: EventSink,
+        E: ControllerNumaTopologyDetectedAssociatedEntity,
+    {
+        client.emit(entity, self, EventLevel::Info);
     }
 }
 
@@ -1062,58 +1206,6 @@ impl ControllerPipelineShutdownTimeout {
     where
         S: EventSink,
         E: ControllerPipelineShutdownTimeoutAssociatedEntity,
-    {
-        client.emit(entity, self, EventLevel::Warn);
-    }
-}
-
-/// The controller.pipeline_without_its_provider internal telemetry event occurred.
-#[derive(Debug, Clone)]
-pub struct ControllerPipelineWithoutItsProvider;
-
-/// Marker implemented only by entity types allowed by `controller.pipeline_without_its_provider`.
-pub trait ControllerPipelineWithoutItsProviderAssociatedEntity: entities::SemanticEntity {}
-
-impl ControllerPipelineWithoutItsProviderAssociatedEntity for entities::EngineEntityAttributeSet {}
-
-static CONTROLLER_PIPELINE_WITHOUT_ITS_PROVIDER_DESCRIPTOR: EventDescriptor = EventDescriptor {
-    name: "controller.pipeline_without_its_provider",
-    wire_name: "controller.pipeline_without_its_provider",
-    brief: "The controller.pipeline_without_its_provider internal telemetry event occurred.",
-    stability: "development",
-    requirement_level: EventRequirementLevel::Recommended,
-    scope_names: &["otap-df-controller"],
-    severity_levels: &[EventSeverity::Warn],
-    sources: &["crates/controller/src/lib.rs"],
-    availability: &[],
-    entity_associations: &["otap.engine"],
-    attributes: &[],
-};
-
-impl EventAttributes for ControllerPipelineWithoutItsProvider {
-    #[inline]
-    fn visit_attributes(
-        &self,
-        _visitor: &mut dyn FnMut(&'static EventAttributeDescriptor, EventAttributeValueRef<'_>),
-    ) {
-    }
-}
-
-impl SemanticEvent for ControllerPipelineWithoutItsProvider {
-    const DESCRIPTOR: &'static EventDescriptor =
-        &CONTROLLER_PIPELINE_WITHOUT_ITS_PROVIDER_DESCRIPTOR;
-}
-
-impl ControllerPipelineWithoutItsProvider {
-    /// Static semantic-convention descriptor for this event.
-    pub const DESCRIPTOR: &'static EventDescriptor =
-        &CONTROLLER_PIPELINE_WITHOUT_ITS_PROVIDER_DESCRIPTOR;
-
-    /// Sends this payload at the `warn` level with a compatible entity.
-    pub fn emit_warn<S, E>(&self, client: &mut EventClient<S>, entity: &E)
-    where
-        S: EventSink,
-        E: ControllerPipelineWithoutItsProviderAssociatedEntity,
     {
         client.emit(entity, self, EventLevel::Warn);
     }
@@ -2277,7 +2369,7 @@ pub struct OpampControllerExtensionMessageIgnored {
     /// The expected value recorded by OTAP Dataflow internal telemetry.
     pub expected: String,
     /// The received value recorded by OTAP Dataflow internal telemetry.
-    pub received: otap_df_telemetry::attributes::AttributeValue,
+    pub received: String,
 }
 
 /// Marker implemented only by entity types allowed by `opamp.controller_extension.message.ignored`.
@@ -2308,7 +2400,7 @@ static OPAMP_CONTROLLER_EXTENSION_MESSAGE_IGNORED_DESCRIPTOR: EventDescriptor = 
             key: "received",
             wire_key: "received",
             brief: "The received value recorded by OTAP Dataflow internal telemetry.",
-            value_type: otap_df_telemetry::descriptor::AttributeValueType::Any,
+            value_type: otap_df_telemetry::descriptor::AttributeValueType::String,
             requirement_level: EventRequirementLevel::Required,
         },
     ],
@@ -2326,7 +2418,7 @@ impl EventAttributes for OpampControllerExtensionMessageIgnored {
         );
         visitor(
             &OPAMP_CONTROLLER_EXTENSION_MESSAGE_IGNORED_DESCRIPTOR.attributes[1],
-            EventAttributeValueRef::Any(&self.received),
+            EventAttributeValueRef::String(self.received.as_str()),
         );
     }
 }
@@ -2410,29 +2502,29 @@ impl OpampControllerExtensionMessageIgnoredConnectionSetting {
     }
 }
 
-/// The opamp.controller_extension.message.invalid_config_json internal telemetry event occurred.
+/// Emitted by OTAP Dataflow as `opamp.controller_extension.message.invalid_config`.
 #[derive(Debug, Clone)]
-pub struct OpampControllerExtensionMessageInvalidConfigJson {
+pub struct OpampControllerExtensionMessageInvalidConfig {
     /// The error value recorded by OTAP Dataflow internal telemetry.
     pub error: otap_df_telemetry::attributes::AttributeValue,
 }
 
-/// Marker implemented only by entity types allowed by `opamp.controller_extension.message.invalid_config_json`.
-pub trait OpampControllerExtensionMessageInvalidConfigJsonAssociatedEntity:
+/// Marker implemented only by entity types allowed by `opamp.controller_extension.message.invalid_config`.
+pub trait OpampControllerExtensionMessageInvalidConfigAssociatedEntity:
     entities::SemanticEntity
 {
 }
 
-impl OpampControllerExtensionMessageInvalidConfigJsonAssociatedEntity
+impl OpampControllerExtensionMessageInvalidConfigAssociatedEntity
     for entities::ExtensionAttributeSet
 {
 }
 
-static OPAMP_CONTROLLER_EXTENSION_MESSAGE_INVALID_CONFIG_JSON_DESCRIPTOR: EventDescriptor =
+static OPAMP_CONTROLLER_EXTENSION_MESSAGE_INVALID_CONFIG_DESCRIPTOR: EventDescriptor =
     EventDescriptor {
-        name: "opamp.controller_extension.message.invalid_config_json",
-        wire_name: "opamp.controller_extension.message.invalid_config_json",
-        brief: "The opamp.controller_extension.message.invalid_config_json internal telemetry event occurred.",
+        name: "opamp.controller_extension.message.invalid_config",
+        wire_name: "opamp.controller_extension.message.invalid_config",
+        brief: "Emitted by OTAP Dataflow as `opamp.controller_extension.message.invalid_config`.",
         stability: "development",
         requirement_level: EventRequirementLevel::Recommended,
         scope_names: &["otap-df-controller"],
@@ -2449,106 +2541,34 @@ static OPAMP_CONTROLLER_EXTENSION_MESSAGE_INVALID_CONFIG_JSON_DESCRIPTOR: EventD
         }],
     };
 
-impl EventAttributes for OpampControllerExtensionMessageInvalidConfigJson {
+impl EventAttributes for OpampControllerExtensionMessageInvalidConfig {
     #[inline]
     fn visit_attributes(
         &self,
         visitor: &mut dyn FnMut(&'static EventAttributeDescriptor, EventAttributeValueRef<'_>),
     ) {
         visitor(
-            &OPAMP_CONTROLLER_EXTENSION_MESSAGE_INVALID_CONFIG_JSON_DESCRIPTOR.attributes[0],
+            &OPAMP_CONTROLLER_EXTENSION_MESSAGE_INVALID_CONFIG_DESCRIPTOR.attributes[0],
             EventAttributeValueRef::Any(&self.error),
         );
     }
 }
 
-impl SemanticEvent for OpampControllerExtensionMessageInvalidConfigJson {
+impl SemanticEvent for OpampControllerExtensionMessageInvalidConfig {
     const DESCRIPTOR: &'static EventDescriptor =
-        &OPAMP_CONTROLLER_EXTENSION_MESSAGE_INVALID_CONFIG_JSON_DESCRIPTOR;
+        &OPAMP_CONTROLLER_EXTENSION_MESSAGE_INVALID_CONFIG_DESCRIPTOR;
 }
 
-impl OpampControllerExtensionMessageInvalidConfigJson {
+impl OpampControllerExtensionMessageInvalidConfig {
     /// Static semantic-convention descriptor for this event.
     pub const DESCRIPTOR: &'static EventDescriptor =
-        &OPAMP_CONTROLLER_EXTENSION_MESSAGE_INVALID_CONFIG_JSON_DESCRIPTOR;
+        &OPAMP_CONTROLLER_EXTENSION_MESSAGE_INVALID_CONFIG_DESCRIPTOR;
 
     /// Sends this payload at the `error` level with a compatible entity.
     pub fn emit_error<S, E>(&self, client: &mut EventClient<S>, entity: &E)
     where
         S: EventSink,
-        E: OpampControllerExtensionMessageInvalidConfigJsonAssociatedEntity,
-    {
-        client.emit(entity, self, EventLevel::Error);
-    }
-}
-
-/// The opamp.controller_extension.message.invalid_serialized_config internal telemetry event occurred.
-#[derive(Debug, Clone)]
-pub struct OpampControllerExtensionMessageInvalidSerializedConfig {
-    /// The received value recorded by OTAP Dataflow internal telemetry.
-    pub received: otap_df_telemetry::attributes::AttributeValue,
-}
-
-/// Marker implemented only by entity types allowed by `opamp.controller_extension.message.invalid_serialized_config`.
-pub trait OpampControllerExtensionMessageInvalidSerializedConfigAssociatedEntity:
-    entities::SemanticEntity
-{
-}
-
-impl OpampControllerExtensionMessageInvalidSerializedConfigAssociatedEntity
-    for entities::ExtensionAttributeSet
-{
-}
-
-static OPAMP_CONTROLLER_EXTENSION_MESSAGE_INVALID_SERIALIZED_CONFIG_DESCRIPTOR: EventDescriptor =
-    EventDescriptor {
-        name: "opamp.controller_extension.message.invalid_serialized_config",
-        wire_name: "opamp.controller_extension.message.invalid_serialized_config",
-        brief: "The opamp.controller_extension.message.invalid_serialized_config internal telemetry event occurred.",
-        stability: "development",
-        requirement_level: EventRequirementLevel::Recommended,
-        scope_names: &["otap-df-controller"],
-        severity_levels: &[EventSeverity::Error],
-        sources: &["crates/controller/src/extension/opamp/mod.rs"],
-        availability: &[],
-        entity_associations: &["otap.extension"],
-        attributes: &[EventAttributeDescriptor {
-            key: "received",
-            wire_key: "received",
-            brief: "The received value recorded by OTAP Dataflow internal telemetry.",
-            value_type: otap_df_telemetry::descriptor::AttributeValueType::Any,
-            requirement_level: EventRequirementLevel::Required,
-        }],
-    };
-
-impl EventAttributes for OpampControllerExtensionMessageInvalidSerializedConfig {
-    #[inline]
-    fn visit_attributes(
-        &self,
-        visitor: &mut dyn FnMut(&'static EventAttributeDescriptor, EventAttributeValueRef<'_>),
-    ) {
-        visitor(
-            &OPAMP_CONTROLLER_EXTENSION_MESSAGE_INVALID_SERIALIZED_CONFIG_DESCRIPTOR.attributes[0],
-            EventAttributeValueRef::Any(&self.received),
-        );
-    }
-}
-
-impl SemanticEvent for OpampControllerExtensionMessageInvalidSerializedConfig {
-    const DESCRIPTOR: &'static EventDescriptor =
-        &OPAMP_CONTROLLER_EXTENSION_MESSAGE_INVALID_SERIALIZED_CONFIG_DESCRIPTOR;
-}
-
-impl OpampControllerExtensionMessageInvalidSerializedConfig {
-    /// Static semantic-convention descriptor for this event.
-    pub const DESCRIPTOR: &'static EventDescriptor =
-        &OPAMP_CONTROLLER_EXTENSION_MESSAGE_INVALID_SERIALIZED_CONFIG_DESCRIPTOR;
-
-    /// Sends this payload at the `error` level with a compatible entity.
-    pub fn emit_error<S, E>(&self, client: &mut EventClient<S>, entity: &E)
-    where
-        S: EventSink,
-        E: OpampControllerExtensionMessageInvalidSerializedConfigAssociatedEntity,
+        E: OpampControllerExtensionMessageInvalidConfigAssociatedEntity,
     {
         client.emit(entity, self, EventLevel::Error);
     }
@@ -2769,6 +2789,430 @@ impl OpampControllerExtensionNewInstanceIdInvalid {
         E: OpampControllerExtensionNewInstanceIdInvalidAssociatedEntity,
     {
         client.emit(entity, self, EventLevel::Error);
+    }
+}
+
+/// Emitted by OTAP Dataflow as `opamp.controller_extension.remote_config.accepted`.
+#[derive(Debug, Clone)]
+pub struct OpampControllerExtensionRemoteConfigAccepted;
+
+/// Marker implemented only by entity types allowed by `opamp.controller_extension.remote_config.accepted`.
+pub trait OpampControllerExtensionRemoteConfigAcceptedAssociatedEntity:
+    entities::SemanticEntity
+{
+}
+
+impl OpampControllerExtensionRemoteConfigAcceptedAssociatedEntity
+    for entities::ExtensionAttributeSet
+{
+}
+
+static OPAMP_CONTROLLER_EXTENSION_REMOTE_CONFIG_ACCEPTED_DESCRIPTOR: EventDescriptor =
+    EventDescriptor {
+        name: "opamp.controller_extension.remote_config.accepted",
+        wire_name: "opamp.controller_extension.remote_config.accepted",
+        brief: "Emitted by OTAP Dataflow as `opamp.controller_extension.remote_config.accepted`.",
+        stability: "development",
+        requirement_level: EventRequirementLevel::Recommended,
+        scope_names: &["otap-df-controller"],
+        severity_levels: &[EventSeverity::Debug],
+        sources: &["crates/controller/src/extension/opamp/mod.rs"],
+        availability: &[],
+        entity_associations: &["otap.extension"],
+        attributes: &[],
+    };
+
+impl EventAttributes for OpampControllerExtensionRemoteConfigAccepted {
+    #[inline]
+    fn visit_attributes(
+        &self,
+        _visitor: &mut dyn FnMut(&'static EventAttributeDescriptor, EventAttributeValueRef<'_>),
+    ) {
+    }
+}
+
+impl SemanticEvent for OpampControllerExtensionRemoteConfigAccepted {
+    const DESCRIPTOR: &'static EventDescriptor =
+        &OPAMP_CONTROLLER_EXTENSION_REMOTE_CONFIG_ACCEPTED_DESCRIPTOR;
+}
+
+impl OpampControllerExtensionRemoteConfigAccepted {
+    /// Static semantic-convention descriptor for this event.
+    pub const DESCRIPTOR: &'static EventDescriptor =
+        &OPAMP_CONTROLLER_EXTENSION_REMOTE_CONFIG_ACCEPTED_DESCRIPTOR;
+
+    /// Sends this payload at the `debug` level with a compatible entity.
+    pub fn emit_debug<S, E>(&self, client: &mut EventClient<S>, entity: &E)
+    where
+        S: EventSink,
+        E: OpampControllerExtensionRemoteConfigAcceptedAssociatedEntity,
+    {
+        client.emit(entity, self, EventLevel::Debug);
+    }
+}
+
+/// Emitted by OTAP Dataflow as `opamp.controller_extension.remote_config.empty`.
+#[derive(Debug, Clone)]
+pub struct OpampControllerExtensionRemoteConfigEmpty;
+
+/// Marker implemented only by entity types allowed by `opamp.controller_extension.remote_config.empty`.
+pub trait OpampControllerExtensionRemoteConfigEmptyAssociatedEntity:
+    entities::SemanticEntity
+{
+}
+
+impl OpampControllerExtensionRemoteConfigEmptyAssociatedEntity for entities::ExtensionAttributeSet {}
+
+static OPAMP_CONTROLLER_EXTENSION_REMOTE_CONFIG_EMPTY_DESCRIPTOR: EventDescriptor =
+    EventDescriptor {
+        name: "opamp.controller_extension.remote_config.empty",
+        wire_name: "opamp.controller_extension.remote_config.empty",
+        brief: "Emitted by OTAP Dataflow as `opamp.controller_extension.remote_config.empty`.",
+        stability: "development",
+        requirement_level: EventRequirementLevel::Recommended,
+        scope_names: &["otap-df-controller"],
+        severity_levels: &[EventSeverity::Debug],
+        sources: &["crates/controller/src/extension/opamp/mod.rs"],
+        availability: &[],
+        entity_associations: &["otap.extension"],
+        attributes: &[],
+    };
+
+impl EventAttributes for OpampControllerExtensionRemoteConfigEmpty {
+    #[inline]
+    fn visit_attributes(
+        &self,
+        _visitor: &mut dyn FnMut(&'static EventAttributeDescriptor, EventAttributeValueRef<'_>),
+    ) {
+    }
+}
+
+impl SemanticEvent for OpampControllerExtensionRemoteConfigEmpty {
+    const DESCRIPTOR: &'static EventDescriptor =
+        &OPAMP_CONTROLLER_EXTENSION_REMOTE_CONFIG_EMPTY_DESCRIPTOR;
+}
+
+impl OpampControllerExtensionRemoteConfigEmpty {
+    /// Static semantic-convention descriptor for this event.
+    pub const DESCRIPTOR: &'static EventDescriptor =
+        &OPAMP_CONTROLLER_EXTENSION_REMOTE_CONFIG_EMPTY_DESCRIPTOR;
+
+    /// Sends this payload at the `debug` level with a compatible entity.
+    pub fn emit_debug<S, E>(&self, client: &mut EventClient<S>, entity: &E)
+    where
+        S: EventSink,
+        E: OpampControllerExtensionRemoteConfigEmptyAssociatedEntity,
+    {
+        client.emit(entity, self, EventLevel::Debug);
+    }
+}
+
+/// Emitted by OTAP Dataflow as `opamp.controller_extension.remote_config.missing`.
+#[derive(Debug, Clone)]
+pub struct OpampControllerExtensionRemoteConfigMissing;
+
+/// Marker implemented only by entity types allowed by `opamp.controller_extension.remote_config.missing`.
+pub trait OpampControllerExtensionRemoteConfigMissingAssociatedEntity:
+    entities::SemanticEntity
+{
+}
+
+impl OpampControllerExtensionRemoteConfigMissingAssociatedEntity
+    for entities::ExtensionAttributeSet
+{
+}
+
+static OPAMP_CONTROLLER_EXTENSION_REMOTE_CONFIG_MISSING_DESCRIPTOR: EventDescriptor =
+    EventDescriptor {
+        name: "opamp.controller_extension.remote_config.missing",
+        wire_name: "opamp.controller_extension.remote_config.missing",
+        brief: "Emitted by OTAP Dataflow as `opamp.controller_extension.remote_config.missing`.",
+        stability: "development",
+        requirement_level: EventRequirementLevel::Recommended,
+        scope_names: &["otap-df-controller"],
+        severity_levels: &[EventSeverity::Debug],
+        sources: &["crates/controller/src/extension/opamp/mod.rs"],
+        availability: &[],
+        entity_associations: &["otap.extension"],
+        attributes: &[],
+    };
+
+impl EventAttributes for OpampControllerExtensionRemoteConfigMissing {
+    #[inline]
+    fn visit_attributes(
+        &self,
+        _visitor: &mut dyn FnMut(&'static EventAttributeDescriptor, EventAttributeValueRef<'_>),
+    ) {
+    }
+}
+
+impl SemanticEvent for OpampControllerExtensionRemoteConfigMissing {
+    const DESCRIPTOR: &'static EventDescriptor =
+        &OPAMP_CONTROLLER_EXTENSION_REMOTE_CONFIG_MISSING_DESCRIPTOR;
+}
+
+impl OpampControllerExtensionRemoteConfigMissing {
+    /// Static semantic-convention descriptor for this event.
+    pub const DESCRIPTOR: &'static EventDescriptor =
+        &OPAMP_CONTROLLER_EXTENSION_REMOTE_CONFIG_MISSING_DESCRIPTOR;
+
+    /// Sends this payload at the `debug` level with a compatible entity.
+    pub fn emit_debug<S, E>(&self, client: &mut EventClient<S>, entity: &E)
+    where
+        S: EventSink,
+        E: OpampControllerExtensionRemoteConfigMissingAssociatedEntity,
+    {
+        client.emit(entity, self, EventLevel::Debug);
+    }
+}
+
+/// Emitted by OTAP Dataflow as `opamp.controller_extension.remote_config.reconcile_failed`.
+#[derive(Debug, Clone)]
+pub struct OpampControllerExtensionRemoteConfigReconcileFailed {
+    /// The changes value recorded by OTAP Dataflow internal telemetry.
+    pub changes: Option<otap_df_telemetry::attributes::AttributeValue>,
+    /// The error value recorded by OTAP Dataflow internal telemetry.
+    pub error: Option<otap_df_telemetry::attributes::AttributeValue>,
+    /// The state value recorded by OTAP Dataflow internal telemetry.
+    pub state: Option<String>,
+}
+
+/// Marker implemented only by entity types allowed by `opamp.controller_extension.remote_config.reconcile_failed`.
+pub trait OpampControllerExtensionRemoteConfigReconcileFailedAssociatedEntity:
+    entities::SemanticEntity
+{
+}
+
+impl OpampControllerExtensionRemoteConfigReconcileFailedAssociatedEntity
+    for entities::ExtensionAttributeSet
+{
+}
+
+static OPAMP_CONTROLLER_EXTENSION_REMOTE_CONFIG_RECONCILE_FAILED_DESCRIPTOR: EventDescriptor =
+    EventDescriptor {
+        name: "opamp.controller_extension.remote_config.reconcile_failed",
+        wire_name: "opamp.controller_extension.remote_config.reconcile_failed",
+        brief: "Emitted by OTAP Dataflow as `opamp.controller_extension.remote_config.reconcile_failed`.",
+        stability: "development",
+        requirement_level: EventRequirementLevel::Recommended,
+        scope_names: &["otap-df-controller"],
+        severity_levels: &[EventSeverity::Error],
+        sources: &["crates/controller/src/extension/opamp/mod.rs"],
+        availability: &[],
+        entity_associations: &["otap.extension"],
+        attributes: &[
+            EventAttributeDescriptor {
+                key: "changes",
+                wire_key: "changes",
+                brief: "The changes value recorded by OTAP Dataflow internal telemetry.",
+                value_type: otap_df_telemetry::descriptor::AttributeValueType::Any,
+                requirement_level: EventRequirementLevel::Recommended,
+            },
+            EventAttributeDescriptor {
+                key: "error",
+                wire_key: "error",
+                brief: "The error value recorded by OTAP Dataflow internal telemetry.",
+                value_type: otap_df_telemetry::descriptor::AttributeValueType::Any,
+                requirement_level: EventRequirementLevel::Recommended,
+            },
+            EventAttributeDescriptor {
+                key: "state",
+                wire_key: "state",
+                brief: "The state value recorded by OTAP Dataflow internal telemetry.",
+                value_type: otap_df_telemetry::descriptor::AttributeValueType::String,
+                requirement_level: EventRequirementLevel::Recommended,
+            },
+        ],
+    };
+
+impl EventAttributes for OpampControllerExtensionRemoteConfigReconcileFailed {
+    #[inline]
+    fn visit_attributes(
+        &self,
+        visitor: &mut dyn FnMut(&'static EventAttributeDescriptor, EventAttributeValueRef<'_>),
+    ) {
+        if let Some(value) = &self.changes {
+            visitor(
+                &OPAMP_CONTROLLER_EXTENSION_REMOTE_CONFIG_RECONCILE_FAILED_DESCRIPTOR.attributes[0],
+                EventAttributeValueRef::Any(value),
+            );
+        }
+        if let Some(value) = &self.error {
+            visitor(
+                &OPAMP_CONTROLLER_EXTENSION_REMOTE_CONFIG_RECONCILE_FAILED_DESCRIPTOR.attributes[1],
+                EventAttributeValueRef::Any(value),
+            );
+        }
+        if let Some(value) = &self.state {
+            visitor(
+                &OPAMP_CONTROLLER_EXTENSION_REMOTE_CONFIG_RECONCILE_FAILED_DESCRIPTOR.attributes[2],
+                EventAttributeValueRef::String(value.as_str()),
+            );
+        }
+    }
+}
+
+impl SemanticEvent for OpampControllerExtensionRemoteConfigReconcileFailed {
+    const DESCRIPTOR: &'static EventDescriptor =
+        &OPAMP_CONTROLLER_EXTENSION_REMOTE_CONFIG_RECONCILE_FAILED_DESCRIPTOR;
+}
+
+impl OpampControllerExtensionRemoteConfigReconcileFailed {
+    /// Static semantic-convention descriptor for this event.
+    pub const DESCRIPTOR: &'static EventDescriptor =
+        &OPAMP_CONTROLLER_EXTENSION_REMOTE_CONFIG_RECONCILE_FAILED_DESCRIPTOR;
+
+    /// Sends this payload at the `error` level with a compatible entity.
+    pub fn emit_error<S, E>(&self, client: &mut EventClient<S>, entity: &E)
+    where
+        S: EventSink,
+        E: OpampControllerExtensionRemoteConfigReconcileFailedAssociatedEntity,
+    {
+        client.emit(entity, self, EventLevel::Error);
+    }
+}
+
+/// Emitted by OTAP Dataflow as `opamp.controller_extension.remote_config.reconcile_start`.
+#[derive(Debug, Clone)]
+pub struct OpampControllerExtensionRemoteConfigReconcileStart {
+    /// The delete_missing value recorded by OTAP Dataflow internal telemetry.
+    pub delete_missing: otap_df_telemetry::attributes::AttributeValue,
+}
+
+/// Marker implemented only by entity types allowed by `opamp.controller_extension.remote_config.reconcile_start`.
+pub trait OpampControllerExtensionRemoteConfigReconcileStartAssociatedEntity:
+    entities::SemanticEntity
+{
+}
+
+impl OpampControllerExtensionRemoteConfigReconcileStartAssociatedEntity
+    for entities::ExtensionAttributeSet
+{
+}
+
+static OPAMP_CONTROLLER_EXTENSION_REMOTE_CONFIG_RECONCILE_START_DESCRIPTOR: EventDescriptor =
+    EventDescriptor {
+        name: "opamp.controller_extension.remote_config.reconcile_start",
+        wire_name: "opamp.controller_extension.remote_config.reconcile_start",
+        brief: "Emitted by OTAP Dataflow as `opamp.controller_extension.remote_config.reconcile_start`.",
+        stability: "development",
+        requirement_level: EventRequirementLevel::Recommended,
+        scope_names: &["otap-df-controller"],
+        severity_levels: &[EventSeverity::Info],
+        sources: &["crates/controller/src/extension/opamp/mod.rs"],
+        availability: &[],
+        entity_associations: &["otap.extension"],
+        attributes: &[EventAttributeDescriptor {
+            key: "delete_missing",
+            wire_key: "delete_missing",
+            brief: "The delete_missing value recorded by OTAP Dataflow internal telemetry.",
+            value_type: otap_df_telemetry::descriptor::AttributeValueType::Any,
+            requirement_level: EventRequirementLevel::Required,
+        }],
+    };
+
+impl EventAttributes for OpampControllerExtensionRemoteConfigReconcileStart {
+    #[inline]
+    fn visit_attributes(
+        &self,
+        visitor: &mut dyn FnMut(&'static EventAttributeDescriptor, EventAttributeValueRef<'_>),
+    ) {
+        visitor(
+            &OPAMP_CONTROLLER_EXTENSION_REMOTE_CONFIG_RECONCILE_START_DESCRIPTOR.attributes[0],
+            EventAttributeValueRef::Any(&self.delete_missing),
+        );
+    }
+}
+
+impl SemanticEvent for OpampControllerExtensionRemoteConfigReconcileStart {
+    const DESCRIPTOR: &'static EventDescriptor =
+        &OPAMP_CONTROLLER_EXTENSION_REMOTE_CONFIG_RECONCILE_START_DESCRIPTOR;
+}
+
+impl OpampControllerExtensionRemoteConfigReconcileStart {
+    /// Static semantic-convention descriptor for this event.
+    pub const DESCRIPTOR: &'static EventDescriptor =
+        &OPAMP_CONTROLLER_EXTENSION_REMOTE_CONFIG_RECONCILE_START_DESCRIPTOR;
+
+    /// Sends this payload at the `info` level with a compatible entity.
+    pub fn emit_info<S, E>(&self, client: &mut EventClient<S>, entity: &E)
+    where
+        S: EventSink,
+        E: OpampControllerExtensionRemoteConfigReconcileStartAssociatedEntity,
+    {
+        client.emit(entity, self, EventLevel::Info);
+    }
+}
+
+/// Emitted by OTAP Dataflow as `opamp.controller_extension.remote_config.reconcile_succeeded`.
+#[derive(Debug, Clone)]
+pub struct OpampControllerExtensionRemoteConfigReconcileSucceeded {
+    /// The changes value recorded by OTAP Dataflow internal telemetry.
+    pub changes: otap_df_telemetry::attributes::AttributeValue,
+}
+
+/// Marker implemented only by entity types allowed by `opamp.controller_extension.remote_config.reconcile_succeeded`.
+pub trait OpampControllerExtensionRemoteConfigReconcileSucceededAssociatedEntity:
+    entities::SemanticEntity
+{
+}
+
+impl OpampControllerExtensionRemoteConfigReconcileSucceededAssociatedEntity
+    for entities::ExtensionAttributeSet
+{
+}
+
+static OPAMP_CONTROLLER_EXTENSION_REMOTE_CONFIG_RECONCILE_SUCCEEDED_DESCRIPTOR: EventDescriptor =
+    EventDescriptor {
+        name: "opamp.controller_extension.remote_config.reconcile_succeeded",
+        wire_name: "opamp.controller_extension.remote_config.reconcile_succeeded",
+        brief: "Emitted by OTAP Dataflow as `opamp.controller_extension.remote_config.reconcile_succeeded`.",
+        stability: "development",
+        requirement_level: EventRequirementLevel::Recommended,
+        scope_names: &["otap-df-controller"],
+        severity_levels: &[EventSeverity::Info],
+        sources: &["crates/controller/src/extension/opamp/mod.rs"],
+        availability: &[],
+        entity_associations: &["otap.extension"],
+        attributes: &[EventAttributeDescriptor {
+            key: "changes",
+            wire_key: "changes",
+            brief: "The changes value recorded by OTAP Dataflow internal telemetry.",
+            value_type: otap_df_telemetry::descriptor::AttributeValueType::Any,
+            requirement_level: EventRequirementLevel::Required,
+        }],
+    };
+
+impl EventAttributes for OpampControllerExtensionRemoteConfigReconcileSucceeded {
+    #[inline]
+    fn visit_attributes(
+        &self,
+        visitor: &mut dyn FnMut(&'static EventAttributeDescriptor, EventAttributeValueRef<'_>),
+    ) {
+        visitor(
+            &OPAMP_CONTROLLER_EXTENSION_REMOTE_CONFIG_RECONCILE_SUCCEEDED_DESCRIPTOR.attributes[0],
+            EventAttributeValueRef::Any(&self.changes),
+        );
+    }
+}
+
+impl SemanticEvent for OpampControllerExtensionRemoteConfigReconcileSucceeded {
+    const DESCRIPTOR: &'static EventDescriptor =
+        &OPAMP_CONTROLLER_EXTENSION_REMOTE_CONFIG_RECONCILE_SUCCEEDED_DESCRIPTOR;
+}
+
+impl OpampControllerExtensionRemoteConfigReconcileSucceeded {
+    /// Static semantic-convention descriptor for this event.
+    pub const DESCRIPTOR: &'static EventDescriptor =
+        &OPAMP_CONTROLLER_EXTENSION_REMOTE_CONFIG_RECONCILE_SUCCEEDED_DESCRIPTOR;
+
+    /// Sends this payload at the `info` level with a compatible entity.
+    pub fn emit_info<S, E>(&self, client: &mut EventClient<S>, entity: &E)
+    where
+        S: EventSink,
+        E: OpampControllerExtensionRemoteConfigReconcileSucceededAssociatedEntity,
+    {
+        client.emit(entity, self, EventLevel::Info);
     }
 }
 
@@ -3311,6 +3755,537 @@ impl OpampControllerExtensionWsConnectError {
     }
 }
 
+/// Emitted by OTAP Dataflow as `opamp.controller_extension.ws_connect.success`.
+#[derive(Debug, Clone)]
+pub struct OpampControllerExtensionWsConnectSuccess;
+
+/// Marker implemented only by entity types allowed by `opamp.controller_extension.ws_connect.success`.
+pub trait OpampControllerExtensionWsConnectSuccessAssociatedEntity:
+    entities::SemanticEntity
+{
+}
+
+impl OpampControllerExtensionWsConnectSuccessAssociatedEntity for entities::ExtensionAttributeSet {}
+
+static OPAMP_CONTROLLER_EXTENSION_WS_CONNECT_SUCCESS_DESCRIPTOR: EventDescriptor =
+    EventDescriptor {
+        name: "opamp.controller_extension.ws_connect.success",
+        wire_name: "opamp.controller_extension.ws_connect.success",
+        brief: "Emitted by OTAP Dataflow as `opamp.controller_extension.ws_connect.success`.",
+        stability: "development",
+        requirement_level: EventRequirementLevel::Recommended,
+        scope_names: &["otap-df-controller"],
+        severity_levels: &[EventSeverity::Info],
+        sources: &["crates/controller/src/extension/opamp/mod.rs"],
+        availability: &[],
+        entity_associations: &["otap.extension"],
+        attributes: &[],
+    };
+
+impl EventAttributes for OpampControllerExtensionWsConnectSuccess {
+    #[inline]
+    fn visit_attributes(
+        &self,
+        _visitor: &mut dyn FnMut(&'static EventAttributeDescriptor, EventAttributeValueRef<'_>),
+    ) {
+    }
+}
+
+impl SemanticEvent for OpampControllerExtensionWsConnectSuccess {
+    const DESCRIPTOR: &'static EventDescriptor =
+        &OPAMP_CONTROLLER_EXTENSION_WS_CONNECT_SUCCESS_DESCRIPTOR;
+}
+
+impl OpampControllerExtensionWsConnectSuccess {
+    /// Static semantic-convention descriptor for this event.
+    pub const DESCRIPTOR: &'static EventDescriptor =
+        &OPAMP_CONTROLLER_EXTENSION_WS_CONNECT_SUCCESS_DESCRIPTOR;
+
+    /// Sends this payload at the `info` level with a compatible entity.
+    pub fn emit_info<S, E>(&self, client: &mut EventClient<S>, entity: &E)
+    where
+        S: EventSink,
+        E: OpampControllerExtensionWsConnectSuccessAssociatedEntity,
+    {
+        client.emit(entity, self, EventLevel::Info);
+    }
+}
+
+/// Emitted by OTAP Dataflow as `otelcol.pipeline.recovery.abort`.
+#[derive(Debug, Clone)]
+pub struct OtelcolPipelineRecoveryAbort {
+    /// The core_id value recorded by OTAP Dataflow internal telemetry.
+    pub core_id: otap_df_telemetry::attributes::AttributeValue,
+    /// The error value recorded by OTAP Dataflow internal telemetry.
+    pub error: otap_df_telemetry::attributes::AttributeValue,
+    /// The failed_generation value recorded by OTAP Dataflow internal telemetry.
+    pub failed_generation: otap_df_telemetry::attributes::AttributeValue,
+    /// The max_restarts value recorded by OTAP Dataflow internal telemetry.
+    pub max_restarts: otap_df_telemetry::attributes::AttributeValue,
+    /// The pipeline_group_id value recorded by OTAP Dataflow internal telemetry.
+    pub pipeline_group_id: otap_df_telemetry::attributes::AttributeValue,
+    /// The pipeline_id value recorded by OTAP Dataflow internal telemetry.
+    pub pipeline_id: otap_df_telemetry::attributes::AttributeValue,
+    /// The restart_count value recorded by OTAP Dataflow internal telemetry.
+    pub restart_count: otap_df_telemetry::attributes::AttributeValue,
+}
+
+/// Marker implemented only by entity types allowed by `otelcol.pipeline.recovery.abort`.
+pub trait OtelcolPipelineRecoveryAbortAssociatedEntity: entities::SemanticEntity {}
+
+impl OtelcolPipelineRecoveryAbortAssociatedEntity for entities::EngineEntityAttributeSet {}
+
+impl OtelcolPipelineRecoveryAbortAssociatedEntity for entities::PipelineAttributeSet {}
+
+impl OtelcolPipelineRecoveryAbortAssociatedEntity for entities::NodeAttributeSet {}
+
+impl OtelcolPipelineRecoveryAbortAssociatedEntity for entities::NodeWithCustomAttributeSet {}
+
+static OTELCOL_PIPELINE_RECOVERY_ABORT_DESCRIPTOR: EventDescriptor = EventDescriptor {
+    name: "otelcol.pipeline.recovery.abort",
+    wire_name: "otelcol.pipeline.recovery.abort",
+    brief: "Emitted by OTAP Dataflow as `otelcol.pipeline.recovery.abort`.",
+    stability: "development",
+    requirement_level: EventRequirementLevel::Recommended,
+    scope_names: &["otap-df-controller"],
+    severity_levels: &[EventSeverity::Error],
+    sources: &["crates/controller/src/live_control/runtime.rs"],
+    availability: &[],
+    entity_associations: &[
+        "otap.engine",
+        "otap.pipeline",
+        "otap.node",
+        "otap.node.custom",
+    ],
+    attributes: &[
+        EventAttributeDescriptor {
+            key: "core_id",
+            wire_key: "core_id",
+            brief: "The core_id value recorded by OTAP Dataflow internal telemetry.",
+            value_type: otap_df_telemetry::descriptor::AttributeValueType::Any,
+            requirement_level: EventRequirementLevel::Required,
+        },
+        EventAttributeDescriptor {
+            key: "error",
+            wire_key: "error",
+            brief: "The error value recorded by OTAP Dataflow internal telemetry.",
+            value_type: otap_df_telemetry::descriptor::AttributeValueType::Any,
+            requirement_level: EventRequirementLevel::Required,
+        },
+        EventAttributeDescriptor {
+            key: "failed_generation",
+            wire_key: "failed_generation",
+            brief: "The failed_generation value recorded by OTAP Dataflow internal telemetry.",
+            value_type: otap_df_telemetry::descriptor::AttributeValueType::Any,
+            requirement_level: EventRequirementLevel::Required,
+        },
+        EventAttributeDescriptor {
+            key: "max_restarts",
+            wire_key: "max_restarts",
+            brief: "The max_restarts value recorded by OTAP Dataflow internal telemetry.",
+            value_type: otap_df_telemetry::descriptor::AttributeValueType::Any,
+            requirement_level: EventRequirementLevel::Required,
+        },
+        EventAttributeDescriptor {
+            key: "pipeline_group_id",
+            wire_key: "pipeline_group_id",
+            brief: "The pipeline_group_id value recorded by OTAP Dataflow internal telemetry.",
+            value_type: otap_df_telemetry::descriptor::AttributeValueType::Any,
+            requirement_level: EventRequirementLevel::Required,
+        },
+        EventAttributeDescriptor {
+            key: "pipeline_id",
+            wire_key: "pipeline_id",
+            brief: "The pipeline_id value recorded by OTAP Dataflow internal telemetry.",
+            value_type: otap_df_telemetry::descriptor::AttributeValueType::Any,
+            requirement_level: EventRequirementLevel::Required,
+        },
+        EventAttributeDescriptor {
+            key: "restart_count",
+            wire_key: "restart_count",
+            brief: "The restart_count value recorded by OTAP Dataflow internal telemetry.",
+            value_type: otap_df_telemetry::descriptor::AttributeValueType::Any,
+            requirement_level: EventRequirementLevel::Required,
+        },
+    ],
+};
+
+impl EventAttributes for OtelcolPipelineRecoveryAbort {
+    #[inline]
+    fn visit_attributes(
+        &self,
+        visitor: &mut dyn FnMut(&'static EventAttributeDescriptor, EventAttributeValueRef<'_>),
+    ) {
+        visitor(
+            &OTELCOL_PIPELINE_RECOVERY_ABORT_DESCRIPTOR.attributes[0],
+            EventAttributeValueRef::Any(&self.core_id),
+        );
+        visitor(
+            &OTELCOL_PIPELINE_RECOVERY_ABORT_DESCRIPTOR.attributes[1],
+            EventAttributeValueRef::Any(&self.error),
+        );
+        visitor(
+            &OTELCOL_PIPELINE_RECOVERY_ABORT_DESCRIPTOR.attributes[2],
+            EventAttributeValueRef::Any(&self.failed_generation),
+        );
+        visitor(
+            &OTELCOL_PIPELINE_RECOVERY_ABORT_DESCRIPTOR.attributes[3],
+            EventAttributeValueRef::Any(&self.max_restarts),
+        );
+        visitor(
+            &OTELCOL_PIPELINE_RECOVERY_ABORT_DESCRIPTOR.attributes[4],
+            EventAttributeValueRef::Any(&self.pipeline_group_id),
+        );
+        visitor(
+            &OTELCOL_PIPELINE_RECOVERY_ABORT_DESCRIPTOR.attributes[5],
+            EventAttributeValueRef::Any(&self.pipeline_id),
+        );
+        visitor(
+            &OTELCOL_PIPELINE_RECOVERY_ABORT_DESCRIPTOR.attributes[6],
+            EventAttributeValueRef::Any(&self.restart_count),
+        );
+    }
+}
+
+impl SemanticEvent for OtelcolPipelineRecoveryAbort {
+    const DESCRIPTOR: &'static EventDescriptor = &OTELCOL_PIPELINE_RECOVERY_ABORT_DESCRIPTOR;
+}
+
+impl OtelcolPipelineRecoveryAbort {
+    /// Static semantic-convention descriptor for this event.
+    pub const DESCRIPTOR: &'static EventDescriptor = &OTELCOL_PIPELINE_RECOVERY_ABORT_DESCRIPTOR;
+
+    /// Sends this payload at the `error` level with a compatible entity.
+    pub fn emit_error<S, E>(&self, client: &mut EventClient<S>, entity: &E)
+    where
+        S: EventSink,
+        E: OtelcolPipelineRecoveryAbortAssociatedEntity,
+    {
+        client.emit(entity, self, EventLevel::Error);
+    }
+}
+
+/// Emitted by OTAP Dataflow as `otelcol.pipeline.recovery.complete`.
+#[derive(Debug, Clone)]
+pub struct OtelcolPipelineRecoveryComplete {
+    /// The attempt value recorded by OTAP Dataflow internal telemetry.
+    pub attempt: otap_df_telemetry::attributes::AttributeValue,
+    /// The core_id value recorded by OTAP Dataflow internal telemetry.
+    pub core_id: otap_df_telemetry::attributes::AttributeValue,
+    /// The from_generation value recorded by OTAP Dataflow internal telemetry.
+    pub from_generation: otap_df_telemetry::attributes::AttributeValue,
+    /// The pipeline_group_id value recorded by OTAP Dataflow internal telemetry.
+    pub pipeline_group_id: otap_df_telemetry::attributes::AttributeValue,
+    /// The pipeline_id value recorded by OTAP Dataflow internal telemetry.
+    pub pipeline_id: otap_df_telemetry::attributes::AttributeValue,
+    /// The target_generation value recorded by OTAP Dataflow internal telemetry.
+    pub target_generation: otap_df_telemetry::attributes::AttributeValue,
+}
+
+/// Marker implemented only by entity types allowed by `otelcol.pipeline.recovery.complete`.
+pub trait OtelcolPipelineRecoveryCompleteAssociatedEntity: entities::SemanticEntity {}
+
+impl OtelcolPipelineRecoveryCompleteAssociatedEntity for entities::EngineEntityAttributeSet {}
+
+impl OtelcolPipelineRecoveryCompleteAssociatedEntity for entities::PipelineAttributeSet {}
+
+impl OtelcolPipelineRecoveryCompleteAssociatedEntity for entities::NodeAttributeSet {}
+
+impl OtelcolPipelineRecoveryCompleteAssociatedEntity for entities::NodeWithCustomAttributeSet {}
+
+static OTELCOL_PIPELINE_RECOVERY_COMPLETE_DESCRIPTOR: EventDescriptor = EventDescriptor {
+    name: "otelcol.pipeline.recovery.complete",
+    wire_name: "otelcol.pipeline.recovery.complete",
+    brief: "Emitted by OTAP Dataflow as `otelcol.pipeline.recovery.complete`.",
+    stability: "development",
+    requirement_level: EventRequirementLevel::Recommended,
+    scope_names: &["otap-df-controller"],
+    severity_levels: &[EventSeverity::Info],
+    sources: &["crates/controller/src/live_control/runtime.rs"],
+    availability: &[],
+    entity_associations: &[
+        "otap.engine",
+        "otap.pipeline",
+        "otap.node",
+        "otap.node.custom",
+    ],
+    attributes: &[
+        EventAttributeDescriptor {
+            key: "attempt",
+            wire_key: "attempt",
+            brief: "The attempt value recorded by OTAP Dataflow internal telemetry.",
+            value_type: otap_df_telemetry::descriptor::AttributeValueType::Any,
+            requirement_level: EventRequirementLevel::Required,
+        },
+        EventAttributeDescriptor {
+            key: "core_id",
+            wire_key: "core_id",
+            brief: "The core_id value recorded by OTAP Dataflow internal telemetry.",
+            value_type: otap_df_telemetry::descriptor::AttributeValueType::Any,
+            requirement_level: EventRequirementLevel::Required,
+        },
+        EventAttributeDescriptor {
+            key: "from_generation",
+            wire_key: "from_generation",
+            brief: "The from_generation value recorded by OTAP Dataflow internal telemetry.",
+            value_type: otap_df_telemetry::descriptor::AttributeValueType::Any,
+            requirement_level: EventRequirementLevel::Required,
+        },
+        EventAttributeDescriptor {
+            key: "pipeline_group_id",
+            wire_key: "pipeline_group_id",
+            brief: "The pipeline_group_id value recorded by OTAP Dataflow internal telemetry.",
+            value_type: otap_df_telemetry::descriptor::AttributeValueType::Any,
+            requirement_level: EventRequirementLevel::Required,
+        },
+        EventAttributeDescriptor {
+            key: "pipeline_id",
+            wire_key: "pipeline_id",
+            brief: "The pipeline_id value recorded by OTAP Dataflow internal telemetry.",
+            value_type: otap_df_telemetry::descriptor::AttributeValueType::Any,
+            requirement_level: EventRequirementLevel::Required,
+        },
+        EventAttributeDescriptor {
+            key: "target_generation",
+            wire_key: "target_generation",
+            brief: "The target_generation value recorded by OTAP Dataflow internal telemetry.",
+            value_type: otap_df_telemetry::descriptor::AttributeValueType::Any,
+            requirement_level: EventRequirementLevel::Required,
+        },
+    ],
+};
+
+impl EventAttributes for OtelcolPipelineRecoveryComplete {
+    #[inline]
+    fn visit_attributes(
+        &self,
+        visitor: &mut dyn FnMut(&'static EventAttributeDescriptor, EventAttributeValueRef<'_>),
+    ) {
+        visitor(
+            &OTELCOL_PIPELINE_RECOVERY_COMPLETE_DESCRIPTOR.attributes[0],
+            EventAttributeValueRef::Any(&self.attempt),
+        );
+        visitor(
+            &OTELCOL_PIPELINE_RECOVERY_COMPLETE_DESCRIPTOR.attributes[1],
+            EventAttributeValueRef::Any(&self.core_id),
+        );
+        visitor(
+            &OTELCOL_PIPELINE_RECOVERY_COMPLETE_DESCRIPTOR.attributes[2],
+            EventAttributeValueRef::Any(&self.from_generation),
+        );
+        visitor(
+            &OTELCOL_PIPELINE_RECOVERY_COMPLETE_DESCRIPTOR.attributes[3],
+            EventAttributeValueRef::Any(&self.pipeline_group_id),
+        );
+        visitor(
+            &OTELCOL_PIPELINE_RECOVERY_COMPLETE_DESCRIPTOR.attributes[4],
+            EventAttributeValueRef::Any(&self.pipeline_id),
+        );
+        visitor(
+            &OTELCOL_PIPELINE_RECOVERY_COMPLETE_DESCRIPTOR.attributes[5],
+            EventAttributeValueRef::Any(&self.target_generation),
+        );
+    }
+}
+
+impl SemanticEvent for OtelcolPipelineRecoveryComplete {
+    const DESCRIPTOR: &'static EventDescriptor = &OTELCOL_PIPELINE_RECOVERY_COMPLETE_DESCRIPTOR;
+}
+
+impl OtelcolPipelineRecoveryComplete {
+    /// Static semantic-convention descriptor for this event.
+    pub const DESCRIPTOR: &'static EventDescriptor = &OTELCOL_PIPELINE_RECOVERY_COMPLETE_DESCRIPTOR;
+
+    /// Sends this payload at the `info` level with a compatible entity.
+    pub fn emit_info<S, E>(&self, client: &mut EventClient<S>, entity: &E)
+    where
+        S: EventSink,
+        E: OtelcolPipelineRecoveryCompleteAssociatedEntity,
+    {
+        client.emit(entity, self, EventLevel::Info);
+    }
+}
+
+/// Emitted by OTAP Dataflow as `otelcol.pipeline.recovery.retry`.
+#[derive(Debug, Clone)]
+pub struct OtelcolPipelineRecoveryRetry {
+    /// The attempt value recorded by OTAP Dataflow internal telemetry.
+    pub attempt: otap_df_telemetry::attributes::AttributeValue,
+    /// The backoff_ms value recorded by OTAP Dataflow internal telemetry.
+    pub backoff_ms: otap_df_telemetry::attributes::AttributeValue,
+    /// The core_id value recorded by OTAP Dataflow internal telemetry.
+    pub core_id: otap_df_telemetry::attributes::AttributeValue,
+    /// The error value recorded by OTAP Dataflow internal telemetry.
+    pub error: otap_df_telemetry::attributes::AttributeValue,
+    /// The from_generation value recorded by OTAP Dataflow internal telemetry.
+    pub from_generation: otap_df_telemetry::attributes::AttributeValue,
+    /// The max_restarts value recorded by OTAP Dataflow internal telemetry.
+    pub max_restarts: otap_df_telemetry::attributes::AttributeValue,
+    /// The pipeline_group_id value recorded by OTAP Dataflow internal telemetry.
+    pub pipeline_group_id: otap_df_telemetry::attributes::AttributeValue,
+    /// The pipeline_id value recorded by OTAP Dataflow internal telemetry.
+    pub pipeline_id: otap_df_telemetry::attributes::AttributeValue,
+    /// The target_generation value recorded by OTAP Dataflow internal telemetry.
+    pub target_generation: otap_df_telemetry::attributes::AttributeValue,
+}
+
+/// Marker implemented only by entity types allowed by `otelcol.pipeline.recovery.retry`.
+pub trait OtelcolPipelineRecoveryRetryAssociatedEntity: entities::SemanticEntity {}
+
+impl OtelcolPipelineRecoveryRetryAssociatedEntity for entities::EngineEntityAttributeSet {}
+
+impl OtelcolPipelineRecoveryRetryAssociatedEntity for entities::PipelineAttributeSet {}
+
+impl OtelcolPipelineRecoveryRetryAssociatedEntity for entities::NodeAttributeSet {}
+
+impl OtelcolPipelineRecoveryRetryAssociatedEntity for entities::NodeWithCustomAttributeSet {}
+
+static OTELCOL_PIPELINE_RECOVERY_RETRY_DESCRIPTOR: EventDescriptor = EventDescriptor {
+    name: "otelcol.pipeline.recovery.retry",
+    wire_name: "otelcol.pipeline.recovery.retry",
+    brief: "Emitted by OTAP Dataflow as `otelcol.pipeline.recovery.retry`.",
+    stability: "development",
+    requirement_level: EventRequirementLevel::Recommended,
+    scope_names: &["otap-df-controller"],
+    severity_levels: &[EventSeverity::Warn],
+    sources: &["crates/controller/src/live_control/runtime.rs"],
+    availability: &[],
+    entity_associations: &[
+        "otap.engine",
+        "otap.pipeline",
+        "otap.node",
+        "otap.node.custom",
+    ],
+    attributes: &[
+        EventAttributeDescriptor {
+            key: "attempt",
+            wire_key: "attempt",
+            brief: "The attempt value recorded by OTAP Dataflow internal telemetry.",
+            value_type: otap_df_telemetry::descriptor::AttributeValueType::Any,
+            requirement_level: EventRequirementLevel::Required,
+        },
+        EventAttributeDescriptor {
+            key: "backoff_ms",
+            wire_key: "backoff_ms",
+            brief: "The backoff_ms value recorded by OTAP Dataflow internal telemetry.",
+            value_type: otap_df_telemetry::descriptor::AttributeValueType::Any,
+            requirement_level: EventRequirementLevel::Required,
+        },
+        EventAttributeDescriptor {
+            key: "core_id",
+            wire_key: "core_id",
+            brief: "The core_id value recorded by OTAP Dataflow internal telemetry.",
+            value_type: otap_df_telemetry::descriptor::AttributeValueType::Any,
+            requirement_level: EventRequirementLevel::Required,
+        },
+        EventAttributeDescriptor {
+            key: "error",
+            wire_key: "error",
+            brief: "The error value recorded by OTAP Dataflow internal telemetry.",
+            value_type: otap_df_telemetry::descriptor::AttributeValueType::Any,
+            requirement_level: EventRequirementLevel::Required,
+        },
+        EventAttributeDescriptor {
+            key: "from_generation",
+            wire_key: "from_generation",
+            brief: "The from_generation value recorded by OTAP Dataflow internal telemetry.",
+            value_type: otap_df_telemetry::descriptor::AttributeValueType::Any,
+            requirement_level: EventRequirementLevel::Required,
+        },
+        EventAttributeDescriptor {
+            key: "max_restarts",
+            wire_key: "max_restarts",
+            brief: "The max_restarts value recorded by OTAP Dataflow internal telemetry.",
+            value_type: otap_df_telemetry::descriptor::AttributeValueType::Any,
+            requirement_level: EventRequirementLevel::Required,
+        },
+        EventAttributeDescriptor {
+            key: "pipeline_group_id",
+            wire_key: "pipeline_group_id",
+            brief: "The pipeline_group_id value recorded by OTAP Dataflow internal telemetry.",
+            value_type: otap_df_telemetry::descriptor::AttributeValueType::Any,
+            requirement_level: EventRequirementLevel::Required,
+        },
+        EventAttributeDescriptor {
+            key: "pipeline_id",
+            wire_key: "pipeline_id",
+            brief: "The pipeline_id value recorded by OTAP Dataflow internal telemetry.",
+            value_type: otap_df_telemetry::descriptor::AttributeValueType::Any,
+            requirement_level: EventRequirementLevel::Required,
+        },
+        EventAttributeDescriptor {
+            key: "target_generation",
+            wire_key: "target_generation",
+            brief: "The target_generation value recorded by OTAP Dataflow internal telemetry.",
+            value_type: otap_df_telemetry::descriptor::AttributeValueType::Any,
+            requirement_level: EventRequirementLevel::Required,
+        },
+    ],
+};
+
+impl EventAttributes for OtelcolPipelineRecoveryRetry {
+    #[inline]
+    fn visit_attributes(
+        &self,
+        visitor: &mut dyn FnMut(&'static EventAttributeDescriptor, EventAttributeValueRef<'_>),
+    ) {
+        visitor(
+            &OTELCOL_PIPELINE_RECOVERY_RETRY_DESCRIPTOR.attributes[0],
+            EventAttributeValueRef::Any(&self.attempt),
+        );
+        visitor(
+            &OTELCOL_PIPELINE_RECOVERY_RETRY_DESCRIPTOR.attributes[1],
+            EventAttributeValueRef::Any(&self.backoff_ms),
+        );
+        visitor(
+            &OTELCOL_PIPELINE_RECOVERY_RETRY_DESCRIPTOR.attributes[2],
+            EventAttributeValueRef::Any(&self.core_id),
+        );
+        visitor(
+            &OTELCOL_PIPELINE_RECOVERY_RETRY_DESCRIPTOR.attributes[3],
+            EventAttributeValueRef::Any(&self.error),
+        );
+        visitor(
+            &OTELCOL_PIPELINE_RECOVERY_RETRY_DESCRIPTOR.attributes[4],
+            EventAttributeValueRef::Any(&self.from_generation),
+        );
+        visitor(
+            &OTELCOL_PIPELINE_RECOVERY_RETRY_DESCRIPTOR.attributes[5],
+            EventAttributeValueRef::Any(&self.max_restarts),
+        );
+        visitor(
+            &OTELCOL_PIPELINE_RECOVERY_RETRY_DESCRIPTOR.attributes[6],
+            EventAttributeValueRef::Any(&self.pipeline_group_id),
+        );
+        visitor(
+            &OTELCOL_PIPELINE_RECOVERY_RETRY_DESCRIPTOR.attributes[7],
+            EventAttributeValueRef::Any(&self.pipeline_id),
+        );
+        visitor(
+            &OTELCOL_PIPELINE_RECOVERY_RETRY_DESCRIPTOR.attributes[8],
+            EventAttributeValueRef::Any(&self.target_generation),
+        );
+    }
+}
+
+impl SemanticEvent for OtelcolPipelineRecoveryRetry {
+    const DESCRIPTOR: &'static EventDescriptor = &OTELCOL_PIPELINE_RECOVERY_RETRY_DESCRIPTOR;
+}
+
+impl OtelcolPipelineRecoveryRetry {
+    /// Static semantic-convention descriptor for this event.
+    pub const DESCRIPTOR: &'static EventDescriptor = &OTELCOL_PIPELINE_RECOVERY_RETRY_DESCRIPTOR;
+
+    /// Sends this payload at the `warn` level with a compatible entity.
+    pub fn emit_warn<S, E>(&self, client: &mut EventClient<S>, entity: &E)
+    where
+        S: EventSink,
+        E: OtelcolPipelineRecoveryRetryAssociatedEntity,
+    {
+        client.emit(entity, self, EventLevel::Warn);
+    }
+}
+
 /// The pipeline.core_allocation internal telemetry event occurred.
 #[derive(Debug, Clone)]
 pub struct PipelineCoreAllocation {
@@ -3322,6 +4297,10 @@ pub struct PipelineCoreAllocation {
     pub pipeline_group_id: otap_df_telemetry::attributes::AttributeValue,
     /// The pipeline_id value recorded by OTAP Dataflow internal telemetry.
     pub pipeline_id: otap_df_telemetry::attributes::AttributeValue,
+    /// The resolved_cores value recorded by OTAP Dataflow internal telemetry.
+    pub resolved_cores: otap_df_telemetry::attributes::AttributeValue,
+    /// The resolved_numa_nodes value recorded by OTAP Dataflow internal telemetry.
+    pub resolved_numa_nodes: otap_df_telemetry::attributes::AttributeValue,
 }
 
 /// Marker implemented only by entity types allowed by `pipeline.core_allocation`.
@@ -3369,6 +4348,20 @@ static PIPELINE_CORE_ALLOCATION_DESCRIPTOR: EventDescriptor = EventDescriptor {
             value_type: otap_df_telemetry::descriptor::AttributeValueType::Any,
             requirement_level: EventRequirementLevel::Required,
         },
+        EventAttributeDescriptor {
+            key: "resolved_cores",
+            wire_key: "resolved_cores",
+            brief: "The resolved_cores value recorded by OTAP Dataflow internal telemetry.",
+            value_type: otap_df_telemetry::descriptor::AttributeValueType::Any,
+            requirement_level: EventRequirementLevel::Required,
+        },
+        EventAttributeDescriptor {
+            key: "resolved_numa_nodes",
+            wire_key: "resolved_numa_nodes",
+            brief: "The resolved_numa_nodes value recorded by OTAP Dataflow internal telemetry.",
+            value_type: otap_df_telemetry::descriptor::AttributeValueType::Any,
+            requirement_level: EventRequirementLevel::Required,
+        },
     ],
 };
 
@@ -3393,6 +4386,14 @@ impl EventAttributes for PipelineCoreAllocation {
         visitor(
             &PIPELINE_CORE_ALLOCATION_DESCRIPTOR.attributes[3],
             EventAttributeValueRef::Any(&self.pipeline_id),
+        );
+        visitor(
+            &PIPELINE_CORE_ALLOCATION_DESCRIPTOR.attributes[4],
+            EventAttributeValueRef::Any(&self.resolved_cores),
+        );
+        visitor(
+            &PIPELINE_CORE_ALLOCATION_DESCRIPTOR.attributes[5],
+            EventAttributeValueRef::Any(&self.resolved_numa_nodes),
         );
     }
 }

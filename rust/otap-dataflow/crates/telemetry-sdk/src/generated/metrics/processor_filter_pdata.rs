@@ -31,82 +31,23 @@ impl AssociatedEntity for entities::NodeWithCustomAttributeSet {}
 #[derive(Debug, Default, Clone)]
 #[repr(C, align(64))]
 pub struct FilterPdataMetrics {
-    /// Number of log signals consumed
-    pub log_signals_consumed: otap_df_telemetry::instrument::Counter<u64>,
-    /// Number of log signals filtered
-    pub log_signals_filtered: otap_df_telemetry::instrument::Counter<u64>,
-    /// Number of metric signals consumed
-    pub metric_signals_consumed: otap_df_telemetry::instrument::Counter<u64>,
-    /// Number of metric signals filtered
-    pub metric_signals_filtered: otap_df_telemetry::instrument::Counter<u64>,
-    /// Number of span signals consumed
-    pub span_signals_consumed: otap_df_telemetry::instrument::Counter<u64>,
-    /// Number of span signals filtered
-    pub span_signals_filtered: otap_df_telemetry::instrument::Counter<u64>,
+    /// Number of signal items (log records, spans, or metric data points) a decision node chose to drop.
+    pub dropped_items: otap_df_telemetry::instrument::Counter<u64>,
 }
 
 /// Per-field conditional availability in descriptor order.
-pub const FILTER_PDATA_METRICS_METRIC_AVAILABILITY: &[Option<&str>] = &[
-    AVAILABILITY,
-    AVAILABILITY,
-    AVAILABILITY,
-    AVAILABILITY,
-    AVAILABILITY,
-    AVAILABILITY,
-];
+pub const FILTER_PDATA_METRICS_METRIC_AVAILABILITY: &[Option<&str>] = &[AVAILABILITY];
 
 static FILTER_PDATA_METRICS_DESCRIPTOR: MetricsDescriptor = MetricsDescriptor {
     name: METRIC_SET,
-    metrics: &[
-        MetricsField {
-            name: "log.signals.consumed",
-            unit: "{log}",
-            brief: "Number of log signals consumed",
-            instrument: Instrument::Counter,
-            temporality: Some(otap_df_telemetry::descriptor::Temporality::Delta),
-            value_type: MetricValueType::U64,
-        },
-        MetricsField {
-            name: "log.signals.filtered",
-            unit: "{log}",
-            brief: "Number of log signals filtered",
-            instrument: Instrument::Counter,
-            temporality: Some(otap_df_telemetry::descriptor::Temporality::Delta),
-            value_type: MetricValueType::U64,
-        },
-        MetricsField {
-            name: "metric.signals.consumed",
-            unit: "{metric}",
-            brief: "Number of metric signals consumed",
-            instrument: Instrument::Counter,
-            temporality: Some(otap_df_telemetry::descriptor::Temporality::Delta),
-            value_type: MetricValueType::U64,
-        },
-        MetricsField {
-            name: "metric.signals.filtered",
-            unit: "{metric}",
-            brief: "Number of metric signals filtered",
-            instrument: Instrument::Counter,
-            temporality: Some(otap_df_telemetry::descriptor::Temporality::Delta),
-            value_type: MetricValueType::U64,
-        },
-        MetricsField {
-            name: "span.signals.consumed",
-            unit: "{span}",
-            brief: "Number of span signals consumed",
-            instrument: Instrument::Counter,
-            temporality: Some(otap_df_telemetry::descriptor::Temporality::Delta),
-            value_type: MetricValueType::U64,
-        },
-        MetricsField {
-            name: "span.signals.filtered",
-            unit: "{span}",
-            brief: "Number of span signals filtered",
-            instrument: Instrument::Counter,
-            temporality: Some(otap_df_telemetry::descriptor::Temporality::Delta),
-            value_type: MetricValueType::U64,
-        },
-    ],
+    metrics: &[MetricsField {
+        name: "dropped.items",
+        unit: "{item}",
+        brief: "Number of signal items (log records, spans, or metric data points) a decision node chose to drop.",
+        instrument: Instrument::Counter,
+        temporality: Some(otap_df_telemetry::descriptor::Temporality::Delta),
+        value_type: MetricValueType::U64,
+    }],
 };
 
 impl MetricSetHandler for FilterPdataMetrics {
@@ -117,44 +58,17 @@ impl MetricSetHandler for FilterPdataMetrics {
 
     #[inline]
     fn snapshot_values(&self) -> Vec<MetricValue> {
-        vec![
-            MetricValue::from(self.log_signals_consumed.get()),
-            MetricValue::from(self.log_signals_filtered.get()),
-            MetricValue::from(self.metric_signals_consumed.get()),
-            MetricValue::from(self.metric_signals_filtered.get()),
-            MetricValue::from(self.span_signals_consumed.get()),
-            MetricValue::from(self.span_signals_filtered.get()),
-        ]
+        vec![MetricValue::from(self.dropped_items.get())]
     }
 
     #[inline]
     fn clear_values(&mut self) {
-        self.log_signals_consumed.reset();
-        self.log_signals_filtered.reset();
-        self.metric_signals_consumed.reset();
-        self.metric_signals_filtered.reset();
-        self.span_signals_consumed.reset();
-        self.span_signals_filtered.reset();
+        self.dropped_items.reset();
     }
 
     #[inline]
     fn needs_flush(&self) -> bool {
-        if !MetricValue::from(self.log_signals_consumed.get()).is_zero() {
-            return true;
-        }
-        if !MetricValue::from(self.log_signals_filtered.get()).is_zero() {
-            return true;
-        }
-        if !MetricValue::from(self.metric_signals_consumed.get()).is_zero() {
-            return true;
-        }
-        if !MetricValue::from(self.metric_signals_filtered.get()).is_zero() {
-            return true;
-        }
-        if !MetricValue::from(self.span_signals_consumed.get()).is_zero() {
-            return true;
-        }
-        if !MetricValue::from(self.span_signals_filtered.get()).is_zero() {
+        if !MetricValue::from(self.dropped_items.get()).is_zero() {
             return true;
         }
         false

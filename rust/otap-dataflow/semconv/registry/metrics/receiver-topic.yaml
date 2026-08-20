@@ -1,10 +1,10 @@
 file_format: definition/2
 metrics:
 - name: receiver.topic.bridge.controls.ignored.propagation.disabled
-  brief: Number of downstream ACK/NACK controls ignored because topic Ack/Nack propagation
-    is disabled for this receiver.
+  brief: Number of downstream ACK/NACK controls ignored because topic Ack/Nack propagation is disabled
+    for this receiver.
   instrument: counter
-  unit: "{event}"
+  unit: '{event}'
   stability: development
   requirement_level: recommended
   entity_associations:
@@ -17,11 +17,11 @@ metrics:
     otap_dataflow:
       metric_set: receiver.topic
 - name: receiver.topic.bridge.invalid.or.untracked.id
-  brief: Number of downstream ACK/NACK controls carrying an id that is not currently
-    tracked by the topic runtime. With the current raw `message_id` bridge this also
-    includes invalid or forged ids; those causes are not distinguishable yet.
+  brief: Number of downstream ACK/NACK controls carrying an id that is not currently tracked by the topic
+    runtime. With the current raw `message_id` bridge this also includes invalid or forged ids; those
+    causes are not distinguishable yet.
   instrument: counter
-  unit: "{event}"
+  unit: '{event}'
   stability: development
   requirement_level: recommended
   entity_associations:
@@ -34,10 +34,9 @@ metrics:
     otap_dataflow:
       metric_set: receiver.topic
 - name: receiver.topic.bridge.missing.calldata
-  brief: Number of downstream ACK/NACK controls missing the bridged topic message
-    id in calldata.
+  brief: Number of downstream ACK/NACK controls missing the bridged topic message id in calldata.
   instrument: counter
-  unit: "{event}"
+  unit: '{event}'
   stability: development
   requirement_level: recommended
   entity_associations:
@@ -50,10 +49,10 @@ metrics:
     otap_dataflow:
       metric_set: receiver.topic
 - name: receiver.topic.bridge.runtime.failures
-  brief: Number of downstream ACK/NACK controls that failed to bridge for some runtime
-    reason other than an unknown message id.
+  brief: Number of downstream ACK/NACK controls that failed to bridge for some runtime reason other than
+    an unknown message id.
   instrument: counter
-  unit: "{event}"
+  unit: '{event}'
   stability: development
   requirement_level: recommended
   entity_associations:
@@ -68,7 +67,7 @@ metrics:
 - name: receiver.topic.bridged.downstream.acks
   brief: Number of downstream ACK controls successfully bridged to topic ack.
   instrument: counter
-  unit: "{item}"
+  unit: '{item}'
   stability: development
   requirement_level: recommended
   entity_associations:
@@ -83,7 +82,7 @@ metrics:
 - name: receiver.topic.bridged.downstream.nacks
   brief: Number of downstream NACK controls successfully bridged to topic nack.
   instrument: counter
-  unit: "{item}"
+  unit: '{item}'
   stability: development
   requirement_level: recommended
   entity_associations:
@@ -98,7 +97,7 @@ metrics:
 - name: receiver.topic.downstream.backpressure.events
   brief: Number of downstream backpressure events (>= 500ms blocked).
   instrument: counter
-  unit: "{event}"
+  unit: '{event}'
   stability: development
   requirement_level: recommended
   entity_associations:
@@ -128,7 +127,7 @@ metrics:
 - name: receiver.topic.forward.failures
   brief: Number of forward failures to downstream channel.
   instrument: counter
-  unit: "{item}"
+  unit: '{item}'
   stability: development
   requirement_level: recommended
   entity_associations:
@@ -143,7 +142,7 @@ metrics:
 - name: receiver.topic.forwarded.messages
   brief: Number of messages forwarded to downstream.
   instrument: counter
-  unit: "{item}"
+  unit: '{item}'
   stability: development
   requirement_level: recommended
   entity_associations:
@@ -158,7 +157,7 @@ metrics:
 - name: receiver.topic.lag.disconnects
   brief: Number of broadcast subscriptions disconnected because of lag.
   instrument: counter
-  unit: "{event}"
+  unit: '{event}'
   stability: development
   requirement_level: recommended
   entity_associations:
@@ -173,7 +172,7 @@ metrics:
 - name: receiver.topic.lagged.messages
   brief: Total messages missed across lag notifications.
   instrument: counter
-  unit: "{item}"
+  unit: '{item}'
   stability: development
   requirement_level: recommended
   entity_associations:
@@ -188,7 +187,7 @@ metrics:
 - name: receiver.topic.lagged.notifications
   brief: Number of lag notifications emitted by broadcast subscriptions.
   instrument: counter
-  unit: "{event}"
+  unit: '{event}'
   stability: development
   requirement_level: recommended
   entity_associations:

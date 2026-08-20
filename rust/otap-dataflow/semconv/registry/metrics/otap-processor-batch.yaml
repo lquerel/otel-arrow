@@ -3,52 +3,7 @@ metrics:
 - name: otap.processor.batch.batching.errors
   brief: Number of batches for which errors encountered
   instrument: counter
-  unit: "{error}"
-  stability: development
-  requirement_level: recommended
-  entity_associations:
-  - one_of:
-    - otap.node
-    - otap.node.custom
-  annotations:
-    code_generation:
-      metric_value_type: int
-    otap_dataflow:
-      metric_set: otap.processor.batch
-- name: otap.processor.batch.consumed.batches.logs
-  brief: Total batches consumed for logs signal
-  instrument: counter
-  unit: "{item}"
-  stability: development
-  requirement_level: recommended
-  entity_associations:
-  - one_of:
-    - otap.node
-    - otap.node.custom
-  annotations:
-    code_generation:
-      metric_value_type: int
-    otap_dataflow:
-      metric_set: otap.processor.batch
-- name: otap.processor.batch.consumed.batches.metrics
-  brief: Total batches consumed for metrics signal
-  instrument: counter
-  unit: "{item}"
-  stability: development
-  requirement_level: recommended
-  entity_associations:
-  - one_of:
-    - otap.node
-    - otap.node.custom
-  annotations:
-    code_generation:
-      metric_value_type: int
-    otap_dataflow:
-      metric_set: otap.processor.batch
-- name: otap.processor.batch.consumed.batches.traces
-  brief: Total batches consumed for traces signal
-  instrument: counter
-  unit: "{item}"
+  unit: '{error}'
   stability: development
   requirement_level: recommended
   entity_associations:
@@ -63,7 +18,7 @@ metrics:
 - name: otap.processor.batch.dropped.conversion
   brief: Number of messages dropped due to conversion failures
   instrument: counter
-  unit: "{msg}"
+  unit: '{msg}'
   stability: development
   requirement_level: recommended
   entity_associations:
@@ -93,7 +48,7 @@ metrics:
 - name: otap.processor.batch.flush.output.batches
   brief: Number of output batches emitted by each flush
   instrument: histogram
-  unit: "{batch}"
+  unit: '{batch}'
   stability: development
   requirement_level: recommended
   entity_associations:
@@ -138,7 +93,7 @@ metrics:
 - name: otap.processor.batch.flush.pending.requests
   brief: Number of input requests pending at flush time
   instrument: histogram
-  unit: "{request}"
+  unit: '{request}'
   stability: development
   requirement_level: recommended
   entity_associations:
@@ -168,7 +123,7 @@ metrics:
 - name: otap.processor.batch.flushes.size
   brief: Number of flushes triggered by size threshold (all signals)
   instrument: counter
-  unit: "{flush}"
+  unit: '{flush}'
   stability: development
   requirement_level: recommended
   entity_associations:
@@ -183,7 +138,7 @@ metrics:
 - name: otap.processor.batch.flushes.timer
   brief: Number of flushes triggered by timer (all signals)
   instrument: counter
-  unit: "{flush}"
+  unit: '{flush}'
   stability: development
   requirement_level: recommended
   entity_associations:
@@ -198,7 +153,7 @@ metrics:
 - name: otap.processor.batch.nacked.inbound.slots
   brief: Number of requests nacked due to inbound slot exhaustion
   instrument: counter
-  unit: "{msg}"
+  unit: '{msg}'
   stability: development
   requirement_level: recommended
   entity_associations:
@@ -213,7 +168,7 @@ metrics:
 - name: otap.processor.batch.nacked.outbound.slots
   brief: Number of requests nacked due to inbound slot exhaustion
   instrument: counter
-  unit: "{msg}"
+  unit: '{msg}'
   stability: development
   requirement_level: recommended
   entity_associations:
@@ -225,40 +180,11 @@ metrics:
       metric_value_type: int
     otap_dataflow:
       metric_set: otap.processor.batch
-- name: otap.processor.batch.produced.batches.logs
-  brief: Total batches produced for logs signal
+- name: otap.processor.batch.split.budget.fallbacks
+  brief: Number of oversize resource entries emitted whole (best-effort) because splitting them would
+    have exceeded the configured fragment budget.
   instrument: counter
-  unit: "{item}"
-  stability: development
-  requirement_level: recommended
-  entity_associations:
-  - one_of:
-    - otap.node
-    - otap.node.custom
-  annotations:
-    code_generation:
-      metric_value_type: int
-    otap_dataflow:
-      metric_set: otap.processor.batch
-- name: otap.processor.batch.produced.batches.metrics
-  brief: Total batches produced for metrics signal
-  instrument: counter
-  unit: "{item}"
-  stability: development
-  requirement_level: recommended
-  entity_associations:
-  - one_of:
-    - otap.node
-    - otap.node.custom
-  annotations:
-    code_generation:
-      metric_value_type: int
-    otap_dataflow:
-      metric_set: otap.processor.batch
-- name: otap.processor.batch.produced.batches.traces
-  brief: Total batches produced for traces signal
-  instrument: counter
-  unit: "{item}"
+  unit: '{entry}'
   stability: development
   requirement_level: recommended
   entity_associations:

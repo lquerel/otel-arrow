@@ -33,7 +33,7 @@ pub struct EngineMetrics {
     pub cpu_utilization: otap_df_telemetry::instrument::Gauge<f64>,
     /// Process-wide memory limiter state encoded as `0=normal`, `1=soft`, `2=hard`.
     pub memory_pressure_state: otap_df_telemetry::instrument::Gauge<u64>,
-    /// Process-wide Resident Set Size - physical RAM currently used by the process. Matches what external tools report (e.g. `kubectl top pod`, `htop`, `ps rss`).
+    /// Process-wide Resident Set Size -- physical RAM currently used by the process. Matches what external tools report (e.g. `kubectl top pod`, `htop`, `ps rss`).
     pub memory_rss: otap_df_telemetry::instrument::ObserveUpDownCounter<u64>,
     /// Effective process-wide memory limiter hard limit, in bytes.
     pub process_memory_hard_limit_bytes: otap_df_telemetry::instrument::Gauge<u64>,
@@ -75,7 +75,7 @@ static ENGINE_METRICS_DESCRIPTOR: MetricsDescriptor = MetricsDescriptor {
         MetricsField {
             name: "memory.rss",
             unit: "{By}",
-            brief: "Process-wide Resident Set Size - physical RAM currently used by the process. Matches what external tools report (e.g. `kubectl top pod`, `htop`, `ps rss`).",
+            brief: "Process-wide Resident Set Size -- physical RAM currently used by the process. Matches what external tools report (e.g. `kubectl top pod`, `htop`, `ps rss`).",
             instrument: Instrument::UpDownCounter,
             temporality: Some(otap_df_telemetry::descriptor::Temporality::Cumulative),
             value_type: MetricValueType::U64,

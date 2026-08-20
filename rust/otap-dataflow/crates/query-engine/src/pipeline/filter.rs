@@ -71,7 +71,7 @@ impl PipelineStage for FilterPipelineStage {
         // Convert the result to a root-aligned BooleanArray selection vector.
         let selection_vec = match result {
             None => {
-                // expression data was absent — no rows pass the filter
+                // expression data was absent -- no rows pass the filter
                 BooleanArray::new(BooleanBuffer::new_unset(num_rows), None)
             }
             Some(scoped_value) => {
@@ -126,10 +126,10 @@ impl PipelineStage for FilterPipelineStage {
 /// Convert a `ColumnarValue` into a `BooleanArray` selection vector of the given number of rows.
 ///
 /// Handles:
-/// - `ColumnarValue::Array` — casts to `BooleanArray`, strips null buffer by ANDing values with
+/// - `ColumnarValue::Array` -- casts to `BooleanArray`, strips null buffer by ANDing values with
 ///   the null buffer (null predicate results are treated as false)
-/// - `ColumnarValue::Scalar(Boolean(true))` — all-true array
-/// - `ColumnarValue::Scalar(Boolean(false))` or `Scalar(Null)` — all-false array
+/// - `ColumnarValue::Scalar(Boolean(true))` -- all-true array
+/// - `ColumnarValue::Scalar(Boolean(false))` or `Scalar(Null)` -- all-false array
 pub(crate) fn scoped_value_to_boolean_array(
     values: ColumnarValue,
     num_rows: usize,
@@ -259,7 +259,7 @@ fn align_selection_vec_from_atts(
             });
         }
         None => {
-            // no ID column means no attributes exist — return all-null for the root
+            // no ID column means no attributes exist -- return all-null for the root
             return Ok(ScopedValue::new(
                 null_columnar_value_for_rows(&value.values, num_rows)?,
                 DataScope::Root,
@@ -399,6 +399,7 @@ mod test {
     use crate::pipeline::{Pipeline, PipelineOptions};
 
     use super::*;
+    use otap_df_pdata::OtapPayloadHelpers;
     use otap_df_pdata::proto::opentelemetry::arrow::v1::ArrowPayloadType;
     use otap_df_pdata::schema::consts;
 
@@ -420,22 +421,25 @@ mod test {
     use otap_df_pdata::proto::opentelemetry::logs::v1::{
         LogRecord, LogsData, ResourceLogs, ScopeLogs,
     };
+
     use otap_df_pdata::proto::opentelemetry::metrics::v1::exponential_histogram_data_point::Buckets;
     use otap_df_pdata::proto::opentelemetry::metrics::v1::{
-        Exemplar, ExponentialHistogram, ExponentialHistogramDataPoint, Gauge, Histogram,
-        HistogramDataPoint, Metric, NumberDataPoint, Summary, SummaryDataPoint,
+        AggregationTemporality, Exemplar, ExponentialHistogram, ExponentialHistogramDataPoint,
+        Gauge, Histogram, HistogramDataPoint, Metric, MetricsData, NumberDataPoint, Sum, Summary,
+        SummaryDataPoint,
     };
     use otap_df_pdata::proto::opentelemetry::resource::v1::Resource;
     use otap_df_pdata::proto::opentelemetry::trace::v1::span::{Event, Link};
     use otap_df_pdata::proto::opentelemetry::trace::v1::{Span, Status};
     use otap_df_pdata::testing::round_trip::{
-        otap_to_otlp, otlp_to_otap, to_logs_data, to_otap_logs, to_otap_metrics, to_otap_traces,
-        to_traces_data,
+        otap_to_otlp, otlp_to_otap, to_logs_data, to_metrics_data, to_otap_logs, to_otap_metrics,
+        to_otap_traces, to_traces_data,
     };
     use otap_df_query_engine_languages::opl::parser::OplParser;
 
     use crate::pipeline::test::{
-        exec_logs_pipeline, otap_to_logs_data, otap_to_metrics_data, otap_to_traces_data,
+        exec_logs_pipeline, exec_metrics_pipeline, otap_to_logs_data, otap_to_metrics_data,
+        otap_to_traces_data,
     };
 
     async fn test_simple_filter<P: Parser, F: Fn(&str) -> String>(date_time_formatter: F) {
@@ -793,6 +797,44 @@ mod test {
         ];
 
         let query = "logs | where matches(body, \"hello .*\")";
+        let result = exec_logs_pipeline::<OplParser>(query, to_logs_data(input.clone())).await;
+
+        assert_eq!(
+            &result.resource_logs[0].scope_logs[0].log_records,
+            &[input[0].clone(), input[1].clone()]
+        );
+    }
+
+    #[tokio::test]
+    async fn test_filter_logs_body_using_matches_with_escape_sequences() {
+        let input = vec![
+            LogRecord::build()
+                .body(AnyValue::new_string("hello 1"))
+                .event_name("1")
+                .finish(),
+            LogRecord::build()
+                .body(AnyValue::new_string("hello 12"))
+                .event_name("2")
+                .finish(),
+            LogRecord::build()
+                .body(AnyValue::new_string("hello world"))
+                .event_name("3")
+                .finish(),
+            LogRecord::build()
+                .body(AnyValue::new_string("hello"))
+                .event_name("6")
+                .finish(),
+        ];
+
+        let query = r#"logs | where matches(body, "hello \\d$")"#;
+        let result = exec_logs_pipeline::<OplParser>(query, to_logs_data(input.clone())).await;
+
+        assert_eq!(
+            &result.resource_logs[0].scope_logs[0].log_records,
+            &[input[0].clone()]
+        );
+
+        let query = r#"logs | where matches(body, "hello \\d+")"#;
         let result = exec_logs_pipeline::<OplParser>(query, to_logs_data(input.clone())).await;
 
         assert_eq!(
@@ -5661,6 +5703,122 @@ mod test {
         assert_eq!(traces_input, traces_ouptut);
     }
 
+    /// Scenario: Filter a metrics stream using `is <MetricType>` predicates.
+    /// Guarantees: Only metrics of the requested concrete type remain after filtering.
+    #[tokio::test]
+    async fn test_filter_check_metric_type() {
+        let gauge_metric = Metric::build()
+            .name("gauge_metric")
+            .data_gauge(Gauge {
+                data_points: vec![NumberDataPoint::build().finish()],
+            })
+            .finish();
+        let sum_metric = Metric::build()
+            .name("sum_metric")
+            .data_sum(Sum {
+                data_points: vec![NumberDataPoint::build().finish()],
+                ..Default::default()
+            })
+            .finish();
+        let histogram_metric = Metric::build()
+            .name("histogram_metric")
+            .data_histogram(Histogram {
+                data_points: vec![HistogramDataPoint::build().finish()],
+                aggregation_temporality: AggregationTemporality::Unspecified as i32,
+            })
+            .finish();
+        let exp_histogram_metric = Metric::build()
+            .name("exp_histogram_metric")
+            .data_exponential_histogram(ExponentialHistogram {
+                data_points: vec![
+                    ExponentialHistogramDataPoint::build()
+                        .positive(Buckets::default())
+                        .negative(Buckets::default())
+                        .finish(),
+                ],
+                aggregation_temporality: AggregationTemporality::Unspecified as i32,
+            })
+            .finish();
+        let summary_metric = Metric::build()
+            .name("summary_metric")
+            .data_summary(Summary {
+                data_points: vec![SummaryDataPoint::build().finish()],
+            })
+            .finish();
+
+        let input = to_metrics_data(vec![
+            gauge_metric.clone(),
+            sum_metric.clone(),
+            histogram_metric.clone(),
+            exp_histogram_metric.clone(),
+            summary_metric.clone(),
+        ]);
+
+        // helper to assert on which metrics were present after filtering
+        let assert_results = |result: MetricsData, expected| {
+            assert_eq!(result.resource_metrics.len(), 1);
+            assert_eq!(result.resource_metrics[0].scope_metrics.len(), 1);
+            pretty_assertions::assert_eq!(
+                result.resource_metrics[0].scope_metrics[0].metrics,
+                expected
+            );
+        };
+
+        let query = "metrics | where is Gauge";
+        let result = exec_metrics_pipeline::<OplParser>(query, input.clone()).await;
+        assert_results(result, vec![gauge_metric.clone()]);
+
+        let query = "metrics | where is Sum";
+        let result = exec_metrics_pipeline::<OplParser>(query, input.clone()).await;
+        assert_results(result, vec![sum_metric.clone()]);
+
+        let query = "metrics | where is Histogram";
+        let result = exec_metrics_pipeline::<OplParser>(query, input.clone()).await;
+        assert_results(result, vec![histogram_metric.clone()]);
+
+        let query = "metrics | where is ExponentialHistogram";
+        let result = exec_metrics_pipeline::<OplParser>(query, input.clone()).await;
+        assert_results(result, vec![exp_histogram_metric.clone()]);
+
+        let query = "metrics | where is Summary";
+        let result = exec_metrics_pipeline::<OplParser>(query, input.clone()).await;
+        assert_results(result, vec![summary_metric.clone()]);
+    }
+
+    /// Scenario: Run selecting some concrete metric type against a mixed stream of batches of
+    /// various signal types
+    /// Guarantees: Only rows from metrics batches having the selected metric type remain
+    #[tokio::test]
+    async fn test_filter_check_signal_type_as_concrete_metric_type() {
+        let logs_batch = vec![LogRecord::build().finish()];
+        let spans_batch = vec![Span::build().finish()];
+        let metrics_batch = vec![Metric::build().data_gauge(Gauge::default()).finish()];
+
+        let query = "signals | where is Gauge";
+        let parser_result = OplParser::parse(query).unwrap();
+        let mut pipeline = Pipeline::new(parser_result.pipeline);
+
+        let logs_result = pipeline.execute(to_otap_logs(logs_batch)).await.unwrap();
+        assert!(logs_result.is_empty());
+
+        let spans_result = pipeline.execute(to_otap_traces(spans_batch)).await.unwrap();
+        assert!(spans_result.is_empty());
+
+        let metrics_result = pipeline
+            .execute(to_otap_metrics(metrics_batch.clone()))
+            .await
+            .unwrap();
+        let OtlpProtoMessage::Metrics(result) = otap_to_otlp(&metrics_result) else {
+            panic!("invalid signal type after conversion")
+        };
+        assert_eq!(result.resource_metrics.len(), 1);
+        assert_eq!(result.resource_metrics[0].scope_metrics.len(), 1);
+        pretty_assertions::assert_eq!(
+            result.resource_metrics[0].scope_metrics[0].metrics,
+            metrics_batch
+        );
+    }
+
     #[tokio::test]
     async fn test_filter_by_attr_type() {
         let log_records = vec![
@@ -5886,6 +6044,43 @@ mod test {
         assert_eq!(
             &result.resource_logs[0].scope_logs[0].log_records,
             &expected
+        );
+    }
+
+    /// Scenario: A five-attribute traffic-generator-shaped log record joins two attribute predicates.
+    /// Guarantees: Scalar false filters the record, while scalar true keeps it without terminating filtering.
+    #[tokio::test]
+    async fn test_filter_attributes_all_scalar_result() {
+        let log_records = vec![
+            LogRecord::build()
+                .attributes([
+                    KeyValue::new("thread.id", AnyValue::new_int(0)),
+                    KeyValue::new("thread.name", AnyValue::new_string("worker")),
+                    KeyValue::new("code.function", AnyValue::new_string("run")),
+                    KeyValue::new("code.namespace", AnyValue::new_string("example")),
+                    KeyValue::new("code.filepath", AnyValue::new_string("main.rs")),
+                ])
+                .finish(),
+        ];
+
+        let result = exec_logs_pipeline::<OplParser>(
+            r#"logs | where (attributes["code.function"] == "foo") and not(contains(attributes["thread.name"], "bar"))"#,
+            to_logs_data(log_records.clone()),
+        )
+        .await;
+
+        assert!(result.resource_logs.is_empty());
+
+        let result = exec_logs_pipeline::<OplParser>(
+            r#"logs | where (attributes["code.function"] == "run") and not(contains(attributes["thread.name"], "bar"))"#,
+            to_logs_data(log_records.clone()),
+        )
+        .await;
+
+        assert!(!result.resource_logs.is_empty());
+        assert_eq!(
+            &result.resource_logs[0].scope_logs[0].log_records,
+            &[log_records[0].clone()]
         );
     }
 }

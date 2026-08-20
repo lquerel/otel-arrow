@@ -15,8 +15,121 @@ use quote::{format_ident, quote};
 use std::collections::HashSet;
 use syn::parse_quote;
 use syn::{
-    Attribute, Data, DeriveInput, Fields, ItemStruct, LitStr, parse_macro_input, spanned::Spanned,
+    Attribute, Data, DeriveInput, Fields, ItemStruct, LitStr, Token, parse_macro_input,
+    spanned::Spanned,
 };
+
+struct ComponentTelemetryScopeArgs {
+    urn: syn::Expr,
+    target: LitStr,
+}
+
+impl syn::parse::Parse for ComponentTelemetryScopeArgs {
+    fn parse(input: syn::parse::ParseStream<'_>) -> syn::Result<Self> {
+        let mut urn = None;
+        let mut target = None;
+
+        while !input.is_empty() {
+            let key: syn::Ident = input.parse()?;
+            let _ = input.parse::<Token![=]>()?;
+
+            if key == "urn" {
+                if urn.is_some() {
+                    return Err(syn::Error::new(key.span(), "duplicate `urn` argument"));
+                }
+                urn = Some(input.parse()?);
+            } else if key == "target" {
+                if target.is_some() {
+                    return Err(syn::Error::new(key.span(), "duplicate `target` argument"));
+                }
+                target = Some(input.parse()?);
+            } else {
+                return Err(syn::Error::new(
+                    key.span(),
+                    "unsupported argument; expected `urn` or `target`",
+                ));
+            }
+
+            if input.is_empty() {
+                break;
+            }
+            let _ = input.parse::<Token![,]>()?;
+        }
+
+        Ok(Self {
+            urn: urn.ok_or_else(|| input.error("missing `urn` argument"))?,
+            target: target.ok_or_else(|| input.error("missing `target` argument"))?,
+        })
+    }
+}
+
+/// Binds the `otel_*` event macros in the current module subtree to one
+/// registered component target.
+///
+/// The target is compile-time checked against `urn`. It is the URN without the
+/// `urn:` prefix and with colon separators replaced by dots.
+#[proc_macro]
+pub fn otel_component_scope(input: TokenStream) -> TokenStream {
+    let ComponentTelemetryScopeArgs { urn, target } =
+        parse_macro_input!(input as ComponentTelemetryScopeArgs);
+    let telemetry = quote!(::otap_df_telemetry);
+
+    quote! {
+        const _: () = #telemetry::_private::validate_component_target(#urn, #target);
+
+        #[allow(unused_macros)]
+        macro_rules! otel_debug {
+            ($($tokens:tt)*) => {
+                #telemetry::otel_debug!(
+                    target: #target,
+                    $($tokens)*
+                )
+            };
+        }
+
+        #[allow(unused_macros)]
+        macro_rules! otel_info {
+            ($($tokens:tt)*) => {
+                #telemetry::otel_info!(
+                    target: #target,
+                    $($tokens)*
+                )
+            };
+        }
+
+        #[allow(unused_macros)]
+        macro_rules! otel_warn {
+            ($($tokens:tt)*) => {
+                #telemetry::otel_warn!(
+                    target: #target,
+                    $($tokens)*
+                )
+            };
+        }
+
+        #[allow(unused_macros)]
+        macro_rules! otel_error {
+            ($($tokens:tt)*) => {
+                #telemetry::otel_error!(
+                    target: #target,
+                    $($tokens)*
+                )
+            };
+        }
+
+        #[allow(unused_macros)]
+        macro_rules! otel_event {
+            ($($tokens:tt)*) => {
+                #telemetry::otel_event!(
+                    target: #target,
+                    $($tokens)*
+                )
+            };
+        }
+
+    }
+    .into()
+}
 
 /// Derive implementation of `otap_df_telemetry::metrics::MetricSetHandler` for a struct.
 ///
@@ -112,11 +225,15 @@ pub fn derive_metric_set_handler(input: TokenStream) -> TokenStream {
         let mut name_attr: Option<String> = None;
         let mut unit_attr: Option<String> = None;
         for attr in &field.attrs {
-            if let Some((maybe_name, u)) = parse_metric_field_attr(attr) {
-                if maybe_name.is_some() {
-                    name_attr = maybe_name;
+            match parse_metric_field_attr(attr) {
+                Ok(Some((maybe_name, unit))) => {
+                    if maybe_name.is_some() {
+                        name_attr = maybe_name;
+                    }
+                    unit_attr = Some(unit);
                 }
-                unit_attr = Some(u);
+                Ok(None) => {}
+                Err(err) => return err.to_compile_error().into(),
             }
         }
 
@@ -132,10 +249,19 @@ pub fn derive_metric_set_handler(input: TokenStream) -> TokenStream {
                         if let Some(seg) = seg_opt {
                             let ident_ty = seg.ident.to_string();
 
-                            // Handle Mmsc separately — it has no generic type parameter.
+                            // Handle Mmsc separately -- it has no generic type parameter.
                             if ident_ty == "Mmsc" {
                                 (
                                     quote!(otap_df_telemetry::descriptor::Instrument::Mmsc),
+                                    quote!(Some(otap_df_telemetry::descriptor::Temporality::Delta)),
+                                    quote!(otap_df_telemetry::descriptor::MetricValueType::F64),
+                                    ident_ty,
+                                )
+                            } else if ident_ty == "HistogramNormal"
+                                || ident_ty == "HistogramDetailed"
+                            {
+                                (
+                                    quote!(otap_df_telemetry::descriptor::Instrument::ExponentialHistogram),
                                     quote!(Some(otap_df_telemetry::descriptor::Temporality::Delta)),
                                     quote!(otap_df_telemetry::descriptor::MetricValueType::F64),
                                     ident_ty,
@@ -263,10 +389,18 @@ pub fn derive_metric_set_handler(input: TokenStream) -> TokenStream {
             metric_field_value_types.push(value_type_variant);
 
             match instrument_ty_name.as_str() {
-                "Counter" | "Mmsc" => {
+                "Counter" => {
                     metric_field_clear_stmts.push(quote!( self.#field_ident.reset(); ));
                     metric_field_needs_flush_checks.push(quote!(
                         if !otap_df_telemetry::metrics::MetricValue::from(self.#field_ident.get()).is_zero() {
+                            return true;
+                        }
+                    ));
+                }
+                "Mmsc" | "HistogramNormal" | "HistogramDetailed" => {
+                    metric_field_clear_stmts.push(quote!( self.#field_ident.reset(); ));
+                    metric_field_needs_flush_checks.push(quote!(
+                        if !self.#field_ident.is_empty() {
                             return true;
                         }
                     ));
@@ -612,12 +746,9 @@ pub fn derive_attribute_set_handler(input: TokenStream) -> TokenStream {
 
                     unsafe {
                         INIT.call_once(|| {
-                            // Create a dummy instance to access composed descriptors
-                            let dummy = Self::default();
-
                             // Calculate total field count
                             let mut total_fields = #local_fields_len;
-                            #( total_fields += dummy.#composed_field_idents.descriptor().fields.len(); )*
+                            #( total_fields += self.#composed_field_idents.descriptor().fields.len(); )*
 
                             // Create a vector to hold all fields
                             let mut all_fields = ::std::vec::Vec::with_capacity(total_fields);
@@ -632,7 +763,7 @@ pub fn derive_attribute_set_handler(input: TokenStream) -> TokenStream {
                             ]);
 
                             // Add fields from composed sets
-                            #( all_fields.extend_from_slice(dummy.#composed_field_idents.descriptor().fields); )*
+                            #( all_fields.extend_from_slice(self.#composed_field_idents.descriptor().fields); )*
 
                             // Leak the vector to get a 'static reference
                             let fields_slice: &'static [#field_path] = ::std::boxed::Box::leak(all_fields.into_boxed_slice());
@@ -1003,36 +1134,33 @@ pub fn metric_set(attr: TokenStream, item: TokenStream) -> TokenStream {
     quote!( #s #marker_impl ).into()
 }
 
-/// Declares either a named scope/entity attribute set or an emitted-item
-/// attribute set.
-///
-/// ```ignore
-/// #[attribute_set(name = "node.scope")] // scope or entity attributes
-/// #[attribute_set(item, registration)] // fixed item attributes
-/// #[attribute_set(item, measurement)] // per-recording metric item attributes
-/// ```
-#[proc_macro_attribute]
-pub fn attribute_set(attr: TokenStream, item: TokenStream) -> TokenStream {
-    // Parse `name = "..."` or the bare item modes.
-    let args = proc_macro2::TokenStream::from(attr);
-    let mut name_val: Option<String> = None;
-    let mut is_item = false;
-    let mut is_registration = false;
-    let mut is_measurement = false;
-    if let Err(err) = syn::parse::Parser::parse2(
+#[derive(Debug, Default)]
+struct AttributeSetArgs {
+    name: Option<String>,
+    scope: bool,
+    item: bool,
+    registration: bool,
+    measurement: bool,
+}
+
+fn parse_attribute_set_args(args: proc_macro2::TokenStream) -> syn::Result<AttributeSetArgs> {
+    let mut parsed = AttributeSetArgs::default();
+    syn::parse::Parser::parse2(
         |input: syn::parse::ParseStream<'_>| -> syn::Result<()> {
             while !input.is_empty() {
                 let ident: syn::Ident = input.parse()?;
                 if ident == "name" {
                     let _: syn::Token![=] = input.parse()?;
                     let lit: LitStr = input.parse()?;
-                    name_val = Some(lit.value());
+                    parsed.name = Some(lit.value());
+                } else if ident == "scope" {
+                    parsed.scope = true;
                 } else if ident == "item" {
-                    is_item = true;
+                    parsed.item = true;
                 } else if ident == "registration" {
-                    is_registration = true;
+                    parsed.registration = true;
                 } else if ident == "measurement" {
-                    is_measurement = true;
+                    parsed.measurement = true;
                 } else {
                     return Err(syn::Error::new(
                         ident.span(),
@@ -1046,54 +1174,72 @@ pub fn attribute_set(attr: TokenStream, item: TokenStream) -> TokenStream {
             Ok(())
         },
         args,
-    ) {
-        return err.to_compile_error().into();
+    )?;
+
+    if parsed.scope && (parsed.item || parsed.registration || parsed.measurement) {
+        return Err(syn::Error::new(
+            proc_macro2::Span::call_site(),
+            "`scope` cannot be combined with item modes",
+        ));
     }
+    if parsed.scope && parsed.name.is_none() {
+        return Err(syn::Error::new(
+            proc_macro2::Span::call_site(),
+            "`scope` requires `name = \"...\"`",
+        ));
+    }
+    if parsed.registration && !parsed.item {
+        return Err(syn::Error::new(
+            proc_macro2::Span::call_site(),
+            "`registration` requires `item`",
+        ));
+    }
+    if parsed.measurement && !parsed.item {
+        return Err(syn::Error::new(
+            proc_macro2::Span::call_site(),
+            "`measurement` requires `item`",
+        ));
+    }
+    if parsed.name.is_some() && parsed.item {
+        return Err(syn::Error::new(
+            proc_macro2::Span::call_site(),
+            "`name` cannot be combined with `item`",
+        ));
+    }
+    if parsed.item && parsed.registration == parsed.measurement {
+        return Err(syn::Error::new(
+            proc_macro2::Span::call_site(),
+            "`item` requires exactly one of `registration` or `measurement`",
+        ));
+    }
+    if !parsed.scope && !parsed.item {
+        return Err(syn::Error::new(
+            proc_macro2::Span::call_site(),
+            "missing `scope, name = \"...\"` or `item, registration|measurement` in attribute_set attribute",
+        ));
+    }
+
+    Ok(parsed)
+}
+
+/// Declares either a named scope attribute set or an emitted-item attribute set.
+///
+/// ```ignore
+/// #[attribute_set(scope, name = "node.scope")] // scope attributes
+/// #[attribute_set(item, registration)] // fixed item attributes
+/// #[attribute_set(item, measurement)] // per-recording metric item attributes
+/// ```
+#[proc_macro_attribute]
+pub fn attribute_set(attr: TokenStream, item: TokenStream) -> TokenStream {
+    let args = match parse_attribute_set_args(proc_macro2::TokenStream::from(attr)) {
+        Ok(args) => args,
+        Err(error) => return error.to_compile_error().into(),
+    };
 
     // Parse the struct item
     let mut s = parse_macro_input!(item as ItemStruct);
-    if is_registration && !is_item {
-        return syn::Error::new(
-            proc_macro2::Span::call_site(),
-            "`registration` requires `item`",
-        )
-        .to_compile_error()
-        .into();
-    }
-    if is_measurement && !is_item && name_val.is_none() {
-        return syn::Error::new(
-            proc_macro2::Span::call_site(),
-            "`measurement` requires `item`",
-        )
-        .to_compile_error()
-        .into();
-    }
-    if name_val.is_some() && (is_item || is_registration) {
-        return syn::Error::new(
-            proc_macro2::Span::call_site(),
-            "`name` and item modes cannot be combined",
-        )
-        .to_compile_error()
-        .into();
-    }
-    if is_item && is_registration == is_measurement {
-        return syn::Error::new(
-            proc_macro2::Span::call_site(),
-            "`item` requires exactly one of `registration` or `measurement`",
-        )
-        .to_compile_error()
-        .into();
-    }
-    if !is_item && name_val.is_none() {
-        return syn::Error::new(
-            proc_macro2::Span::call_site(),
-            "missing `name = \"...\"` or `item, registration|measurement` in attribute_set attribute",
-        )
-        .to_compile_error()
-        .into();
-    }
 
-    let measurement_impl = if is_measurement {
+    let measurement_impl = if args.measurement {
         match build_measurement_attribute_set_impl_for_fields(&s.ident, &s.fields, s.span()) {
             Ok(measurement_impl) => measurement_impl,
             Err(error) => return error.to_compile_error().into(),
@@ -1101,7 +1247,7 @@ pub fn attribute_set(attr: TokenStream, item: TokenStream) -> TokenStream {
     } else {
         proc_macro2::TokenStream::new()
     };
-    let attributes_name = match name_val {
+    let attributes_name = match args.name {
         Some(name) if name.is_empty() => {
             return syn::Error::new(s.span(), "attribute set name must not be empty")
                 .to_compile_error()
@@ -1224,23 +1370,31 @@ fn parse_metrics_name_attr(attr: &Attribute) -> Option<String> {
     out
 }
 
-fn parse_metric_field_attr(attr: &Attribute) -> Option<(Option<String>, String)> {
+fn parse_metric_field_attr(attr: &Attribute) -> syn::Result<Option<(Option<String>, String)>> {
     if !attr.path().is_ident("metric") {
-        return None;
+        return Ok(None);
     }
     let mut name: Option<String> = None;
     let mut unit: Option<String> = None;
-    let _ = attr.parse_nested_meta(|meta| {
+    attr.parse_nested_meta(|meta| {
         if meta.path.is_ident("name") {
             let s: LitStr = meta.value()?.parse()?;
             name = Some(s.value());
         } else if meta.path.is_ident("unit") {
             let s: LitStr = meta.value()?.parse()?;
             unit = Some(s.value());
+        } else {
+            return Err(meta.error("unsupported metric argument; expected `name` or `unit`"));
         }
         Ok(())
-    });
-    unit.map(|u| (name, u))
+    })?;
+    let unit = unit.ok_or_else(|| {
+        syn::Error::new(
+            attr.span(),
+            "metric field attribute requires the `unit` argument",
+        )
+    })?;
+    Ok(Some((name, unit)))
 }
 
 fn parse_attributes_name_attr(attr: &Attribute) -> Option<String> {
@@ -1284,6 +1438,104 @@ fn parse_attribute_field_attr(attr: &Attribute) -> syn::Result<Option<String>> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// Scenario: component telemetry scope arguments are supplied in either possible order.
+    /// Guarantees: named arguments parse independently of their source order.
+    #[test]
+    fn component_telemetry_scope_arguments_accept_any_order() {
+        let permutations = [
+            r#"urn = COMPONENT_URN, target = "otel.processor.transform""#,
+            r#"target = "otel.processor.transform", urn = COMPONENT_URN"#,
+        ];
+
+        for arguments in permutations {
+            let parsed = syn::parse_str::<ComponentTelemetryScopeArgs>(arguments)
+                .expect("named component telemetry scope arguments should parse in any order");
+            assert_eq!(parsed.target.value(), "otel.processor.transform");
+        }
+    }
+
+    /// Scenario: a component telemetry scope repeats one named argument.
+    /// Guarantees: duplicate arguments are rejected instead of silently replacing a value.
+    #[test]
+    fn component_telemetry_scope_arguments_reject_duplicates() {
+        let err = syn::parse_str::<ComponentTelemetryScopeArgs>(
+            r#"urn = COMPONENT_URN, target = "otel.processor.transform", target = "otel.exporter.transform""#,
+        )
+        .err()
+        .expect("duplicate component telemetry scope arguments should fail");
+
+        assert_eq!(err.to_string(), "duplicate `target` argument");
+    }
+
+    /// Scenario: A metric field declares the supported name and unit arguments.
+    /// Guarantees: The parser returns both values without an error.
+    #[test]
+    fn metric_field_arguments_accept_name_and_unit() {
+        let attr: Attribute = parse_quote!(#[metric(name = "dropped.items", unit = "{item}")]);
+
+        let parsed = parse_metric_field_attr(&attr).expect("supported arguments should parse");
+
+        assert_eq!(
+            parsed,
+            Some((Some("dropped.items".to_string()), "{item}".to_string()))
+        );
+    }
+
+    /// Scenario: A metric field declares a unit without overriding its derived name.
+    /// Guarantees: The parser accepts the unit and leaves the optional name unset.
+    #[test]
+    fn metric_field_arguments_accept_unit_without_name() {
+        let attr: Attribute = parse_quote!(#[metric(unit = "{item}")]);
+
+        let parsed = parse_metric_field_attr(&attr).expect("a metric name is optional");
+
+        assert_eq!(parsed, Some((None, "{item}".to_string())));
+    }
+
+    /// Scenario: A metric field declares a custom name without declaring a unit.
+    /// Guarantees: The parser rejects the field instead of silently omitting the metric.
+    #[test]
+    fn metric_field_arguments_require_unit() {
+        let attr: Attribute = parse_quote!(#[metric(name = "dropped.items")]);
+
+        let err = parse_metric_field_attr(&attr).expect_err("metric fields require a unit");
+
+        assert_eq!(
+            err.to_string(),
+            "metric field attribute requires the `unit` argument"
+        );
+    }
+
+    /// Scenario: A metric field attempts to declare registration attributes inline.
+    /// Guarantees: The parser rejects registration attributes instead of silently ignoring them.
+    #[test]
+    fn metric_field_arguments_reject_registration_attributes() {
+        let attr: Attribute =
+            parse_quote!(#[metric(unit = "{item}", registration_attrs(signal = "logs"))]);
+
+        let err = parse_metric_field_attr(&attr)
+            .expect_err("registration attributes are not metric field arguments");
+
+        assert_eq!(
+            err.to_string(),
+            "unsupported metric argument; expected `name` or `unit`"
+        );
+    }
+
+    /// Scenario: A metric field argument name contains a typo.
+    /// Guarantees: The parser reports the unknown argument instead of accepting partial metadata.
+    #[test]
+    fn metric_field_arguments_reject_unknown_arguments() {
+        let attr: Attribute = parse_quote!(#[metric(unit = "{item}", registration_attr = "logs")]);
+
+        let err = parse_metric_field_attr(&attr).expect_err("unknown metric arguments should fail");
+
+        assert_eq!(
+            err.to_string(),
+            "unsupported metric argument; expected `name` or `unit`"
+        );
+    }
 
     /// Scenario: measurement fields resolve to the same explicit attribute key.
     /// Guarantees: macro expansion rejects duplicate item keys.
@@ -1389,5 +1641,50 @@ mod tests {
             error.to_string(),
             "attribute_key must use the form #[attribute_key = \"...\"]"
         );
+    }
+
+    /// Scenario: a named attribute set is declared for telemetry scope attributes.
+    /// Guarantees: scope declarations require the explicit `scope` keyword.
+    #[test]
+    fn scope_attribute_sets_require_the_scope_keyword() {
+        let scope = parse_attribute_set_args(quote::quote!(scope, name = "test.scope"))
+            .expect("explicit scope attribute sets should parse");
+        assert_eq!(scope.name.as_deref(), Some("test.scope"));
+        assert!(scope.scope);
+
+        let error = parse_attribute_set_args(quote::quote!(name = "test.scope"))
+            .expect_err("named attribute sets without a scope must fail");
+        assert_eq!(
+            error.to_string(),
+            "missing `scope, name = \"...\"` or `item, registration|measurement` in attribute_set attribute"
+        );
+    }
+
+    /// Scenario: registration and measurement attribute sets use a schema name.
+    /// Guarantees: names are reserved for explicitly declared scope attribute sets.
+    #[test]
+    fn item_attribute_sets_cannot_be_named() {
+        for (args, expected_error) in [
+            (
+                quote::quote!(item, measurement, name = "test.measurement"),
+                "`name` cannot be combined with `item`",
+            ),
+            (
+                quote::quote!(item, registration, name = "test.registration"),
+                "`name` cannot be combined with `item`",
+            ),
+            (
+                quote::quote!(name = "test.measurement", measurement),
+                "`measurement` requires `item`",
+            ),
+            (
+                quote::quote!(name = "test.registration", registration),
+                "`registration` requires `item`",
+            ),
+        ] {
+            let error = parse_attribute_set_args(args)
+                .expect_err("item attribute sets must not declare names");
+            assert_eq!(error.to_string(), expected_error);
+        }
     }
 }

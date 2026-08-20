@@ -9,7 +9,7 @@ use otap_df_telemetry::attributes::{
     AttributeKeySchema, AttributeSetHandler, AttributeSetKeySchema, AttributeValue,
 };
 use otap_df_telemetry::descriptor::{AttributeField, AttributeValueType, AttributesDescriptor};
-use otap_df_telemetry_macros::attribute_set;
+use otap_df_telemetry_macros::{AttributeEnum, attribute_set};
 use std::borrow::Cow;
 use std::collections::BTreeMap;
 use std::hash::Hash;
@@ -47,7 +47,7 @@ pub fn config_map_to_telemetry(
 }
 
 /// Engine attributes (core id, numa node id, ...).
-#[attribute_set(name = "controller.attrs")]
+#[attribute_set(scope, name = "controller.attrs")]
 #[derive(Debug, Clone, Default, Hash)]
 pub struct EngineAttributeSet {
     /// Core identifier.
@@ -79,7 +79,7 @@ impl AttributeSetHandler for EngineEntityAttributeSet {
 }
 
 /// Pipeline attributes.
-#[attribute_set(name = "pipeline.attrs")]
+#[attribute_set(scope, name = "pipeline.attrs")]
 #[derive(Debug, Clone, Default, Hash)]
 pub struct PipelineAttributeSet {
     /// Pipeline identifier as defined in the configuration.
@@ -102,14 +102,14 @@ pub struct PipelineAttributeSet {
 /// Fields are private; the type can only be constructed through a scope-kind
 /// constructor (e.g. [`ExtensionScopeAttributeSet::pipeline`]). This enforces
 /// the invariant that every scope value has a populated payload matching its
-/// `scope.kind` discriminator — there is no way to build a "kind-less" or
+/// `scope.kind` discriminator -- there is no way to build a "kind-less" or
 /// inconsistent scope set in the public API.
 ///
 /// When new scope kinds are introduced (e.g. `"engine"`, `"group"`),
 /// add a corresponding `#[compose]` payload field below and a matching
 /// constructor; existing constructors keep new payloads at `Default` so the
 /// descriptor stays stable across scope kinds.
-#[attribute_set(name = "extension.scope.attrs")]
+#[attribute_set(scope, name = "extension.scope.attrs")]
 #[derive(Debug, Clone, Hash)]
 pub struct ExtensionScopeAttributeSet {
     /// Scope kind discriminator. Always paired with the populated payload
@@ -126,7 +126,7 @@ pub struct ExtensionScopeAttributeSet {
 impl Default for ExtensionScopeAttributeSet {
     /// Sentinel default used by the `#[compose]` macro to compute the cached
     /// composed descriptor once at startup. The produced value carries an
-    /// empty `scope.kind` and is **not** a valid scope identity — production
+    /// empty `scope.kind` and is **not** a valid scope identity -- production
     /// telemetry must construct values through a scope-kind constructor
     /// (e.g. [`ExtensionScopeAttributeSet::pipeline`]).
     fn default() -> Self {
@@ -153,7 +153,7 @@ impl ExtensionScopeAttributeSet {
 }
 
 /// Extension attributes, including the host scope.
-#[attribute_set(name = "extension.attrs")]
+#[attribute_set(scope, name = "extension.attrs")]
 #[derive(Debug, Clone, Default, Hash)]
 pub struct ExtensionAttributeSet {
     /// Extension unique identifier within its host scope.
@@ -169,7 +169,7 @@ pub struct ExtensionAttributeSet {
 }
 
 /// Node attributes.
-#[attribute_set(name = "node.attrs")]
+#[attribute_set(scope, name = "node.attrs")]
 #[derive(Debug, Clone, Default, Hash)]
 pub struct NodeAttributeSet {
     /// Node unique identifier (in scope of the pipeline).
@@ -191,7 +191,7 @@ pub struct NodeAttributeSet {
 /// This is used only when a node has non-empty `entity.extend.identity_attributes` in its config.
 /// Nodes without custom attributes use [`NodeAttributeSet`] directly, avoiding
 /// empty `custom={}` noise in telemetry output.
-#[attribute_set(name = "node.custom.attrs")]
+#[attribute_set(scope, name = "node.custom.attrs")]
 #[derive(Debug, Clone, Default, Hash)]
 pub struct NodeWithCustomAttributeSet {
     /// Base node attributes.
@@ -204,7 +204,7 @@ pub struct NodeWithCustomAttributeSet {
 }
 
 /// Node attributes extended with a topic name.
-#[attribute_set(name = "node.topic.attrs")]
+#[attribute_set(scope, name = "node.topic.attrs")]
 #[derive(Debug, Clone, Default, Hash)]
 pub struct NodeWithTopicAttributeSet {
     /// Base node attributes.
@@ -215,7 +215,7 @@ pub struct NodeWithTopicAttributeSet {
 }
 
 /// Node attributes (including custom telemetry attributes) extended with a topic name.
-#[attribute_set(name = "node.custom.topic.attrs")]
+#[attribute_set(scope, name = "node.custom.topic.attrs")]
 #[derive(Debug, Clone, Default, Hash)]
 pub struct NodeWithCustomTopicAttributeSet {
     /// Base node + custom telemetry attributes.
@@ -286,7 +286,7 @@ impl AttributeSetKeySchema for CustomAttributeSet {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use otap_df_telemetry::attributes::AttributeSetHandler;
+    use otap_df_telemetry::attributes::{AttributeEnum, AttributeSetHandler};
 
     /// Distinct `(group, pipeline)` pairs must not collide on attribute
     /// values: flattening into a single `/`-separated string allows two
@@ -314,11 +314,102 @@ mod tests {
              two real scopes to register the same telemetry entity"
         );
     }
+
+    /// Scenario: Channel entity dimensions are represented by closed enum value sets.
+    /// Guarantees: Their cardinalities and exported lowercase values remain stable.
+    #[test]
+    fn channel_attribute_enums_have_stable_values() {
+        assert_eq!(ChannelKind::CARDINALITY, 2);
+        assert_eq!(ChannelKind::VARIANTS, &["control", "pdata"]);
+        assert_eq!(ChannelMode::CARDINALITY, 2);
+        assert_eq!(ChannelMode::VARIANTS, &["local", "shared"]);
+        assert_eq!(ChannelType::CARDINALITY, 2);
+        assert_eq!(ChannelType::VARIANTS, &["mpsc", "mpmc"]);
+        assert_eq!(ChannelImplementation::CARDINALITY, 3);
+        assert_eq!(
+            ChannelImplementation::VARIANTS,
+            &["internal", "tokio", "flume"]
+        );
+    }
+
+    /// Scenario: A node channel entity is built from typed channel dimensions.
+    /// Guarantees: Scope attributes retain their established keys and string values.
+    #[test]
+    fn node_channel_attribute_enums_serialize_as_scope_strings() {
+        let attrs = NodeChannelAttributeSet {
+            channel_id: "channel-a".into(),
+            node_attrs: NodeAttributeSet::default(),
+            node_port: "output".into(),
+            channel_kind: ChannelKind::Pdata,
+            channel_mode: ChannelMode::Shared,
+            channel_type: ChannelType::Mpmc,
+            channel_impl: ChannelImplementation::Flume,
+        };
+        let attr_map: BTreeMap<&'static str, String> = attrs
+            .iter_attributes()
+            .map(|(key, value)| (key, value.to_string_value()))
+            .collect();
+
+        assert_eq!(
+            attr_map.get("channel.kind").map(String::as_str),
+            Some("pdata")
+        );
+        assert_eq!(
+            attr_map.get("channel.mode").map(String::as_str),
+            Some("shared")
+        );
+        assert_eq!(
+            attr_map.get("channel.type").map(String::as_str),
+            Some("mpmc")
+        );
+        assert_eq!(
+            attr_map.get("channel.impl").map(String::as_str),
+            Some("flume")
+        );
+    }
+}
+
+/// Payload carried by an internal channel.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, AttributeEnum)]
+pub enum ChannelKind {
+    /// Engine control messages.
+    Control,
+    /// Pipeline telemetry data.
+    Pdata,
+}
+
+/// Concurrency boundary crossed by an internal channel.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, AttributeEnum)]
+pub enum ChannelMode {
+    /// Both endpoints run on the same local executor.
+    Local,
+    /// The channel can cross thread or executor boundaries.
+    Shared,
+}
+
+/// Producer/consumer topology supported by an internal channel.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, AttributeEnum)]
+pub enum ChannelType {
+    /// Multiple producers and a single consumer.
+    Mpsc,
+    /// Multiple producers and multiple consumers.
+    Mpmc,
+}
+
+/// Runtime implementation backing an internal channel.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, AttributeEnum)]
+pub enum ChannelImplementation {
+    /// OTAP Dataflow's internal local channel implementation.
+    Internal,
+    /// Tokio's channel implementation.
+    Tokio,
+    /// Flume's channel implementation.
+    Flume,
 }
 
 /// Channel endpoint attributes for a node-hosted channel.
-#[attribute_set(name = "node.channel.attrs")]
-#[derive(Debug, Clone, Default, Hash)]
+#[attribute_set(scope, name = "node.channel.attrs")]
+#[derive(Debug, Clone, Hash)]
 pub struct NodeChannelAttributeSet {
     /// Unique channel identifier within the host scope.
     #[attribute_key = "channel.id"]
@@ -337,24 +428,37 @@ pub struct NodeChannelAttributeSet {
 
     /// Channel payload kind ("control" or "pdata").
     #[attribute_key = "channel.kind"]
-    pub channel_kind: Cow<'static, str>,
+    pub channel_kind: ChannelKind,
     /// Concurrency mode of the channel ("local" or "shared").
     #[attribute_key = "channel.mode"]
-    pub channel_mode: Cow<'static, str>,
-    /// Channel type ("mpsc", "mpmc", "spsc", "spmc").
+    pub channel_mode: ChannelMode,
+    /// Channel type ("mpsc" or "mpmc").
     #[attribute_key = "channel.type"]
-    pub channel_type: Cow<'static, str>,
+    pub channel_type: ChannelType,
     /// Channel implementation ("tokio", "flume", "internal").
     #[attribute_key = "channel.impl"]
-    pub channel_impl: Cow<'static, str>,
+    pub channel_impl: ChannelImplementation,
+}
+
+/// Channel endpoint attributes for a node-hosted channel, extended with user-configured custom telemetry attributes.
+#[attribute_set(scope, name = "node.channel.custom.attrs")]
+#[derive(Debug, Clone, Hash)]
+pub struct NodeWithCustomChannelAttributeSet {
+    /// Base node channel attributes.
+    #[compose]
+    pub channel_attrs: NodeChannelAttributeSet,
+
+    /// Custom user-defined telemetry attributes.
+    #[compose]
+    pub custom_attrs: CustomAttributeSet,
 }
 
 /// Channel endpoint attributes for an extension-hosted channel.
 ///
 /// Extensions only have a single control-channel kind (MPSC), so `channel.kind`
 /// and `channel.type` are intentionally omitted as invariants.
-#[attribute_set(name = "extension.channel.attrs")]
-#[derive(Debug, Clone, Default, Hash)]
+#[attribute_set(scope, name = "extension.channel.attrs")]
+#[derive(Debug, Clone, Hash)]
 pub struct ExtensionChannelAttributeSet {
     /// Unique channel identifier within the host scope.
     #[attribute_key = "channel.id"]
@@ -366,8 +470,8 @@ pub struct ExtensionChannelAttributeSet {
 
     /// Concurrency mode of the channel ("local" or "shared").
     #[attribute_key = "channel.mode"]
-    pub channel_mode: Cow<'static, str>,
+    pub channel_mode: ChannelMode,
     /// Channel implementation ("tokio", "internal").
     #[attribute_key = "channel.impl"]
-    pub channel_impl: Cow<'static, str>,
+    pub channel_impl: ChannelImplementation,
 }

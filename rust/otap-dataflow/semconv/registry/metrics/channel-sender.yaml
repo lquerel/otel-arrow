@@ -1,11 +1,16 @@
 file_format: definition/2
 metrics:
-- name: channel.sender.send.count
-  brief: Count of messages successfully sent to the channel.
+- name: channel.sender.failures
+  brief: Failed or refused immediate send attempts.
   instrument: counter
-  unit: "{message}"
+  unit: '{message}'
   stability: development
   requirement_level: recommended
+  attributes:
+  - ref: error.type
+    requirement_level: recommended
+  - ref: signal
+    requirement_level: recommended
   entity_associations:
   - one_of:
     - otap.node.channel
@@ -15,27 +20,17 @@ metrics:
       metric_value_type: int
     otap_dataflow:
       metric_set: channel.sender
-- name: channel.sender.send.error_closed
-  brief: Count of send failures due to a closed channel.
+- name: channel.sender.messages
+  brief: Messages whose immediate channel send attempt terminated.
   instrument: counter
-  unit: "{1}"
+  unit: '{message}'
   stability: development
   requirement_level: recommended
-  entity_associations:
-  - one_of:
-    - otap.node.channel
-    - otap.extension.channel
-  annotations:
-    code_generation:
-      metric_value_type: int
-    otap_dataflow:
-      metric_set: channel.sender
-- name: channel.sender.send.error_full
-  brief: Count of send failures due to a full channel.
-  instrument: counter
-  unit: "{1}"
-  stability: development
-  requirement_level: recommended
+  attributes:
+  - ref: outcome
+    requirement_level: recommended
+  - ref: signal
+    requirement_level: recommended
   entity_associations:
   - one_of:
     - otap.node.channel

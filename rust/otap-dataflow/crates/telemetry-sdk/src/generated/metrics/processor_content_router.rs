@@ -30,154 +30,52 @@ impl AssociatedEntity for entities::NodeWithCustomAttributeSet {}
 /// Strongly typed values for the `processor.content_router` metric set.
 #[derive(Debug, Default, Clone)]
 #[repr(C, align(64))]
-pub struct ContentRouterMetrics {
-    /// Number of messages that failed due to internal conversion errors.
-    pub signals_conversion_error: otap_df_telemetry::instrument::Counter<u64>,
-    /// Number of messages NACKed (no route match, missing key, mixed batch, conversion error, or send failure).
-    pub signals_nacked: otap_df_telemetry::instrument::Counter<u64>,
-    /// Number of messages where the routing key was missing.
-    pub signals_no_routing_key: otap_df_telemetry::instrument::Counter<u64>,
-    /// Number of messages rejected because the selected route was closed.
-    pub signals_rejected_route_closed: otap_df_telemetry::instrument::Counter<u64>,
-    /// Number of messages rejected because the selected route was full.
-    pub signals_rejected_route_full: otap_df_telemetry::instrument::Counter<u64>,
-    /// Number of messages routed to a named port.
-    pub signals_routed: otap_df_telemetry::instrument::Counter<u64>,
-    /// Number of messages routed to the default output.
-    pub signals_routed_default: otap_df_telemetry::instrument::Counter<u64>,
+pub struct ContentRouterMeasurementMetrics {
+    /// Number of messages with this outcome.
+    pub messages: otap_df_telemetry::instrument::Counter<u64>,
 }
 
 /// Per-field conditional availability in descriptor order.
-pub const CONTENT_ROUTER_METRICS_METRIC_AVAILABILITY: &[Option<&str>] = &[
-    AVAILABILITY,
-    AVAILABILITY,
-    AVAILABILITY,
-    AVAILABILITY,
-    AVAILABILITY,
-    AVAILABILITY,
-    AVAILABILITY,
-];
+pub const CONTENT_ROUTER_MEASUREMENT_METRICS_METRIC_AVAILABILITY: &[Option<&str>] = &[AVAILABILITY];
 
-static CONTENT_ROUTER_METRICS_DESCRIPTOR: MetricsDescriptor = MetricsDescriptor {
+static CONTENT_ROUTER_MEASUREMENT_METRICS_DESCRIPTOR: MetricsDescriptor = MetricsDescriptor {
     name: METRIC_SET,
-    metrics: &[
-        MetricsField {
-            name: "signals.conversion.error",
-            unit: "{msg}",
-            brief: "Number of messages that failed due to internal conversion errors.",
-            instrument: Instrument::Counter,
-            temporality: Some(otap_df_telemetry::descriptor::Temporality::Delta),
-            value_type: MetricValueType::U64,
-        },
-        MetricsField {
-            name: "signals.nacked",
-            unit: "{msg}",
-            brief: "Number of messages NACKed (no route match, missing key, mixed batch, conversion error, or send failure).",
-            instrument: Instrument::Counter,
-            temporality: Some(otap_df_telemetry::descriptor::Temporality::Delta),
-            value_type: MetricValueType::U64,
-        },
-        MetricsField {
-            name: "signals.no.routing.key",
-            unit: "{msg}",
-            brief: "Number of messages where the routing key was missing.",
-            instrument: Instrument::Counter,
-            temporality: Some(otap_df_telemetry::descriptor::Temporality::Delta),
-            value_type: MetricValueType::U64,
-        },
-        MetricsField {
-            name: "signals.rejected.route.closed",
-            unit: "{msg}",
-            brief: "Number of messages rejected because the selected route was closed.",
-            instrument: Instrument::Counter,
-            temporality: Some(otap_df_telemetry::descriptor::Temporality::Delta),
-            value_type: MetricValueType::U64,
-        },
-        MetricsField {
-            name: "signals.rejected.route.full",
-            unit: "{msg}",
-            brief: "Number of messages rejected because the selected route was full.",
-            instrument: Instrument::Counter,
-            temporality: Some(otap_df_telemetry::descriptor::Temporality::Delta),
-            value_type: MetricValueType::U64,
-        },
-        MetricsField {
-            name: "signals.routed",
-            unit: "{msg}",
-            brief: "Number of messages routed to a named port.",
-            instrument: Instrument::Counter,
-            temporality: Some(otap_df_telemetry::descriptor::Temporality::Delta),
-            value_type: MetricValueType::U64,
-        },
-        MetricsField {
-            name: "signals.routed.default",
-            unit: "{msg}",
-            brief: "Number of messages routed to the default output.",
-            instrument: Instrument::Counter,
-            temporality: Some(otap_df_telemetry::descriptor::Temporality::Delta),
-            value_type: MetricValueType::U64,
-        },
-    ],
+    metrics: &[MetricsField {
+        name: "messages",
+        unit: "{message}",
+        brief: "Number of messages with this outcome.",
+        instrument: Instrument::Counter,
+        temporality: Some(otap_df_telemetry::descriptor::Temporality::Delta),
+        value_type: MetricValueType::U64,
+    }],
 };
 
-impl MetricSetHandler for ContentRouterMetrics {
+impl MetricSetHandler for ContentRouterMeasurementMetrics {
     #[inline]
     fn descriptor(&self) -> &'static MetricsDescriptor {
-        &CONTENT_ROUTER_METRICS_DESCRIPTOR
+        &CONTENT_ROUTER_MEASUREMENT_METRICS_DESCRIPTOR
     }
 
     #[inline]
     fn snapshot_values(&self) -> Vec<MetricValue> {
-        vec![
-            MetricValue::from(self.signals_conversion_error.get()),
-            MetricValue::from(self.signals_nacked.get()),
-            MetricValue::from(self.signals_no_routing_key.get()),
-            MetricValue::from(self.signals_rejected_route_closed.get()),
-            MetricValue::from(self.signals_rejected_route_full.get()),
-            MetricValue::from(self.signals_routed.get()),
-            MetricValue::from(self.signals_routed_default.get()),
-        ]
+        vec![MetricValue::from(self.messages.get())]
     }
 
     #[inline]
     fn clear_values(&mut self) {
-        self.signals_conversion_error.reset();
-        self.signals_nacked.reset();
-        self.signals_no_routing_key.reset();
-        self.signals_rejected_route_closed.reset();
-        self.signals_rejected_route_full.reset();
-        self.signals_routed.reset();
-        self.signals_routed_default.reset();
+        self.messages.reset();
     }
 
     #[inline]
     fn needs_flush(&self) -> bool {
-        if !MetricValue::from(self.signals_conversion_error.get()).is_zero() {
-            return true;
-        }
-        if !MetricValue::from(self.signals_nacked.get()).is_zero() {
-            return true;
-        }
-        if !MetricValue::from(self.signals_no_routing_key.get()).is_zero() {
-            return true;
-        }
-        if !MetricValue::from(self.signals_rejected_route_closed.get()).is_zero() {
-            return true;
-        }
-        if !MetricValue::from(self.signals_rejected_route_full.get()).is_zero() {
-            return true;
-        }
-        if !MetricValue::from(self.signals_routed.get()).is_zero() {
-            return true;
-        }
-        if !MetricValue::from(self.signals_routed_default.get()).is_zero() {
+        if !MetricValue::from(self.messages.get()).is_zero() {
             return true;
         }
         false
     }
 }
 
-impl ContentRouterMetrics {
+impl ContentRouterMeasurementMetrics {
     /// Registers this metric set against a semantically compatible entity.
     #[must_use]
     pub fn register<E>(registry: &TelemetryRegistryHandle, entity: E) -> MetricSet<Self>

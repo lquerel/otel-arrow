@@ -31,23 +31,69 @@ impl AssociatedEntity for entities::NodeWithCustomAttributeSet {}
 #[derive(Debug, Default, Clone)]
 #[repr(C, align(64))]
 pub struct ClickhouseExporterMetrics {
+    /// Total number of OTAP log batches transformed by the specialized path.
+    pub log_fast_path_batches: otap_df_telemetry::instrument::Counter<u64>,
+    /// Total number of raw OTLP log batches transformed directly to ClickHouse columns.
+    pub log_otlp_direct_path_batches: otap_df_telemetry::instrument::Counter<u64>,
+    /// Total number of raw OTLP log batches sent through the legacy transform fallback.
+    pub log_otlp_transform_fallback_batches: otap_df_telemetry::instrument::Counter<u64>,
     /// Total number of log rows written successfully into clickhouse
     pub log_rows_written: otap_df_telemetry::instrument::Counter<u64>,
+    /// Total number of log batches sent through the generic transform fallback.
+    pub log_transform_fallback_batches: otap_df_telemetry::instrument::Counter<u64>,
     /// Total number of trace rows written successfully into clickhouse
     pub trace_rows_written: otap_df_telemetry::instrument::Counter<u64>,
 }
 
 /// Per-field conditional availability in descriptor order.
-pub const CLICKHOUSE_EXPORTER_METRICS_METRIC_AVAILABILITY: &[Option<&str>] =
-    &[AVAILABILITY, AVAILABILITY];
+pub const CLICKHOUSE_EXPORTER_METRICS_METRIC_AVAILABILITY: &[Option<&str>] = &[
+    AVAILABILITY,
+    AVAILABILITY,
+    AVAILABILITY,
+    AVAILABILITY,
+    AVAILABILITY,
+    AVAILABILITY,
+];
 
 static CLICKHOUSE_EXPORTER_METRICS_DESCRIPTOR: MetricsDescriptor = MetricsDescriptor {
     name: METRIC_SET,
     metrics: &[
         MetricsField {
+            name: "log.fast.path.batches",
+            unit: "{batch}",
+            brief: "Total number of OTAP log batches transformed by the specialized path.",
+            instrument: Instrument::Counter,
+            temporality: Some(otap_df_telemetry::descriptor::Temporality::Delta),
+            value_type: MetricValueType::U64,
+        },
+        MetricsField {
+            name: "log.otlp.direct.path.batches",
+            unit: "{batch}",
+            brief: "Total number of raw OTLP log batches transformed directly to ClickHouse columns.",
+            instrument: Instrument::Counter,
+            temporality: Some(otap_df_telemetry::descriptor::Temporality::Delta),
+            value_type: MetricValueType::U64,
+        },
+        MetricsField {
+            name: "log.otlp.transform.fallback.batches",
+            unit: "{batch}",
+            brief: "Total number of raw OTLP log batches sent through the legacy transform fallback.",
+            instrument: Instrument::Counter,
+            temporality: Some(otap_df_telemetry::descriptor::Temporality::Delta),
+            value_type: MetricValueType::U64,
+        },
+        MetricsField {
             name: "log.rows.written",
             unit: "{row}",
             brief: "Total number of log rows written successfully into clickhouse",
+            instrument: Instrument::Counter,
+            temporality: Some(otap_df_telemetry::descriptor::Temporality::Delta),
+            value_type: MetricValueType::U64,
+        },
+        MetricsField {
+            name: "log.transform.fallback.batches",
+            unit: "{batch}",
+            brief: "Total number of log batches sent through the generic transform fallback.",
             instrument: Instrument::Counter,
             temporality: Some(otap_df_telemetry::descriptor::Temporality::Delta),
             value_type: MetricValueType::U64,
@@ -72,20 +118,40 @@ impl MetricSetHandler for ClickhouseExporterMetrics {
     #[inline]
     fn snapshot_values(&self) -> Vec<MetricValue> {
         vec![
+            MetricValue::from(self.log_fast_path_batches.get()),
+            MetricValue::from(self.log_otlp_direct_path_batches.get()),
+            MetricValue::from(self.log_otlp_transform_fallback_batches.get()),
             MetricValue::from(self.log_rows_written.get()),
+            MetricValue::from(self.log_transform_fallback_batches.get()),
             MetricValue::from(self.trace_rows_written.get()),
         ]
     }
 
     #[inline]
     fn clear_values(&mut self) {
+        self.log_fast_path_batches.reset();
+        self.log_otlp_direct_path_batches.reset();
+        self.log_otlp_transform_fallback_batches.reset();
         self.log_rows_written.reset();
+        self.log_transform_fallback_batches.reset();
         self.trace_rows_written.reset();
     }
 
     #[inline]
     fn needs_flush(&self) -> bool {
+        if !MetricValue::from(self.log_fast_path_batches.get()).is_zero() {
+            return true;
+        }
+        if !MetricValue::from(self.log_otlp_direct_path_batches.get()).is_zero() {
+            return true;
+        }
+        if !MetricValue::from(self.log_otlp_transform_fallback_batches.get()).is_zero() {
+            return true;
+        }
         if !MetricValue::from(self.log_rows_written.get()).is_zero() {
+            return true;
+        }
+        if !MetricValue::from(self.log_transform_fallback_batches.get()).is_zero() {
             return true;
         }
         if !MetricValue::from(self.trace_rows_written.get()).is_zero() {

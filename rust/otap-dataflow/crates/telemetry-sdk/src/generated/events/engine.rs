@@ -11,6 +11,169 @@ use crate::event::{
     EventDescriptor, EventLevel, EventRequirementLevel, EventSeverity, EventSink, SemanticEvent,
 };
 
+/// Emitted by OTAP Dataflow as `admission.binding.summary`.
+#[derive(Debug, Clone)]
+pub struct AdmissionBindingSummary {
+    /// The bound_nodes value recorded by OTAP Dataflow internal telemetry.
+    pub bound_nodes: otap_df_telemetry::attributes::AttributeValue,
+    /// The explicitly_opted_out_nodes value recorded by OTAP Dataflow internal telemetry.
+    pub explicitly_opted_out_nodes: otap_df_telemetry::attributes::AttributeValue,
+}
+
+/// Marker implemented only by entity types allowed by `admission.binding.summary`.
+pub trait AdmissionBindingSummaryAssociatedEntity: entities::SemanticEntity {}
+
+impl AdmissionBindingSummaryAssociatedEntity for entities::EngineEntityAttributeSet {}
+
+impl AdmissionBindingSummaryAssociatedEntity for entities::PipelineAttributeSet {}
+
+impl AdmissionBindingSummaryAssociatedEntity for entities::NodeAttributeSet {}
+
+impl AdmissionBindingSummaryAssociatedEntity for entities::NodeWithCustomAttributeSet {}
+
+static ADMISSION_BINDING_SUMMARY_DESCRIPTOR: EventDescriptor = EventDescriptor {
+    name: "admission.binding.summary",
+    wire_name: "admission.binding.summary",
+    brief: "Emitted by OTAP Dataflow as `admission.binding.summary`.",
+    stability: "development",
+    requirement_level: EventRequirementLevel::Recommended,
+    scope_names: &["otap-df-engine"],
+    severity_levels: &[EventSeverity::Info],
+    sources: &["crates/engine/src/lib.rs"],
+    availability: &[],
+    entity_associations: &[
+        "otap.engine",
+        "otap.pipeline",
+        "otap.node",
+        "otap.node.custom",
+    ],
+    attributes: &[
+        EventAttributeDescriptor {
+            key: "bound_nodes",
+            wire_key: "bound_nodes",
+            brief: "The bound_nodes value recorded by OTAP Dataflow internal telemetry.",
+            value_type: otap_df_telemetry::descriptor::AttributeValueType::Any,
+            requirement_level: EventRequirementLevel::Required,
+        },
+        EventAttributeDescriptor {
+            key: "explicitly_opted_out_nodes",
+            wire_key: "explicitly_opted_out_nodes",
+            brief: "The explicitly_opted_out_nodes value recorded by OTAP Dataflow internal telemetry.",
+            value_type: otap_df_telemetry::descriptor::AttributeValueType::Any,
+            requirement_level: EventRequirementLevel::Required,
+        },
+    ],
+};
+
+impl EventAttributes for AdmissionBindingSummary {
+    #[inline]
+    fn visit_attributes(
+        &self,
+        visitor: &mut dyn FnMut(&'static EventAttributeDescriptor, EventAttributeValueRef<'_>),
+    ) {
+        visitor(
+            &ADMISSION_BINDING_SUMMARY_DESCRIPTOR.attributes[0],
+            EventAttributeValueRef::Any(&self.bound_nodes),
+        );
+        visitor(
+            &ADMISSION_BINDING_SUMMARY_DESCRIPTOR.attributes[1],
+            EventAttributeValueRef::Any(&self.explicitly_opted_out_nodes),
+        );
+    }
+}
+
+impl SemanticEvent for AdmissionBindingSummary {
+    const DESCRIPTOR: &'static EventDescriptor = &ADMISSION_BINDING_SUMMARY_DESCRIPTOR;
+}
+
+impl AdmissionBindingSummary {
+    /// Static semantic-convention descriptor for this event.
+    pub const DESCRIPTOR: &'static EventDescriptor = &ADMISSION_BINDING_SUMMARY_DESCRIPTOR;
+
+    /// Sends this payload at the `info` level with a compatible entity.
+    pub fn emit_info<S, E>(&self, client: &mut EventClient<S>, entity: &E)
+    where
+        S: EventSink,
+        E: AdmissionBindingSummaryAssociatedEntity,
+    {
+        client.emit(entity, self, EventLevel::Info);
+    }
+}
+
+/// Emitted by OTAP Dataflow as `admission.metrics.reporting.fail`.
+#[derive(Debug, Clone)]
+pub struct AdmissionMetricsReportingFail {
+    /// The error value recorded by OTAP Dataflow internal telemetry.
+    pub error: otap_df_telemetry::attributes::AttributeValue,
+}
+
+/// Marker implemented only by entity types allowed by `admission.metrics.reporting.fail`.
+pub trait AdmissionMetricsReportingFailAssociatedEntity: entities::SemanticEntity {}
+
+impl AdmissionMetricsReportingFailAssociatedEntity for entities::EngineEntityAttributeSet {}
+
+impl AdmissionMetricsReportingFailAssociatedEntity for entities::PipelineAttributeSet {}
+
+impl AdmissionMetricsReportingFailAssociatedEntity for entities::NodeAttributeSet {}
+
+impl AdmissionMetricsReportingFailAssociatedEntity for entities::NodeWithCustomAttributeSet {}
+
+static ADMISSION_METRICS_REPORTING_FAIL_DESCRIPTOR: EventDescriptor = EventDescriptor {
+    name: "admission.metrics.reporting.fail",
+    wire_name: "admission.metrics.reporting.fail",
+    brief: "Emitted by OTAP Dataflow as `admission.metrics.reporting.fail`.",
+    stability: "development",
+    requirement_level: EventRequirementLevel::Recommended,
+    scope_names: &["otap-df-engine"],
+    severity_levels: &[EventSeverity::Warn],
+    sources: &["crates/engine/src/pipeline_ctrl.rs"],
+    availability: &[],
+    entity_associations: &[
+        "otap.engine",
+        "otap.pipeline",
+        "otap.node",
+        "otap.node.custom",
+    ],
+    attributes: &[EventAttributeDescriptor {
+        key: "error",
+        wire_key: "error",
+        brief: "The error value recorded by OTAP Dataflow internal telemetry.",
+        value_type: otap_df_telemetry::descriptor::AttributeValueType::Any,
+        requirement_level: EventRequirementLevel::Required,
+    }],
+};
+
+impl EventAttributes for AdmissionMetricsReportingFail {
+    #[inline]
+    fn visit_attributes(
+        &self,
+        visitor: &mut dyn FnMut(&'static EventAttributeDescriptor, EventAttributeValueRef<'_>),
+    ) {
+        visitor(
+            &ADMISSION_METRICS_REPORTING_FAIL_DESCRIPTOR.attributes[0],
+            EventAttributeValueRef::Any(&self.error),
+        );
+    }
+}
+
+impl SemanticEvent for AdmissionMetricsReportingFail {
+    const DESCRIPTOR: &'static EventDescriptor = &ADMISSION_METRICS_REPORTING_FAIL_DESCRIPTOR;
+}
+
+impl AdmissionMetricsReportingFail {
+    /// Static semantic-convention descriptor for this event.
+    pub const DESCRIPTOR: &'static EventDescriptor = &ADMISSION_METRICS_REPORTING_FAIL_DESCRIPTOR;
+
+    /// Sends this payload at the `warn` level with a compatible entity.
+    pub fn emit_warn<S, E>(&self, client: &mut EventClient<S>, entity: &E)
+    where
+        S: EventSink,
+        E: AdmissionMetricsReportingFailAssociatedEntity,
+    {
+        client.emit(entity, self, EventLevel::Warn);
+    }
+}
+
 /// The channel.metrics.partial_wrap_skip internal telemetry event occurred.
 #[derive(Debug, Clone)]
 pub struct ChannelMetricsPartialWrapSkip {

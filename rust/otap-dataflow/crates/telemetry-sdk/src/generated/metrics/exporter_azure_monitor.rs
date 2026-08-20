@@ -30,75 +30,21 @@ impl AssociatedEntity for entities::NodeWithCustomAttributeSet {}
 /// Strongly typed values for the `exporter.azure_monitor` metric set.
 #[derive(Debug, Default, Clone)]
 #[repr(C, align(64))]
-pub struct AzureMonitorExporterMetrics {
+pub struct AzureMonitorExporterOperationalMetrics {
     /// Compressed batch size in bytes (min/max/sum/count). Recorded once per batch; HTTP retries do not produce additional observations.
     pub batch_size: otap_df_telemetry::instrument::Mmsc,
-    /// Current number of batch-to-message mappings (leak detector).
-    pub batch_to_msg_count: otap_df_telemetry::instrument::Gauge<u64>,
     /// Uncompressed batch size in bytes (min/max/sum/count). Recorded once per batch, before compression.
     pub batch_uncompressed_size: otap_df_telemetry::instrument::Mmsc,
-    /// Number of batches that failed to export.
-    pub failed_batches: otap_df_telemetry::instrument::Counter<u64>,
-    /// Number of messages that failed to export.
-    pub failed_messages: otap_df_telemetry::instrument::Counter<u64>,
-    /// Number of rows that failed to export.
-    pub failed_rows: otap_df_telemetry::instrument::Counter<u64>,
-    /// Number of successful heartbeat sends.
-    pub heartbeats: otap_df_telemetry::instrument::Counter<u64>,
     /// Current number of in-flight export requests.
     pub in_flight_exports: otap_df_telemetry::instrument::Gauge<u64>,
     /// Current number of log records in-flight at the exporter (enqueued export requests awaiting completion, including records being retried).
     pub in_flight_log_records: otap_df_telemetry::instrument::Gauge<u64>,
-    /// Number of HTTP 2xx (success) responses.
-    pub laclient_http_2xx: otap_df_telemetry::instrument::Counter<u64>,
-    /// Number of HTTP 401 (unauthorized) responses.
-    pub laclient_http_401: otap_df_telemetry::instrument::Counter<u64>,
-    /// Number of HTTP 403 (forbidden) responses.
-    pub laclient_http_403: otap_df_telemetry::instrument::Counter<u64>,
-    /// Number of HTTP 413 (payload too large) responses.
-    pub laclient_http_413: otap_df_telemetry::instrument::Counter<u64>,
-    /// Number of HTTP 429 (rate limited) responses.
-    pub laclient_http_429: otap_df_telemetry::instrument::Counter<u64>,
-    /// Number of HTTP 5xx (server error) responses.
-    pub laclient_http_5xx: otap_df_telemetry::instrument::Counter<u64>,
-    /// Client HTTP success latency in milliseconds (min/max/sum/count).
-    pub laclient_http_success_latency: otap_df_telemetry::instrument::Mmsc,
-    /// Number of network errors (connect, timeout, etc.) before receiving an HTTP response.
-    pub laclient_network_errors: otap_df_telemetry::instrument::Counter<u64>,
     /// Number of log entries rejected for exceeding the batch size limit.
     pub log_entries_too_large: otap_df_telemetry::instrument::Counter<u64>,
-    /// Current number of message-to-batch mappings (leak detector).
-    pub msg_to_batch_count: otap_df_telemetry::instrument::Gauge<u64>,
-    /// Current number of message-to-data mappings (leak detector).
-    pub msg_to_data_count: otap_df_telemetry::instrument::Gauge<u64>,
-    /// Number of batches successfully exported.
-    pub successful_batches: otap_df_telemetry::instrument::Counter<u64>,
-    /// Number of messages successfully exported.
-    pub successful_messages: otap_df_telemetry::instrument::Counter<u64>,
-    /// Number of rows successfully exported.
-    pub successful_rows: otap_df_telemetry::instrument::Counter<u64>,
 }
 
 /// Per-field conditional availability in descriptor order.
-pub const AZURE_MONITOR_EXPORTER_METRICS_METRIC_AVAILABILITY: &[Option<&str>] = &[
-    AVAILABILITY,
-    AVAILABILITY,
-    AVAILABILITY,
-    AVAILABILITY,
-    AVAILABILITY,
-    AVAILABILITY,
-    AVAILABILITY,
-    AVAILABILITY,
-    AVAILABILITY,
-    AVAILABILITY,
-    AVAILABILITY,
-    AVAILABILITY,
-    AVAILABILITY,
-    AVAILABILITY,
-    AVAILABILITY,
-    AVAILABILITY,
-    AVAILABILITY,
-    AVAILABILITY,
+pub const AZURE_MONITOR_EXPORTER_OPERATIONAL_METRICS_METRIC_AVAILABILITY: &[Option<&str>] = &[
     AVAILABILITY,
     AVAILABILITY,
     AVAILABILITY,
@@ -106,228 +52,67 @@ pub const AZURE_MONITOR_EXPORTER_METRICS_METRIC_AVAILABILITY: &[Option<&str>] = 
     AVAILABILITY,
 ];
 
-static AZURE_MONITOR_EXPORTER_METRICS_DESCRIPTOR: MetricsDescriptor = MetricsDescriptor {
-    name: METRIC_SET,
-    metrics: &[
-        MetricsField {
-            name: "batch.size",
-            unit: "By",
-            brief: "Compressed batch size in bytes (min/max/sum/count). Recorded once per batch; HTTP retries do not produce additional observations.",
-            instrument: Instrument::Mmsc,
-            temporality: Some(otap_df_telemetry::descriptor::Temporality::Delta),
-            value_type: MetricValueType::F64,
-        },
-        MetricsField {
-            name: "batch.to.msg.count",
-            unit: "{entry}",
-            brief: "Current number of batch-to-message mappings (leak detector).",
-            instrument: Instrument::Gauge,
-            temporality: None,
-            value_type: MetricValueType::U64,
-        },
-        MetricsField {
-            name: "batch.uncompressed.size",
-            unit: "By",
-            brief: "Uncompressed batch size in bytes (min/max/sum/count). Recorded once per batch, before compression.",
-            instrument: Instrument::Mmsc,
-            temporality: Some(otap_df_telemetry::descriptor::Temporality::Delta),
-            value_type: MetricValueType::F64,
-        },
-        MetricsField {
-            name: "failed.batches",
-            unit: "{batch}",
-            brief: "Number of batches that failed to export.",
-            instrument: Instrument::Counter,
-            temporality: Some(otap_df_telemetry::descriptor::Temporality::Delta),
-            value_type: MetricValueType::U64,
-        },
-        MetricsField {
-            name: "failed.messages",
-            unit: "{message}",
-            brief: "Number of messages that failed to export.",
-            instrument: Instrument::Counter,
-            temporality: Some(otap_df_telemetry::descriptor::Temporality::Delta),
-            value_type: MetricValueType::U64,
-        },
-        MetricsField {
-            name: "failed.rows",
-            unit: "{row}",
-            brief: "Number of rows that failed to export.",
-            instrument: Instrument::Counter,
-            temporality: Some(otap_df_telemetry::descriptor::Temporality::Delta),
-            value_type: MetricValueType::U64,
-        },
-        MetricsField {
-            name: "heartbeats",
-            unit: "{heartbeat}",
-            brief: "Number of successful heartbeat sends.",
-            instrument: Instrument::Counter,
-            temporality: Some(otap_df_telemetry::descriptor::Temporality::Delta),
-            value_type: MetricValueType::U64,
-        },
-        MetricsField {
-            name: "in.flight.exports",
-            unit: "{export}",
-            brief: "Current number of in-flight export requests.",
-            instrument: Instrument::Gauge,
-            temporality: None,
-            value_type: MetricValueType::U64,
-        },
-        MetricsField {
-            name: "in.flight.log.records",
-            unit: "{log}",
-            brief: "Current number of log records in-flight at the exporter (enqueued export requests awaiting completion, including records being retried).",
-            instrument: Instrument::Gauge,
-            temporality: None,
-            value_type: MetricValueType::U64,
-        },
-        MetricsField {
-            name: "laclient.http.2xx",
-            unit: "{response}",
-            brief: "Number of HTTP 2xx (success) responses.",
-            instrument: Instrument::Counter,
-            temporality: Some(otap_df_telemetry::descriptor::Temporality::Delta),
-            value_type: MetricValueType::U64,
-        },
-        MetricsField {
-            name: "laclient.http.401",
-            unit: "{response}",
-            brief: "Number of HTTP 401 (unauthorized) responses.",
-            instrument: Instrument::Counter,
-            temporality: Some(otap_df_telemetry::descriptor::Temporality::Delta),
-            value_type: MetricValueType::U64,
-        },
-        MetricsField {
-            name: "laclient.http.403",
-            unit: "{response}",
-            brief: "Number of HTTP 403 (forbidden) responses.",
-            instrument: Instrument::Counter,
-            temporality: Some(otap_df_telemetry::descriptor::Temporality::Delta),
-            value_type: MetricValueType::U64,
-        },
-        MetricsField {
-            name: "laclient.http.413",
-            unit: "{response}",
-            brief: "Number of HTTP 413 (payload too large) responses.",
-            instrument: Instrument::Counter,
-            temporality: Some(otap_df_telemetry::descriptor::Temporality::Delta),
-            value_type: MetricValueType::U64,
-        },
-        MetricsField {
-            name: "laclient.http.429",
-            unit: "{response}",
-            brief: "Number of HTTP 429 (rate limited) responses.",
-            instrument: Instrument::Counter,
-            temporality: Some(otap_df_telemetry::descriptor::Temporality::Delta),
-            value_type: MetricValueType::U64,
-        },
-        MetricsField {
-            name: "laclient.http.5xx",
-            unit: "{response}",
-            brief: "Number of HTTP 5xx (server error) responses.",
-            instrument: Instrument::Counter,
-            temporality: Some(otap_df_telemetry::descriptor::Temporality::Delta),
-            value_type: MetricValueType::U64,
-        },
-        MetricsField {
-            name: "laclient.http.success.latency",
-            unit: "ms",
-            brief: "Client HTTP success latency in milliseconds (min/max/sum/count).",
-            instrument: Instrument::Mmsc,
-            temporality: Some(otap_df_telemetry::descriptor::Temporality::Delta),
-            value_type: MetricValueType::F64,
-        },
-        MetricsField {
-            name: "laclient.network.errors",
-            unit: "{error}",
-            brief: "Number of network errors (connect, timeout, etc.) before receiving an HTTP response.",
-            instrument: Instrument::Counter,
-            temporality: Some(otap_df_telemetry::descriptor::Temporality::Delta),
-            value_type: MetricValueType::U64,
-        },
-        MetricsField {
-            name: "log.entries.too.large",
-            unit: "{entry}",
-            brief: "Number of log entries rejected for exceeding the batch size limit.",
-            instrument: Instrument::Counter,
-            temporality: Some(otap_df_telemetry::descriptor::Temporality::Delta),
-            value_type: MetricValueType::U64,
-        },
-        MetricsField {
-            name: "msg.to.batch.count",
-            unit: "{entry}",
-            brief: "Current number of message-to-batch mappings (leak detector).",
-            instrument: Instrument::Gauge,
-            temporality: None,
-            value_type: MetricValueType::U64,
-        },
-        MetricsField {
-            name: "msg.to.data.count",
-            unit: "{entry}",
-            brief: "Current number of message-to-data mappings (leak detector).",
-            instrument: Instrument::Gauge,
-            temporality: None,
-            value_type: MetricValueType::U64,
-        },
-        MetricsField {
-            name: "successful.batches",
-            unit: "{batch}",
-            brief: "Number of batches successfully exported.",
-            instrument: Instrument::Counter,
-            temporality: Some(otap_df_telemetry::descriptor::Temporality::Delta),
-            value_type: MetricValueType::U64,
-        },
-        MetricsField {
-            name: "successful.messages",
-            unit: "{message}",
-            brief: "Number of messages successfully exported.",
-            instrument: Instrument::Counter,
-            temporality: Some(otap_df_telemetry::descriptor::Temporality::Delta),
-            value_type: MetricValueType::U64,
-        },
-        MetricsField {
-            name: "successful.rows",
-            unit: "{row}",
-            brief: "Number of rows successfully exported.",
-            instrument: Instrument::Counter,
-            temporality: Some(otap_df_telemetry::descriptor::Temporality::Delta),
-            value_type: MetricValueType::U64,
-        },
-    ],
-};
+static AZURE_MONITOR_EXPORTER_OPERATIONAL_METRICS_DESCRIPTOR: MetricsDescriptor =
+    MetricsDescriptor {
+        name: METRIC_SET,
+        metrics: &[
+            MetricsField {
+                name: "batch.size",
+                unit: "By",
+                brief: "Compressed batch size in bytes (min/max/sum/count). Recorded once per batch; HTTP retries do not produce additional observations.",
+                instrument: Instrument::Mmsc,
+                temporality: Some(otap_df_telemetry::descriptor::Temporality::Delta),
+                value_type: MetricValueType::F64,
+            },
+            MetricsField {
+                name: "batch.uncompressed.size",
+                unit: "By",
+                brief: "Uncompressed batch size in bytes (min/max/sum/count). Recorded once per batch, before compression.",
+                instrument: Instrument::Mmsc,
+                temporality: Some(otap_df_telemetry::descriptor::Temporality::Delta),
+                value_type: MetricValueType::F64,
+            },
+            MetricsField {
+                name: "in.flight.exports",
+                unit: "{export}",
+                brief: "Current number of in-flight export requests.",
+                instrument: Instrument::Gauge,
+                temporality: None,
+                value_type: MetricValueType::U64,
+            },
+            MetricsField {
+                name: "in.flight.log.records",
+                unit: "{log}",
+                brief: "Current number of log records in-flight at the exporter (enqueued export requests awaiting completion, including records being retried).",
+                instrument: Instrument::Gauge,
+                temporality: None,
+                value_type: MetricValueType::U64,
+            },
+            MetricsField {
+                name: "log.entries.too.large",
+                unit: "{entry}",
+                brief: "Number of log entries rejected for exceeding the batch size limit.",
+                instrument: Instrument::Counter,
+                temporality: Some(otap_df_telemetry::descriptor::Temporality::Delta),
+                value_type: MetricValueType::U64,
+            },
+        ],
+    };
 
-impl MetricSetHandler for AzureMonitorExporterMetrics {
+impl MetricSetHandler for AzureMonitorExporterOperationalMetrics {
     #[inline]
     fn descriptor(&self) -> &'static MetricsDescriptor {
-        &AZURE_MONITOR_EXPORTER_METRICS_DESCRIPTOR
+        &AZURE_MONITOR_EXPORTER_OPERATIONAL_METRICS_DESCRIPTOR
     }
 
     #[inline]
     fn snapshot_values(&self) -> Vec<MetricValue> {
         vec![
             MetricValue::from(self.batch_size.get()),
-            MetricValue::from(self.batch_to_msg_count.get()),
             MetricValue::from(self.batch_uncompressed_size.get()),
-            MetricValue::from(self.failed_batches.get()),
-            MetricValue::from(self.failed_messages.get()),
-            MetricValue::from(self.failed_rows.get()),
-            MetricValue::from(self.heartbeats.get()),
             MetricValue::from(self.in_flight_exports.get()),
             MetricValue::from(self.in_flight_log_records.get()),
-            MetricValue::from(self.laclient_http_2xx.get()),
-            MetricValue::from(self.laclient_http_401.get()),
-            MetricValue::from(self.laclient_http_403.get()),
-            MetricValue::from(self.laclient_http_413.get()),
-            MetricValue::from(self.laclient_http_429.get()),
-            MetricValue::from(self.laclient_http_5xx.get()),
-            MetricValue::from(self.laclient_http_success_latency.get()),
-            MetricValue::from(self.laclient_network_errors.get()),
             MetricValue::from(self.log_entries_too_large.get()),
-            MetricValue::from(self.msg_to_batch_count.get()),
-            MetricValue::from(self.msg_to_data_count.get()),
-            MetricValue::from(self.successful_batches.get()),
-            MetricValue::from(self.successful_messages.get()),
-            MetricValue::from(self.successful_rows.get()),
         ]
     }
 
@@ -335,22 +120,7 @@ impl MetricSetHandler for AzureMonitorExporterMetrics {
     fn clear_values(&mut self) {
         self.batch_size.reset();
         self.batch_uncompressed_size.reset();
-        self.failed_batches.reset();
-        self.failed_messages.reset();
-        self.failed_rows.reset();
-        self.heartbeats.reset();
-        self.laclient_http_2xx.reset();
-        self.laclient_http_401.reset();
-        self.laclient_http_403.reset();
-        self.laclient_http_413.reset();
-        self.laclient_http_429.reset();
-        self.laclient_http_5xx.reset();
-        self.laclient_http_success_latency.reset();
-        self.laclient_network_errors.reset();
         self.log_entries_too_large.reset();
-        self.successful_batches.reset();
-        self.successful_messages.reset();
-        self.successful_rows.reset();
     }
 
     #[inline]
@@ -361,59 +131,14 @@ impl MetricSetHandler for AzureMonitorExporterMetrics {
         if !MetricValue::from(self.batch_uncompressed_size.get()).is_zero() {
             return true;
         }
-        if !MetricValue::from(self.failed_batches.get()).is_zero() {
-            return true;
-        }
-        if !MetricValue::from(self.failed_messages.get()).is_zero() {
-            return true;
-        }
-        if !MetricValue::from(self.failed_rows.get()).is_zero() {
-            return true;
-        }
-        if !MetricValue::from(self.heartbeats.get()).is_zero() {
-            return true;
-        }
-        if !MetricValue::from(self.laclient_http_2xx.get()).is_zero() {
-            return true;
-        }
-        if !MetricValue::from(self.laclient_http_401.get()).is_zero() {
-            return true;
-        }
-        if !MetricValue::from(self.laclient_http_403.get()).is_zero() {
-            return true;
-        }
-        if !MetricValue::from(self.laclient_http_413.get()).is_zero() {
-            return true;
-        }
-        if !MetricValue::from(self.laclient_http_429.get()).is_zero() {
-            return true;
-        }
-        if !MetricValue::from(self.laclient_http_5xx.get()).is_zero() {
-            return true;
-        }
-        if !MetricValue::from(self.laclient_http_success_latency.get()).is_zero() {
-            return true;
-        }
-        if !MetricValue::from(self.laclient_network_errors.get()).is_zero() {
-            return true;
-        }
         if !MetricValue::from(self.log_entries_too_large.get()).is_zero() {
-            return true;
-        }
-        if !MetricValue::from(self.successful_batches.get()).is_zero() {
-            return true;
-        }
-        if !MetricValue::from(self.successful_messages.get()).is_zero() {
-            return true;
-        }
-        if !MetricValue::from(self.successful_rows.get()).is_zero() {
             return true;
         }
         true
     }
 }
 
-impl AzureMonitorExporterMetrics {
+impl AzureMonitorExporterOperationalMetrics {
     /// Registers this metric set against a semantically compatible entity.
     #[must_use]
     pub fn register<E>(registry: &TelemetryRegistryHandle, entity: E) -> MetricSet<Self>

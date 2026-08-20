@@ -9,11 +9,11 @@
 //!
 //! Two coordination styles are supported:
 //!
-//! 1. **External flip (manual)** — register with [`register_state`] (or
+//! 1. **External flip (manual)** -- register with [`register_state`] (or
 //!    [`register_state_with_auto_flip`] passing `0` for `nack_first_n`) and
 //!    later call [`set_should_ack_by_id`] from the test thread. Required when
 //!    the test needs to interleave permanent/transient NACK phases.
-//! 2. **Auto-flip (deterministic)** — register with
+//! 2. **Auto-flip (deterministic)** -- register with
 //!    [`register_state_with_auto_flip`] and pass a positive `nack_first_n`.
 //!    The exporter sends NACKs until the combined count of transient and
 //!    permanent NACKs reaches `nack_first_n`, then atomically flips itself to
@@ -226,7 +226,7 @@ impl Exporter<OtapPdata> for FlakyExporter {
                 Message::Control(NodeControlMsg::Shutdown { .. }) => {
                     break;
                 }
-                Message::PData(data) => {
+                Message::PData(mut data) => {
                     let should_ack = self
                         .should_ack
                         .as_ref()

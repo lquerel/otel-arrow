@@ -25,6 +25,18 @@ AttributeValue
     | replace("\\u003e", ">") -}}
 {%- endmacro -%}
 
+{# Imported OTel attributes do not carry the project-owned wire annotation. #}
+{%- macro attribute_wire_key(attribute) -%}
+{%- if attribute.annotations is defined
+    and attribute.annotations.otap_dataflow is defined
+    and attribute.annotations.otap_dataflow.wire is defined
+    and attribute.annotations.otap_dataflow.wire.attribute_key is defined -%}
+{{- attribute.annotations.otap_dataflow.wire.attribute_key -}}
+{%- else -%}
+{{- attribute.key -}}
+{%- endif -%}
+{%- endmacro -%}
+
 {%- macro attribute_descriptor_type(attribute) -%}
 {%- if attribute.type == "string" -%}
 AttributeValueType::String
@@ -76,7 +88,9 @@ f64
 {%- endmacro -%}
 
 {%- macro metric_instrument_type(metric) -%}
-{%- if metric.instrument == "counter" -%}
+{%- if metric.annotations.otap_dataflow.rust is defined and metric.annotations.otap_dataflow.rust.instrument is defined -%}
+otap_df_telemetry::instrument::{{ metric.annotations.otap_dataflow.rust.instrument }}
+{%- elif metric.instrument == "counter" -%}
 {%- if metric.annotations.otap_dataflow.recording == "observed" -%}
 otap_df_telemetry::instrument::ObserveCounter<{{ metric_rust_value_type(metric) }}>
 {%- else -%}
@@ -96,7 +110,9 @@ otap_df_telemetry::instrument::Mmsc
 {%- endmacro -%}
 
 {%- macro descriptor_instrument(metric) -%}
-{%- if metric.instrument == "counter" -%}
+{%- if metric.annotations.otap_dataflow.rust is defined and metric.annotations.otap_dataflow.rust.instrument is defined -%}
+Instrument::ExponentialHistogram
+{%- elif metric.instrument == "counter" -%}
 Instrument::Counter
 {%- elif metric.instrument == "updowncounter" -%}
 Instrument::UpDownCounter

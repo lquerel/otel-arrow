@@ -11,6 +11,71 @@ use crate::event::{
     EventDescriptor, EventLevel, EventRequirementLevel, EventSeverity, EventSink, SemanticEvent,
 };
 
+/// Emitted by OTAP Dataflow as `console.format_failed`.
+#[derive(Debug, Clone)]
+pub struct ConsoleFormatFailed {
+    /// The error value recorded by OTAP Dataflow internal telemetry.
+    pub error: otap_df_telemetry::attributes::AttributeValue,
+}
+
+/// Marker implemented only by entity types allowed by `console.format_failed`.
+pub trait ConsoleFormatFailedAssociatedEntity: entities::SemanticEntity {}
+
+impl ConsoleFormatFailedAssociatedEntity for entities::NodeAttributeSet {}
+
+impl ConsoleFormatFailedAssociatedEntity for entities::NodeWithCustomAttributeSet {}
+
+static CONSOLE_FORMAT_FAILED_DESCRIPTOR: EventDescriptor = EventDescriptor {
+    name: "console.format_failed",
+    wire_name: "console.format_failed",
+    brief: "Emitted by OTAP Dataflow as `console.format_failed`.",
+    stability: "development",
+    requirement_level: EventRequirementLevel::Recommended,
+    scope_names: &["otap-df-core-nodes"],
+    severity_levels: &[EventSeverity::Error],
+    sources: &["crates/core-nodes/src/exporters/console_exporter/mod.rs"],
+    availability: &[],
+    entity_associations: &["otap.node", "otap.node.custom"],
+    attributes: &[EventAttributeDescriptor {
+        key: "error",
+        wire_key: "error",
+        brief: "The error value recorded by OTAP Dataflow internal telemetry.",
+        value_type: otap_df_telemetry::descriptor::AttributeValueType::Any,
+        requirement_level: EventRequirementLevel::Required,
+    }],
+};
+
+impl EventAttributes for ConsoleFormatFailed {
+    #[inline]
+    fn visit_attributes(
+        &self,
+        visitor: &mut dyn FnMut(&'static EventAttributeDescriptor, EventAttributeValueRef<'_>),
+    ) {
+        visitor(
+            &CONSOLE_FORMAT_FAILED_DESCRIPTOR.attributes[0],
+            EventAttributeValueRef::Any(&self.error),
+        );
+    }
+}
+
+impl SemanticEvent for ConsoleFormatFailed {
+    const DESCRIPTOR: &'static EventDescriptor = &CONSOLE_FORMAT_FAILED_DESCRIPTOR;
+}
+
+impl ConsoleFormatFailed {
+    /// Static semantic-convention descriptor for this event.
+    pub const DESCRIPTOR: &'static EventDescriptor = &CONSOLE_FORMAT_FAILED_DESCRIPTOR;
+
+    /// Sends this payload at the `error` level with a compatible entity.
+    pub fn emit_error<S, E>(&self, client: &mut EventClient<S>, entity: &E)
+    where
+        S: EventSink,
+        E: ConsoleFormatFailedAssociatedEntity,
+    {
+        client.emit(entity, self, EventLevel::Error);
+    }
+}
+
 /// The console.logs_view.otap_create_failed internal telemetry event occurred.
 #[derive(Debug, Clone)]
 pub struct ConsoleLogsViewOtapCreateFailed {
@@ -143,107 +208,68 @@ impl ConsoleLogsViewOtlpCreateFailed {
     }
 }
 
-/// The console.metrics.not_implemented internal telemetry event occurred.
+/// Emitted by OTAP Dataflow as `console.message.unsupported_signal`.
 #[derive(Debug, Clone)]
-pub struct ConsoleMetricsNotImplemented;
+pub struct ConsoleMessageUnsupportedSignal {
+    /// The signal value recorded by OTAP Dataflow internal telemetry.
+    pub signal: otap_df_telemetry::attributes::AttributeValue,
+}
 
-/// Marker implemented only by entity types allowed by `console.metrics.not_implemented`.
-pub trait ConsoleMetricsNotImplementedAssociatedEntity: entities::SemanticEntity {}
+/// Marker implemented only by entity types allowed by `console.message.unsupported_signal`.
+pub trait ConsoleMessageUnsupportedSignalAssociatedEntity: entities::SemanticEntity {}
 
-impl ConsoleMetricsNotImplementedAssociatedEntity for entities::NodeAttributeSet {}
+impl ConsoleMessageUnsupportedSignalAssociatedEntity for entities::NodeAttributeSet {}
 
-impl ConsoleMetricsNotImplementedAssociatedEntity for entities::NodeWithCustomAttributeSet {}
+impl ConsoleMessageUnsupportedSignalAssociatedEntity for entities::NodeWithCustomAttributeSet {}
 
-static CONSOLE_METRICS_NOT_IMPLEMENTED_DESCRIPTOR: EventDescriptor = EventDescriptor {
-    name: "console.metrics.not_implemented",
-    wire_name: "console.metrics.not_implemented",
-    brief: "The console.metrics.not_implemented internal telemetry event occurred.",
+static CONSOLE_MESSAGE_UNSUPPORTED_SIGNAL_DESCRIPTOR: EventDescriptor = EventDescriptor {
+    name: "console.message.unsupported_signal",
+    wire_name: "console.message.unsupported_signal",
+    brief: "Emitted by OTAP Dataflow as `console.message.unsupported_signal`.",
     stability: "development",
     requirement_level: EventRequirementLevel::Recommended,
     scope_names: &["otap-df-core-nodes"],
-    severity_levels: &[EventSeverity::Error],
+    severity_levels: &[EventSeverity::Warn],
     sources: &["crates/core-nodes/src/exporters/console_exporter/mod.rs"],
     availability: &[],
     entity_associations: &["otap.node", "otap.node.custom"],
-    attributes: &[],
+    attributes: &[EventAttributeDescriptor {
+        key: "signal",
+        wire_key: "signal",
+        brief: "The signal value recorded by OTAP Dataflow internal telemetry.",
+        value_type: otap_df_telemetry::descriptor::AttributeValueType::Any,
+        requirement_level: EventRequirementLevel::Required,
+    }],
 };
 
-impl EventAttributes for ConsoleMetricsNotImplemented {
+impl EventAttributes for ConsoleMessageUnsupportedSignal {
     #[inline]
     fn visit_attributes(
         &self,
-        _visitor: &mut dyn FnMut(&'static EventAttributeDescriptor, EventAttributeValueRef<'_>),
+        visitor: &mut dyn FnMut(&'static EventAttributeDescriptor, EventAttributeValueRef<'_>),
     ) {
+        visitor(
+            &CONSOLE_MESSAGE_UNSUPPORTED_SIGNAL_DESCRIPTOR.attributes[0],
+            EventAttributeValueRef::Any(&self.signal),
+        );
     }
 }
 
-impl SemanticEvent for ConsoleMetricsNotImplemented {
-    const DESCRIPTOR: &'static EventDescriptor = &CONSOLE_METRICS_NOT_IMPLEMENTED_DESCRIPTOR;
+impl SemanticEvent for ConsoleMessageUnsupportedSignal {
+    const DESCRIPTOR: &'static EventDescriptor = &CONSOLE_MESSAGE_UNSUPPORTED_SIGNAL_DESCRIPTOR;
 }
 
-impl ConsoleMetricsNotImplemented {
+impl ConsoleMessageUnsupportedSignal {
     /// Static semantic-convention descriptor for this event.
-    pub const DESCRIPTOR: &'static EventDescriptor = &CONSOLE_METRICS_NOT_IMPLEMENTED_DESCRIPTOR;
+    pub const DESCRIPTOR: &'static EventDescriptor = &CONSOLE_MESSAGE_UNSUPPORTED_SIGNAL_DESCRIPTOR;
 
-    /// Sends this payload at the `error` level with a compatible entity.
-    pub fn emit_error<S, E>(&self, client: &mut EventClient<S>, entity: &E)
+    /// Sends this payload at the `warn` level with a compatible entity.
+    pub fn emit_warn<S, E>(&self, client: &mut EventClient<S>, entity: &E)
     where
         S: EventSink,
-        E: ConsoleMetricsNotImplementedAssociatedEntity,
+        E: ConsoleMessageUnsupportedSignalAssociatedEntity,
     {
-        client.emit(entity, self, EventLevel::Error);
-    }
-}
-
-/// The console.traces.not_implemented internal telemetry event occurred.
-#[derive(Debug, Clone)]
-pub struct ConsoleTracesNotImplemented;
-
-/// Marker implemented only by entity types allowed by `console.traces.not_implemented`.
-pub trait ConsoleTracesNotImplementedAssociatedEntity: entities::SemanticEntity {}
-
-impl ConsoleTracesNotImplementedAssociatedEntity for entities::NodeAttributeSet {}
-
-impl ConsoleTracesNotImplementedAssociatedEntity for entities::NodeWithCustomAttributeSet {}
-
-static CONSOLE_TRACES_NOT_IMPLEMENTED_DESCRIPTOR: EventDescriptor = EventDescriptor {
-    name: "console.traces.not_implemented",
-    wire_name: "console.traces.not_implemented",
-    brief: "The console.traces.not_implemented internal telemetry event occurred.",
-    stability: "development",
-    requirement_level: EventRequirementLevel::Recommended,
-    scope_names: &["otap-df-core-nodes"],
-    severity_levels: &[EventSeverity::Error],
-    sources: &["crates/core-nodes/src/exporters/console_exporter/mod.rs"],
-    availability: &[],
-    entity_associations: &["otap.node", "otap.node.custom"],
-    attributes: &[],
-};
-
-impl EventAttributes for ConsoleTracesNotImplemented {
-    #[inline]
-    fn visit_attributes(
-        &self,
-        _visitor: &mut dyn FnMut(&'static EventAttributeDescriptor, EventAttributeValueRef<'_>),
-    ) {
-    }
-}
-
-impl SemanticEvent for ConsoleTracesNotImplemented {
-    const DESCRIPTOR: &'static EventDescriptor = &CONSOLE_TRACES_NOT_IMPLEMENTED_DESCRIPTOR;
-}
-
-impl ConsoleTracesNotImplemented {
-    /// Static semantic-convention descriptor for this event.
-    pub const DESCRIPTOR: &'static EventDescriptor = &CONSOLE_TRACES_NOT_IMPLEMENTED_DESCRIPTOR;
-
-    /// Sends this payload at the `error` level with a compatible entity.
-    pub fn emit_error<S, E>(&self, client: &mut EventClient<S>, entity: &E)
-    where
-        S: EventSink,
-        E: ConsoleTracesNotImplementedAssociatedEntity,
-    {
-        client.emit(entity, self, EventLevel::Error);
+        client.emit(entity, self, EventLevel::Warn);
     }
 }
 
@@ -4209,6 +4235,547 @@ impl OtapReceiverStart {
     }
 }
 
+/// Emitted by OTAP Dataflow as `otelcol.node.file.operation.fail`.
+#[derive(Debug, Clone)]
+pub struct OtelcolNodeFileOperationFail {
+    /// The error value recorded by OTAP Dataflow internal telemetry.
+    pub error: otap_df_telemetry::attributes::AttributeValue,
+    /// Timed exporter phase.
+    pub operation: otap_df_telemetry::attributes::AttributeValue,
+    /// The signal value recorded by OTAP Dataflow internal telemetry.
+    pub signal: otap_df_telemetry::attributes::AttributeValue,
+}
+
+/// Marker implemented only by entity types allowed by `otelcol.node.file.operation.fail`.
+pub trait OtelcolNodeFileOperationFailAssociatedEntity: entities::SemanticEntity {}
+
+impl OtelcolNodeFileOperationFailAssociatedEntity for entities::NodeAttributeSet {}
+
+impl OtelcolNodeFileOperationFailAssociatedEntity for entities::NodeWithCustomAttributeSet {}
+
+static OTELCOL_NODE_FILE_OPERATION_FAIL_DESCRIPTOR: EventDescriptor = EventDescriptor {
+    name: "otelcol.node.file.operation.fail",
+    wire_name: "otelcol.node.file.operation.fail",
+    brief: "Emitted by OTAP Dataflow as `otelcol.node.file.operation.fail`.",
+    stability: "development",
+    requirement_level: EventRequirementLevel::Recommended,
+    scope_names: &["otap-df-core-nodes"],
+    severity_levels: &[EventSeverity::Warn],
+    sources: &["crates/core-nodes/src/exporters/file_exporter/mod.rs"],
+    availability: &[],
+    entity_associations: &["otap.node", "otap.node.custom"],
+    attributes: &[
+        EventAttributeDescriptor {
+            key: "error",
+            wire_key: "error",
+            brief: "The error value recorded by OTAP Dataflow internal telemetry.",
+            value_type: otap_df_telemetry::descriptor::AttributeValueType::Any,
+            requirement_level: EventRequirementLevel::Required,
+        },
+        EventAttributeDescriptor {
+            key: "operation",
+            wire_key: "operation",
+            brief: "Timed exporter phase.",
+            value_type: otap_df_telemetry::descriptor::AttributeValueType::Any,
+            requirement_level: EventRequirementLevel::Required,
+        },
+        EventAttributeDescriptor {
+            key: "signal",
+            wire_key: "signal",
+            brief: "The signal value recorded by OTAP Dataflow internal telemetry.",
+            value_type: otap_df_telemetry::descriptor::AttributeValueType::Any,
+            requirement_level: EventRequirementLevel::Required,
+        },
+    ],
+};
+
+impl EventAttributes for OtelcolNodeFileOperationFail {
+    #[inline]
+    fn visit_attributes(
+        &self,
+        visitor: &mut dyn FnMut(&'static EventAttributeDescriptor, EventAttributeValueRef<'_>),
+    ) {
+        visitor(
+            &OTELCOL_NODE_FILE_OPERATION_FAIL_DESCRIPTOR.attributes[0],
+            EventAttributeValueRef::Any(&self.error),
+        );
+        visitor(
+            &OTELCOL_NODE_FILE_OPERATION_FAIL_DESCRIPTOR.attributes[1],
+            EventAttributeValueRef::Any(&self.operation),
+        );
+        visitor(
+            &OTELCOL_NODE_FILE_OPERATION_FAIL_DESCRIPTOR.attributes[2],
+            EventAttributeValueRef::Any(&self.signal),
+        );
+    }
+}
+
+impl SemanticEvent for OtelcolNodeFileOperationFail {
+    const DESCRIPTOR: &'static EventDescriptor = &OTELCOL_NODE_FILE_OPERATION_FAIL_DESCRIPTOR;
+}
+
+impl OtelcolNodeFileOperationFail {
+    /// Static semantic-convention descriptor for this event.
+    pub const DESCRIPTOR: &'static EventDescriptor = &OTELCOL_NODE_FILE_OPERATION_FAIL_DESCRIPTOR;
+
+    /// Sends this payload at the `warn` level with a compatible entity.
+    pub fn emit_warn<S, E>(&self, client: &mut EventClient<S>, entity: &E)
+    where
+        S: EventSink,
+        E: OtelcolNodeFileOperationFailAssociatedEntity,
+    {
+        client.emit(entity, self, EventLevel::Warn);
+    }
+}
+
+/// Emitted by OTAP Dataflow as `otelcol.node.file.rollback.fail`.
+#[derive(Debug, Clone)]
+pub struct OtelcolNodeFileRollbackFail {
+    /// The error value recorded by OTAP Dataflow internal telemetry.
+    pub error: otap_df_telemetry::attributes::AttributeValue,
+    /// Timed exporter phase.
+    pub operation: otap_df_telemetry::attributes::AttributeValue,
+    /// The rollback_error value recorded by OTAP Dataflow internal telemetry.
+    pub rollback_error: otap_df_telemetry::attributes::AttributeValue,
+    /// The signal value recorded by OTAP Dataflow internal telemetry.
+    pub signal: otap_df_telemetry::attributes::AttributeValue,
+}
+
+/// Marker implemented only by entity types allowed by `otelcol.node.file.rollback.fail`.
+pub trait OtelcolNodeFileRollbackFailAssociatedEntity: entities::SemanticEntity {}
+
+impl OtelcolNodeFileRollbackFailAssociatedEntity for entities::NodeAttributeSet {}
+
+impl OtelcolNodeFileRollbackFailAssociatedEntity for entities::NodeWithCustomAttributeSet {}
+
+static OTELCOL_NODE_FILE_ROLLBACK_FAIL_DESCRIPTOR: EventDescriptor = EventDescriptor {
+    name: "otelcol.node.file.rollback.fail",
+    wire_name: "otelcol.node.file.rollback.fail",
+    brief: "Emitted by OTAP Dataflow as `otelcol.node.file.rollback.fail`.",
+    stability: "development",
+    requirement_level: EventRequirementLevel::Recommended,
+    scope_names: &["otap-df-core-nodes"],
+    severity_levels: &[EventSeverity::Error],
+    sources: &["crates/core-nodes/src/exporters/file_exporter/mod.rs"],
+    availability: &[],
+    entity_associations: &["otap.node", "otap.node.custom"],
+    attributes: &[
+        EventAttributeDescriptor {
+            key: "error",
+            wire_key: "error",
+            brief: "The error value recorded by OTAP Dataflow internal telemetry.",
+            value_type: otap_df_telemetry::descriptor::AttributeValueType::Any,
+            requirement_level: EventRequirementLevel::Required,
+        },
+        EventAttributeDescriptor {
+            key: "operation",
+            wire_key: "operation",
+            brief: "Timed exporter phase.",
+            value_type: otap_df_telemetry::descriptor::AttributeValueType::Any,
+            requirement_level: EventRequirementLevel::Required,
+        },
+        EventAttributeDescriptor {
+            key: "rollback_error",
+            wire_key: "rollback_error",
+            brief: "The rollback_error value recorded by OTAP Dataflow internal telemetry.",
+            value_type: otap_df_telemetry::descriptor::AttributeValueType::Any,
+            requirement_level: EventRequirementLevel::Required,
+        },
+        EventAttributeDescriptor {
+            key: "signal",
+            wire_key: "signal",
+            brief: "The signal value recorded by OTAP Dataflow internal telemetry.",
+            value_type: otap_df_telemetry::descriptor::AttributeValueType::Any,
+            requirement_level: EventRequirementLevel::Required,
+        },
+    ],
+};
+
+impl EventAttributes for OtelcolNodeFileRollbackFail {
+    #[inline]
+    fn visit_attributes(
+        &self,
+        visitor: &mut dyn FnMut(&'static EventAttributeDescriptor, EventAttributeValueRef<'_>),
+    ) {
+        visitor(
+            &OTELCOL_NODE_FILE_ROLLBACK_FAIL_DESCRIPTOR.attributes[0],
+            EventAttributeValueRef::Any(&self.error),
+        );
+        visitor(
+            &OTELCOL_NODE_FILE_ROLLBACK_FAIL_DESCRIPTOR.attributes[1],
+            EventAttributeValueRef::Any(&self.operation),
+        );
+        visitor(
+            &OTELCOL_NODE_FILE_ROLLBACK_FAIL_DESCRIPTOR.attributes[2],
+            EventAttributeValueRef::Any(&self.rollback_error),
+        );
+        visitor(
+            &OTELCOL_NODE_FILE_ROLLBACK_FAIL_DESCRIPTOR.attributes[3],
+            EventAttributeValueRef::Any(&self.signal),
+        );
+    }
+}
+
+impl SemanticEvent for OtelcolNodeFileRollbackFail {
+    const DESCRIPTOR: &'static EventDescriptor = &OTELCOL_NODE_FILE_ROLLBACK_FAIL_DESCRIPTOR;
+}
+
+impl OtelcolNodeFileRollbackFail {
+    /// Static semantic-convention descriptor for this event.
+    pub const DESCRIPTOR: &'static EventDescriptor = &OTELCOL_NODE_FILE_ROLLBACK_FAIL_DESCRIPTOR;
+
+    /// Sends this payload at the `error` level with a compatible entity.
+    pub fn emit_error<S, E>(&self, client: &mut EventClient<S>, entity: &E)
+    where
+        S: EventSink,
+        E: OtelcolNodeFileRollbackFailAssociatedEntity,
+    {
+        client.emit(entity, self, EventLevel::Error);
+    }
+}
+
+/// Emitted by OTAP Dataflow as `otelcol.node.file.start`.
+#[derive(Debug, Clone)]
+pub struct OtelcolNodeFileStart {
+    /// The create_directories value recorded by OTAP Dataflow internal telemetry.
+    pub create_directories: otap_df_telemetry::attributes::AttributeValue,
+    /// The durability value recorded by OTAP Dataflow internal telemetry.
+    pub durability: otap_df_telemetry::attributes::AttributeValue,
+    /// The format value recorded by OTAP Dataflow internal telemetry.
+    pub format: otap_df_telemetry::attributes::AttributeValue,
+    /// The max_frame_bytes value recorded by OTAP Dataflow internal telemetry.
+    pub max_frame_bytes: otap_df_telemetry::attributes::AttributeValue,
+    /// The open_mode value recorded by OTAP Dataflow internal telemetry.
+    pub open_mode: otap_df_telemetry::attributes::AttributeValue,
+    /// The tail_recovery value recorded by OTAP Dataflow internal telemetry.
+    pub tail_recovery: otap_df_telemetry::attributes::AttributeValue,
+}
+
+/// Marker implemented only by entity types allowed by `otelcol.node.file.start`.
+pub trait OtelcolNodeFileStartAssociatedEntity: entities::SemanticEntity {}
+
+impl OtelcolNodeFileStartAssociatedEntity for entities::NodeAttributeSet {}
+
+impl OtelcolNodeFileStartAssociatedEntity for entities::NodeWithCustomAttributeSet {}
+
+static OTELCOL_NODE_FILE_START_DESCRIPTOR: EventDescriptor = EventDescriptor {
+    name: "otelcol.node.file.start",
+    wire_name: "otelcol.node.file.start",
+    brief: "Emitted by OTAP Dataflow as `otelcol.node.file.start`.",
+    stability: "development",
+    requirement_level: EventRequirementLevel::Recommended,
+    scope_names: &["otap-df-core-nodes"],
+    severity_levels: &[EventSeverity::Info],
+    sources: &["crates/core-nodes/src/exporters/file_exporter/mod.rs"],
+    availability: &[],
+    entity_associations: &["otap.node", "otap.node.custom"],
+    attributes: &[
+        EventAttributeDescriptor {
+            key: "create_directories",
+            wire_key: "create_directories",
+            brief: "The create_directories value recorded by OTAP Dataflow internal telemetry.",
+            value_type: otap_df_telemetry::descriptor::AttributeValueType::Any,
+            requirement_level: EventRequirementLevel::Required,
+        },
+        EventAttributeDescriptor {
+            key: "durability",
+            wire_key: "durability",
+            brief: "The durability value recorded by OTAP Dataflow internal telemetry.",
+            value_type: otap_df_telemetry::descriptor::AttributeValueType::Any,
+            requirement_level: EventRequirementLevel::Required,
+        },
+        EventAttributeDescriptor {
+            key: "format",
+            wire_key: "format",
+            brief: "The format value recorded by OTAP Dataflow internal telemetry.",
+            value_type: otap_df_telemetry::descriptor::AttributeValueType::Any,
+            requirement_level: EventRequirementLevel::Required,
+        },
+        EventAttributeDescriptor {
+            key: "max_frame_bytes",
+            wire_key: "max_frame_bytes",
+            brief: "The max_frame_bytes value recorded by OTAP Dataflow internal telemetry.",
+            value_type: otap_df_telemetry::descriptor::AttributeValueType::Any,
+            requirement_level: EventRequirementLevel::Required,
+        },
+        EventAttributeDescriptor {
+            key: "open_mode",
+            wire_key: "open_mode",
+            brief: "The open_mode value recorded by OTAP Dataflow internal telemetry.",
+            value_type: otap_df_telemetry::descriptor::AttributeValueType::Any,
+            requirement_level: EventRequirementLevel::Required,
+        },
+        EventAttributeDescriptor {
+            key: "tail_recovery",
+            wire_key: "tail_recovery",
+            brief: "The tail_recovery value recorded by OTAP Dataflow internal telemetry.",
+            value_type: otap_df_telemetry::descriptor::AttributeValueType::Any,
+            requirement_level: EventRequirementLevel::Required,
+        },
+    ],
+};
+
+impl EventAttributes for OtelcolNodeFileStart {
+    #[inline]
+    fn visit_attributes(
+        &self,
+        visitor: &mut dyn FnMut(&'static EventAttributeDescriptor, EventAttributeValueRef<'_>),
+    ) {
+        visitor(
+            &OTELCOL_NODE_FILE_START_DESCRIPTOR.attributes[0],
+            EventAttributeValueRef::Any(&self.create_directories),
+        );
+        visitor(
+            &OTELCOL_NODE_FILE_START_DESCRIPTOR.attributes[1],
+            EventAttributeValueRef::Any(&self.durability),
+        );
+        visitor(
+            &OTELCOL_NODE_FILE_START_DESCRIPTOR.attributes[2],
+            EventAttributeValueRef::Any(&self.format),
+        );
+        visitor(
+            &OTELCOL_NODE_FILE_START_DESCRIPTOR.attributes[3],
+            EventAttributeValueRef::Any(&self.max_frame_bytes),
+        );
+        visitor(
+            &OTELCOL_NODE_FILE_START_DESCRIPTOR.attributes[4],
+            EventAttributeValueRef::Any(&self.open_mode),
+        );
+        visitor(
+            &OTELCOL_NODE_FILE_START_DESCRIPTOR.attributes[5],
+            EventAttributeValueRef::Any(&self.tail_recovery),
+        );
+    }
+}
+
+impl SemanticEvent for OtelcolNodeFileStart {
+    const DESCRIPTOR: &'static EventDescriptor = &OTELCOL_NODE_FILE_START_DESCRIPTOR;
+}
+
+impl OtelcolNodeFileStart {
+    /// Static semantic-convention descriptor for this event.
+    pub const DESCRIPTOR: &'static EventDescriptor = &OTELCOL_NODE_FILE_START_DESCRIPTOR;
+
+    /// Sends this payload at the `info` level with a compatible entity.
+    pub fn emit_info<S, E>(&self, client: &mut EventClient<S>, entity: &E)
+    where
+        S: EventSink,
+        E: OtelcolNodeFileStartAssociatedEntity,
+    {
+        client.emit(entity, self, EventLevel::Info);
+    }
+}
+
+/// Emitted by OTAP Dataflow as `otelcol.node.file.stop`.
+#[derive(Debug, Clone)]
+pub struct OtelcolNodeFileStop {
+    /// The reason value recorded by OTAP Dataflow internal telemetry.
+    pub reason: otap_df_telemetry::attributes::AttributeValue,
+}
+
+/// Marker implemented only by entity types allowed by `otelcol.node.file.stop`.
+pub trait OtelcolNodeFileStopAssociatedEntity: entities::SemanticEntity {}
+
+impl OtelcolNodeFileStopAssociatedEntity for entities::NodeAttributeSet {}
+
+impl OtelcolNodeFileStopAssociatedEntity for entities::NodeWithCustomAttributeSet {}
+
+static OTELCOL_NODE_FILE_STOP_DESCRIPTOR: EventDescriptor = EventDescriptor {
+    name: "otelcol.node.file.stop",
+    wire_name: "otelcol.node.file.stop",
+    brief: "Emitted by OTAP Dataflow as `otelcol.node.file.stop`.",
+    stability: "development",
+    requirement_level: EventRequirementLevel::Recommended,
+    scope_names: &["otap-df-core-nodes"],
+    severity_levels: &[EventSeverity::Info],
+    sources: &["crates/core-nodes/src/exporters/file_exporter/mod.rs"],
+    availability: &[],
+    entity_associations: &["otap.node", "otap.node.custom"],
+    attributes: &[EventAttributeDescriptor {
+        key: "reason",
+        wire_key: "reason",
+        brief: "The reason value recorded by OTAP Dataflow internal telemetry.",
+        value_type: otap_df_telemetry::descriptor::AttributeValueType::Any,
+        requirement_level: EventRequirementLevel::Required,
+    }],
+};
+
+impl EventAttributes for OtelcolNodeFileStop {
+    #[inline]
+    fn visit_attributes(
+        &self,
+        visitor: &mut dyn FnMut(&'static EventAttributeDescriptor, EventAttributeValueRef<'_>),
+    ) {
+        visitor(
+            &OTELCOL_NODE_FILE_STOP_DESCRIPTOR.attributes[0],
+            EventAttributeValueRef::Any(&self.reason),
+        );
+    }
+}
+
+impl SemanticEvent for OtelcolNodeFileStop {
+    const DESCRIPTOR: &'static EventDescriptor = &OTELCOL_NODE_FILE_STOP_DESCRIPTOR;
+}
+
+impl OtelcolNodeFileStop {
+    /// Static semantic-convention descriptor for this event.
+    pub const DESCRIPTOR: &'static EventDescriptor = &OTELCOL_NODE_FILE_STOP_DESCRIPTOR;
+
+    /// Sends this payload at the `info` level with a compatible entity.
+    pub fn emit_info<S, E>(&self, client: &mut EventClient<S>, entity: &E)
+    where
+        S: EventSink,
+        E: OtelcolNodeFileStopAssociatedEntity,
+    {
+        client.emit(entity, self, EventLevel::Info);
+    }
+}
+
+/// Emitted by OTAP Dataflow as `otelcol.node.file.tail.recover`.
+#[derive(Debug, Clone)]
+pub struct OtelcolNodeFileTailRecover {
+    /// The recovered_bytes value recorded by OTAP Dataflow internal telemetry.
+    pub recovered_bytes: otap_df_telemetry::attributes::AttributeValue,
+    /// The signal value recorded by OTAP Dataflow internal telemetry.
+    pub signal: otap_df_telemetry::attributes::AttributeValue,
+}
+
+/// Marker implemented only by entity types allowed by `otelcol.node.file.tail.recover`.
+pub trait OtelcolNodeFileTailRecoverAssociatedEntity: entities::SemanticEntity {}
+
+impl OtelcolNodeFileTailRecoverAssociatedEntity for entities::NodeAttributeSet {}
+
+impl OtelcolNodeFileTailRecoverAssociatedEntity for entities::NodeWithCustomAttributeSet {}
+
+static OTELCOL_NODE_FILE_TAIL_RECOVER_DESCRIPTOR: EventDescriptor = EventDescriptor {
+    name: "otelcol.node.file.tail.recover",
+    wire_name: "otelcol.node.file.tail.recover",
+    brief: "Emitted by OTAP Dataflow as `otelcol.node.file.tail.recover`.",
+    stability: "development",
+    requirement_level: EventRequirementLevel::Recommended,
+    scope_names: &["otap-df-core-nodes"],
+    severity_levels: &[EventSeverity::Warn],
+    sources: &["crates/core-nodes/src/exporters/file_exporter/mod.rs"],
+    availability: &[],
+    entity_associations: &["otap.node", "otap.node.custom"],
+    attributes: &[
+        EventAttributeDescriptor {
+            key: "recovered_bytes",
+            wire_key: "recovered_bytes",
+            brief: "The recovered_bytes value recorded by OTAP Dataflow internal telemetry.",
+            value_type: otap_df_telemetry::descriptor::AttributeValueType::Any,
+            requirement_level: EventRequirementLevel::Required,
+        },
+        EventAttributeDescriptor {
+            key: "signal",
+            wire_key: "signal",
+            brief: "The signal value recorded by OTAP Dataflow internal telemetry.",
+            value_type: otap_df_telemetry::descriptor::AttributeValueType::Any,
+            requirement_level: EventRequirementLevel::Required,
+        },
+    ],
+};
+
+impl EventAttributes for OtelcolNodeFileTailRecover {
+    #[inline]
+    fn visit_attributes(
+        &self,
+        visitor: &mut dyn FnMut(&'static EventAttributeDescriptor, EventAttributeValueRef<'_>),
+    ) {
+        visitor(
+            &OTELCOL_NODE_FILE_TAIL_RECOVER_DESCRIPTOR.attributes[0],
+            EventAttributeValueRef::Any(&self.recovered_bytes),
+        );
+        visitor(
+            &OTELCOL_NODE_FILE_TAIL_RECOVER_DESCRIPTOR.attributes[1],
+            EventAttributeValueRef::Any(&self.signal),
+        );
+    }
+}
+
+impl SemanticEvent for OtelcolNodeFileTailRecover {
+    const DESCRIPTOR: &'static EventDescriptor = &OTELCOL_NODE_FILE_TAIL_RECOVER_DESCRIPTOR;
+}
+
+impl OtelcolNodeFileTailRecover {
+    /// Static semantic-convention descriptor for this event.
+    pub const DESCRIPTOR: &'static EventDescriptor = &OTELCOL_NODE_FILE_TAIL_RECOVER_DESCRIPTOR;
+
+    /// Sends this payload at the `warn` level with a compatible entity.
+    pub fn emit_warn<S, E>(&self, client: &mut EventClient<S>, entity: &E)
+    where
+        S: EventSink,
+        E: OtelcolNodeFileTailRecoverAssociatedEntity,
+    {
+        client.emit(entity, self, EventLevel::Warn);
+    }
+}
+
+/// Emitted by OTAP Dataflow as `otelcol.node.file.writer.start`.
+#[derive(Debug, Clone)]
+pub struct OtelcolNodeFileWriterStart {
+    /// The signal value recorded by OTAP Dataflow internal telemetry.
+    pub signal: otap_df_telemetry::attributes::AttributeValue,
+}
+
+/// Marker implemented only by entity types allowed by `otelcol.node.file.writer.start`.
+pub trait OtelcolNodeFileWriterStartAssociatedEntity: entities::SemanticEntity {}
+
+impl OtelcolNodeFileWriterStartAssociatedEntity for entities::NodeAttributeSet {}
+
+impl OtelcolNodeFileWriterStartAssociatedEntity for entities::NodeWithCustomAttributeSet {}
+
+static OTELCOL_NODE_FILE_WRITER_START_DESCRIPTOR: EventDescriptor = EventDescriptor {
+    name: "otelcol.node.file.writer.start",
+    wire_name: "otelcol.node.file.writer.start",
+    brief: "Emitted by OTAP Dataflow as `otelcol.node.file.writer.start`.",
+    stability: "development",
+    requirement_level: EventRequirementLevel::Recommended,
+    scope_names: &["otap-df-core-nodes"],
+    severity_levels: &[EventSeverity::Info],
+    sources: &["crates/core-nodes/src/exporters/file_exporter/mod.rs"],
+    availability: &[],
+    entity_associations: &["otap.node", "otap.node.custom"],
+    attributes: &[EventAttributeDescriptor {
+        key: "signal",
+        wire_key: "signal",
+        brief: "The signal value recorded by OTAP Dataflow internal telemetry.",
+        value_type: otap_df_telemetry::descriptor::AttributeValueType::Any,
+        requirement_level: EventRequirementLevel::Required,
+    }],
+};
+
+impl EventAttributes for OtelcolNodeFileWriterStart {
+    #[inline]
+    fn visit_attributes(
+        &self,
+        visitor: &mut dyn FnMut(&'static EventAttributeDescriptor, EventAttributeValueRef<'_>),
+    ) {
+        visitor(
+            &OTELCOL_NODE_FILE_WRITER_START_DESCRIPTOR.attributes[0],
+            EventAttributeValueRef::Any(&self.signal),
+        );
+    }
+}
+
+impl SemanticEvent for OtelcolNodeFileWriterStart {
+    const DESCRIPTOR: &'static EventDescriptor = &OTELCOL_NODE_FILE_WRITER_START_DESCRIPTOR;
+}
+
+impl OtelcolNodeFileWriterStart {
+    /// Static semantic-convention descriptor for this event.
+    pub const DESCRIPTOR: &'static EventDescriptor = &OTELCOL_NODE_FILE_WRITER_START_DESCRIPTOR;
+
+    /// Sends this payload at the `info` level with a compatible entity.
+    pub fn emit_info<S, E>(&self, client: &mut EventClient<S>, entity: &E)
+    where
+        S: EventSink,
+        E: OtelcolNodeFileWriterStartAssociatedEntity,
+    {
+        client.emit(entity, self, EventLevel::Info);
+    }
+}
+
 /// The otlp.exporter.grpc.channels internal telemetry event occurred.
 #[derive(Debug, Clone)]
 pub struct OtlpExporterGrpcChannels {
@@ -4286,6 +4853,120 @@ impl OtlpExporterGrpcChannels {
         E: OtlpExporterGrpcChannelsAssociatedEntity,
     {
         client.emit(entity, self, EventLevel::Info);
+    }
+}
+
+/// Emitted by OTAP Dataflow as `otlp.exporter.grpc.export_error`.
+#[derive(Debug, Clone)]
+pub struct OtlpExporterGrpcExportError {
+    /// The code value recorded by OTAP Dataflow internal telemetry.
+    pub code: Option<String>,
+    /// The error value recorded by OTAP Dataflow internal telemetry.
+    pub error: Option<otap_df_telemetry::attributes::AttributeValue>,
+    /// The error_msg value recorded by OTAP Dataflow internal telemetry.
+    pub error_msg: Option<otap_df_telemetry::attributes::AttributeValue>,
+    /// The source value recorded by OTAP Dataflow internal telemetry.
+    pub source: Option<otap_df_telemetry::attributes::AttributeValue>,
+}
+
+/// Marker implemented only by entity types allowed by `otlp.exporter.grpc.export_error`.
+pub trait OtlpExporterGrpcExportErrorAssociatedEntity: entities::SemanticEntity {}
+
+impl OtlpExporterGrpcExportErrorAssociatedEntity for entities::NodeAttributeSet {}
+
+impl OtlpExporterGrpcExportErrorAssociatedEntity for entities::NodeWithCustomAttributeSet {}
+
+static OTLP_EXPORTER_GRPC_EXPORT_ERROR_DESCRIPTOR: EventDescriptor = EventDescriptor {
+    name: "otlp.exporter.grpc.export_error",
+    wire_name: "otlp.exporter.grpc.export_error",
+    brief: "Emitted by OTAP Dataflow as `otlp.exporter.grpc.export_error`.",
+    stability: "development",
+    requirement_level: EventRequirementLevel::Recommended,
+    scope_names: &["otap-df-core-nodes"],
+    severity_levels: &[EventSeverity::Warn],
+    sources: &["crates/core-nodes/src/exporters/otlp_grpc_exporter/mod.rs"],
+    availability: &[],
+    entity_associations: &["otap.node", "otap.node.custom"],
+    attributes: &[
+        EventAttributeDescriptor {
+            key: "code",
+            wire_key: "code",
+            brief: "The code value recorded by OTAP Dataflow internal telemetry.",
+            value_type: otap_df_telemetry::descriptor::AttributeValueType::String,
+            requirement_level: EventRequirementLevel::Recommended,
+        },
+        EventAttributeDescriptor {
+            key: "error",
+            wire_key: "error",
+            brief: "The error value recorded by OTAP Dataflow internal telemetry.",
+            value_type: otap_df_telemetry::descriptor::AttributeValueType::Any,
+            requirement_level: EventRequirementLevel::Recommended,
+        },
+        EventAttributeDescriptor {
+            key: "error_msg",
+            wire_key: "error_msg",
+            brief: "The error_msg value recorded by OTAP Dataflow internal telemetry.",
+            value_type: otap_df_telemetry::descriptor::AttributeValueType::Any,
+            requirement_level: EventRequirementLevel::Recommended,
+        },
+        EventAttributeDescriptor {
+            key: "source",
+            wire_key: "source",
+            brief: "The source value recorded by OTAP Dataflow internal telemetry.",
+            value_type: otap_df_telemetry::descriptor::AttributeValueType::Any,
+            requirement_level: EventRequirementLevel::Recommended,
+        },
+    ],
+};
+
+impl EventAttributes for OtlpExporterGrpcExportError {
+    #[inline]
+    fn visit_attributes(
+        &self,
+        visitor: &mut dyn FnMut(&'static EventAttributeDescriptor, EventAttributeValueRef<'_>),
+    ) {
+        if let Some(value) = &self.code {
+            visitor(
+                &OTLP_EXPORTER_GRPC_EXPORT_ERROR_DESCRIPTOR.attributes[0],
+                EventAttributeValueRef::String(value.as_str()),
+            );
+        }
+        if let Some(value) = &self.error {
+            visitor(
+                &OTLP_EXPORTER_GRPC_EXPORT_ERROR_DESCRIPTOR.attributes[1],
+                EventAttributeValueRef::Any(value),
+            );
+        }
+        if let Some(value) = &self.error_msg {
+            visitor(
+                &OTLP_EXPORTER_GRPC_EXPORT_ERROR_DESCRIPTOR.attributes[2],
+                EventAttributeValueRef::Any(value),
+            );
+        }
+        if let Some(value) = &self.source {
+            visitor(
+                &OTLP_EXPORTER_GRPC_EXPORT_ERROR_DESCRIPTOR.attributes[3],
+                EventAttributeValueRef::Any(value),
+            );
+        }
+    }
+}
+
+impl SemanticEvent for OtlpExporterGrpcExportError {
+    const DESCRIPTOR: &'static EventDescriptor = &OTLP_EXPORTER_GRPC_EXPORT_ERROR_DESCRIPTOR;
+}
+
+impl OtlpExporterGrpcExportError {
+    /// Static semantic-convention descriptor for this event.
+    pub const DESCRIPTOR: &'static EventDescriptor = &OTLP_EXPORTER_GRPC_EXPORT_ERROR_DESCRIPTOR;
+
+    /// Sends this payload at the `warn` level with a compatible entity.
+    pub fn emit_warn<S, E>(&self, client: &mut EventClient<S>, entity: &E)
+    where
+        S: EventSink,
+        E: OtlpExporterGrpcExportErrorAssociatedEntity,
+    {
+        client.emit(entity, self, EventLevel::Warn);
     }
 }
 
@@ -4369,55 +5050,70 @@ impl OtlpExporterGrpcHeaderSkip {
     }
 }
 
-/// Emitted by the OTLP gRPC exporter when it receives an upstream data or control message.
+/// Emitted by OTAP Dataflow as `otlp.exporter.grpc.invalid_bearer_token`.
 #[derive(Debug, Clone)]
-pub struct OtlpExporterGrpcReceive;
+pub struct OtlpExporterGrpcInvalidBearerToken {
+    /// The error value recorded by OTAP Dataflow internal telemetry.
+    pub error: otap_df_telemetry::attributes::AttributeValue,
+}
 
-/// Marker implemented only by entity types allowed by `otlp.exporter.grpc.receive`.
-pub trait OtlpExporterGrpcReceiveAssociatedEntity: entities::SemanticEntity {}
+/// Marker implemented only by entity types allowed by `otlp.exporter.grpc.invalid_bearer_token`.
+pub trait OtlpExporterGrpcInvalidBearerTokenAssociatedEntity: entities::SemanticEntity {}
 
-impl OtlpExporterGrpcReceiveAssociatedEntity for entities::NodeAttributeSet {}
+impl OtlpExporterGrpcInvalidBearerTokenAssociatedEntity for entities::NodeAttributeSet {}
 
-impl OtlpExporterGrpcReceiveAssociatedEntity for entities::NodeWithCustomAttributeSet {}
+impl OtlpExporterGrpcInvalidBearerTokenAssociatedEntity for entities::NodeWithCustomAttributeSet {}
 
-static OTLP_EXPORTER_GRPC_RECEIVE_DESCRIPTOR: EventDescriptor = EventDescriptor {
-    name: "otlp.exporter.grpc.receive",
-    wire_name: "otlp.exporter.grpc.receive",
-    brief: "Emitted by the OTLP gRPC exporter when it receives an upstream data or control message.",
+static OTLP_EXPORTER_GRPC_INVALID_BEARER_TOKEN_DESCRIPTOR: EventDescriptor = EventDescriptor {
+    name: "otlp.exporter.grpc.invalid_bearer_token",
+    wire_name: "otlp.exporter.grpc.invalid_bearer_token",
+    brief: "Emitted by OTAP Dataflow as `otlp.exporter.grpc.invalid_bearer_token`.",
     stability: "development",
     requirement_level: EventRequirementLevel::Recommended,
     scope_names: &["otap-df-core-nodes"],
-    severity_levels: &[EventSeverity::Debug],
+    severity_levels: &[EventSeverity::Warn],
     sources: &["crates/core-nodes/src/exporters/otlp_grpc_exporter/mod.rs"],
     availability: &[],
     entity_associations: &["otap.node", "otap.node.custom"],
-    attributes: &[],
+    attributes: &[EventAttributeDescriptor {
+        key: "error",
+        wire_key: "error",
+        brief: "The error value recorded by OTAP Dataflow internal telemetry.",
+        value_type: otap_df_telemetry::descriptor::AttributeValueType::Any,
+        requirement_level: EventRequirementLevel::Required,
+    }],
 };
 
-impl EventAttributes for OtlpExporterGrpcReceive {
+impl EventAttributes for OtlpExporterGrpcInvalidBearerToken {
     #[inline]
     fn visit_attributes(
         &self,
-        _visitor: &mut dyn FnMut(&'static EventAttributeDescriptor, EventAttributeValueRef<'_>),
+        visitor: &mut dyn FnMut(&'static EventAttributeDescriptor, EventAttributeValueRef<'_>),
     ) {
+        visitor(
+            &OTLP_EXPORTER_GRPC_INVALID_BEARER_TOKEN_DESCRIPTOR.attributes[0],
+            EventAttributeValueRef::Any(&self.error),
+        );
     }
 }
 
-impl SemanticEvent for OtlpExporterGrpcReceive {
-    const DESCRIPTOR: &'static EventDescriptor = &OTLP_EXPORTER_GRPC_RECEIVE_DESCRIPTOR;
+impl SemanticEvent for OtlpExporterGrpcInvalidBearerToken {
+    const DESCRIPTOR: &'static EventDescriptor =
+        &OTLP_EXPORTER_GRPC_INVALID_BEARER_TOKEN_DESCRIPTOR;
 }
 
-impl OtlpExporterGrpcReceive {
+impl OtlpExporterGrpcInvalidBearerToken {
     /// Static semantic-convention descriptor for this event.
-    pub const DESCRIPTOR: &'static EventDescriptor = &OTLP_EXPORTER_GRPC_RECEIVE_DESCRIPTOR;
+    pub const DESCRIPTOR: &'static EventDescriptor =
+        &OTLP_EXPORTER_GRPC_INVALID_BEARER_TOKEN_DESCRIPTOR;
 
-    /// Sends this payload at the `debug` level with a compatible entity.
-    pub fn emit_debug<S, E>(&self, client: &mut EventClient<S>, entity: &E)
+    /// Sends this payload at the `warn` level with a compatible entity.
+    pub fn emit_warn<S, E>(&self, client: &mut EventClient<S>, entity: &E)
     where
         S: EventSink,
-        E: OtlpExporterGrpcReceiveAssociatedEntity,
+        E: OtlpExporterGrpcInvalidBearerTokenAssociatedEntity,
     {
-        client.emit(entity, self, EventLevel::Debug);
+        client.emit(entity, self, EventLevel::Warn);
     }
 }
 
@@ -4538,13 +5234,64 @@ impl OtlpExporterGrpcStart {
     }
 }
 
+/// Emitted by OTAP Dataflow as `otlp.exporter.grpc.token_stream_closed`.
+#[derive(Debug, Clone)]
+pub struct OtlpExporterGrpcTokenStreamClosed;
+
+/// Marker implemented only by entity types allowed by `otlp.exporter.grpc.token_stream_closed`.
+pub trait OtlpExporterGrpcTokenStreamClosedAssociatedEntity: entities::SemanticEntity {}
+
+impl OtlpExporterGrpcTokenStreamClosedAssociatedEntity for entities::NodeAttributeSet {}
+
+impl OtlpExporterGrpcTokenStreamClosedAssociatedEntity for entities::NodeWithCustomAttributeSet {}
+
+static OTLP_EXPORTER_GRPC_TOKEN_STREAM_CLOSED_DESCRIPTOR: EventDescriptor = EventDescriptor {
+    name: "otlp.exporter.grpc.token_stream_closed",
+    wire_name: "otlp.exporter.grpc.token_stream_closed",
+    brief: "Emitted by OTAP Dataflow as `otlp.exporter.grpc.token_stream_closed`.",
+    stability: "development",
+    requirement_level: EventRequirementLevel::Recommended,
+    scope_names: &["otap-df-core-nodes"],
+    severity_levels: &[EventSeverity::Warn],
+    sources: &["crates/core-nodes/src/exporters/otlp_grpc_exporter/mod.rs"],
+    availability: &[],
+    entity_associations: &["otap.node", "otap.node.custom"],
+    attributes: &[],
+};
+
+impl EventAttributes for OtlpExporterGrpcTokenStreamClosed {
+    #[inline]
+    fn visit_attributes(
+        &self,
+        _visitor: &mut dyn FnMut(&'static EventAttributeDescriptor, EventAttributeValueRef<'_>),
+    ) {
+    }
+}
+
+impl SemanticEvent for OtlpExporterGrpcTokenStreamClosed {
+    const DESCRIPTOR: &'static EventDescriptor = &OTLP_EXPORTER_GRPC_TOKEN_STREAM_CLOSED_DESCRIPTOR;
+}
+
+impl OtlpExporterGrpcTokenStreamClosed {
+    /// Static semantic-convention descriptor for this event.
+    pub const DESCRIPTOR: &'static EventDescriptor =
+        &OTLP_EXPORTER_GRPC_TOKEN_STREAM_CLOSED_DESCRIPTOR;
+
+    /// Sends this payload at the `warn` level with a compatible entity.
+    pub fn emit_warn<S, E>(&self, client: &mut EventClient<S>, entity: &E)
+    where
+        S: EventSink,
+        E: OtlpExporterGrpcTokenStreamClosedAssociatedEntity,
+    {
+        client.emit(entity, self, EventLevel::Warn);
+    }
+}
+
 /// Emitted when an OTLP exporter request fails.
 #[derive(Debug, Clone)]
 pub struct OtlpExporterHttpExportError {
-    /// The error value recorded by OTAP Dataflow internal telemetry.
-    pub error: Option<otap_df_telemetry::attributes::AttributeValue>,
     /// The retryable value recorded by OTAP Dataflow internal telemetry.
-    pub retryable: Option<otap_df_telemetry::attributes::AttributeValue>,
+    pub retryable: otap_df_telemetry::attributes::AttributeValue,
 }
 
 /// Marker implemented only by entity types allowed by `otlp.exporter.http.export_error`.
@@ -4562,28 +5309,16 @@ static OTLP_EXPORTER_HTTP_EXPORT_ERROR_DESCRIPTOR: EventDescriptor = EventDescri
     requirement_level: EventRequirementLevel::Recommended,
     scope_names: &["otap-df-core-nodes"],
     severity_levels: &[EventSeverity::Warn],
-    sources: &[
-        "crates/core-nodes/src/exporters/otlp_grpc_exporter/mod.rs",
-        "crates/core-nodes/src/exporters/otlp_http_exporter/mod.rs",
-    ],
+    sources: &["crates/core-nodes/src/exporters/otlp_http_exporter/mod.rs"],
     availability: &[],
     entity_associations: &["otap.node", "otap.node.custom"],
-    attributes: &[
-        EventAttributeDescriptor {
-            key: "error",
-            wire_key: "error",
-            brief: "The error value recorded by OTAP Dataflow internal telemetry.",
-            value_type: otap_df_telemetry::descriptor::AttributeValueType::Any,
-            requirement_level: EventRequirementLevel::Recommended,
-        },
-        EventAttributeDescriptor {
-            key: "retryable",
-            wire_key: "retryable",
-            brief: "The retryable value recorded by OTAP Dataflow internal telemetry.",
-            value_type: otap_df_telemetry::descriptor::AttributeValueType::Any,
-            requirement_level: EventRequirementLevel::Recommended,
-        },
-    ],
+    attributes: &[EventAttributeDescriptor {
+        key: "retryable",
+        wire_key: "retryable",
+        brief: "The retryable value recorded by OTAP Dataflow internal telemetry.",
+        value_type: otap_df_telemetry::descriptor::AttributeValueType::Any,
+        requirement_level: EventRequirementLevel::Required,
+    }],
 };
 
 impl EventAttributes for OtlpExporterHttpExportError {
@@ -4592,18 +5327,10 @@ impl EventAttributes for OtlpExporterHttpExportError {
         &self,
         visitor: &mut dyn FnMut(&'static EventAttributeDescriptor, EventAttributeValueRef<'_>),
     ) {
-        if let Some(value) = &self.error {
-            visitor(
-                &OTLP_EXPORTER_HTTP_EXPORT_ERROR_DESCRIPTOR.attributes[0],
-                EventAttributeValueRef::Any(value),
-            );
-        }
-        if let Some(value) = &self.retryable {
-            visitor(
-                &OTLP_EXPORTER_HTTP_EXPORT_ERROR_DESCRIPTOR.attributes[1],
-                EventAttributeValueRef::Any(value),
-            );
-        }
+        visitor(
+            &OTLP_EXPORTER_HTTP_EXPORT_ERROR_DESCRIPTOR.attributes[0],
+            EventAttributeValueRef::Any(&self.retryable),
+        );
     }
 }
 
@@ -4625,55 +5352,136 @@ impl OtlpExporterHttpExportError {
     }
 }
 
-/// The otlp.exporter.http.receive internal telemetry event occurred.
+/// Emitted by OTAP Dataflow as `otlp.exporter.http.invalid_bearer_token`.
 #[derive(Debug, Clone)]
-pub struct OtlpExporterHttpReceive;
+pub struct OtlpExporterHttpInvalidBearerToken {
+    /// The error value recorded by OTAP Dataflow internal telemetry.
+    pub error: otap_df_telemetry::attributes::AttributeValue,
+}
 
-/// Marker implemented only by entity types allowed by `otlp.exporter.http.receive`.
-pub trait OtlpExporterHttpReceiveAssociatedEntity: entities::SemanticEntity {}
+/// Marker implemented only by entity types allowed by `otlp.exporter.http.invalid_bearer_token`.
+pub trait OtlpExporterHttpInvalidBearerTokenAssociatedEntity: entities::SemanticEntity {}
 
-impl OtlpExporterHttpReceiveAssociatedEntity for entities::NodeAttributeSet {}
+impl OtlpExporterHttpInvalidBearerTokenAssociatedEntity for entities::NodeAttributeSet {}
 
-impl OtlpExporterHttpReceiveAssociatedEntity for entities::NodeWithCustomAttributeSet {}
+impl OtlpExporterHttpInvalidBearerTokenAssociatedEntity for entities::NodeWithCustomAttributeSet {}
 
-static OTLP_EXPORTER_HTTP_RECEIVE_DESCRIPTOR: EventDescriptor = EventDescriptor {
-    name: "otlp.exporter.http.receive",
-    wire_name: "otlp.exporter.http.receive",
-    brief: "The otlp.exporter.http.receive internal telemetry event occurred.",
+static OTLP_EXPORTER_HTTP_INVALID_BEARER_TOKEN_DESCRIPTOR: EventDescriptor = EventDescriptor {
+    name: "otlp.exporter.http.invalid_bearer_token",
+    wire_name: "otlp.exporter.http.invalid_bearer_token",
+    brief: "Emitted by OTAP Dataflow as `otlp.exporter.http.invalid_bearer_token`.",
     stability: "development",
     requirement_level: EventRequirementLevel::Recommended,
     scope_names: &["otap-df-core-nodes"],
-    severity_levels: &[EventSeverity::Debug],
+    severity_levels: &[EventSeverity::Warn],
     sources: &["crates/core-nodes/src/exporters/otlp_http_exporter/mod.rs"],
     availability: &[],
     entity_associations: &["otap.node", "otap.node.custom"],
-    attributes: &[],
+    attributes: &[EventAttributeDescriptor {
+        key: "error",
+        wire_key: "error",
+        brief: "The error value recorded by OTAP Dataflow internal telemetry.",
+        value_type: otap_df_telemetry::descriptor::AttributeValueType::Any,
+        requirement_level: EventRequirementLevel::Required,
+    }],
 };
 
-impl EventAttributes for OtlpExporterHttpReceive {
+impl EventAttributes for OtlpExporterHttpInvalidBearerToken {
     #[inline]
     fn visit_attributes(
         &self,
-        _visitor: &mut dyn FnMut(&'static EventAttributeDescriptor, EventAttributeValueRef<'_>),
+        visitor: &mut dyn FnMut(&'static EventAttributeDescriptor, EventAttributeValueRef<'_>),
     ) {
+        visitor(
+            &OTLP_EXPORTER_HTTP_INVALID_BEARER_TOKEN_DESCRIPTOR.attributes[0],
+            EventAttributeValueRef::Any(&self.error),
+        );
     }
 }
 
-impl SemanticEvent for OtlpExporterHttpReceive {
-    const DESCRIPTOR: &'static EventDescriptor = &OTLP_EXPORTER_HTTP_RECEIVE_DESCRIPTOR;
+impl SemanticEvent for OtlpExporterHttpInvalidBearerToken {
+    const DESCRIPTOR: &'static EventDescriptor =
+        &OTLP_EXPORTER_HTTP_INVALID_BEARER_TOKEN_DESCRIPTOR;
 }
 
-impl OtlpExporterHttpReceive {
+impl OtlpExporterHttpInvalidBearerToken {
     /// Static semantic-convention descriptor for this event.
-    pub const DESCRIPTOR: &'static EventDescriptor = &OTLP_EXPORTER_HTTP_RECEIVE_DESCRIPTOR;
+    pub const DESCRIPTOR: &'static EventDescriptor =
+        &OTLP_EXPORTER_HTTP_INVALID_BEARER_TOKEN_DESCRIPTOR;
 
-    /// Sends this payload at the `debug` level with a compatible entity.
-    pub fn emit_debug<S, E>(&self, client: &mut EventClient<S>, entity: &E)
+    /// Sends this payload at the `warn` level with a compatible entity.
+    pub fn emit_warn<S, E>(&self, client: &mut EventClient<S>, entity: &E)
     where
         S: EventSink,
-        E: OtlpExporterHttpReceiveAssociatedEntity,
+        E: OtlpExporterHttpInvalidBearerTokenAssociatedEntity,
     {
-        client.emit(entity, self, EventLevel::Debug);
+        client.emit(entity, self, EventLevel::Warn);
+    }
+}
+
+/// Emitted by OTAP Dataflow as `otlp.exporter.http.notification_error`.
+#[derive(Debug, Clone)]
+pub struct OtlpExporterHttpNotificationError {
+    /// The error value recorded by OTAP Dataflow internal telemetry.
+    pub error: otap_df_telemetry::attributes::AttributeValue,
+}
+
+/// Marker implemented only by entity types allowed by `otlp.exporter.http.notification_error`.
+pub trait OtlpExporterHttpNotificationErrorAssociatedEntity: entities::SemanticEntity {}
+
+impl OtlpExporterHttpNotificationErrorAssociatedEntity for entities::NodeAttributeSet {}
+
+impl OtlpExporterHttpNotificationErrorAssociatedEntity for entities::NodeWithCustomAttributeSet {}
+
+static OTLP_EXPORTER_HTTP_NOTIFICATION_ERROR_DESCRIPTOR: EventDescriptor = EventDescriptor {
+    name: "otlp.exporter.http.notification_error",
+    wire_name: "otlp.exporter.http.notification_error",
+    brief: "Emitted by OTAP Dataflow as `otlp.exporter.http.notification_error`.",
+    stability: "development",
+    requirement_level: EventRequirementLevel::Recommended,
+    scope_names: &["otap-df-core-nodes"],
+    severity_levels: &[EventSeverity::Warn],
+    sources: &["crates/core-nodes/src/exporters/otlp_http_exporter/mod.rs"],
+    availability: &[],
+    entity_associations: &["otap.node", "otap.node.custom"],
+    attributes: &[EventAttributeDescriptor {
+        key: "error",
+        wire_key: "error",
+        brief: "The error value recorded by OTAP Dataflow internal telemetry.",
+        value_type: otap_df_telemetry::descriptor::AttributeValueType::Any,
+        requirement_level: EventRequirementLevel::Required,
+    }],
+};
+
+impl EventAttributes for OtlpExporterHttpNotificationError {
+    #[inline]
+    fn visit_attributes(
+        &self,
+        visitor: &mut dyn FnMut(&'static EventAttributeDescriptor, EventAttributeValueRef<'_>),
+    ) {
+        visitor(
+            &OTLP_EXPORTER_HTTP_NOTIFICATION_ERROR_DESCRIPTOR.attributes[0],
+            EventAttributeValueRef::Any(&self.error),
+        );
+    }
+}
+
+impl SemanticEvent for OtlpExporterHttpNotificationError {
+    const DESCRIPTOR: &'static EventDescriptor = &OTLP_EXPORTER_HTTP_NOTIFICATION_ERROR_DESCRIPTOR;
+}
+
+impl OtlpExporterHttpNotificationError {
+    /// Static semantic-convention descriptor for this event.
+    pub const DESCRIPTOR: &'static EventDescriptor =
+        &OTLP_EXPORTER_HTTP_NOTIFICATION_ERROR_DESCRIPTOR;
+
+    /// Sends this payload at the `warn` level with a compatible entity.
+    pub fn emit_warn<S, E>(&self, client: &mut EventClient<S>, entity: &E)
+    where
+        S: EventSink,
+        E: OtlpExporterHttpNotificationErrorAssociatedEntity,
+    {
+        client.emit(entity, self, EventLevel::Warn);
     }
 }
 
@@ -4832,6 +5640,59 @@ impl OtlpExporterHttpStart {
         E: OtlpExporterHttpStartAssociatedEntity,
     {
         client.emit(entity, self, EventLevel::Info);
+    }
+}
+
+/// Emitted by OTAP Dataflow as `otlp.exporter.http.token_stream_closed`.
+#[derive(Debug, Clone)]
+pub struct OtlpExporterHttpTokenStreamClosed;
+
+/// Marker implemented only by entity types allowed by `otlp.exporter.http.token_stream_closed`.
+pub trait OtlpExporterHttpTokenStreamClosedAssociatedEntity: entities::SemanticEntity {}
+
+impl OtlpExporterHttpTokenStreamClosedAssociatedEntity for entities::NodeAttributeSet {}
+
+impl OtlpExporterHttpTokenStreamClosedAssociatedEntity for entities::NodeWithCustomAttributeSet {}
+
+static OTLP_EXPORTER_HTTP_TOKEN_STREAM_CLOSED_DESCRIPTOR: EventDescriptor = EventDescriptor {
+    name: "otlp.exporter.http.token_stream_closed",
+    wire_name: "otlp.exporter.http.token_stream_closed",
+    brief: "Emitted by OTAP Dataflow as `otlp.exporter.http.token_stream_closed`.",
+    stability: "development",
+    requirement_level: EventRequirementLevel::Recommended,
+    scope_names: &["otap-df-core-nodes"],
+    severity_levels: &[EventSeverity::Warn],
+    sources: &["crates/core-nodes/src/exporters/otlp_http_exporter/mod.rs"],
+    availability: &[],
+    entity_associations: &["otap.node", "otap.node.custom"],
+    attributes: &[],
+};
+
+impl EventAttributes for OtlpExporterHttpTokenStreamClosed {
+    #[inline]
+    fn visit_attributes(
+        &self,
+        _visitor: &mut dyn FnMut(&'static EventAttributeDescriptor, EventAttributeValueRef<'_>),
+    ) {
+    }
+}
+
+impl SemanticEvent for OtlpExporterHttpTokenStreamClosed {
+    const DESCRIPTOR: &'static EventDescriptor = &OTLP_EXPORTER_HTTP_TOKEN_STREAM_CLOSED_DESCRIPTOR;
+}
+
+impl OtlpExporterHttpTokenStreamClosed {
+    /// Static semantic-convention descriptor for this event.
+    pub const DESCRIPTOR: &'static EventDescriptor =
+        &OTLP_EXPORTER_HTTP_TOKEN_STREAM_CLOSED_DESCRIPTOR;
+
+    /// Sends this payload at the `warn` level with a compatible entity.
+    pub fn emit_warn<S, E>(&self, client: &mut EventClient<S>, entity: &E)
+    where
+        S: EventSink,
+        E: OtlpExporterHttpTokenStreamClosedAssociatedEntity,
+    {
+        client.emit(entity, self, EventLevel::Warn);
     }
 }
 
@@ -5212,13 +6073,79 @@ impl PerfExporterStart {
     }
 }
 
+/// Emitted by OTAP Dataflow as `syslog_cef_receiver.rate_limit.drop`.
+#[derive(Debug, Clone)]
+pub struct SyslogCefReceiverRateLimitDrop {
+    /// The peer value recorded by OTAP Dataflow internal telemetry.
+    pub peer: String,
+}
+
+/// Marker implemented only by entity types allowed by `syslog_cef_receiver.rate_limit.drop`.
+pub trait SyslogCefReceiverRateLimitDropAssociatedEntity: entities::SemanticEntity {}
+
+impl SyslogCefReceiverRateLimitDropAssociatedEntity for entities::NodeAttributeSet {}
+
+impl SyslogCefReceiverRateLimitDropAssociatedEntity for entities::NodeWithCustomAttributeSet {}
+
+static SYSLOG_CEF_RECEIVER_RATE_LIMIT_DROP_DESCRIPTOR: EventDescriptor = EventDescriptor {
+    name: "syslog_cef_receiver.rate_limit.drop",
+    wire_name: "syslog_cef_receiver.rate_limit.drop",
+    brief: "Emitted by OTAP Dataflow as `syslog_cef_receiver.rate_limit.drop`.",
+    stability: "development",
+    requirement_level: EventRequirementLevel::Recommended,
+    scope_names: &["otap-df-core-nodes"],
+    severity_levels: &[EventSeverity::Warn],
+    sources: &["crates/core-nodes/src/receivers/syslog_cef_receiver/mod.rs"],
+    availability: &[],
+    entity_associations: &["otap.node", "otap.node.custom"],
+    attributes: &[EventAttributeDescriptor {
+        key: "peer",
+        wire_key: "peer",
+        brief: "The peer value recorded by OTAP Dataflow internal telemetry.",
+        value_type: otap_df_telemetry::descriptor::AttributeValueType::String,
+        requirement_level: EventRequirementLevel::Required,
+    }],
+};
+
+impl EventAttributes for SyslogCefReceiverRateLimitDrop {
+    #[inline]
+    fn visit_attributes(
+        &self,
+        visitor: &mut dyn FnMut(&'static EventAttributeDescriptor, EventAttributeValueRef<'_>),
+    ) {
+        visitor(
+            &SYSLOG_CEF_RECEIVER_RATE_LIMIT_DROP_DESCRIPTOR.attributes[0],
+            EventAttributeValueRef::String(self.peer.as_str()),
+        );
+    }
+}
+
+impl SemanticEvent for SyslogCefReceiverRateLimitDrop {
+    const DESCRIPTOR: &'static EventDescriptor = &SYSLOG_CEF_RECEIVER_RATE_LIMIT_DROP_DESCRIPTOR;
+}
+
+impl SyslogCefReceiverRateLimitDrop {
+    /// Static semantic-convention descriptor for this event.
+    pub const DESCRIPTOR: &'static EventDescriptor =
+        &SYSLOG_CEF_RECEIVER_RATE_LIMIT_DROP_DESCRIPTOR;
+
+    /// Sends this payload at the `warn` level with a compatible entity.
+    pub fn emit_warn<S, E>(&self, client: &mut EventClient<S>, entity: &E)
+    where
+        S: EventSink,
+        E: SyslogCefReceiverRateLimitDropAssociatedEntity,
+    {
+        client.emit(entity, self, EventLevel::Warn);
+    }
+}
+
 /// The syslog_cef_receiver.start internal telemetry event occurred.
 #[derive(Debug, Clone)]
 pub struct SyslogCefReceiverStart {
     /// The listening_addr value recorded by OTAP Dataflow internal telemetry.
     pub listening_addr: otap_df_telemetry::attributes::AttributeValue,
     /// The protocol value recorded by OTAP Dataflow internal telemetry.
-    pub protocol: String,
+    pub protocol: otap_df_telemetry::attributes::AttributeValue,
 }
 
 /// Marker implemented only by entity types allowed by `syslog_cef_receiver.start`.
@@ -5251,7 +6178,7 @@ static SYSLOG_CEF_RECEIVER_START_DESCRIPTOR: EventDescriptor = EventDescriptor {
             key: "protocol",
             wire_key: "protocol",
             brief: "The protocol value recorded by OTAP Dataflow internal telemetry.",
-            value_type: otap_df_telemetry::descriptor::AttributeValueType::String,
+            value_type: otap_df_telemetry::descriptor::AttributeValueType::Any,
             requirement_level: EventRequirementLevel::Required,
         },
     ],
@@ -5269,7 +6196,7 @@ impl EventAttributes for SyslogCefReceiverStart {
         );
         visitor(
             &SYSLOG_CEF_RECEIVER_START_DESCRIPTOR.attributes[1],
-            EventAttributeValueRef::String(self.protocol.as_str()),
+            EventAttributeValueRef::Any(&self.protocol),
         );
     }
 }

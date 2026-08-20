@@ -14,9 +14,16 @@
 //!
 //! # Fallback
 //! Destinations can declare `fallback_for: <port>`. On nack/timeout of the
-//! origin, the fallback is triggered. Chains (A→B→C) are supported.
+//! origin, the fallback is triggered. Chains (A->B->C) are supported.
 //!
 //! See `processors/fanout_processor/README.md` for detailed diagrams and examples.
+
+otap_df_telemetry::otel_component_scope!(
+    urn = FANOUT_PROCESSOR_URN,
+    target = "otel.processor.fanout",
+);
+
+mod metrics;
 
 use async_trait::async_trait;
 use linkme::distributed_slice;
@@ -32,9 +39,6 @@ use otap_df_engine::message::Message;
 use otap_df_engine::node::NodeId;
 use otap_df_engine::{ConsumerEffectHandlerExtension, Interests, ProducerEffectHandlerExtension};
 use otap_df_engine::{ProcessorFactory, processor::ProcessorWrapper};
-use otap_df_telemetry::instrument::{Counter, Gauge};
-use otap_df_telemetry::metrics::MetricSet;
-use otap_df_telemetry_macros::metric_set;
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use smallvec::{SmallVec, smallvec};
@@ -43,6 +47,7 @@ use std::collections::{BinaryHeap, HashMap, HashSet};
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 
+use metrics::FanoutMetrics;
 use otap_df_otap::{OTAP_PROCESSOR_FACTORIES, pdata::OtapPdata};
 
 /// URN for the fan-out processor.
@@ -104,7 +109,7 @@ struct FanoutConfig {
     pub timeout_check_interval: Duration,
     /// Maximum number of in-flight messages tracked by the processor.
     /// When the limit is reached, `accept_pdata()` returns `false` to apply backpressure
-    /// via the engine's `recv_when` gate — no data is lost or nacked.
+    /// via the engine's `recv_when` gate -- no data is lost or nacked.
     /// Only applies when await_ack is "primary" or "all" (not "none").
     /// Default: 10000. Set to 0 for unlimited (not recommended for production).
     #[serde(default = "FanoutConfig::default_max_inflight")]
@@ -306,7 +311,7 @@ struct ValidatedConfig {
     /// Fast-path: await_ack == None, no inflight tracking needed.
     use_fire_and_forget: bool,
     /// Fast-path: parallel + primary + no fallback + no timeout.
-    /// Uses slim inflight (request_id → original_pdata) instead of full DestinationVec.
+    /// Uses slim inflight (request_id -> original_pdata) instead of full DestinationVec.
     use_slim_primary: bool,
 }
 
@@ -362,35 +367,6 @@ struct Inflight {
     next_send_queue: DestinationIndexQueue,
 }
 
-#[metric_set(name = "processor.fanout")]
-#[derive(Debug, Default, Clone)]
-struct FanoutMetrics {
-    /// Requests dispatched. Note: This is a convenience metric that overlaps with
-    /// channel-level send metrics. Consider removing if metric bloat is a concern.
-    #[metric(unit = "{item}")]
-    pub sent: Counter<u64>,
-    /// Requests acked upstream (after await_ack/fallback aggregation).
-    #[metric(unit = "{item}")]
-    pub acked: Counter<u64>,
-    /// Requests nacked upstream (after await_ack/fallback aggregation).
-    #[metric(unit = "{item}")]
-    pub nacked: Counter<u64>,
-    #[metric(unit = "{item}")]
-    pub timed_out: Counter<u64>,
-    /// Current number of in-flight requests tracked by the processor.
-    #[metric(unit = "{item}")]
-    pub in_flight: Gauge<u64>,
-    /// Configured max_inflight value (0 means unlimited).
-    #[metric(unit = "{item}")]
-    pub max_inflight_config: Gauge<u64>,
-    /// 1 when fanout is currently refusing new pdata via accept_pdata(), else 0.
-    #[metric(unit = "1")]
-    pub throttled: Gauge<u64>,
-    /// Increments on transition from not-throttled to throttled.
-    #[metric(unit = "{episode}")]
-    pub throttle_episodes: Counter<u64>,
-}
-
 /// Entry in the deadline min-heap for efficient timeout checking.
 /// Wrapped in Reverse<> when inserted to make BinaryHeap a min-heap.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
@@ -403,7 +379,7 @@ struct Deadline {
 /// Fan-out processor implementation.
 pub struct FanoutProcessor {
     config: ValidatedConfig,
-    metrics: MetricSet<FanoutMetrics>,
+    metrics: FanoutMetrics,
     /// Full inflight tracking for complex scenarios (sequential, await_all, fallback, timeout).
     inflight: HashMap<u64, Inflight>,
     /// Slim inflight for primary-only fast path: just request_id -> original_pdata.
@@ -439,8 +415,14 @@ fn now() -> Instant {
 
 impl FanoutProcessor {
     fn new(pipeline_ctx: PipelineContext, config: ValidatedConfig) -> Self {
-        let mut metrics = pipeline_ctx.register_metrics::<FanoutMetrics>();
-        metrics.max_inflight_config.set(config.max_inflight as u64);
+        let metrics = FanoutMetrics::register(
+            &pipeline_ctx,
+            config.max_inflight,
+            config
+                .destinations
+                .iter()
+                .map(|destination| destination.port.to_string()),
+        );
         Self {
             config,
             metrics,
@@ -474,12 +456,12 @@ impl FanoutProcessor {
         } else {
             self.inflight.len()
         };
-        self.metrics.in_flight.set(current_inflight as u64);
+        self.metrics.set_active(current_inflight);
 
         let throttled = !self.accept_pdata();
-        self.metrics.throttled.set(u64::from(throttled));
+        self.metrics.set_throttled(throttled);
         if throttled && !self.was_throttled {
-            self.metrics.throttle_episodes.add(1);
+            self.metrics.record_throttle_episode();
         }
         self.was_throttled = throttled;
     }
@@ -692,7 +674,7 @@ impl FanoutProcessor {
             let idx = deadline.dest_index;
 
             // Validate the deadline is still relevant (request exists, destination still InFlight).
-            let (await_ack, primary, origin, is_valid) = {
+            let (await_ack, primary, origin, signal, is_valid) = {
                 let Some(inflight) = self.inflight.get(&req) else {
                     continue; // Request already completed.
                 };
@@ -703,14 +685,20 @@ impl FanoutProcessor {
                 // Only process if still InFlight and deadline matches (guards against stale heap entries).
                 let is_valid = matches!(ep.status, DestinationStatus::InFlight)
                     && ep.timeout_at == Some(deadline.at);
-                (inflight.await_ack, inflight.primary, ep.origin, is_valid)
+                (
+                    inflight.await_ack,
+                    inflight.primary,
+                    ep.origin,
+                    inflight.original_pdata.signal_type(),
+                    is_valid,
+                )
             };
 
             if !is_valid {
                 continue;
             }
 
-            self.metrics.timed_out.add(1);
+            self.metrics.record_timeout(idx, signal);
             match self.handle_failure(
                 req,
                 idx,
@@ -816,7 +804,6 @@ impl FanoutProcessor {
         // Await primary: if this ack corresponds to primary origin (or its fallback) we can finish.
         if matches!(await_ack, AwaitAck::Primary) && origin == primary {
             let entry = self.inflight.remove(&request_id);
-            self.metrics.acked.add(1);
             if let Some(inflight) = entry {
                 // Use original_pdata for correct upstream routing
                 let ack_to_return = AckMsg {
@@ -846,7 +833,6 @@ impl FanoutProcessor {
         if matches!(await_ack, AwaitAck::All) {
             let maybe_ack = self.mark_complete(request_id, origin);
             if let Some(original_pdata) = maybe_ack {
-                self.metrics.acked.add(1);
                 // Use original_pdata for correct upstream routing
                 let ackmsg = AckMsg {
                     accepted: Box::new(original_pdata),
@@ -895,7 +881,6 @@ impl FanoutProcessor {
         if let Some(nackmsg) =
             self.handle_failure(request_id, dest_index, nack.reason.clone(), false)
         {
-            self.metrics.nacked.add(1);
             let _ = self.inflight.remove(&request_id);
             effect_handler.notify_nack(nackmsg).await?;
             return Ok(());
@@ -943,10 +928,7 @@ impl FanoutProcessor {
                 .send_message_to(dest.port.clone(), dest_data)
                 .await?;
         }
-        self.metrics.sent.add(1);
-
         // Ack upstream immediately with original pdata.
-        self.metrics.acked.add(1);
         effect_handler.notify_ack(AckMsg::new(pdata)).await?;
         Ok(())
     }
@@ -954,7 +936,7 @@ impl FanoutProcessor {
     // =========================================================================
     // FAST PATH: Slim primary-only (parallel + primary + no fallback/timeout)
     // =========================================================================
-    // Minimal state: request_id → original_pdata. Ignore non-primary acks/nacks.
+    // Minimal state: request_id -> original_pdata. Ignore non-primary acks/nacks.
     //
     // Note: An optimization was considered to eliminate slim_inflight by keeping the original
     // context on primary (so acks route directly upstream) and using empty context on non-primary
@@ -990,7 +972,6 @@ impl FanoutProcessor {
                 .send_message_to(dest.port.clone(), dest_data)
                 .await?;
         }
-        self.metrics.sent.add(1);
         Ok(())
     }
 
@@ -1010,7 +991,6 @@ impl FanoutProcessor {
 
         // Primary acked - forward upstream and clean up.
         if let Some(original_pdata) = self.slim_inflight.remove(&request_id) {
-            self.metrics.acked.add(1);
             effect_handler
                 .notify_ack(AckMsg::new(original_pdata))
                 .await?;
@@ -1034,7 +1014,6 @@ impl FanoutProcessor {
 
         // Primary nacked - forward upstream and clean up.
         if let Some(original_pdata) = self.slim_inflight.remove(&request_id) {
-            self.metrics.nacked.add(1);
             let nackmsg = NackMsg {
                 reason: nack.reason,
                 unwind: UnwindData::default(),
@@ -1104,7 +1083,7 @@ impl Processor<OtapPdata> for FanoutProcessor {
             Message::Control(NodeControlMsg::CollectTelemetry {
                 mut metrics_reporter,
             }) => {
-                _ = metrics_reporter.report(&mut self.metrics);
+                _ = self.metrics.report(&mut metrics_reporter);
                 return Ok(());
             }
             // Shutdown and other control messages are ignored: we drop inflight state on drop,
@@ -1113,7 +1092,7 @@ impl Processor<OtapPdata> for FanoutProcessor {
             Message::PData(pdata) => {
                 debug_assert!(
                     self.accept_pdata(),
-                    "process() called with PData while at max_inflight ({}) — \
+                    "process() called with PData while at max_inflight ({}) \u{2014} \
                      engine must check accept_pdata() before delivering",
                     self.config.max_inflight
                 );
@@ -1126,7 +1105,7 @@ impl Processor<OtapPdata> for FanoutProcessor {
                 }
 
                 // === FAST PATH 2: Slim primary-only (parallel + primary + no fallback/timeout) ===
-                // Minimal state: just request_id → original_pdata.
+                // Minimal state: just request_id -> original_pdata.
                 if self.config.use_slim_primary {
                     self.process_slim_primary(pdata, effect_handler).await?;
                     Ok(())
@@ -1151,7 +1130,6 @@ impl Processor<OtapPdata> for FanoutProcessor {
                     for d in deadlines {
                         self.deadline_heap.push(Reverse(d));
                     }
-                    self.metrics.sent.add(1);
                     Ok(())
                 }
             }
@@ -1180,6 +1158,7 @@ pub fn create_fanout_processor(
 
 /// Register the fan-out processor as an OTAP processor factory.
 #[allow(unsafe_code)]
+#[otap_df_engine::component_inventory(category = Processor)]
 #[distributed_slice(OTAP_PROCESSOR_FACTORIES)]
 pub static FANOUT_PROCESSOR_FACTORY: ProcessorFactory<OtapPdata> = ProcessorFactory {
     name: FANOUT_PROCESSOR_URN,
@@ -1270,8 +1249,10 @@ mod tests {
                 "destinations": destinations_cfg,
             }),
             capabilities: HashMap::new(),
+            rate_limiters: None,
             header_capture: None,
             header_propagation: None,
+            policies: None,
         };
 
         let pipeline_ctx =
@@ -1329,8 +1310,10 @@ mod tests {
                 "await_ack": "primary"
             }),
             capabilities: HashMap::new(),
+            rate_limiters: None,
             header_capture: None,
             header_propagation: None,
+            policies: None,
         }
     }
 
@@ -1338,7 +1321,7 @@ mod tests {
     const TEST_UPSTREAM_NODE_ID: usize = 12345;
 
     fn make_pdata() -> OtapPdata {
-        let payload = OtapPayload::OtlpBytes(OtlpProtoBytes::empty(SignalType::Logs));
+        let payload = OtapPayload::from(OtlpProtoBytes::empty(SignalType::Logs));
         // Simulate an upstream subscriber (e.g., receiver) so acks/nacks route correctly.
         OtapPdata::new(Context::default(), payload).test_subscribe_to(
             Interests::ACKS | Interests::NACKS,
@@ -1380,8 +1363,10 @@ mod tests {
             default_output: None,
             config: json!({}),
             capabilities: HashMap::new(),
+            rate_limiters: None,
             header_capture: None,
             header_propagation: None,
+            policies: None,
         };
         let err = cfg
             .validate(&node_cfg)
@@ -1420,8 +1405,10 @@ mod tests {
             default_output: None,
             config: json!({}),
             capabilities: HashMap::new(),
+            rate_limiters: None,
             header_capture: None,
             header_propagation: None,
+            policies: None,
         };
         assert!(cfg.validate(&node_cfg).is_err());
     }
@@ -1453,8 +1440,10 @@ mod tests {
             default_output: None,
             config: json!({}),
             capabilities: HashMap::new(),
+            rate_limiters: None,
             header_capture: None,
             header_propagation: None,
+            policies: None,
         };
         assert!(cfg.validate(&node_cfg).is_err());
     }
@@ -1478,8 +1467,10 @@ mod tests {
             default_output: None,
             config: json!({}),
             capabilities: HashMap::new(),
+            rate_limiters: None,
             header_capture: None,
             header_propagation: None,
+            policies: None,
         };
         assert!(cfg.validate(&node_cfg).is_err());
     }
@@ -1514,8 +1505,10 @@ mod tests {
             default_output: None,
             config: json!({}),
             capabilities: HashMap::new(),
+            rate_limiters: None,
             header_capture: None,
             header_propagation: None,
+            policies: None,
         };
         let err = cfg
             .validate(&node_cfg)
@@ -1549,8 +1542,10 @@ mod tests {
             default_output: None,
             config: json!({}),
             capabilities: HashMap::new(),
+            rate_limiters: None,
             header_capture: None,
             header_propagation: None,
+            policies: None,
         };
         let err = cfg
             .validate(&node_cfg)
@@ -1597,8 +1592,10 @@ mod tests {
             default_output: None,
             config: json!({}),
             capabilities: HashMap::new(),
+            rate_limiters: None,
             header_capture: None,
             header_propagation: None,
+            policies: None,
         };
         let err = cfg
             .validate(&node_cfg)
@@ -1641,8 +1638,10 @@ mod tests {
             default_output: None,
             config: json!({}),
             capabilities: HashMap::new(),
+            rate_limiters: None,
             header_capture: None,
             header_propagation: None,
+            policies: None,
         };
         let err = cfg
             .validate(&node_cfg)
@@ -1694,8 +1693,10 @@ mod tests {
                 "await_ack": "primary"
             }),
             capabilities: HashMap::new(),
+            rate_limiters: None,
             header_capture: None,
             header_propagation: None,
+            policies: None,
         };
 
         let metrics_system = InternalTelemetrySystem::default();
@@ -2558,8 +2559,10 @@ mod tests {
             default_output: None,
             config,
             capabilities: HashMap::new(),
+            rate_limiters: None,
             header_capture: None,
             header_propagation: None,
+            policies: None,
         };
 
         let pipeline_ctx =
@@ -2720,9 +2723,9 @@ mod tests {
     /// Test behavior when late ack arrives from original destination after timeout triggered fallback.
     ///
     /// Sequence:
-    /// 1. Primary times out → fallback dispatched, primary marked TimedOut
-    /// 2. Late ack arrives from primary → IGNORED (destination is TimedOut)
-    /// 3. Fallback acks → request completes
+    /// 1. Primary times out -> fallback dispatched, primary marked TimedOut
+    /// 2. Late ack arrives from primary -> IGNORED (destination is TimedOut)
+    /// 3. Fallback acks -> request completes
     /// 4. Upstream receives exactly one ack (from fallback outcome)
     #[tokio::test]
     async fn late_ack_from_timed_out_primary_is_ignored() {
@@ -2816,7 +2819,7 @@ mod tests {
     ///
     /// Sequence:
     /// 1. Sequential mode with A (has fallback B) and C
-    /// 2. A acks successfully → B is marked Skipped
+    /// 2. A acks successfully -> B is marked Skipped
     /// 3. C is dispatched next (B is skipped)
     #[tokio::test]
     async fn sequential_mode_skips_fallback_when_origin_succeeds() {
@@ -2896,7 +2899,7 @@ mod tests {
     #[tokio::test]
     async fn no_nacks_at_max_inflight() {
         // Slim primary path: parallel + primary + no fallback + no timeout.
-        // Acks are never returned — simulating a slow exporter holding all acks.
+        // Acks are never returned -- simulating a slow exporter holding all acks.
         const MAX_INFLIGHT: usize = 2;
         let mut h = build_harness_with_config(
             json!([make_dest(TEST_OUT_PORT_NAME, true, None, None)]),
@@ -2909,7 +2912,7 @@ mod tests {
             "expected slim primary path for this test"
         );
 
-        // Send exactly max_inflight messages — the most we can send without
+        // Send exactly max_inflight messages -- the most we can send without
         // violating the accept_pdata() contract (no acks are returned).
         for _ in 0..MAX_INFLIGHT {
             h.fanout
@@ -2928,7 +2931,7 @@ mod tests {
 
         assert_eq!(
             nacked, 0,
-            "fanout must not nack messages — backpressure is handled by the engine"
+            "fanout must not nack messages \u{2014} backpressure is handled by the engine"
         );
     }
 }

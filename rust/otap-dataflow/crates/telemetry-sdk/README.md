@@ -35,7 +35,7 @@ hash-map or string lookup.
 
 ## Generate
 
-Install Weaver v0.24.2, then run from `rust/otap-dataflow`:
+Install Weaver v0.25.1, then run from `rust/otap-dataflow`:
 
 ```bash
 weaver registry generate rust crates/telemetry-sdk/src/generated \

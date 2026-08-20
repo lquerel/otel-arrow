@@ -11,6 +11,141 @@ use crate::event::{
     EventDescriptor, EventLevel, EventRequirementLevel, EventSeverity, EventSink, SemanticEvent,
 };
 
+/// Emitted by OTAP Dataflow as `azure_monitor_exporter.auth.invalid_bearer_token`.
+#[derive(Debug, Clone)]
+pub struct AzureMonitorExporterAuthInvalidBearerToken {
+    /// The error value recorded by OTAP Dataflow internal telemetry.
+    pub error: otap_df_telemetry::attributes::AttributeValue,
+}
+
+/// Marker implemented only by entity types allowed by `azure_monitor_exporter.auth.invalid_bearer_token`.
+pub trait AzureMonitorExporterAuthInvalidBearerTokenAssociatedEntity:
+    entities::SemanticEntity
+{
+}
+
+impl AzureMonitorExporterAuthInvalidBearerTokenAssociatedEntity for entities::NodeAttributeSet {}
+
+impl AzureMonitorExporterAuthInvalidBearerTokenAssociatedEntity
+    for entities::NodeWithCustomAttributeSet
+{
+}
+
+static AZURE_MONITOR_EXPORTER_AUTH_INVALID_BEARER_TOKEN_DESCRIPTOR: EventDescriptor =
+    EventDescriptor {
+        name: "azure_monitor_exporter.auth.invalid_bearer_token",
+        wire_name: "azure_monitor_exporter.auth.invalid_bearer_token",
+        brief: "Emitted by OTAP Dataflow as `azure_monitor_exporter.auth.invalid_bearer_token`.",
+        stability: "development",
+        requirement_level: EventRequirementLevel::Recommended,
+        scope_names: &["otap-df-contrib-nodes"],
+        severity_levels: &[EventSeverity::Warn],
+        sources: &["crates/contrib-nodes/src/exporters/azure_monitor_exporter/exporter.rs"],
+        availability: &["feature = \"azure-monitor-exporter\""],
+        entity_associations: &["otap.node", "otap.node.custom"],
+        attributes: &[EventAttributeDescriptor {
+            key: "error",
+            wire_key: "error",
+            brief: "The error value recorded by OTAP Dataflow internal telemetry.",
+            value_type: otap_df_telemetry::descriptor::AttributeValueType::Any,
+            requirement_level: EventRequirementLevel::Required,
+        }],
+    };
+
+impl EventAttributes for AzureMonitorExporterAuthInvalidBearerToken {
+    #[inline]
+    fn visit_attributes(
+        &self,
+        visitor: &mut dyn FnMut(&'static EventAttributeDescriptor, EventAttributeValueRef<'_>),
+    ) {
+        visitor(
+            &AZURE_MONITOR_EXPORTER_AUTH_INVALID_BEARER_TOKEN_DESCRIPTOR.attributes[0],
+            EventAttributeValueRef::Any(&self.error),
+        );
+    }
+}
+
+impl SemanticEvent for AzureMonitorExporterAuthInvalidBearerToken {
+    const DESCRIPTOR: &'static EventDescriptor =
+        &AZURE_MONITOR_EXPORTER_AUTH_INVALID_BEARER_TOKEN_DESCRIPTOR;
+}
+
+impl AzureMonitorExporterAuthInvalidBearerToken {
+    /// Static semantic-convention descriptor for this event.
+    pub const DESCRIPTOR: &'static EventDescriptor =
+        &AZURE_MONITOR_EXPORTER_AUTH_INVALID_BEARER_TOKEN_DESCRIPTOR;
+
+    /// Sends this payload at the `warn` level with a compatible entity.
+    pub fn emit_warn<S, E>(&self, client: &mut EventClient<S>, entity: &E)
+    where
+        S: EventSink,
+        E: AzureMonitorExporterAuthInvalidBearerTokenAssociatedEntity,
+    {
+        client.emit(entity, self, EventLevel::Warn);
+    }
+}
+
+/// Emitted by OTAP Dataflow as `azure_monitor_exporter.auth.token_stream_closed`.
+#[derive(Debug, Clone)]
+pub struct AzureMonitorExporterAuthTokenStreamClosed;
+
+/// Marker implemented only by entity types allowed by `azure_monitor_exporter.auth.token_stream_closed`.
+pub trait AzureMonitorExporterAuthTokenStreamClosedAssociatedEntity:
+    entities::SemanticEntity
+{
+}
+
+impl AzureMonitorExporterAuthTokenStreamClosedAssociatedEntity for entities::NodeAttributeSet {}
+
+impl AzureMonitorExporterAuthTokenStreamClosedAssociatedEntity
+    for entities::NodeWithCustomAttributeSet
+{
+}
+
+static AZURE_MONITOR_EXPORTER_AUTH_TOKEN_STREAM_CLOSED_DESCRIPTOR: EventDescriptor =
+    EventDescriptor {
+        name: "azure_monitor_exporter.auth.token_stream_closed",
+        wire_name: "azure_monitor_exporter.auth.token_stream_closed",
+        brief: "Emitted by OTAP Dataflow as `azure_monitor_exporter.auth.token_stream_closed`.",
+        stability: "development",
+        requirement_level: EventRequirementLevel::Recommended,
+        scope_names: &["otap-df-contrib-nodes"],
+        severity_levels: &[EventSeverity::Warn],
+        sources: &["crates/contrib-nodes/src/exporters/azure_monitor_exporter/exporter.rs"],
+        availability: &["feature = \"azure-monitor-exporter\""],
+        entity_associations: &["otap.node", "otap.node.custom"],
+        attributes: &[],
+    };
+
+impl EventAttributes for AzureMonitorExporterAuthTokenStreamClosed {
+    #[inline]
+    fn visit_attributes(
+        &self,
+        _visitor: &mut dyn FnMut(&'static EventAttributeDescriptor, EventAttributeValueRef<'_>),
+    ) {
+    }
+}
+
+impl SemanticEvent for AzureMonitorExporterAuthTokenStreamClosed {
+    const DESCRIPTOR: &'static EventDescriptor =
+        &AZURE_MONITOR_EXPORTER_AUTH_TOKEN_STREAM_CLOSED_DESCRIPTOR;
+}
+
+impl AzureMonitorExporterAuthTokenStreamClosed {
+    /// Static semantic-convention descriptor for this event.
+    pub const DESCRIPTOR: &'static EventDescriptor =
+        &AZURE_MONITOR_EXPORTER_AUTH_TOKEN_STREAM_CLOSED_DESCRIPTOR;
+
+    /// Sends this payload at the `warn` level with a compatible entity.
+    pub fn emit_warn<S, E>(&self, client: &mut EventClient<S>, entity: &E)
+    where
+        S: EventSink,
+        E: AzureMonitorExporterAuthTokenStreamClosedAssociatedEntity,
+    {
+        client.emit(entity, self, EventLevel::Warn);
+    }
+}
+
 /// The azure_monitor_exporter.client.error internal telemetry event occurred.
 #[derive(Debug, Clone)]
 pub struct AzureMonitorExporterClientError {
@@ -656,7 +791,7 @@ impl AzureMonitorExporterMessageNoValidEntries {
 #[derive(Debug, Clone)]
 pub struct AzureMonitorExporterMessageUnsupportedSignal {
     /// The format value recorded by OTAP Dataflow internal telemetry.
-    pub format: String,
+    pub format: otap_df_telemetry::attributes::AttributeValue,
     /// The signal value recorded by OTAP Dataflow internal telemetry.
     pub signal: otap_df_telemetry::attributes::AttributeValue,
 }
@@ -691,7 +826,7 @@ static AZURE_MONITOR_EXPORTER_MESSAGE_UNSUPPORTED_SIGNAL_DESCRIPTOR: EventDescri
                 key: "format",
                 wire_key: "format",
                 brief: "The format value recorded by OTAP Dataflow internal telemetry.",
-                value_type: otap_df_telemetry::descriptor::AttributeValueType::String,
+                value_type: otap_df_telemetry::descriptor::AttributeValueType::Any,
                 requirement_level: EventRequirementLevel::Required,
             },
             EventAttributeDescriptor {
@@ -712,7 +847,7 @@ impl EventAttributes for AzureMonitorExporterMessageUnsupportedSignal {
     ) {
         visitor(
             &AZURE_MONITOR_EXPORTER_MESSAGE_UNSUPPORTED_SIGNAL_DESCRIPTOR.attributes[0],
-            EventAttributeValueRef::String(self.format.as_str()),
+            EventAttributeValueRef::Any(&self.format),
         );
         visitor(
             &AZURE_MONITOR_EXPORTER_MESSAGE_UNSUPPORTED_SIGNAL_DESCRIPTOR.attributes[1],
@@ -1079,6 +1214,149 @@ impl ClickhouseExporterConvertError {
     }
 }
 
+/// Emitted by OTAP Dataflow as `clickhouse.exporter.otlp.invalid_protobuf`.
+#[derive(Debug, Clone)]
+pub struct ClickhouseExporterOtlpInvalidProtobuf {
+    /// The error value recorded by OTAP Dataflow internal telemetry.
+    pub error: otap_df_telemetry::attributes::AttributeValue,
+}
+
+/// Marker implemented only by entity types allowed by `clickhouse.exporter.otlp.invalid_protobuf`.
+pub trait ClickhouseExporterOtlpInvalidProtobufAssociatedEntity: entities::SemanticEntity {}
+
+impl ClickhouseExporterOtlpInvalidProtobufAssociatedEntity for entities::NodeAttributeSet {}
+
+impl ClickhouseExporterOtlpInvalidProtobufAssociatedEntity
+    for entities::NodeWithCustomAttributeSet
+{
+}
+
+static CLICKHOUSE_EXPORTER_OTLP_INVALID_PROTOBUF_DESCRIPTOR: EventDescriptor = EventDescriptor {
+    name: "clickhouse.exporter.otlp.invalid_protobuf",
+    wire_name: "clickhouse.exporter.otlp.invalid_protobuf",
+    brief: "Emitted by OTAP Dataflow as `clickhouse.exporter.otlp.invalid_protobuf`.",
+    stability: "development",
+    requirement_level: EventRequirementLevel::Recommended,
+    scope_names: &["otap-df-contrib-nodes"],
+    severity_levels: &[EventSeverity::Warn],
+    sources: &["crates/contrib-nodes/src/exporters/clickhouse_exporter/mod.rs"],
+    availability: &["feature = \"clickhouse-exporter\""],
+    entity_associations: &["otap.node", "otap.node.custom"],
+    attributes: &[EventAttributeDescriptor {
+        key: "error",
+        wire_key: "error",
+        brief: "The error value recorded by OTAP Dataflow internal telemetry.",
+        value_type: otap_df_telemetry::descriptor::AttributeValueType::Any,
+        requirement_level: EventRequirementLevel::Required,
+    }],
+};
+
+impl EventAttributes for ClickhouseExporterOtlpInvalidProtobuf {
+    #[inline]
+    fn visit_attributes(
+        &self,
+        visitor: &mut dyn FnMut(&'static EventAttributeDescriptor, EventAttributeValueRef<'_>),
+    ) {
+        visitor(
+            &CLICKHOUSE_EXPORTER_OTLP_INVALID_PROTOBUF_DESCRIPTOR.attributes[0],
+            EventAttributeValueRef::Any(&self.error),
+        );
+    }
+}
+
+impl SemanticEvent for ClickhouseExporterOtlpInvalidProtobuf {
+    const DESCRIPTOR: &'static EventDescriptor =
+        &CLICKHOUSE_EXPORTER_OTLP_INVALID_PROTOBUF_DESCRIPTOR;
+}
+
+impl ClickhouseExporterOtlpInvalidProtobuf {
+    /// Static semantic-convention descriptor for this event.
+    pub const DESCRIPTOR: &'static EventDescriptor =
+        &CLICKHOUSE_EXPORTER_OTLP_INVALID_PROTOBUF_DESCRIPTOR;
+
+    /// Sends this payload at the `warn` level with a compatible entity.
+    pub fn emit_warn<S, E>(&self, client: &mut EventClient<S>, entity: &E)
+    where
+        S: EventSink,
+        E: ClickhouseExporterOtlpInvalidProtobufAssociatedEntity,
+    {
+        client.emit(entity, self, EventLevel::Warn);
+    }
+}
+
+/// Emitted by OTAP Dataflow as `clickhouse.exporter.otlp.transform.fallback`.
+#[derive(Debug, Clone)]
+pub struct ClickhouseExporterOtlpTransformFallback {
+    /// The reason value recorded by OTAP Dataflow internal telemetry.
+    pub reason: otap_df_telemetry::attributes::AttributeValue,
+}
+
+/// Marker implemented only by entity types allowed by `clickhouse.exporter.otlp.transform.fallback`.
+pub trait ClickhouseExporterOtlpTransformFallbackAssociatedEntity:
+    entities::SemanticEntity
+{
+}
+
+impl ClickhouseExporterOtlpTransformFallbackAssociatedEntity for entities::NodeAttributeSet {}
+
+impl ClickhouseExporterOtlpTransformFallbackAssociatedEntity
+    for entities::NodeWithCustomAttributeSet
+{
+}
+
+static CLICKHOUSE_EXPORTER_OTLP_TRANSFORM_FALLBACK_DESCRIPTOR: EventDescriptor = EventDescriptor {
+    name: "clickhouse.exporter.otlp.transform.fallback",
+    wire_name: "clickhouse.exporter.otlp.transform.fallback",
+    brief: "Emitted by OTAP Dataflow as `clickhouse.exporter.otlp.transform.fallback`.",
+    stability: "development",
+    requirement_level: EventRequirementLevel::Recommended,
+    scope_names: &["otap-df-contrib-nodes"],
+    severity_levels: &[EventSeverity::Debug],
+    sources: &["crates/contrib-nodes/src/exporters/clickhouse_exporter/mod.rs"],
+    availability: &["feature = \"clickhouse-exporter\""],
+    entity_associations: &["otap.node", "otap.node.custom"],
+    attributes: &[EventAttributeDescriptor {
+        key: "reason",
+        wire_key: "reason",
+        brief: "The reason value recorded by OTAP Dataflow internal telemetry.",
+        value_type: otap_df_telemetry::descriptor::AttributeValueType::Any,
+        requirement_level: EventRequirementLevel::Required,
+    }],
+};
+
+impl EventAttributes for ClickhouseExporterOtlpTransformFallback {
+    #[inline]
+    fn visit_attributes(
+        &self,
+        visitor: &mut dyn FnMut(&'static EventAttributeDescriptor, EventAttributeValueRef<'_>),
+    ) {
+        visitor(
+            &CLICKHOUSE_EXPORTER_OTLP_TRANSFORM_FALLBACK_DESCRIPTOR.attributes[0],
+            EventAttributeValueRef::Any(&self.reason),
+        );
+    }
+}
+
+impl SemanticEvent for ClickhouseExporterOtlpTransformFallback {
+    const DESCRIPTOR: &'static EventDescriptor =
+        &CLICKHOUSE_EXPORTER_OTLP_TRANSFORM_FALLBACK_DESCRIPTOR;
+}
+
+impl ClickhouseExporterOtlpTransformFallback {
+    /// Static semantic-convention descriptor for this event.
+    pub const DESCRIPTOR: &'static EventDescriptor =
+        &CLICKHOUSE_EXPORTER_OTLP_TRANSFORM_FALLBACK_DESCRIPTOR;
+
+    /// Sends this payload at the `debug` level with a compatible entity.
+    pub fn emit_debug<S, E>(&self, client: &mut EventClient<S>, entity: &E)
+    where
+        S: EventSink,
+        E: ClickhouseExporterOtlpTransformFallbackAssociatedEntity,
+    {
+        client.emit(entity, self, EventLevel::Debug);
+    }
+}
+
 /// The clickhouse.exporter.shutdown internal telemetry event occurred.
 #[derive(Debug, Clone)]
 pub struct ClickhouseExporterShutdown;
@@ -1131,6 +1409,80 @@ impl ClickhouseExporterShutdown {
     }
 }
 
+/// Emitted by OTAP Dataflow as `clickhouse.exporter.shutdown.deadline_exceeded`.
+#[derive(Debug, Clone)]
+pub struct ClickhouseExporterShutdownDeadlineExceeded {
+    /// The abandoned_writes value recorded by OTAP Dataflow internal telemetry.
+    pub abandoned_writes: otap_df_telemetry::attributes::AttributeValue,
+}
+
+/// Marker implemented only by entity types allowed by `clickhouse.exporter.shutdown.deadline_exceeded`.
+pub trait ClickhouseExporterShutdownDeadlineExceededAssociatedEntity:
+    entities::SemanticEntity
+{
+}
+
+impl ClickhouseExporterShutdownDeadlineExceededAssociatedEntity for entities::NodeAttributeSet {}
+
+impl ClickhouseExporterShutdownDeadlineExceededAssociatedEntity
+    for entities::NodeWithCustomAttributeSet
+{
+}
+
+static CLICKHOUSE_EXPORTER_SHUTDOWN_DEADLINE_EXCEEDED_DESCRIPTOR: EventDescriptor =
+    EventDescriptor {
+        name: "clickhouse.exporter.shutdown.deadline_exceeded",
+        wire_name: "clickhouse.exporter.shutdown.deadline_exceeded",
+        brief: "Emitted by OTAP Dataflow as `clickhouse.exporter.shutdown.deadline_exceeded`.",
+        stability: "development",
+        requirement_level: EventRequirementLevel::Recommended,
+        scope_names: &["otap-df-contrib-nodes"],
+        severity_levels: &[EventSeverity::Warn],
+        sources: &["crates/contrib-nodes/src/exporters/clickhouse_exporter/mod.rs"],
+        availability: &["feature = \"clickhouse-exporter\""],
+        entity_associations: &["otap.node", "otap.node.custom"],
+        attributes: &[EventAttributeDescriptor {
+            key: "abandoned_writes",
+            wire_key: "abandoned_writes",
+            brief: "The abandoned_writes value recorded by OTAP Dataflow internal telemetry.",
+            value_type: otap_df_telemetry::descriptor::AttributeValueType::Any,
+            requirement_level: EventRequirementLevel::Required,
+        }],
+    };
+
+impl EventAttributes for ClickhouseExporterShutdownDeadlineExceeded {
+    #[inline]
+    fn visit_attributes(
+        &self,
+        visitor: &mut dyn FnMut(&'static EventAttributeDescriptor, EventAttributeValueRef<'_>),
+    ) {
+        visitor(
+            &CLICKHOUSE_EXPORTER_SHUTDOWN_DEADLINE_EXCEEDED_DESCRIPTOR.attributes[0],
+            EventAttributeValueRef::Any(&self.abandoned_writes),
+        );
+    }
+}
+
+impl SemanticEvent for ClickhouseExporterShutdownDeadlineExceeded {
+    const DESCRIPTOR: &'static EventDescriptor =
+        &CLICKHOUSE_EXPORTER_SHUTDOWN_DEADLINE_EXCEEDED_DESCRIPTOR;
+}
+
+impl ClickhouseExporterShutdownDeadlineExceeded {
+    /// Static semantic-convention descriptor for this event.
+    pub const DESCRIPTOR: &'static EventDescriptor =
+        &CLICKHOUSE_EXPORTER_SHUTDOWN_DEADLINE_EXCEEDED_DESCRIPTOR;
+
+    /// Sends this payload at the `warn` level with a compatible entity.
+    pub fn emit_warn<S, E>(&self, client: &mut EventClient<S>, entity: &E)
+    where
+        S: EventSink,
+        E: ClickhouseExporterShutdownDeadlineExceededAssociatedEntity,
+    {
+        client.emit(entity, self, EventLevel::Warn);
+    }
+}
+
 /// The clickhouse.exporter.start internal telemetry event occurred.
 #[derive(Debug, Clone)]
 pub struct ClickhouseExporterStart {
@@ -1138,6 +1490,8 @@ pub struct ClickhouseExporterStart {
     pub database: otap_df_telemetry::attributes::AttributeValue,
     /// The endpoint value recorded by OTAP Dataflow internal telemetry.
     pub endpoint: otap_df_telemetry::attributes::AttributeValue,
+    /// The max_in_flight value recorded by OTAP Dataflow internal telemetry.
+    pub max_in_flight: otap_df_telemetry::attributes::AttributeValue,
     /// The username value recorded by OTAP Dataflow internal telemetry.
     pub username: otap_df_telemetry::attributes::AttributeValue,
 }
@@ -1176,6 +1530,13 @@ static CLICKHOUSE_EXPORTER_START_DESCRIPTOR: EventDescriptor = EventDescriptor {
             requirement_level: EventRequirementLevel::Required,
         },
         EventAttributeDescriptor {
+            key: "max_in_flight",
+            wire_key: "max_in_flight",
+            brief: "The max_in_flight value recorded by OTAP Dataflow internal telemetry.",
+            value_type: otap_df_telemetry::descriptor::AttributeValueType::Any,
+            requirement_level: EventRequirementLevel::Required,
+        },
+        EventAttributeDescriptor {
             key: "username",
             wire_key: "username",
             brief: "The username value recorded by OTAP Dataflow internal telemetry.",
@@ -1201,6 +1562,10 @@ impl EventAttributes for ClickhouseExporterStart {
         );
         visitor(
             &CLICKHOUSE_EXPORTER_START_DESCRIPTOR.attributes[2],
+            EventAttributeValueRef::Any(&self.max_in_flight),
+        );
+        visitor(
+            &CLICKHOUSE_EXPORTER_START_DESCRIPTOR.attributes[3],
             EventAttributeValueRef::Any(&self.username),
         );
     }
@@ -2479,6 +2844,244 @@ impl EtwReceiverForwardFailed {
     }
 }
 
+/// Emitted by OTAP Dataflow as `etw_receiver.provider_name_hashed`.
+#[derive(Debug, Clone)]
+pub struct EtwReceiverProviderNameHashed {
+    /// The provider_name value recorded by OTAP Dataflow internal telemetry.
+    pub provider_name: otap_df_telemetry::attributes::AttributeValue,
+}
+
+/// Marker implemented only by entity types allowed by `etw_receiver.provider_name_hashed`.
+pub trait EtwReceiverProviderNameHashedAssociatedEntity: entities::SemanticEntity {}
+
+impl EtwReceiverProviderNameHashedAssociatedEntity for entities::NodeAttributeSet {}
+
+impl EtwReceiverProviderNameHashedAssociatedEntity for entities::NodeWithCustomAttributeSet {}
+
+static ETW_RECEIVER_PROVIDER_NAME_HASHED_DESCRIPTOR: EventDescriptor = EventDescriptor {
+    name: "etw_receiver.provider_name_hashed",
+    wire_name: "etw_receiver.provider_name_hashed",
+    brief: "Emitted by OTAP Dataflow as `etw_receiver.provider_name_hashed`.",
+    stability: "development",
+    requirement_level: EventRequirementLevel::Recommended,
+    scope_names: &["otap-df-contrib-nodes"],
+    severity_levels: &[EventSeverity::Info],
+    sources: &["crates/contrib-nodes/src/receivers/etw_receiver/session.rs"],
+    availability: &["all (feature = \"etw-receiver\" , target_os = \"windows\")"],
+    entity_associations: &["otap.node", "otap.node.custom"],
+    attributes: &[EventAttributeDescriptor {
+        key: "provider_name",
+        wire_key: "provider_name",
+        brief: "The provider_name value recorded by OTAP Dataflow internal telemetry.",
+        value_type: otap_df_telemetry::descriptor::AttributeValueType::Any,
+        requirement_level: EventRequirementLevel::Required,
+    }],
+};
+
+impl EventAttributes for EtwReceiverProviderNameHashed {
+    #[inline]
+    fn visit_attributes(
+        &self,
+        visitor: &mut dyn FnMut(&'static EventAttributeDescriptor, EventAttributeValueRef<'_>),
+    ) {
+        visitor(
+            &ETW_RECEIVER_PROVIDER_NAME_HASHED_DESCRIPTOR.attributes[0],
+            EventAttributeValueRef::Any(&self.provider_name),
+        );
+    }
+}
+
+impl SemanticEvent for EtwReceiverProviderNameHashed {
+    const DESCRIPTOR: &'static EventDescriptor = &ETW_RECEIVER_PROVIDER_NAME_HASHED_DESCRIPTOR;
+}
+
+impl EtwReceiverProviderNameHashed {
+    /// Static semantic-convention descriptor for this event.
+    pub const DESCRIPTOR: &'static EventDescriptor = &ETW_RECEIVER_PROVIDER_NAME_HASHED_DESCRIPTOR;
+
+    /// Sends this payload at the `info` level with a compatible entity.
+    pub fn emit_info<S, E>(&self, client: &mut EventClient<S>, entity: &E)
+    where
+        S: EventSink,
+        E: EtwReceiverProviderNameHashedAssociatedEntity,
+    {
+        client.emit(entity, self, EventLevel::Info);
+    }
+}
+
+/// Emitted by OTAP Dataflow as `etw_receiver.provider_name_hashed_after_enumeration_error`.
+#[derive(Debug, Clone)]
+pub struct EtwReceiverProviderNameHashedAfterEnumerationError {
+    /// The error value recorded by OTAP Dataflow internal telemetry.
+    pub error: otap_df_telemetry::attributes::AttributeValue,
+    /// The provider_name value recorded by OTAP Dataflow internal telemetry.
+    pub provider_name: otap_df_telemetry::attributes::AttributeValue,
+}
+
+/// Marker implemented only by entity types allowed by `etw_receiver.provider_name_hashed_after_enumeration_error`.
+pub trait EtwReceiverProviderNameHashedAfterEnumerationErrorAssociatedEntity:
+    entities::SemanticEntity
+{
+}
+
+impl EtwReceiverProviderNameHashedAfterEnumerationErrorAssociatedEntity
+    for entities::NodeAttributeSet
+{
+}
+
+impl EtwReceiverProviderNameHashedAfterEnumerationErrorAssociatedEntity
+    for entities::NodeWithCustomAttributeSet
+{
+}
+
+static ETW_RECEIVER_PROVIDER_NAME_HASHED_AFTER_ENUMERATION_ERROR_DESCRIPTOR: EventDescriptor =
+    EventDescriptor {
+        name: "etw_receiver.provider_name_hashed_after_enumeration_error",
+        wire_name: "etw_receiver.provider_name_hashed_after_enumeration_error",
+        brief: "Emitted by OTAP Dataflow as `etw_receiver.provider_name_hashed_after_enumeration_error`.",
+        stability: "development",
+        requirement_level: EventRequirementLevel::Recommended,
+        scope_names: &["otap-df-contrib-nodes"],
+        severity_levels: &[EventSeverity::Warn],
+        sources: &["crates/contrib-nodes/src/receivers/etw_receiver/session.rs"],
+        availability: &["all (feature = \"etw-receiver\" , target_os = \"windows\")"],
+        entity_associations: &["otap.node", "otap.node.custom"],
+        attributes: &[
+            EventAttributeDescriptor {
+                key: "error",
+                wire_key: "error",
+                brief: "The error value recorded by OTAP Dataflow internal telemetry.",
+                value_type: otap_df_telemetry::descriptor::AttributeValueType::Any,
+                requirement_level: EventRequirementLevel::Required,
+            },
+            EventAttributeDescriptor {
+                key: "provider_name",
+                wire_key: "provider_name",
+                brief: "The provider_name value recorded by OTAP Dataflow internal telemetry.",
+                value_type: otap_df_telemetry::descriptor::AttributeValueType::Any,
+                requirement_level: EventRequirementLevel::Required,
+            },
+        ],
+    };
+
+impl EventAttributes for EtwReceiverProviderNameHashedAfterEnumerationError {
+    #[inline]
+    fn visit_attributes(
+        &self,
+        visitor: &mut dyn FnMut(&'static EventAttributeDescriptor, EventAttributeValueRef<'_>),
+    ) {
+        visitor(
+            &ETW_RECEIVER_PROVIDER_NAME_HASHED_AFTER_ENUMERATION_ERROR_DESCRIPTOR.attributes[0],
+            EventAttributeValueRef::Any(&self.error),
+        );
+        visitor(
+            &ETW_RECEIVER_PROVIDER_NAME_HASHED_AFTER_ENUMERATION_ERROR_DESCRIPTOR.attributes[1],
+            EventAttributeValueRef::Any(&self.provider_name),
+        );
+    }
+}
+
+impl SemanticEvent for EtwReceiverProviderNameHashedAfterEnumerationError {
+    const DESCRIPTOR: &'static EventDescriptor =
+        &ETW_RECEIVER_PROVIDER_NAME_HASHED_AFTER_ENUMERATION_ERROR_DESCRIPTOR;
+}
+
+impl EtwReceiverProviderNameHashedAfterEnumerationError {
+    /// Static semantic-convention descriptor for this event.
+    pub const DESCRIPTOR: &'static EventDescriptor =
+        &ETW_RECEIVER_PROVIDER_NAME_HASHED_AFTER_ENUMERATION_ERROR_DESCRIPTOR;
+
+    /// Sends this payload at the `warn` level with a compatible entity.
+    pub fn emit_warn<S, E>(&self, client: &mut EventClient<S>, entity: &E)
+    where
+        S: EventSink,
+        E: EtwReceiverProviderNameHashedAfterEnumerationErrorAssociatedEntity,
+    {
+        client.emit(entity, self, EventLevel::Warn);
+    }
+}
+
+/// Emitted by OTAP Dataflow as `etw_receiver.provider_name_resolved`.
+#[derive(Debug, Clone)]
+pub struct EtwReceiverProviderNameResolved {
+    /// The provider_name value recorded by OTAP Dataflow internal telemetry.
+    pub provider_name: otap_df_telemetry::attributes::AttributeValue,
+    /// The schema_source value recorded by OTAP Dataflow internal telemetry.
+    pub schema_source: otap_df_telemetry::attributes::AttributeValue,
+}
+
+/// Marker implemented only by entity types allowed by `etw_receiver.provider_name_resolved`.
+pub trait EtwReceiverProviderNameResolvedAssociatedEntity: entities::SemanticEntity {}
+
+impl EtwReceiverProviderNameResolvedAssociatedEntity for entities::NodeAttributeSet {}
+
+impl EtwReceiverProviderNameResolvedAssociatedEntity for entities::NodeWithCustomAttributeSet {}
+
+static ETW_RECEIVER_PROVIDER_NAME_RESOLVED_DESCRIPTOR: EventDescriptor = EventDescriptor {
+    name: "etw_receiver.provider_name_resolved",
+    wire_name: "etw_receiver.provider_name_resolved",
+    brief: "Emitted by OTAP Dataflow as `etw_receiver.provider_name_resolved`.",
+    stability: "development",
+    requirement_level: EventRequirementLevel::Recommended,
+    scope_names: &["otap-df-contrib-nodes"],
+    severity_levels: &[EventSeverity::Info],
+    sources: &["crates/contrib-nodes/src/receivers/etw_receiver/session.rs"],
+    availability: &["all (feature = \"etw-receiver\" , target_os = \"windows\")"],
+    entity_associations: &["otap.node", "otap.node.custom"],
+    attributes: &[
+        EventAttributeDescriptor {
+            key: "provider_name",
+            wire_key: "provider_name",
+            brief: "The provider_name value recorded by OTAP Dataflow internal telemetry.",
+            value_type: otap_df_telemetry::descriptor::AttributeValueType::Any,
+            requirement_level: EventRequirementLevel::Required,
+        },
+        EventAttributeDescriptor {
+            key: "schema_source",
+            wire_key: "schema_source",
+            brief: "The schema_source value recorded by OTAP Dataflow internal telemetry.",
+            value_type: otap_df_telemetry::descriptor::AttributeValueType::Any,
+            requirement_level: EventRequirementLevel::Required,
+        },
+    ],
+};
+
+impl EventAttributes for EtwReceiverProviderNameResolved {
+    #[inline]
+    fn visit_attributes(
+        &self,
+        visitor: &mut dyn FnMut(&'static EventAttributeDescriptor, EventAttributeValueRef<'_>),
+    ) {
+        visitor(
+            &ETW_RECEIVER_PROVIDER_NAME_RESOLVED_DESCRIPTOR.attributes[0],
+            EventAttributeValueRef::Any(&self.provider_name),
+        );
+        visitor(
+            &ETW_RECEIVER_PROVIDER_NAME_RESOLVED_DESCRIPTOR.attributes[1],
+            EventAttributeValueRef::Any(&self.schema_source),
+        );
+    }
+}
+
+impl SemanticEvent for EtwReceiverProviderNameResolved {
+    const DESCRIPTOR: &'static EventDescriptor = &ETW_RECEIVER_PROVIDER_NAME_RESOLVED_DESCRIPTOR;
+}
+
+impl EtwReceiverProviderNameResolved {
+    /// Static semantic-convention descriptor for this event.
+    pub const DESCRIPTOR: &'static EventDescriptor =
+        &ETW_RECEIVER_PROVIDER_NAME_RESOLVED_DESCRIPTOR;
+
+    /// Sends this payload at the `info` level with a compatible entity.
+    pub fn emit_info<S, E>(&self, client: &mut EventClient<S>, entity: &E)
+    where
+        S: EventSink,
+        E: EtwReceiverProviderNameResolvedAssociatedEntity,
+    {
+        client.emit(entity, self, EventLevel::Info);
+    }
+}
+
 /// The etw_receiver.start internal telemetry event occurred.
 #[derive(Debug, Clone)]
 pub struct EtwReceiverStart {
@@ -2582,6 +3185,183 @@ impl EtwReceiverStart {
         E: EtwReceiverStartAssociatedEntity,
     {
         client.emit(entity, self, EventLevel::Info);
+    }
+}
+
+/// Emitted by OTAP Dataflow as `geneva_exporter.agent_fed.credential_unavailable`.
+#[derive(Debug, Clone)]
+pub struct GenevaExporterAgentFedCredentialUnavailable {
+    /// The consecutive_failures value recorded by OTAP Dataflow internal telemetry.
+    pub consecutive_failures: otap_df_telemetry::attributes::AttributeValue,
+    /// The error value recorded by OTAP Dataflow internal telemetry.
+    pub error: otap_df_telemetry::attributes::AttributeValue,
+}
+
+/// Marker implemented only by entity types allowed by `geneva_exporter.agent_fed.credential_unavailable`.
+pub trait GenevaExporterAgentFedCredentialUnavailableAssociatedEntity:
+    entities::SemanticEntity
+{
+}
+
+impl GenevaExporterAgentFedCredentialUnavailableAssociatedEntity for entities::NodeAttributeSet {}
+
+impl GenevaExporterAgentFedCredentialUnavailableAssociatedEntity
+    for entities::NodeWithCustomAttributeSet
+{
+}
+
+static GENEVA_EXPORTER_AGENT_FED_CREDENTIAL_UNAVAILABLE_DESCRIPTOR: EventDescriptor =
+    EventDescriptor {
+        name: "geneva_exporter.agent_fed.credential_unavailable",
+        wire_name: "geneva_exporter.agent_fed.credential_unavailable",
+        brief: "Emitted by OTAP Dataflow as `geneva_exporter.agent_fed.credential_unavailable`.",
+        stability: "development",
+        requirement_level: EventRequirementLevel::Recommended,
+        scope_names: &["otap-df-contrib-nodes"],
+        severity_levels: &[EventSeverity::Warn],
+        sources: &["crates/contrib-nodes/src/exporters/geneva_exporter/agent_fed_source.rs"],
+        availability: &["feature = \"geneva-exporter\""],
+        entity_associations: &["otap.node", "otap.node.custom"],
+        attributes: &[
+            EventAttributeDescriptor {
+                key: "consecutive_failures",
+                wire_key: "consecutive_failures",
+                brief: "The consecutive_failures value recorded by OTAP Dataflow internal telemetry.",
+                value_type: otap_df_telemetry::descriptor::AttributeValueType::Any,
+                requirement_level: EventRequirementLevel::Required,
+            },
+            EventAttributeDescriptor {
+                key: "error",
+                wire_key: "error",
+                brief: "The error value recorded by OTAP Dataflow internal telemetry.",
+                value_type: otap_df_telemetry::descriptor::AttributeValueType::Any,
+                requirement_level: EventRequirementLevel::Required,
+            },
+        ],
+    };
+
+impl EventAttributes for GenevaExporterAgentFedCredentialUnavailable {
+    #[inline]
+    fn visit_attributes(
+        &self,
+        visitor: &mut dyn FnMut(&'static EventAttributeDescriptor, EventAttributeValueRef<'_>),
+    ) {
+        visitor(
+            &GENEVA_EXPORTER_AGENT_FED_CREDENTIAL_UNAVAILABLE_DESCRIPTOR.attributes[0],
+            EventAttributeValueRef::Any(&self.consecutive_failures),
+        );
+        visitor(
+            &GENEVA_EXPORTER_AGENT_FED_CREDENTIAL_UNAVAILABLE_DESCRIPTOR.attributes[1],
+            EventAttributeValueRef::Any(&self.error),
+        );
+    }
+}
+
+impl SemanticEvent for GenevaExporterAgentFedCredentialUnavailable {
+    const DESCRIPTOR: &'static EventDescriptor =
+        &GENEVA_EXPORTER_AGENT_FED_CREDENTIAL_UNAVAILABLE_DESCRIPTOR;
+}
+
+impl GenevaExporterAgentFedCredentialUnavailable {
+    /// Static semantic-convention descriptor for this event.
+    pub const DESCRIPTOR: &'static EventDescriptor =
+        &GENEVA_EXPORTER_AGENT_FED_CREDENTIAL_UNAVAILABLE_DESCRIPTOR;
+
+    /// Sends this payload at the `warn` level with a compatible entity.
+    pub fn emit_warn<S, E>(&self, client: &mut EventClient<S>, entity: &E)
+    where
+        S: EventSink,
+        E: GenevaExporterAgentFedCredentialUnavailableAssociatedEntity,
+    {
+        client.emit(entity, self, EventLevel::Warn);
+    }
+}
+
+/// Emitted by OTAP Dataflow as `geneva_exporter.agent_fed.invalid_credential`.
+#[derive(Debug, Clone)]
+pub struct GenevaExporterAgentFedInvalidCredential {
+    /// The consecutive_failures value recorded by OTAP Dataflow internal telemetry.
+    pub consecutive_failures: otap_df_telemetry::attributes::AttributeValue,
+    /// The reason value recorded by OTAP Dataflow internal telemetry.
+    pub reason: otap_df_telemetry::attributes::AttributeValue,
+}
+
+/// Marker implemented only by entity types allowed by `geneva_exporter.agent_fed.invalid_credential`.
+pub trait GenevaExporterAgentFedInvalidCredentialAssociatedEntity:
+    entities::SemanticEntity
+{
+}
+
+impl GenevaExporterAgentFedInvalidCredentialAssociatedEntity for entities::NodeAttributeSet {}
+
+impl GenevaExporterAgentFedInvalidCredentialAssociatedEntity
+    for entities::NodeWithCustomAttributeSet
+{
+}
+
+static GENEVA_EXPORTER_AGENT_FED_INVALID_CREDENTIAL_DESCRIPTOR: EventDescriptor = EventDescriptor {
+    name: "geneva_exporter.agent_fed.invalid_credential",
+    wire_name: "geneva_exporter.agent_fed.invalid_credential",
+    brief: "Emitted by OTAP Dataflow as `geneva_exporter.agent_fed.invalid_credential`.",
+    stability: "development",
+    requirement_level: EventRequirementLevel::Recommended,
+    scope_names: &["otap-df-contrib-nodes"],
+    severity_levels: &[EventSeverity::Warn],
+    sources: &["crates/contrib-nodes/src/exporters/geneva_exporter/agent_fed_source.rs"],
+    availability: &["feature = \"geneva-exporter\""],
+    entity_associations: &["otap.node", "otap.node.custom"],
+    attributes: &[
+        EventAttributeDescriptor {
+            key: "consecutive_failures",
+            wire_key: "consecutive_failures",
+            brief: "The consecutive_failures value recorded by OTAP Dataflow internal telemetry.",
+            value_type: otap_df_telemetry::descriptor::AttributeValueType::Any,
+            requirement_level: EventRequirementLevel::Required,
+        },
+        EventAttributeDescriptor {
+            key: "reason",
+            wire_key: "reason",
+            brief: "The reason value recorded by OTAP Dataflow internal telemetry.",
+            value_type: otap_df_telemetry::descriptor::AttributeValueType::Any,
+            requirement_level: EventRequirementLevel::Required,
+        },
+    ],
+};
+
+impl EventAttributes for GenevaExporterAgentFedInvalidCredential {
+    #[inline]
+    fn visit_attributes(
+        &self,
+        visitor: &mut dyn FnMut(&'static EventAttributeDescriptor, EventAttributeValueRef<'_>),
+    ) {
+        visitor(
+            &GENEVA_EXPORTER_AGENT_FED_INVALID_CREDENTIAL_DESCRIPTOR.attributes[0],
+            EventAttributeValueRef::Any(&self.consecutive_failures),
+        );
+        visitor(
+            &GENEVA_EXPORTER_AGENT_FED_INVALID_CREDENTIAL_DESCRIPTOR.attributes[1],
+            EventAttributeValueRef::Any(&self.reason),
+        );
+    }
+}
+
+impl SemanticEvent for GenevaExporterAgentFedInvalidCredential {
+    const DESCRIPTOR: &'static EventDescriptor =
+        &GENEVA_EXPORTER_AGENT_FED_INVALID_CREDENTIAL_DESCRIPTOR;
+}
+
+impl GenevaExporterAgentFedInvalidCredential {
+    /// Static semantic-convention descriptor for this event.
+    pub const DESCRIPTOR: &'static EventDescriptor =
+        &GENEVA_EXPORTER_AGENT_FED_INVALID_CREDENTIAL_DESCRIPTOR;
+
+    /// Sends this payload at the `warn` level with a compatible entity.
+    pub fn emit_warn<S, E>(&self, client: &mut EventClient<S>, entity: &E)
+    where
+        S: EventSink,
+        E: GenevaExporterAgentFedInvalidCredentialAssociatedEntity,
+    {
+        client.emit(entity, self, EventLevel::Warn);
     }
 }
 
@@ -2702,6 +3482,72 @@ impl GenevaExporterError {
     }
 }
 
+/// Emitted by OTAP Dataflow as `geneva_exporter.obo.unmatched_event`.
+#[derive(Debug, Clone)]
+pub struct GenevaExporterOboUnmatchedEvent {
+    /// The event_name value recorded by OTAP Dataflow internal telemetry.
+    pub event_name: otap_df_telemetry::attributes::AttributeValue,
+}
+
+/// Marker implemented only by entity types allowed by `geneva_exporter.obo.unmatched_event`.
+pub trait GenevaExporterOboUnmatchedEventAssociatedEntity: entities::SemanticEntity {}
+
+impl GenevaExporterOboUnmatchedEventAssociatedEntity for entities::NodeAttributeSet {}
+
+impl GenevaExporterOboUnmatchedEventAssociatedEntity for entities::NodeWithCustomAttributeSet {}
+
+static GENEVA_EXPORTER_OBO_UNMATCHED_EVENT_DESCRIPTOR: EventDescriptor = EventDescriptor {
+    name: "geneva_exporter.obo.unmatched_event",
+    wire_name: "geneva_exporter.obo.unmatched_event",
+    brief: "Emitted by OTAP Dataflow as `geneva_exporter.obo.unmatched_event`.",
+    stability: "development",
+    requirement_level: EventRequirementLevel::Recommended,
+    scope_names: &["otap-df-contrib-nodes"],
+    severity_levels: &[EventSeverity::Warn],
+    sources: &["crates/contrib-nodes/src/exporters/geneva_exporter/mod.rs"],
+    availability: &["feature = \"geneva-exporter\""],
+    entity_associations: &["otap.node", "otap.node.custom"],
+    attributes: &[EventAttributeDescriptor {
+        key: "event_name",
+        wire_key: "event_name",
+        brief: "The event_name value recorded by OTAP Dataflow internal telemetry.",
+        value_type: otap_df_telemetry::descriptor::AttributeValueType::Any,
+        requirement_level: EventRequirementLevel::Required,
+    }],
+};
+
+impl EventAttributes for GenevaExporterOboUnmatchedEvent {
+    #[inline]
+    fn visit_attributes(
+        &self,
+        visitor: &mut dyn FnMut(&'static EventAttributeDescriptor, EventAttributeValueRef<'_>),
+    ) {
+        visitor(
+            &GENEVA_EXPORTER_OBO_UNMATCHED_EVENT_DESCRIPTOR.attributes[0],
+            EventAttributeValueRef::Any(&self.event_name),
+        );
+    }
+}
+
+impl SemanticEvent for GenevaExporterOboUnmatchedEvent {
+    const DESCRIPTOR: &'static EventDescriptor = &GENEVA_EXPORTER_OBO_UNMATCHED_EVENT_DESCRIPTOR;
+}
+
+impl GenevaExporterOboUnmatchedEvent {
+    /// Static semantic-convention descriptor for this event.
+    pub const DESCRIPTOR: &'static EventDescriptor =
+        &GENEVA_EXPORTER_OBO_UNMATCHED_EVENT_DESCRIPTOR;
+
+    /// Sends this payload at the `warn` level with a compatible entity.
+    pub fn emit_warn<S, E>(&self, client: &mut EventClient<S>, entity: &E)
+    where
+        S: EventSink,
+        E: GenevaExporterOboUnmatchedEventAssociatedEntity,
+    {
+        client.emit(entity, self, EventLevel::Warn);
+    }
+}
+
 /// The geneva_exporter.shutdown internal telemetry event occurred.
 #[derive(Debug, Clone)]
 pub struct GenevaExporterShutdown;
@@ -2812,9 +3658,15 @@ pub struct GenevaExporterStart {
     /// The account value recorded by OTAP Dataflow internal telemetry.
     pub account: otap_df_telemetry::attributes::AttributeValue,
     /// The endpoint value recorded by OTAP Dataflow internal telemetry.
-    pub endpoint: otap_df_telemetry::attributes::AttributeValue,
+    pub endpoint: Option<otap_df_telemetry::attributes::AttributeValue>,
+    /// The endpoint_source value recorded by OTAP Dataflow internal telemetry.
+    pub endpoint_source: Option<String>,
     /// The namespace value recorded by OTAP Dataflow internal telemetry.
     pub namespace: otap_df_telemetry::attributes::AttributeValue,
+    /// The role_instance value recorded by OTAP Dataflow internal telemetry.
+    pub role_instance: otap_df_telemetry::attributes::AttributeValue,
+    /// The role_name value recorded by OTAP Dataflow internal telemetry.
+    pub role_name: otap_df_telemetry::attributes::AttributeValue,
 }
 
 /// Marker implemented only by entity types allowed by `geneva_exporter.start`.
@@ -2848,12 +3700,33 @@ static GENEVA_EXPORTER_START_DESCRIPTOR: EventDescriptor = EventDescriptor {
             wire_key: "endpoint",
             brief: "The endpoint value recorded by OTAP Dataflow internal telemetry.",
             value_type: otap_df_telemetry::descriptor::AttributeValueType::Any,
-            requirement_level: EventRequirementLevel::Required,
+            requirement_level: EventRequirementLevel::Recommended,
+        },
+        EventAttributeDescriptor {
+            key: "endpoint_source",
+            wire_key: "endpoint_source",
+            brief: "The endpoint_source value recorded by OTAP Dataflow internal telemetry.",
+            value_type: otap_df_telemetry::descriptor::AttributeValueType::String,
+            requirement_level: EventRequirementLevel::Recommended,
         },
         EventAttributeDescriptor {
             key: "namespace",
             wire_key: "namespace",
             brief: "The namespace value recorded by OTAP Dataflow internal telemetry.",
+            value_type: otap_df_telemetry::descriptor::AttributeValueType::Any,
+            requirement_level: EventRequirementLevel::Required,
+        },
+        EventAttributeDescriptor {
+            key: "role_instance",
+            wire_key: "role_instance",
+            brief: "The role_instance value recorded by OTAP Dataflow internal telemetry.",
+            value_type: otap_df_telemetry::descriptor::AttributeValueType::Any,
+            requirement_level: EventRequirementLevel::Required,
+        },
+        EventAttributeDescriptor {
+            key: "role_name",
+            wire_key: "role_name",
+            brief: "The role_name value recorded by OTAP Dataflow internal telemetry.",
             value_type: otap_df_telemetry::descriptor::AttributeValueType::Any,
             requirement_level: EventRequirementLevel::Required,
         },
@@ -2870,13 +3743,29 @@ impl EventAttributes for GenevaExporterStart {
             &GENEVA_EXPORTER_START_DESCRIPTOR.attributes[0],
             EventAttributeValueRef::Any(&self.account),
         );
+        if let Some(value) = &self.endpoint {
+            visitor(
+                &GENEVA_EXPORTER_START_DESCRIPTOR.attributes[1],
+                EventAttributeValueRef::Any(value),
+            );
+        }
+        if let Some(value) = &self.endpoint_source {
+            visitor(
+                &GENEVA_EXPORTER_START_DESCRIPTOR.attributes[2],
+                EventAttributeValueRef::String(value.as_str()),
+            );
+        }
         visitor(
-            &GENEVA_EXPORTER_START_DESCRIPTOR.attributes[1],
-            EventAttributeValueRef::Any(&self.endpoint),
+            &GENEVA_EXPORTER_START_DESCRIPTOR.attributes[3],
+            EventAttributeValueRef::Any(&self.namespace),
         );
         visitor(
-            &GENEVA_EXPORTER_START_DESCRIPTOR.attributes[2],
-            EventAttributeValueRef::Any(&self.namespace),
+            &GENEVA_EXPORTER_START_DESCRIPTOR.attributes[4],
+            EventAttributeValueRef::Any(&self.role_instance),
+        );
+        visitor(
+            &GENEVA_EXPORTER_START_DESCRIPTOR.attributes[5],
+            EventAttributeValueRef::Any(&self.role_name),
         );
     }
 }
@@ -2961,6 +3850,110 @@ impl GenevaExporterUpload {
     where
         S: EventSink,
         E: GenevaExporterUploadAssociatedEntity,
+    {
+        client.emit(entity, self, EventLevel::Info);
+    }
+}
+
+/// Emitted by OTAP Dataflow as `kafka.assignment.became_empty`.
+#[derive(Debug, Clone)]
+pub struct KafkaAssignmentBecameEmpty;
+
+/// Marker implemented only by entity types allowed by `kafka.assignment.became_empty`.
+pub trait KafkaAssignmentBecameEmptyAssociatedEntity: entities::SemanticEntity {}
+
+impl KafkaAssignmentBecameEmptyAssociatedEntity for entities::NodeAttributeSet {}
+
+impl KafkaAssignmentBecameEmptyAssociatedEntity for entities::NodeWithCustomAttributeSet {}
+
+static KAFKA_ASSIGNMENT_BECAME_EMPTY_DESCRIPTOR: EventDescriptor = EventDescriptor {
+    name: "kafka.assignment.became_empty",
+    wire_name: "kafka.assignment.became_empty",
+    brief: "Emitted by OTAP Dataflow as `kafka.assignment.became_empty`.",
+    stability: "development",
+    requirement_level: EventRequirementLevel::Recommended,
+    scope_names: &["otap-df-contrib-nodes"],
+    severity_levels: &[EventSeverity::Info],
+    sources: &["crates/contrib-nodes/src/receivers/kafka_receiver/rebalance.rs"],
+    availability: &["feature = \"kafka-receiver\""],
+    entity_associations: &["otap.node", "otap.node.custom"],
+    attributes: &[],
+};
+
+impl EventAttributes for KafkaAssignmentBecameEmpty {
+    #[inline]
+    fn visit_attributes(
+        &self,
+        _visitor: &mut dyn FnMut(&'static EventAttributeDescriptor, EventAttributeValueRef<'_>),
+    ) {
+    }
+}
+
+impl SemanticEvent for KafkaAssignmentBecameEmpty {
+    const DESCRIPTOR: &'static EventDescriptor = &KAFKA_ASSIGNMENT_BECAME_EMPTY_DESCRIPTOR;
+}
+
+impl KafkaAssignmentBecameEmpty {
+    /// Static semantic-convention descriptor for this event.
+    pub const DESCRIPTOR: &'static EventDescriptor = &KAFKA_ASSIGNMENT_BECAME_EMPTY_DESCRIPTOR;
+
+    /// Sends this payload at the `info` level with a compatible entity.
+    pub fn emit_info<S, E>(&self, client: &mut EventClient<S>, entity: &E)
+    where
+        S: EventSink,
+        E: KafkaAssignmentBecameEmptyAssociatedEntity,
+    {
+        client.emit(entity, self, EventLevel::Info);
+    }
+}
+
+/// Emitted by OTAP Dataflow as `kafka.assignment.became_non_empty`.
+#[derive(Debug, Clone)]
+pub struct KafkaAssignmentBecameNonEmpty;
+
+/// Marker implemented only by entity types allowed by `kafka.assignment.became_non_empty`.
+pub trait KafkaAssignmentBecameNonEmptyAssociatedEntity: entities::SemanticEntity {}
+
+impl KafkaAssignmentBecameNonEmptyAssociatedEntity for entities::NodeAttributeSet {}
+
+impl KafkaAssignmentBecameNonEmptyAssociatedEntity for entities::NodeWithCustomAttributeSet {}
+
+static KAFKA_ASSIGNMENT_BECAME_NON_EMPTY_DESCRIPTOR: EventDescriptor = EventDescriptor {
+    name: "kafka.assignment.became_non_empty",
+    wire_name: "kafka.assignment.became_non_empty",
+    brief: "Emitted by OTAP Dataflow as `kafka.assignment.became_non_empty`.",
+    stability: "development",
+    requirement_level: EventRequirementLevel::Recommended,
+    scope_names: &["otap-df-contrib-nodes"],
+    severity_levels: &[EventSeverity::Info],
+    sources: &["crates/contrib-nodes/src/receivers/kafka_receiver/rebalance.rs"],
+    availability: &["feature = \"kafka-receiver\""],
+    entity_associations: &["otap.node", "otap.node.custom"],
+    attributes: &[],
+};
+
+impl EventAttributes for KafkaAssignmentBecameNonEmpty {
+    #[inline]
+    fn visit_attributes(
+        &self,
+        _visitor: &mut dyn FnMut(&'static EventAttributeDescriptor, EventAttributeValueRef<'_>),
+    ) {
+    }
+}
+
+impl SemanticEvent for KafkaAssignmentBecameNonEmpty {
+    const DESCRIPTOR: &'static EventDescriptor = &KAFKA_ASSIGNMENT_BECAME_NON_EMPTY_DESCRIPTOR;
+}
+
+impl KafkaAssignmentBecameNonEmpty {
+    /// Static semantic-convention descriptor for this event.
+    pub const DESCRIPTOR: &'static EventDescriptor = &KAFKA_ASSIGNMENT_BECAME_NON_EMPTY_DESCRIPTOR;
+
+    /// Sends this payload at the `info` level with a compatible entity.
+    pub fn emit_info<S, E>(&self, client: &mut EventClient<S>, entity: &E)
+    where
+        S: EventSink,
+        E: KafkaAssignmentBecameNonEmptyAssociatedEntity,
     {
         client.emit(entity, self, EventLevel::Info);
     }
@@ -3778,11 +4771,210 @@ impl KafkaExporterProducerConfigOverriddenKey {
     }
 }
 
+/// Emitted by OTAP Dataflow as `kafka.exporter.reconfigure.flush_failed`.
+#[derive(Debug, Clone)]
+pub struct KafkaExporterReconfigureFlushFailed {
+    /// The error value recorded by OTAP Dataflow internal telemetry.
+    pub error: otap_df_telemetry::attributes::AttributeValue,
+}
+
+/// Marker implemented only by entity types allowed by `kafka.exporter.reconfigure.flush_failed`.
+pub trait KafkaExporterReconfigureFlushFailedAssociatedEntity: entities::SemanticEntity {}
+
+impl KafkaExporterReconfigureFlushFailedAssociatedEntity for entities::NodeAttributeSet {}
+
+impl KafkaExporterReconfigureFlushFailedAssociatedEntity for entities::NodeWithCustomAttributeSet {}
+
+static KAFKA_EXPORTER_RECONFIGURE_FLUSH_FAILED_DESCRIPTOR: EventDescriptor = EventDescriptor {
+    name: "kafka.exporter.reconfigure.flush_failed",
+    wire_name: "kafka.exporter.reconfigure.flush_failed",
+    brief: "Emitted by OTAP Dataflow as `kafka.exporter.reconfigure.flush_failed`.",
+    stability: "development",
+    requirement_level: EventRequirementLevel::Recommended,
+    scope_names: &["otap-df-contrib-nodes"],
+    severity_levels: &[EventSeverity::Warn],
+    sources: &["crates/contrib-nodes/src/exporters/kafka_exporter/exporter.rs"],
+    availability: &["feature = \"kafka-exporter\""],
+    entity_associations: &["otap.node", "otap.node.custom"],
+    attributes: &[EventAttributeDescriptor {
+        key: "error",
+        wire_key: "error",
+        brief: "The error value recorded by OTAP Dataflow internal telemetry.",
+        value_type: otap_df_telemetry::descriptor::AttributeValueType::Any,
+        requirement_level: EventRequirementLevel::Required,
+    }],
+};
+
+impl EventAttributes for KafkaExporterReconfigureFlushFailed {
+    #[inline]
+    fn visit_attributes(
+        &self,
+        visitor: &mut dyn FnMut(&'static EventAttributeDescriptor, EventAttributeValueRef<'_>),
+    ) {
+        visitor(
+            &KAFKA_EXPORTER_RECONFIGURE_FLUSH_FAILED_DESCRIPTOR.attributes[0],
+            EventAttributeValueRef::Any(&self.error),
+        );
+    }
+}
+
+impl SemanticEvent for KafkaExporterReconfigureFlushFailed {
+    const DESCRIPTOR: &'static EventDescriptor =
+        &KAFKA_EXPORTER_RECONFIGURE_FLUSH_FAILED_DESCRIPTOR;
+}
+
+impl KafkaExporterReconfigureFlushFailed {
+    /// Static semantic-convention descriptor for this event.
+    pub const DESCRIPTOR: &'static EventDescriptor =
+        &KAFKA_EXPORTER_RECONFIGURE_FLUSH_FAILED_DESCRIPTOR;
+
+    /// Sends this payload at the `warn` level with a compatible entity.
+    pub fn emit_warn<S, E>(&self, client: &mut EventClient<S>, entity: &E)
+    where
+        S: EventSink,
+        E: KafkaExporterReconfigureFlushFailedAssociatedEntity,
+    {
+        client.emit(entity, self, EventLevel::Warn);
+    }
+}
+
+/// Emitted by OTAP Dataflow as `kafka.exporter.reconfigure_error`.
+#[derive(Debug, Clone)]
+pub struct KafkaExporterReconfigureError {
+    /// The error value recorded by OTAP Dataflow internal telemetry.
+    pub error: otap_df_telemetry::attributes::AttributeValue,
+}
+
+/// Marker implemented only by entity types allowed by `kafka.exporter.reconfigure_error`.
+pub trait KafkaExporterReconfigureErrorAssociatedEntity: entities::SemanticEntity {}
+
+impl KafkaExporterReconfigureErrorAssociatedEntity for entities::NodeAttributeSet {}
+
+impl KafkaExporterReconfigureErrorAssociatedEntity for entities::NodeWithCustomAttributeSet {}
+
+static KAFKA_EXPORTER_RECONFIGURE_ERROR_DESCRIPTOR: EventDescriptor = EventDescriptor {
+    name: "kafka.exporter.reconfigure_error",
+    wire_name: "kafka.exporter.reconfigure_error",
+    brief: "Emitted by OTAP Dataflow as `kafka.exporter.reconfigure_error`.",
+    stability: "development",
+    requirement_level: EventRequirementLevel::Recommended,
+    scope_names: &["otap-df-contrib-nodes"],
+    severity_levels: &[EventSeverity::Warn],
+    sources: &["crates/contrib-nodes/src/exporters/kafka_exporter/exporter.rs"],
+    availability: &["feature = \"kafka-exporter\""],
+    entity_associations: &["otap.node", "otap.node.custom"],
+    attributes: &[EventAttributeDescriptor {
+        key: "error",
+        wire_key: "error",
+        brief: "The error value recorded by OTAP Dataflow internal telemetry.",
+        value_type: otap_df_telemetry::descriptor::AttributeValueType::Any,
+        requirement_level: EventRequirementLevel::Required,
+    }],
+};
+
+impl EventAttributes for KafkaExporterReconfigureError {
+    #[inline]
+    fn visit_attributes(
+        &self,
+        visitor: &mut dyn FnMut(&'static EventAttributeDescriptor, EventAttributeValueRef<'_>),
+    ) {
+        visitor(
+            &KAFKA_EXPORTER_RECONFIGURE_ERROR_DESCRIPTOR.attributes[0],
+            EventAttributeValueRef::Any(&self.error),
+        );
+    }
+}
+
+impl SemanticEvent for KafkaExporterReconfigureError {
+    const DESCRIPTOR: &'static EventDescriptor = &KAFKA_EXPORTER_RECONFIGURE_ERROR_DESCRIPTOR;
+}
+
+impl KafkaExporterReconfigureError {
+    /// Static semantic-convention descriptor for this event.
+    pub const DESCRIPTOR: &'static EventDescriptor = &KAFKA_EXPORTER_RECONFIGURE_ERROR_DESCRIPTOR;
+
+    /// Sends this payload at the `warn` level with a compatible entity.
+    pub fn emit_warn<S, E>(&self, client: &mut EventClient<S>, entity: &E)
+    where
+        S: EventSink,
+        E: KafkaExporterReconfigureErrorAssociatedEntity,
+    {
+        client.emit(entity, self, EventLevel::Warn);
+    }
+}
+
+/// Emitted by OTAP Dataflow as `kafka.exporter.reconfigured`.
+#[derive(Debug, Clone)]
+pub struct KafkaExporterReconfigured {
+    /// The brokers value recorded by OTAP Dataflow internal telemetry.
+    pub brokers: String,
+}
+
+/// Marker implemented only by entity types allowed by `kafka.exporter.reconfigured`.
+pub trait KafkaExporterReconfiguredAssociatedEntity: entities::SemanticEntity {}
+
+impl KafkaExporterReconfiguredAssociatedEntity for entities::NodeAttributeSet {}
+
+impl KafkaExporterReconfiguredAssociatedEntity for entities::NodeWithCustomAttributeSet {}
+
+static KAFKA_EXPORTER_RECONFIGURED_DESCRIPTOR: EventDescriptor = EventDescriptor {
+    name: "kafka.exporter.reconfigured",
+    wire_name: "kafka.exporter.reconfigured",
+    brief: "Emitted by OTAP Dataflow as `kafka.exporter.reconfigured`.",
+    stability: "development",
+    requirement_level: EventRequirementLevel::Recommended,
+    scope_names: &["otap-df-contrib-nodes"],
+    severity_levels: &[EventSeverity::Info],
+    sources: &["crates/contrib-nodes/src/exporters/kafka_exporter/exporter.rs"],
+    availability: &["feature = \"kafka-exporter\""],
+    entity_associations: &["otap.node", "otap.node.custom"],
+    attributes: &[EventAttributeDescriptor {
+        key: "brokers",
+        wire_key: "brokers",
+        brief: "The brokers value recorded by OTAP Dataflow internal telemetry.",
+        value_type: otap_df_telemetry::descriptor::AttributeValueType::String,
+        requirement_level: EventRequirementLevel::Required,
+    }],
+};
+
+impl EventAttributes for KafkaExporterReconfigured {
+    #[inline]
+    fn visit_attributes(
+        &self,
+        visitor: &mut dyn FnMut(&'static EventAttributeDescriptor, EventAttributeValueRef<'_>),
+    ) {
+        visitor(
+            &KAFKA_EXPORTER_RECONFIGURED_DESCRIPTOR.attributes[0],
+            EventAttributeValueRef::String(self.brokers.as_str()),
+        );
+    }
+}
+
+impl SemanticEvent for KafkaExporterReconfigured {
+    const DESCRIPTOR: &'static EventDescriptor = &KAFKA_EXPORTER_RECONFIGURED_DESCRIPTOR;
+}
+
+impl KafkaExporterReconfigured {
+    /// Static semantic-convention descriptor for this event.
+    pub const DESCRIPTOR: &'static EventDescriptor = &KAFKA_EXPORTER_RECONFIGURED_DESCRIPTOR;
+
+    /// Sends this payload at the `info` level with a compatible entity.
+    pub fn emit_info<S, E>(&self, client: &mut EventClient<S>, entity: &E)
+    where
+        S: EventSink,
+        E: KafkaExporterReconfiguredAssociatedEntity,
+    {
+        client.emit(entity, self, EventLevel::Info);
+    }
+}
+
 /// The kafka.exporter.send.failed internal telemetry event occurred.
 #[derive(Debug, Clone)]
 pub struct KafkaExporterSendFailed {
     /// The error value recorded by OTAP Dataflow internal telemetry.
     pub error: otap_df_telemetry::attributes::AttributeValue,
+    /// The permanent value recorded by OTAP Dataflow internal telemetry.
+    pub permanent: otap_df_telemetry::attributes::AttributeValue,
     /// The signal_type value recorded by OTAP Dataflow internal telemetry.
     pub signal_type: otap_df_telemetry::attributes::AttributeValue,
     /// Topic name associated with the node metrics.
@@ -3816,6 +5008,13 @@ static KAFKA_EXPORTER_SEND_FAILED_DESCRIPTOR: EventDescriptor = EventDescriptor 
             requirement_level: EventRequirementLevel::Required,
         },
         EventAttributeDescriptor {
+            key: "permanent",
+            wire_key: "permanent",
+            brief: "The permanent value recorded by OTAP Dataflow internal telemetry.",
+            value_type: otap_df_telemetry::descriptor::AttributeValueType::Any,
+            requirement_level: EventRequirementLevel::Required,
+        },
+        EventAttributeDescriptor {
             key: "signal_type",
             wire_key: "signal_type",
             brief: "The signal_type value recorded by OTAP Dataflow internal telemetry.",
@@ -3844,10 +5043,14 @@ impl EventAttributes for KafkaExporterSendFailed {
         );
         visitor(
             &KAFKA_EXPORTER_SEND_FAILED_DESCRIPTOR.attributes[1],
-            EventAttributeValueRef::Any(&self.signal_type),
+            EventAttributeValueRef::Any(&self.permanent),
         );
         visitor(
             &KAFKA_EXPORTER_SEND_FAILED_DESCRIPTOR.attributes[2],
+            EventAttributeValueRef::Any(&self.signal_type),
+        );
+        visitor(
+            &KAFKA_EXPORTER_SEND_FAILED_DESCRIPTOR.attributes[3],
             EventAttributeValueRef::Any(&self.topic),
         );
     }
@@ -4017,6 +5220,72 @@ impl KafkaExporterSignalUnconfigured {
     }
 }
 
+/// Emitted by OTAP Dataflow as `kafka.exporter.topic.disallowed_header`.
+#[derive(Debug, Clone)]
+pub struct KafkaExporterTopicDisallowedHeader {
+    /// The header_topic value recorded by OTAP Dataflow internal telemetry.
+    pub header_topic: String,
+}
+
+/// Marker implemented only by entity types allowed by `kafka.exporter.topic.disallowed_header`.
+pub trait KafkaExporterTopicDisallowedHeaderAssociatedEntity: entities::SemanticEntity {}
+
+impl KafkaExporterTopicDisallowedHeaderAssociatedEntity for entities::NodeAttributeSet {}
+
+impl KafkaExporterTopicDisallowedHeaderAssociatedEntity for entities::NodeWithCustomAttributeSet {}
+
+static KAFKA_EXPORTER_TOPIC_DISALLOWED_HEADER_DESCRIPTOR: EventDescriptor = EventDescriptor {
+    name: "kafka.exporter.topic.disallowed_header",
+    wire_name: "kafka.exporter.topic.disallowed_header",
+    brief: "Emitted by OTAP Dataflow as `kafka.exporter.topic.disallowed_header`.",
+    stability: "development",
+    requirement_level: EventRequirementLevel::Recommended,
+    scope_names: &["otap-df-contrib-nodes"],
+    severity_levels: &[EventSeverity::Warn],
+    sources: &["crates/contrib-nodes/src/exporters/kafka_exporter/error.rs"],
+    availability: &["feature = \"kafka-exporter\""],
+    entity_associations: &["otap.node", "otap.node.custom"],
+    attributes: &[EventAttributeDescriptor {
+        key: "header_topic",
+        wire_key: "header_topic",
+        brief: "The header_topic value recorded by OTAP Dataflow internal telemetry.",
+        value_type: otap_df_telemetry::descriptor::AttributeValueType::String,
+        requirement_level: EventRequirementLevel::Required,
+    }],
+};
+
+impl EventAttributes for KafkaExporterTopicDisallowedHeader {
+    #[inline]
+    fn visit_attributes(
+        &self,
+        visitor: &mut dyn FnMut(&'static EventAttributeDescriptor, EventAttributeValueRef<'_>),
+    ) {
+        visitor(
+            &KAFKA_EXPORTER_TOPIC_DISALLOWED_HEADER_DESCRIPTOR.attributes[0],
+            EventAttributeValueRef::String(self.header_topic.as_str()),
+        );
+    }
+}
+
+impl SemanticEvent for KafkaExporterTopicDisallowedHeader {
+    const DESCRIPTOR: &'static EventDescriptor = &KAFKA_EXPORTER_TOPIC_DISALLOWED_HEADER_DESCRIPTOR;
+}
+
+impl KafkaExporterTopicDisallowedHeader {
+    /// Static semantic-convention descriptor for this event.
+    pub const DESCRIPTOR: &'static EventDescriptor =
+        &KAFKA_EXPORTER_TOPIC_DISALLOWED_HEADER_DESCRIPTOR;
+
+    /// Sends this payload at the `warn` level with a compatible entity.
+    pub fn emit_warn<S, E>(&self, client: &mut EventClient<S>, entity: &E)
+    where
+        S: EventSink,
+        E: KafkaExporterTopicDisallowedHeaderAssociatedEntity,
+    {
+        client.emit(entity, self, EventLevel::Warn);
+    }
+}
+
 /// The kafka.exporter.topic.invalid_header internal telemetry event occurred.
 #[derive(Debug, Clone)]
 pub struct KafkaExporterTopicInvalidHeader {
@@ -4041,7 +5310,7 @@ static KAFKA_EXPORTER_TOPIC_INVALID_HEADER_DESCRIPTOR: EventDescriptor = EventDe
     requirement_level: EventRequirementLevel::Recommended,
     scope_names: &["otap-df-contrib-nodes"],
     severity_levels: &[EventSeverity::Warn],
-    sources: &["crates/contrib-nodes/src/exporters/kafka_exporter/topic_router.rs"],
+    sources: &["crates/contrib-nodes/src/exporters/kafka_exporter/error.rs"],
     availability: &["feature = \"kafka-exporter\""],
     entity_associations: &["otap.node", "otap.node.custom"],
     attributes: &[
@@ -4464,6 +5733,326 @@ impl KafkaHeaderAttributeParseIntFailed {
     }
 }
 
+/// Emitted by OTAP Dataflow as `kafka.lag.assignment_failed`.
+#[derive(Debug, Clone)]
+pub struct KafkaLagAssignmentFailed {
+    /// The error value recorded by OTAP Dataflow internal telemetry.
+    pub error: otap_df_telemetry::attributes::AttributeValue,
+}
+
+/// Marker implemented only by entity types allowed by `kafka.lag.assignment_failed`.
+pub trait KafkaLagAssignmentFailedAssociatedEntity: entities::SemanticEntity {}
+
+impl KafkaLagAssignmentFailedAssociatedEntity for entities::NodeAttributeSet {}
+
+impl KafkaLagAssignmentFailedAssociatedEntity for entities::NodeWithCustomAttributeSet {}
+
+static KAFKA_LAG_ASSIGNMENT_FAILED_DESCRIPTOR: EventDescriptor = EventDescriptor {
+    name: "kafka.lag.assignment_failed",
+    wire_name: "kafka.lag.assignment_failed",
+    brief: "Emitted by OTAP Dataflow as `kafka.lag.assignment_failed`.",
+    stability: "development",
+    requirement_level: EventRequirementLevel::Recommended,
+    scope_names: &["otap-df-contrib-nodes"],
+    severity_levels: &[EventSeverity::Error],
+    sources: &["crates/contrib-nodes/src/receivers/kafka_receiver/receiver.rs"],
+    availability: &["feature = \"kafka-receiver\""],
+    entity_associations: &["otap.node", "otap.node.custom"],
+    attributes: &[EventAttributeDescriptor {
+        key: "error",
+        wire_key: "error",
+        brief: "The error value recorded by OTAP Dataflow internal telemetry.",
+        value_type: otap_df_telemetry::descriptor::AttributeValueType::Any,
+        requirement_level: EventRequirementLevel::Required,
+    }],
+};
+
+impl EventAttributes for KafkaLagAssignmentFailed {
+    #[inline]
+    fn visit_attributes(
+        &self,
+        visitor: &mut dyn FnMut(&'static EventAttributeDescriptor, EventAttributeValueRef<'_>),
+    ) {
+        visitor(
+            &KAFKA_LAG_ASSIGNMENT_FAILED_DESCRIPTOR.attributes[0],
+            EventAttributeValueRef::Any(&self.error),
+        );
+    }
+}
+
+impl SemanticEvent for KafkaLagAssignmentFailed {
+    const DESCRIPTOR: &'static EventDescriptor = &KAFKA_LAG_ASSIGNMENT_FAILED_DESCRIPTOR;
+}
+
+impl KafkaLagAssignmentFailed {
+    /// Static semantic-convention descriptor for this event.
+    pub const DESCRIPTOR: &'static EventDescriptor = &KAFKA_LAG_ASSIGNMENT_FAILED_DESCRIPTOR;
+
+    /// Sends this payload at the `error` level with a compatible entity.
+    pub fn emit_error<S, E>(&self, client: &mut EventClient<S>, entity: &E)
+    where
+        S: EventSink,
+        E: KafkaLagAssignmentFailedAssociatedEntity,
+    {
+        client.emit(entity, self, EventLevel::Error);
+    }
+}
+
+/// Emitted by OTAP Dataflow as `kafka.lag.committed_offsets_failed`.
+#[derive(Debug, Clone)]
+pub struct KafkaLagCommittedOffsetsFailed {
+    /// The error value recorded by OTAP Dataflow internal telemetry.
+    pub error: otap_df_telemetry::attributes::AttributeValue,
+}
+
+/// Marker implemented only by entity types allowed by `kafka.lag.committed_offsets_failed`.
+pub trait KafkaLagCommittedOffsetsFailedAssociatedEntity: entities::SemanticEntity {}
+
+impl KafkaLagCommittedOffsetsFailedAssociatedEntity for entities::NodeAttributeSet {}
+
+impl KafkaLagCommittedOffsetsFailedAssociatedEntity for entities::NodeWithCustomAttributeSet {}
+
+static KAFKA_LAG_COMMITTED_OFFSETS_FAILED_DESCRIPTOR: EventDescriptor = EventDescriptor {
+    name: "kafka.lag.committed_offsets_failed",
+    wire_name: "kafka.lag.committed_offsets_failed",
+    brief: "Emitted by OTAP Dataflow as `kafka.lag.committed_offsets_failed`.",
+    stability: "development",
+    requirement_level: EventRequirementLevel::Recommended,
+    scope_names: &["otap-df-contrib-nodes"],
+    severity_levels: &[EventSeverity::Error],
+    sources: &["crates/contrib-nodes/src/receivers/kafka_receiver/receiver.rs"],
+    availability: &["feature = \"kafka-receiver\""],
+    entity_associations: &["otap.node", "otap.node.custom"],
+    attributes: &[EventAttributeDescriptor {
+        key: "error",
+        wire_key: "error",
+        brief: "The error value recorded by OTAP Dataflow internal telemetry.",
+        value_type: otap_df_telemetry::descriptor::AttributeValueType::Any,
+        requirement_level: EventRequirementLevel::Required,
+    }],
+};
+
+impl EventAttributes for KafkaLagCommittedOffsetsFailed {
+    #[inline]
+    fn visit_attributes(
+        &self,
+        visitor: &mut dyn FnMut(&'static EventAttributeDescriptor, EventAttributeValueRef<'_>),
+    ) {
+        visitor(
+            &KAFKA_LAG_COMMITTED_OFFSETS_FAILED_DESCRIPTOR.attributes[0],
+            EventAttributeValueRef::Any(&self.error),
+        );
+    }
+}
+
+impl SemanticEvent for KafkaLagCommittedOffsetsFailed {
+    const DESCRIPTOR: &'static EventDescriptor = &KAFKA_LAG_COMMITTED_OFFSETS_FAILED_DESCRIPTOR;
+}
+
+impl KafkaLagCommittedOffsetsFailed {
+    /// Static semantic-convention descriptor for this event.
+    pub const DESCRIPTOR: &'static EventDescriptor = &KAFKA_LAG_COMMITTED_OFFSETS_FAILED_DESCRIPTOR;
+
+    /// Sends this payload at the `error` level with a compatible entity.
+    pub fn emit_error<S, E>(&self, client: &mut EventClient<S>, entity: &E)
+    where
+        S: EventSink,
+        E: KafkaLagCommittedOffsetsFailedAssociatedEntity,
+    {
+        client.emit(entity, self, EventLevel::Error);
+    }
+}
+
+/// Emitted by OTAP Dataflow as `kafka.lag.fetch_watermarks_failed`.
+#[derive(Debug, Clone)]
+pub struct KafkaLagFetchWatermarksFailed {
+    /// The error value recorded by OTAP Dataflow internal telemetry.
+    pub error: otap_df_telemetry::attributes::AttributeValue,
+    /// The partition value recorded by OTAP Dataflow internal telemetry.
+    pub partition: otap_df_telemetry::attributes::AttributeValue,
+    /// Topic name associated with the node metrics.
+    pub topic: otap_df_telemetry::attributes::AttributeValue,
+}
+
+/// Marker implemented only by entity types allowed by `kafka.lag.fetch_watermarks_failed`.
+pub trait KafkaLagFetchWatermarksFailedAssociatedEntity: entities::SemanticEntity {}
+
+impl KafkaLagFetchWatermarksFailedAssociatedEntity for entities::NodeAttributeSet {}
+
+impl KafkaLagFetchWatermarksFailedAssociatedEntity for entities::NodeWithCustomAttributeSet {}
+
+static KAFKA_LAG_FETCH_WATERMARKS_FAILED_DESCRIPTOR: EventDescriptor = EventDescriptor {
+    name: "kafka.lag.fetch_watermarks_failed",
+    wire_name: "kafka.lag.fetch_watermarks_failed",
+    brief: "Emitted by OTAP Dataflow as `kafka.lag.fetch_watermarks_failed`.",
+    stability: "development",
+    requirement_level: EventRequirementLevel::Recommended,
+    scope_names: &["otap-df-contrib-nodes"],
+    severity_levels: &[EventSeverity::Error],
+    sources: &["crates/contrib-nodes/src/receivers/kafka_receiver/receiver.rs"],
+    availability: &["feature = \"kafka-receiver\""],
+    entity_associations: &["otap.node", "otap.node.custom"],
+    attributes: &[
+        EventAttributeDescriptor {
+            key: "error",
+            wire_key: "error",
+            brief: "The error value recorded by OTAP Dataflow internal telemetry.",
+            value_type: otap_df_telemetry::descriptor::AttributeValueType::Any,
+            requirement_level: EventRequirementLevel::Required,
+        },
+        EventAttributeDescriptor {
+            key: "partition",
+            wire_key: "partition",
+            brief: "The partition value recorded by OTAP Dataflow internal telemetry.",
+            value_type: otap_df_telemetry::descriptor::AttributeValueType::Any,
+            requirement_level: EventRequirementLevel::Required,
+        },
+        EventAttributeDescriptor {
+            key: "topic",
+            wire_key: "topic",
+            brief: "Topic name associated with the node metrics.",
+            value_type: otap_df_telemetry::descriptor::AttributeValueType::Any,
+            requirement_level: EventRequirementLevel::Required,
+        },
+    ],
+};
+
+impl EventAttributes for KafkaLagFetchWatermarksFailed {
+    #[inline]
+    fn visit_attributes(
+        &self,
+        visitor: &mut dyn FnMut(&'static EventAttributeDescriptor, EventAttributeValueRef<'_>),
+    ) {
+        visitor(
+            &KAFKA_LAG_FETCH_WATERMARKS_FAILED_DESCRIPTOR.attributes[0],
+            EventAttributeValueRef::Any(&self.error),
+        );
+        visitor(
+            &KAFKA_LAG_FETCH_WATERMARKS_FAILED_DESCRIPTOR.attributes[1],
+            EventAttributeValueRef::Any(&self.partition),
+        );
+        visitor(
+            &KAFKA_LAG_FETCH_WATERMARKS_FAILED_DESCRIPTOR.attributes[2],
+            EventAttributeValueRef::Any(&self.topic),
+        );
+    }
+}
+
+impl SemanticEvent for KafkaLagFetchWatermarksFailed {
+    const DESCRIPTOR: &'static EventDescriptor = &KAFKA_LAG_FETCH_WATERMARKS_FAILED_DESCRIPTOR;
+}
+
+impl KafkaLagFetchWatermarksFailed {
+    /// Static semantic-convention descriptor for this event.
+    pub const DESCRIPTOR: &'static EventDescriptor = &KAFKA_LAG_FETCH_WATERMARKS_FAILED_DESCRIPTOR;
+
+    /// Sends this payload at the `error` level with a compatible entity.
+    pub fn emit_error<S, E>(&self, client: &mut EventClient<S>, entity: &E)
+    where
+        S: EventSink,
+        E: KafkaLagFetchWatermarksFailedAssociatedEntity,
+    {
+        client.emit(entity, self, EventLevel::Error);
+    }
+}
+
+/// Emitted by OTAP Dataflow as `kafka.lag.refresh_incomplete`.
+#[derive(Debug, Clone)]
+pub struct KafkaLagRefreshIncomplete {
+    /// The partition value recorded by OTAP Dataflow internal telemetry.
+    pub partition: Option<otap_df_telemetry::attributes::AttributeValue>,
+    /// The reason value recorded by OTAP Dataflow internal telemetry.
+    pub reason: otap_df_telemetry::attributes::AttributeValue,
+    /// Topic name associated with the node metrics.
+    pub topic: Option<otap_df_telemetry::attributes::AttributeValue>,
+}
+
+/// Marker implemented only by entity types allowed by `kafka.lag.refresh_incomplete`.
+pub trait KafkaLagRefreshIncompleteAssociatedEntity: entities::SemanticEntity {}
+
+impl KafkaLagRefreshIncompleteAssociatedEntity for entities::NodeAttributeSet {}
+
+impl KafkaLagRefreshIncompleteAssociatedEntity for entities::NodeWithCustomAttributeSet {}
+
+static KAFKA_LAG_REFRESH_INCOMPLETE_DESCRIPTOR: EventDescriptor = EventDescriptor {
+    name: "kafka.lag.refresh_incomplete",
+    wire_name: "kafka.lag.refresh_incomplete",
+    brief: "Emitted by OTAP Dataflow as `kafka.lag.refresh_incomplete`.",
+    stability: "development",
+    requirement_level: EventRequirementLevel::Recommended,
+    scope_names: &["otap-df-contrib-nodes"],
+    severity_levels: &[EventSeverity::Warn],
+    sources: &["crates/contrib-nodes/src/receivers/kafka_receiver/receiver.rs"],
+    availability: &["feature = \"kafka-receiver\""],
+    entity_associations: &["otap.node", "otap.node.custom"],
+    attributes: &[
+        EventAttributeDescriptor {
+            key: "partition",
+            wire_key: "partition",
+            brief: "The partition value recorded by OTAP Dataflow internal telemetry.",
+            value_type: otap_df_telemetry::descriptor::AttributeValueType::Any,
+            requirement_level: EventRequirementLevel::Recommended,
+        },
+        EventAttributeDescriptor {
+            key: "reason",
+            wire_key: "reason",
+            brief: "The reason value recorded by OTAP Dataflow internal telemetry.",
+            value_type: otap_df_telemetry::descriptor::AttributeValueType::Any,
+            requirement_level: EventRequirementLevel::Required,
+        },
+        EventAttributeDescriptor {
+            key: "topic",
+            wire_key: "topic",
+            brief: "Topic name associated with the node metrics.",
+            value_type: otap_df_telemetry::descriptor::AttributeValueType::Any,
+            requirement_level: EventRequirementLevel::Recommended,
+        },
+    ],
+};
+
+impl EventAttributes for KafkaLagRefreshIncomplete {
+    #[inline]
+    fn visit_attributes(
+        &self,
+        visitor: &mut dyn FnMut(&'static EventAttributeDescriptor, EventAttributeValueRef<'_>),
+    ) {
+        if let Some(value) = &self.partition {
+            visitor(
+                &KAFKA_LAG_REFRESH_INCOMPLETE_DESCRIPTOR.attributes[0],
+                EventAttributeValueRef::Any(value),
+            );
+        }
+        visitor(
+            &KAFKA_LAG_REFRESH_INCOMPLETE_DESCRIPTOR.attributes[1],
+            EventAttributeValueRef::Any(&self.reason),
+        );
+        if let Some(value) = &self.topic {
+            visitor(
+                &KAFKA_LAG_REFRESH_INCOMPLETE_DESCRIPTOR.attributes[2],
+                EventAttributeValueRef::Any(value),
+            );
+        }
+    }
+}
+
+impl SemanticEvent for KafkaLagRefreshIncomplete {
+    const DESCRIPTOR: &'static EventDescriptor = &KAFKA_LAG_REFRESH_INCOMPLETE_DESCRIPTOR;
+}
+
+impl KafkaLagRefreshIncomplete {
+    /// Static semantic-convention descriptor for this event.
+    pub const DESCRIPTOR: &'static EventDescriptor = &KAFKA_LAG_REFRESH_INCOMPLETE_DESCRIPTOR;
+
+    /// Sends this payload at the `warn` level with a compatible entity.
+    pub fn emit_warn<S, E>(&self, client: &mut EventClient<S>, entity: &E)
+    where
+        S: EventSink,
+        E: KafkaLagRefreshIncompleteAssociatedEntity,
+    {
+        client.emit(entity, self, EventLevel::Warn);
+    }
+}
+
 /// The kafka.rebalance.assignment_query_failed internal telemetry event occurred.
 #[derive(Debug, Clone)]
 pub struct KafkaRebalanceAssignmentQueryFailed {
@@ -4658,6 +6247,219 @@ impl KafkaRebalanceError {
         E: KafkaRebalanceErrorAssociatedEntity,
     {
         client.emit(entity, self, EventLevel::Warn);
+    }
+}
+
+/// Emitted by OTAP Dataflow as `kafka.rebalance.partitions_assigned`.
+#[derive(Debug, Clone)]
+pub struct KafkaRebalancePartitionsAssigned {
+    /// The count value recorded by OTAP Dataflow internal telemetry.
+    pub count: otap_df_telemetry::attributes::AttributeValue,
+    /// The listed_count value recorded by OTAP Dataflow internal telemetry.
+    pub listed_count: otap_df_telemetry::attributes::AttributeValue,
+    /// The partitions value recorded by OTAP Dataflow internal telemetry.
+    pub partitions: String,
+    /// The truncated value recorded by OTAP Dataflow internal telemetry.
+    pub truncated: otap_df_telemetry::attributes::AttributeValue,
+}
+
+/// Marker implemented only by entity types allowed by `kafka.rebalance.partitions_assigned`.
+pub trait KafkaRebalancePartitionsAssignedAssociatedEntity: entities::SemanticEntity {}
+
+impl KafkaRebalancePartitionsAssignedAssociatedEntity for entities::NodeAttributeSet {}
+
+impl KafkaRebalancePartitionsAssignedAssociatedEntity for entities::NodeWithCustomAttributeSet {}
+
+static KAFKA_REBALANCE_PARTITIONS_ASSIGNED_DESCRIPTOR: EventDescriptor = EventDescriptor {
+    name: "kafka.rebalance.partitions_assigned",
+    wire_name: "kafka.rebalance.partitions_assigned",
+    brief: "Emitted by OTAP Dataflow as `kafka.rebalance.partitions_assigned`.",
+    stability: "development",
+    requirement_level: EventRequirementLevel::Recommended,
+    scope_names: &["otap-df-contrib-nodes"],
+    severity_levels: &[EventSeverity::Info],
+    sources: &["crates/contrib-nodes/src/receivers/kafka_receiver/rebalance.rs"],
+    availability: &["feature = \"kafka-receiver\""],
+    entity_associations: &["otap.node", "otap.node.custom"],
+    attributes: &[
+        EventAttributeDescriptor {
+            key: "count",
+            wire_key: "count",
+            brief: "The count value recorded by OTAP Dataflow internal telemetry.",
+            value_type: otap_df_telemetry::descriptor::AttributeValueType::Any,
+            requirement_level: EventRequirementLevel::Required,
+        },
+        EventAttributeDescriptor {
+            key: "listed_count",
+            wire_key: "listed_count",
+            brief: "The listed_count value recorded by OTAP Dataflow internal telemetry.",
+            value_type: otap_df_telemetry::descriptor::AttributeValueType::Any,
+            requirement_level: EventRequirementLevel::Required,
+        },
+        EventAttributeDescriptor {
+            key: "partitions",
+            wire_key: "partitions",
+            brief: "The partitions value recorded by OTAP Dataflow internal telemetry.",
+            value_type: otap_df_telemetry::descriptor::AttributeValueType::String,
+            requirement_level: EventRequirementLevel::Required,
+        },
+        EventAttributeDescriptor {
+            key: "truncated",
+            wire_key: "truncated",
+            brief: "The truncated value recorded by OTAP Dataflow internal telemetry.",
+            value_type: otap_df_telemetry::descriptor::AttributeValueType::Any,
+            requirement_level: EventRequirementLevel::Required,
+        },
+    ],
+};
+
+impl EventAttributes for KafkaRebalancePartitionsAssigned {
+    #[inline]
+    fn visit_attributes(
+        &self,
+        visitor: &mut dyn FnMut(&'static EventAttributeDescriptor, EventAttributeValueRef<'_>),
+    ) {
+        visitor(
+            &KAFKA_REBALANCE_PARTITIONS_ASSIGNED_DESCRIPTOR.attributes[0],
+            EventAttributeValueRef::Any(&self.count),
+        );
+        visitor(
+            &KAFKA_REBALANCE_PARTITIONS_ASSIGNED_DESCRIPTOR.attributes[1],
+            EventAttributeValueRef::Any(&self.listed_count),
+        );
+        visitor(
+            &KAFKA_REBALANCE_PARTITIONS_ASSIGNED_DESCRIPTOR.attributes[2],
+            EventAttributeValueRef::String(self.partitions.as_str()),
+        );
+        visitor(
+            &KAFKA_REBALANCE_PARTITIONS_ASSIGNED_DESCRIPTOR.attributes[3],
+            EventAttributeValueRef::Any(&self.truncated),
+        );
+    }
+}
+
+impl SemanticEvent for KafkaRebalancePartitionsAssigned {
+    const DESCRIPTOR: &'static EventDescriptor = &KAFKA_REBALANCE_PARTITIONS_ASSIGNED_DESCRIPTOR;
+}
+
+impl KafkaRebalancePartitionsAssigned {
+    /// Static semantic-convention descriptor for this event.
+    pub const DESCRIPTOR: &'static EventDescriptor =
+        &KAFKA_REBALANCE_PARTITIONS_ASSIGNED_DESCRIPTOR;
+
+    /// Sends this payload at the `info` level with a compatible entity.
+    pub fn emit_info<S, E>(&self, client: &mut EventClient<S>, entity: &E)
+    where
+        S: EventSink,
+        E: KafkaRebalancePartitionsAssignedAssociatedEntity,
+    {
+        client.emit(entity, self, EventLevel::Info);
+    }
+}
+
+/// Emitted by OTAP Dataflow as `kafka.rebalance.partitions_revoked`.
+#[derive(Debug, Clone)]
+pub struct KafkaRebalancePartitionsRevoked {
+    /// The count value recorded by OTAP Dataflow internal telemetry.
+    pub count: otap_df_telemetry::attributes::AttributeValue,
+    /// The listed_count value recorded by OTAP Dataflow internal telemetry.
+    pub listed_count: otap_df_telemetry::attributes::AttributeValue,
+    /// The partitions value recorded by OTAP Dataflow internal telemetry.
+    pub partitions: String,
+    /// The truncated value recorded by OTAP Dataflow internal telemetry.
+    pub truncated: otap_df_telemetry::attributes::AttributeValue,
+}
+
+/// Marker implemented only by entity types allowed by `kafka.rebalance.partitions_revoked`.
+pub trait KafkaRebalancePartitionsRevokedAssociatedEntity: entities::SemanticEntity {}
+
+impl KafkaRebalancePartitionsRevokedAssociatedEntity for entities::NodeAttributeSet {}
+
+impl KafkaRebalancePartitionsRevokedAssociatedEntity for entities::NodeWithCustomAttributeSet {}
+
+static KAFKA_REBALANCE_PARTITIONS_REVOKED_DESCRIPTOR: EventDescriptor = EventDescriptor {
+    name: "kafka.rebalance.partitions_revoked",
+    wire_name: "kafka.rebalance.partitions_revoked",
+    brief: "Emitted by OTAP Dataflow as `kafka.rebalance.partitions_revoked`.",
+    stability: "development",
+    requirement_level: EventRequirementLevel::Recommended,
+    scope_names: &["otap-df-contrib-nodes"],
+    severity_levels: &[EventSeverity::Info],
+    sources: &["crates/contrib-nodes/src/receivers/kafka_receiver/rebalance.rs"],
+    availability: &["feature = \"kafka-receiver\""],
+    entity_associations: &["otap.node", "otap.node.custom"],
+    attributes: &[
+        EventAttributeDescriptor {
+            key: "count",
+            wire_key: "count",
+            brief: "The count value recorded by OTAP Dataflow internal telemetry.",
+            value_type: otap_df_telemetry::descriptor::AttributeValueType::Any,
+            requirement_level: EventRequirementLevel::Required,
+        },
+        EventAttributeDescriptor {
+            key: "listed_count",
+            wire_key: "listed_count",
+            brief: "The listed_count value recorded by OTAP Dataflow internal telemetry.",
+            value_type: otap_df_telemetry::descriptor::AttributeValueType::Any,
+            requirement_level: EventRequirementLevel::Required,
+        },
+        EventAttributeDescriptor {
+            key: "partitions",
+            wire_key: "partitions",
+            brief: "The partitions value recorded by OTAP Dataflow internal telemetry.",
+            value_type: otap_df_telemetry::descriptor::AttributeValueType::String,
+            requirement_level: EventRequirementLevel::Required,
+        },
+        EventAttributeDescriptor {
+            key: "truncated",
+            wire_key: "truncated",
+            brief: "The truncated value recorded by OTAP Dataflow internal telemetry.",
+            value_type: otap_df_telemetry::descriptor::AttributeValueType::Any,
+            requirement_level: EventRequirementLevel::Required,
+        },
+    ],
+};
+
+impl EventAttributes for KafkaRebalancePartitionsRevoked {
+    #[inline]
+    fn visit_attributes(
+        &self,
+        visitor: &mut dyn FnMut(&'static EventAttributeDescriptor, EventAttributeValueRef<'_>),
+    ) {
+        visitor(
+            &KAFKA_REBALANCE_PARTITIONS_REVOKED_DESCRIPTOR.attributes[0],
+            EventAttributeValueRef::Any(&self.count),
+        );
+        visitor(
+            &KAFKA_REBALANCE_PARTITIONS_REVOKED_DESCRIPTOR.attributes[1],
+            EventAttributeValueRef::Any(&self.listed_count),
+        );
+        visitor(
+            &KAFKA_REBALANCE_PARTITIONS_REVOKED_DESCRIPTOR.attributes[2],
+            EventAttributeValueRef::String(self.partitions.as_str()),
+        );
+        visitor(
+            &KAFKA_REBALANCE_PARTITIONS_REVOKED_DESCRIPTOR.attributes[3],
+            EventAttributeValueRef::Any(&self.truncated),
+        );
+    }
+}
+
+impl SemanticEvent for KafkaRebalancePartitionsRevoked {
+    const DESCRIPTOR: &'static EventDescriptor = &KAFKA_REBALANCE_PARTITIONS_REVOKED_DESCRIPTOR;
+}
+
+impl KafkaRebalancePartitionsRevoked {
+    /// Static semantic-convention descriptor for this event.
+    pub const DESCRIPTOR: &'static EventDescriptor = &KAFKA_REBALANCE_PARTITIONS_REVOKED_DESCRIPTOR;
+
+    /// Sends this payload at the `info` level with a compatible entity.
+    pub fn emit_info<S, E>(&self, client: &mut EventClient<S>, entity: &E)
+    where
+        S: EventSink,
+        E: KafkaRebalancePartitionsRevokedAssociatedEntity,
+    {
+        client.emit(entity, self, EventLevel::Info);
     }
 }
 

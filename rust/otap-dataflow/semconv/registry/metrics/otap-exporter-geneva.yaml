@@ -3,7 +3,7 @@ metrics:
 - name: otap.exporter.geneva.conversion.errors
   brief: Number of OTAP-to-OTLP conversion errors.
   instrument: counter
-  unit: "{error}"
+  unit: '{error}'
   stability: development
   requirement_level: recommended
   entity_associations:
@@ -18,7 +18,7 @@ metrics:
 - name: otap.exporter.geneva.empty.payloads.skipped
   brief: Number of empty payloads skipped (no-op ack).
   instrument: counter
-  unit: "{msg}"
+  unit: '{msg}'
   stability: development
   requirement_level: recommended
   entity_associations:
@@ -33,7 +33,7 @@ metrics:
 - name: otap.exporter.geneva.log.batches.encoded
   brief: Compressed log batches produced by the encoder.
   instrument: counter
-  unit: "{batch}"
+  unit: '{batch}'
   stability: development
   requirement_level: recommended
   entity_associations:
@@ -48,7 +48,7 @@ metrics:
 - name: otap.exporter.geneva.log.batches.failed
   brief: Log batches that failed to upload.
   instrument: counter
-  unit: "{batch}"
+  unit: '{batch}'
   stability: development
   requirement_level: recommended
   entity_associations:
@@ -63,7 +63,7 @@ metrics:
 - name: otap.exporter.geneva.log.batches.uploaded
   brief: Log batches successfully uploaded to Geneva.
   instrument: counter
-  unit: "{batch}"
+  unit: '{batch}'
   stability: development
   requirement_level: recommended
   entity_associations:
@@ -108,7 +108,7 @@ metrics:
 - name: otap.exporter.geneva.log.records.failed
   brief: Individual log records that failed to upload.
   instrument: counter
-  unit: "{record}"
+  unit: '{record}'
   stability: development
   requirement_level: recommended
   entity_associations:
@@ -123,7 +123,7 @@ metrics:
 - name: otap.exporter.geneva.log.records.uploaded
   brief: Individual log records successfully uploaded.
   instrument: counter
-  unit: "{record}"
+  unit: '{record}'
   stability: development
   requirement_level: recommended
   entity_associations:
@@ -168,7 +168,7 @@ metrics:
 - name: otap.exporter.geneva.metrics.payloads.dropped
   brief: Number of metrics payloads dropped (unsupported signal).
   instrument: counter
-  unit: "{msg}"
+  unit: '{msg}'
   stability: development
   requirement_level: recommended
   entity_associations:
@@ -183,7 +183,7 @@ metrics:
 - name: otap.exporter.geneva.trace.batches.encoded
   brief: Compressed trace batches produced by the encoder.
   instrument: counter
-  unit: "{batch}"
+  unit: '{batch}'
   stability: development
   requirement_level: recommended
   entity_associations:
@@ -198,7 +198,7 @@ metrics:
 - name: otap.exporter.geneva.trace.batches.failed
   brief: Trace batches that failed to upload.
   instrument: counter
-  unit: "{batch}"
+  unit: '{batch}'
   stability: development
   requirement_level: recommended
   entity_associations:
@@ -213,7 +213,7 @@ metrics:
 - name: otap.exporter.geneva.trace.batches.uploaded
   brief: Trace batches successfully uploaded to Geneva.
   instrument: counter
-  unit: "{batch}"
+  unit: '{batch}'
   stability: development
   requirement_level: recommended
   entity_associations:
@@ -258,7 +258,7 @@ metrics:
 - name: otap.exporter.geneva.trace.records.failed
   brief: Individual trace records (spans) that failed to upload.
   instrument: counter
-  unit: "{record}"
+  unit: '{record}'
   stability: development
   requirement_level: recommended
   entity_associations:
@@ -273,7 +273,7 @@ metrics:
 - name: otap.exporter.geneva.trace.records.uploaded
   brief: Individual trace records (spans) successfully uploaded.
   instrument: counter
-  unit: "{record}"
+  unit: '{record}'
   stability: development
   requirement_level: recommended
   entity_associations:

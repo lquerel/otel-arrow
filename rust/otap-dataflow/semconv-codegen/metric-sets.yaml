@@ -1,14 +1,42 @@
 params:
   schema: otap-dataflow/metric-sets/1
   metric_sets:
+  - id: admission.rate_limiter
+    rust:
+      package: otap-df-engine
+      type: RateAdmissionMetrics
   - id: channel.receiver
     rust:
       package: otap-df-engine
-      type: ChannelReceiverMetrics
+      types:
+      - type: ChannelReceiverMetrics
+        metrics:
+        - channel.receiver.messages
+      - type: ChannelReceiverStateMetrics
+        metrics:
+        - channel.receiver.capacity
+        - channel.receiver.queue.depth
+      - type: ControlChannelReceiverMetrics
+        metrics:
+        - channel.receiver.capacity
+        - channel.receiver.messages
+        - channel.receiver.queue.depth
   - id: channel.sender
     rust:
       package: otap-df-engine
-      type: ChannelSenderMetrics
+      types:
+      - type: ChannelSenderFailureMetrics
+        metrics:
+        - channel.sender.failures
+      - type: ChannelSenderMetrics
+        metrics:
+        - channel.sender.messages
+      - type: ControlChannelSenderFailureMetrics
+        metrics:
+        - channel.sender.failures
+      - type: ControlChannelSenderMetrics
+        metrics:
+        - channel.sender.messages
   - id: controller.monitor
     rust:
       package: otap-df-controller
@@ -21,20 +49,88 @@ params:
     availability: feature = "azure-monitor-exporter"
     rust:
       package: otap-df-contrib-nodes
-      type: AzureMonitorExporterMetrics
-  - id: exporter.kafka
+      type: AzureMonitorExporterOperationalMetrics
+  - id: exporter.azure_monitor.exports
+    availability: feature = "azure-monitor-exporter"
+    rust:
+      package: otap-df-contrib-nodes
+      type: AzureMonitorExporterExportMetrics
+  - id: exporter.azure_monitor.heartbeats
+    availability: feature = "azure-monitor-exporter"
+    rust:
+      package: otap-df-contrib-nodes
+      type: AzureMonitorExporterHeartbeatMetrics
+  - id: exporter.azure_monitor.http
+    availability: feature = "azure-monitor-exporter"
+    rust:
+      package: otap-df-contrib-nodes
+      type: AzureMonitorExporterHttpMetrics
+  - id: exporter.azure_monitor.state
+    availability: feature = "azure-monitor-exporter"
+    rust:
+      package: otap-df-contrib-nodes
+      type: AzureMonitorExporterStateMetrics
+  - id: exporter.console.failures
+    rust:
+      package: otap-df-core-nodes
+      type: ConsoleExporterFailureMetrics
+  - id: exporter.exports
+    rust:
+      package: otap-df-otap
+      type: ExporterExportMetrics
+  - id: exporter.file
+    rust:
+      package: otap-df-core-nodes
+      types:
+      - type: FileFailureMetrics
+        metrics:
+        - exporter.file.failures
+      - type: FileSignalMetrics
+        metrics:
+        - exporter.file.bytes
+        - exporter.file.items
+        - exporter.file.tail.recovered.bytes
+        - exporter.file.tail.recoveries
+  - id: exporter.file.exports
+    rust:
+      package: otap-df-core-nodes
+      type: FileExporterExportMetrics
+  - id: exporter.kafka.exports
     availability: feature = "kafka-exporter"
     rust:
       package: otap-df-contrib-nodes
-      type: KafkaExporterMetrics
-  - id: exporter.pdata
+      type: KafkaExporterExportMetrics
+  - id: exporter.kafka.failures
+    availability: feature = "kafka-exporter"
     rust:
-      package: otap-df-otap
-      type: ExporterPDataMetrics
-  - id: exporter.perf.pdata
+      package: otap-df-contrib-nodes
+      type: KafkaExporterFailureMetrics
+  - id: exporter.kafka.operations
+    availability: feature = "kafka-exporter"
+    rust:
+      package: otap-df-contrib-nodes
+      type: KafkaExporterOperationMetrics
+  - id: exporter.kafka.routing
+    availability: feature = "kafka-exporter"
+    rust:
+      package: otap-df-contrib-nodes
+      type: KafkaExporterRoutingMetrics
+  - id: exporter.otap.failures
     rust:
       package: otap-df-core-nodes
-      type: PerfExporterPdataMetrics
+      type: OtapExporterFailureMetrics
+  - id: exporter.otap.streams
+    rust:
+      package: otap-df-core-nodes
+      type: OtapExporterStreamMetrics
+  - id: exporter.otlp_grpc.failures
+    rust:
+      package: otap-df-core-nodes
+      type: OtlpGrpcExporterFailureMetrics
+  - id: exporter.otlp_http.failures
+    rust:
+      package: otap-df-core-nodes
+      type: OtlpHttpExporterFailureMetrics
   - id: exporter.topic
     rust:
       package: otap-df-core-nodes
@@ -52,22 +148,27 @@ params:
     rust:
       package: otap-df-engine
       type: ExtensionLifecycleMetrics
+  - id: extension.oauth2_client_auth
+    availability: feature = "oauth2-client-auth-extension"
+    rust:
+      package: otap-df-contrib-extensions
+      type: OAuth2ClientAuthMetrics
   - id: flow
     rust:
       package: otap-df-engine
       types:
+      - type: FlowConsumedItemsMetrics
+        metrics:
+        - flow.consumed.items
+      - type: FlowDroppedItemsMetrics
+        metrics:
+        - flow.dropped.items
       - type: FlowDurationMetrics
         metrics:
         - flow.compute.duration
-      - type: FlowSignalsDroppedMetrics
+      - type: FlowProducedItemsMetrics
         metrics:
-        - flow.signals.dropped
-      - type: FlowSignalsIncomingMetrics
-        metrics:
-        - flow.signals.incoming
-      - type: FlowSignalsOutgoingMetrics
-        metrics:
-        - flow.signals.outgoing
+        - flow.produced.items
   - id: node.completion_emission
     rust:
       package: otap-df-engine
@@ -75,7 +176,14 @@ params:
   - id: node.consumer
     rust:
       package: otap-df-engine
-      type: ConsumedMetrics
+      types:
+      - type: ConsumedItemMetrics
+        metrics:
+        - node.consumer.consumed.items
+      - type: ConsumedMetrics
+        metrics:
+        - node.consumer.consumed.duration
+        - node.consumer.consumed.messages
   - id: node.local_wakeup.scheduler
     rust:
       package: otap-df-engine
@@ -83,7 +191,14 @@ params:
   - id: node.producer
     rust:
       package: otap-df-engine
-      type: ProducedMetrics
+      types:
+      - type: ProducedItemMetrics
+        metrics:
+        - node.producer.produced.items
+      - type: ProducedMetrics
+        metrics:
+        - node.producer.produced.duration
+        - node.producer.produced.messages
   - id: otap.exporter.clickhouse
     availability: feature = "clickhouse-exporter"
     rust:
@@ -94,10 +209,6 @@ params:
     rust:
       package: otap-df-contrib-nodes
       type: ExporterMetrics
-  - id: otap.exporter.grpc.async
-    rust:
-      package: otap-df-core-nodes
-      type: OtapGrpcAsyncMetrics
   - id: otap.exporter.parquet
     rust:
       package: otap-df-core-nodes
@@ -106,10 +217,6 @@ params:
     rust:
       package: otap-df-core-nodes
       type: BatchProcessorMetrics
-  - id: otap.processor.durable_buffer
-    rust:
-      package: otap-df-core-nodes
-      type: DurableBufferMetrics
   - id: pipeline
     rust:
       package: otap-df-engine
@@ -125,7 +232,11 @@ params:
   - id: processor.attributes
     rust:
       package: otap-df-core-nodes
-      type: AttributesProcessorMetrics
+      type: AttributesProcessorTransformMetrics
+  - id: processor.attributes.modified
+    rust:
+      package: otap-df-core-nodes
+      type: AttributesProcessorModifiedMetrics
   - id: processor.compute
     rust:
       package: otap-df-engine
@@ -133,23 +244,64 @@ params:
   - id: processor.content_router
     rust:
       package: otap-df-core-nodes
-      type: ContentRouterMetrics
-  - id: processor.debug.pdata
+      type: ContentRouterMeasurementMetrics
+  - id: processor.debug
     rust:
       package: otap-df-core-nodes
-      type: DebugPdataMetrics
+      type: DebugMetrics
+  - id: processor.durable_buffer
+    rust:
+      package: otap-df-core-nodes
+      type: DurableBufferOperationalMetrics
+  - id: processor.durable_buffer.bundles
+    rust:
+      package: otap-df-core-nodes
+      type: DurableBufferBundleMetrics
+  - id: processor.durable_buffer.ingest
+    rust:
+      package: otap-df-core-nodes
+      type: DurableBufferIngestMetrics
+  - id: processor.durable_buffer.items
+    rust:
+      package: otap-df-core-nodes
+      type: DurableBufferItemMetrics
+  - id: processor.durable_buffer.loss
+    rust:
+      package: otap-df-core-nodes
+      types:
+      - type: DurableBufferLossItemMetrics
+        metrics:
+        - processor.durable_buffer.loss.items
+      - type: DurableBufferLossMetrics
+        metrics:
+        - processor.durable_buffer.loss.bundles
+        - processor.durable_buffer.loss.bytes
+        - processor.durable_buffer.loss.segments
   - id: processor.fanout
     rust:
       package: otap-df-core-nodes
-      type: FanoutMetrics
+      types:
+      - type: FanoutOperationalMetrics
+        metrics:
+        - processor.fanout.active
+        - processor.fanout.max.inflight.config
+        - processor.fanout.throttle.episodes
+        - processor.fanout.throttled
+      - type: FanoutTimeoutMetrics
+        metrics:
+        - processor.fanout.timed.out
   - id: processor.filter.pdata
     rust:
       package: otap-df-core-nodes
       type: FilterPdataMetrics
-  - id: processor.log_sampling.pdata
+  - id: processor.log_sampling
     rust:
       package: otap-df-core-nodes
       type: LogSamplingMetrics
+  - id: processor.partition
+    rust:
+      package: otap-df-core-nodes
+      type: Metrics
   - id: processor.resource_validator
     availability: feature = "resource-validator-processor"
     rust:
@@ -158,11 +310,11 @@ params:
   - id: processor.retry
     rust:
       package: otap-df-core-nodes
-      type: RetryProcessorMetrics
-  - id: processor.signal_type_router
+      type: RetryOperationalMetrics
+  - id: processor.retry.messages
     rust:
       package: otap-df-core-nodes
-      type: SignalTypeRouterMetrics
+      type: RetryMessageMetrics
   - id: processor.temporal_reaggregation.pdata
     rust:
       package: otap-df-core-nodes
@@ -170,7 +322,27 @@ params:
   - id: processor.transform
     rust:
       package: otap-df-core-nodes
-      type: Metrics
+      types:
+      - type: TransformFailureMetrics
+        metrics:
+        - processor.transform.failures
+      - type: TransformOperationMetrics
+        metrics:
+        - processor.transform.operations
+  - id: processor.type_router
+    rust:
+      package: otap-df-core-nodes
+      type: SignalTypeRouterMeasurementMetrics
+  - id: processor.wasm_processor.pdata
+    availability: feature = "wasm"
+    rust:
+      package: otap-df-wasm-host
+      type: WasmProcessorMetrics
+  - id: processor.wasm_processor.pdata.records
+    availability: feature = "wasm"
+    rust:
+      package: otap-df-wasm-host
+      type: WasmProcessorRecordMetrics
   - id: receiver.etw
     availability: all (feature = "etw-receiver" , target_os = "windows")
     rust:
@@ -184,19 +356,63 @@ params:
     rust:
       package: otap-df-core-nodes
       type: JournaldReceiverMetrics
-  - id: receiver.kafka
+  - id: receiver.kafka.acknowledgements
     availability: feature = "kafka-receiver"
     rust:
       package: otap-df-contrib-nodes
-      type: KafkaReceiverMetrics
-  - id: receiver.otap
+      type: KafkaReceiverAcknowledgementMetrics
+  - id: receiver.kafka.consumer
+    availability: feature = "kafka-receiver"
     rust:
-      package: otap-df-core-nodes
-      type: OtapReceiverMetrics
-  - id: receiver.otlp
+      package: otap-df-contrib-nodes
+      type: KafkaReceiverConsumerMetrics
+  - id: receiver.kafka.offset_commits
+    availability: feature = "kafka-receiver"
+    rust:
+      package: otap-df-contrib-nodes
+      type: KafkaReceiverOffsetCommitMetrics
+  - id: receiver.kafka.rejections
+    availability: feature = "kafka-receiver"
+    rust:
+      package: otap-df-contrib-nodes
+      type: KafkaReceiverRejectionMetrics
+  - id: receiver.kafka.transport
+    availability: feature = "kafka-receiver"
+    rust:
+      package: otap-df-contrib-nodes
+      type: KafkaReceiverTransportMetrics
+  - id: receiver.messages
     rust:
       package: otap-df-otap
-      type: OtlpReceiverMetrics
+      type: ReceiverMessageMetrics
+  - id: receiver.otap.acknowledgements
+    rust:
+      package: otap-df-core-nodes
+      type: OtapAcknowledgementMetrics
+  - id: receiver.otap.batches
+    rust:
+      package: otap-df-core-nodes
+      type: OtapBatchMetrics
+  - id: receiver.otap.rejections
+    rust:
+      package: otap-df-core-nodes
+      type: OtapRejectionMetrics
+  - id: receiver.otlp.acknowledgements
+    rust:
+      package: otap-df-otap
+      type: OtlpAcknowledgementMetrics
+  - id: receiver.otlp.rejections
+    rust:
+      package: otap-df-otap
+      type: OtlpRejectionMetrics
+  - id: receiver.otlp.requests
+    rust:
+      package: otap-df-otap
+      type: OtlpRequestMetrics
+  - id: receiver.otlp.transport
+    rust:
+      package: otap-df-otap
+      type: OtlpTransportMetrics
   - id: receiver.syslog_cef
     rust:
       package: otap-df-core-nodes

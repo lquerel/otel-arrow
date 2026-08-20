@@ -13,7 +13,7 @@ use std::time::SystemTime;
 
 /// A sharable/clonable observed event reporter sending events to an `ObservedStore`.
 ///
-/// Engine lifecycle events (Admitted, Ready, …) can optionally be routed through
+/// Engine lifecycle events (Admitted, Ready, ...) can optionally be routed through
 /// a dedicated unbounded channel so they are never silently dropped under
 /// backpressure.  Log events always use the bounded/lossy path controlled by
 /// [`SendPolicy`].
@@ -313,6 +313,75 @@ pub enum ErrorSummary {
         /// Flattened source chain for deeper debugging, if available.
         source: Option<String>,
     },
+}
+
+impl ErrorEvent {
+    /// Returns the stable event kind used in internal telemetry.
+    #[must_use]
+    pub const fn kind(&self) -> &'static str {
+        match self {
+            Self::AdmissionError(_) => "admission_error",
+            Self::ConfigRejected(_) => "config_rejected",
+            Self::UpdateFailed(_) => "update_failed",
+            Self::RollbackFailed(_) => "rollback_failed",
+            Self::DrainError(_) => "drain_error",
+            Self::DrainDeadlineReached => "drain_deadline_reached",
+            Self::RuntimeError(_) => "runtime_error",
+            Self::DeleteError(_) => "delete_error",
+        }
+    }
+
+    /// Returns the structured error summary when the event carries one.
+    #[must_use]
+    pub const fn summary(&self) -> Option<&ErrorSummary> {
+        match self {
+            Self::AdmissionError(summary)
+            | Self::ConfigRejected(summary)
+            | Self::UpdateFailed(summary)
+            | Self::RollbackFailed(summary)
+            | Self::DrainError(summary)
+            | Self::RuntimeError(summary)
+            | Self::DeleteError(summary) => Some(summary),
+            Self::DrainDeadlineReached => None,
+        }
+    }
+}
+
+impl ErrorSummary {
+    /// Returns the high-level error category.
+    #[must_use]
+    pub fn error_kind(&self) -> &str {
+        match self {
+            Self::Pipeline { error_kind, .. } | Self::Node { error_kind, .. } => error_kind,
+        }
+    }
+
+    /// Returns the actionable error message.
+    #[must_use]
+    pub fn message(&self) -> &str {
+        match self {
+            Self::Pipeline { message, .. } | Self::Node { message, .. } => message,
+        }
+    }
+
+    /// Returns the flattened source chain when available.
+    #[must_use]
+    pub fn source(&self) -> Option<&str> {
+        match self {
+            Self::Pipeline { source, .. } | Self::Node { source, .. } => source.as_deref(),
+        }
+    }
+
+    /// Returns node identity for node-level errors.
+    #[must_use]
+    pub fn node(&self) -> Option<(&str, &NodeKind)> {
+        match self {
+            Self::Pipeline { .. } => None,
+            Self::Node {
+                node, node_kind, ..
+            } => Some((node, node_kind)),
+        }
+    }
 }
 
 impl EngineEvent {

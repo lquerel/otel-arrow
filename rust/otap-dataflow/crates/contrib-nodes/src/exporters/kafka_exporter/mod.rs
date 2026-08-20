@@ -10,7 +10,7 @@
 //! # Features
 //!
 //! - Per-signal topic and encoding configuration (traces, metrics, logs)
-//! - Optional signals — only configure the signals you need
+//! - Optional signals -- only configure the signals you need
 //! - Per-signal encoding: `otlp_proto` or `otap_proto`
 //! - Per-signal dynamic topic routing from transport headers
 //! - Authentication: SASL with AWS MSK IAM OAUTHBEARER
@@ -19,6 +19,23 @@
 //! - (Planned) resource attribute-based partitioning for stateful processing
 //! - Async-first using `rdkafka::FutureProducer`
 //! - Per-signal telemetry metrics
+//!
+//! # Live reconfiguration
+//!
+//! The exporter accepts live configuration changes via `NodeControlMsg::Config`
+//! by building a new producer and swapping it in for the old one. This support
+//! does NOT yet provide two important guarantees:
+//!
+//! - It does not guarantee that pdata accepted before the config change is
+//!   flushed before the swap, so in-flight records can be sent using the new
+//!   topic, credentials, or tenant configuration.
+//! - It does not guarantee a non-blocking cutover: the bounded flush and
+//!   old-producer retirement run synchronously and can stall the pipeline for
+//!   up to the flush timeout.
+//!
+//! See [`exporter::KafkaExporter::reconfigure`] and the live-reconfiguration
+//! issue (<https://github.com/open-telemetry/otel-arrow/issues/3768>) for
+//! details.
 //!
 //! # Example Configuration
 //!
@@ -47,12 +64,20 @@
 //!       linger_ms: 5
 //! ```
 
+otap_df_telemetry::otel_component_scope!(
+    urn = exporter::KAFKA_EXPORTER_URN,
+    target = "otel.exporter.kafka",
+);
+
 pub mod config;
 pub mod encoder;
+pub mod error;
 pub mod exporter;
 pub mod metrics;
 pub mod partitioner;
 mod producer;
+mod topic_regex;
 pub mod topic_router;
 
 pub use config::{KafkaExporterConfig, KafkaExporterConfigBuilder};
+pub use error::KafkaExporterError;

@@ -71,6 +71,9 @@ struct MetricDefinition {
     temporality: Option<String>,
     package: String,
     rust_type: String,
+    rust_types: BTreeSet<String>,
+    registration_attribute_sets: BTreeSet<String>,
+    measurement_attribute_sets: BTreeSet<String>,
     rust_field: String,
     source: String,
     availability: Option<String>,
@@ -306,6 +309,8 @@ impl Inventory {
             return Ok(());
         };
         let metric_set = required_name_value(attr, "name")?;
+        let registration_attributes = optional_type_value(attr, "registration_attributes")?;
+        let measurement_attributes = optional_type_value(attr, "measurement_attributes")?;
         let fields = match &item.fields {
             syn::Fields::Named(fields) => &fields.named,
             _ => bail!("metric_set {} must use named fields", item.ident),
@@ -341,18 +346,39 @@ impl Inventory {
                 temporality: shape.temporality,
                 package: package.to_owned(),
                 rust_type: item.ident.to_string(),
+                rust_types: [item.ident.to_string()].into_iter().collect(),
+                registration_attribute_sets: registration_attributes.clone().into_iter().collect(),
+                measurement_attribute_sets: measurement_attributes.clone().into_iter().collect(),
                 rust_field: field_ident,
                 source: source.to_owned(),
                 availability: guard_string(&field_guards),
             };
-            if let Some(previous) = self.metrics.insert(canonical_name.clone(), definition) {
-                bail!(
-                    "duplicate canonical metric {canonical_name}: {}::{} and {}::{}",
-                    previous.source,
-                    previous.rust_field,
-                    source,
-                    field_ident_from_key(&canonical_name)
-                );
+            if let Some(previous) = self.metrics.get_mut(&canonical_name) {
+                if previous.metric_set != definition.metric_set
+                    || previous.name != definition.name
+                    || previous.unit != definition.unit
+                    || previous.instrument != definition.instrument
+                    || previous.value_type != definition.value_type
+                    || previous.temporality != definition.temporality
+                {
+                    bail!(
+                        "incompatible declarations for canonical metric {canonical_name}: \
+                         {}::{} and {}::{}",
+                        previous.source,
+                        previous.rust_field,
+                        source,
+                        definition.rust_field
+                    );
+                }
+                previous.rust_types.insert(definition.rust_type.clone());
+                previous
+                    .registration_attribute_sets
+                    .extend(definition.registration_attribute_sets);
+                previous
+                    .measurement_attribute_sets
+                    .extend(definition.measurement_attribute_sets);
+            } else {
+                self.metrics.insert(canonical_name, definition);
             }
         }
         Ok(())
@@ -368,14 +394,18 @@ impl Inventory {
         let Some(attr) = find_attr(&item.attrs, "attribute_set") else {
             return Ok(());
         };
-        let Some(descriptor) = optional_name_value(attr, "name")? else {
-            return Ok(());
-        };
+        let explicit_descriptor = optional_name_value(attr, "name")?;
+        let inventory_key = explicit_descriptor.as_ref().map_or_else(
+            || format!("{package}:{source}:{}", item.ident),
+            |_| item.ident.to_string(),
+        );
+        let descriptor = explicit_descriptor
+            .unwrap_or_else(|| format!("{}.item", item.ident.to_string().to_lowercase()));
         let fields = match &item.fields {
             syn::Fields::Named(fields) => &fields.named,
             syn::Fields::Unit => {
                 self.attribute_sets.insert(
-                    item.ident.to_string(),
+                    inventory_key,
                     AttributeSetDefinition {
                         descriptor,
                         rust_type: item.ident.to_string(),
@@ -424,10 +454,7 @@ impl Inventory {
                 availability: guard_string(&field_guards),
             });
         }
-        if let Some(previous) = self
-            .attribute_sets
-            .insert(item.ident.to_string(), definition)
-        {
+        if let Some(previous) = self.attribute_sets.insert(inventory_key, definition) {
             bail!(
                 "duplicate attribute-set Rust type {} in {} and {}",
                 item.ident,
@@ -543,7 +570,10 @@ fn metric_shape(ty: &Type) -> Result<MetricShape> {
         .last()
         .ok_or_else(|| anyhow!("empty metric type path"))?;
     let rust_instrument = segment.ident.to_string();
-    if rust_instrument == "Mmsc" {
+    if matches!(
+        rust_instrument.as_str(),
+        "Mmsc" | "HistogramNormal" | "HistogramDetailed"
+    ) {
         return Ok(MetricShape {
             instrument: "histogram".to_owned(),
             rust_instrument,
@@ -872,6 +902,27 @@ fn optional_name_value(attr: &Attribute, name: &str) -> Result<Option<String>> {
                 }
                 Ok(())
             })?;
+        }
+        Ok(())
+    })?;
+    Ok(found)
+}
+
+fn optional_type_value(attr: &Attribute, name: &str) -> Result<Option<String>> {
+    let mut found = None;
+    attr.parse_nested_meta(|meta| {
+        if meta.path.is_ident(name) {
+            let value = meta.value()?.parse::<Type>()?;
+            let Type::Path(path) = value else {
+                return Err(meta.error(format!("{name} must be a type path")));
+            };
+            found = path
+                .path
+                .segments
+                .last()
+                .map(|segment| segment.ident.to_string());
+        } else if meta.input.peek(Token![=]) {
+            let _ = meta.value()?.parse::<Expr>()?;
         }
         Ok(())
     })?;
@@ -1276,10 +1327,6 @@ fn field_value_type(tokens: &[TokenTree]) -> String {
     }
 }
 
-fn field_ident_from_key(key: &str) -> &str {
-    key.rsplit('.').next().unwrap_or(key)
-}
-
 #[derive(Debug, Deserialize)]
 #[serde(deny_unknown_fields)]
 struct MetricSetCatalogFile {
@@ -1348,16 +1395,19 @@ impl MetricSetCatalog {
         Ok(Self { metric_sets })
     }
 
-    fn rust_type_for(&self, metric_set: &str, metric: &str) -> Option<&str> {
-        let spec = self.metric_sets.get(metric_set)?;
+    fn rust_types_for(&self, metric_set: &str, metric: &str) -> BTreeSet<String> {
+        let Some(spec) = self.metric_sets.get(metric_set) else {
+            return BTreeSet::new();
+        };
         if let Some(rust_type) = &spec.rust.r#type {
-            return Some(rust_type);
+            return [rust_type.clone()].into_iter().collect();
         }
         spec.rust
             .types
             .iter()
-            .find(|rust_type| rust_type.metrics.contains(metric))
-            .map(|rust_type| rust_type.r#type.as_str())
+            .filter(|rust_type| rust_type.metrics.contains(metric))
+            .map(|rust_type| rust_type.r#type.clone())
+            .collect()
     }
 
     fn check(&self, inventory: &Inventory, errors: &mut Vec<String>) {
@@ -1382,7 +1432,6 @@ impl MetricSetCatalog {
                 ));
             }
 
-            let mut assigned_metrics = BTreeSet::new();
             for rust_type in &spec.rust.types {
                 if rust_type.metrics.is_empty() {
                     errors.push(format!(
@@ -1391,11 +1440,6 @@ impl MetricSetCatalog {
                     ));
                 }
                 for metric in &rust_type.metrics {
-                    if !assigned_metrics.insert(metric.clone()) {
-                        errors.push(format!(
-                            "metric set {id} assigns metric {metric} to multiple Rust types"
-                        ));
-                    }
                     match inventory.metrics.get(metric) {
                         Some(definition) if definition.metric_set == *id => {}
                         Some(definition) => errors.push(format!(
@@ -1462,6 +1506,8 @@ struct RegistryMetric {
     unit: String,
     stability: String,
     requirement_level: String,
+    #[serde(default)]
+    attributes: Vec<RegistryAttributeRef>,
     entity_associations: Vec<serde_yaml::Value>,
     annotations: RegistryAnnotations,
 }
@@ -1893,6 +1939,17 @@ impl Registry {
                 expected_codegen,
                 errors,
             );
+            let actual_attributes = metric
+                .attributes
+                .iter()
+                .filter_map(|attribute| self.wire_attribute_key(&attribute.r#ref))
+                .collect::<BTreeSet<_>>();
+            check_equal(
+                &format!("metric {name} attributes"),
+                &actual_attributes,
+                &expected_metric_attributes(inventory, expected, errors),
+                errors,
+            );
             check_generated_metric_contract(
                 name,
                 expected,
@@ -2209,6 +2266,43 @@ fn flatten_attribute_set(
     result
 }
 
+fn expected_metric_attributes(
+    inventory: &Inventory,
+    metric: &MetricDefinition,
+    errors: &mut Vec<String>,
+) -> BTreeSet<String> {
+    let mut result = BTreeSet::new();
+    let mut pending = metric
+        .registration_attribute_sets
+        .iter()
+        .chain(&metric.measurement_attribute_sets)
+        .cloned()
+        .collect::<Vec<_>>();
+    let mut visited = BTreeSet::new();
+    while let Some(rust_type) = pending.pop() {
+        if !visited.insert(rust_type.clone()) {
+            continue;
+        }
+        let mut found = false;
+        for set in inventory
+            .attribute_sets
+            .values()
+            .filter(|set| set.rust_type == rust_type)
+        {
+            found = true;
+            result.extend(set.fields.iter().map(|field| field.key.clone()));
+            pending.extend(set.composes.iter().cloned());
+        }
+        if !found {
+            errors.push(format!(
+                "metric {} references unknown attribute set {rust_type}",
+                metric.canonical_name
+            ));
+        }
+    }
+    result
+}
+
 fn expected_metric_entities(metric_set: &str) -> BTreeSet<String> {
     let entities: &[&str] = match metric_set {
         "engine" => &["otap.engine"],
@@ -2216,7 +2310,7 @@ fn expected_metric_entities(metric_set: &str) -> BTreeSet<String> {
         "pipeline" | "pipeline.completion" | "pipeline.runtime_control" | "tokio.runtime" => {
             &["otap.pipeline"]
         }
-        "extension.azure_identity_auth" | "extension.lifecycle" => &["otap.extension"],
+        metric_set if metric_set.starts_with("extension.") => &["otap.extension"],
         "flow" => &["otap.flow"],
         "channel.receiver" | "channel.sender" => &["otap.node.channel", "otap.extension.channel"],
         "node.consumer" | "node.producer" => &["otap.node.channel"],
@@ -2450,11 +2544,9 @@ fn check_generated_metric_contract(
         errors,
     );
     check_equal(
-        &format!("metric {metric} derived rust.type"),
-        metric_sets
-            .rust_type_for(&expected.metric_set, metric)
-            .unwrap_or_default(),
-        expected.rust_type.as_str(),
+        &format!("metric {metric} derived rust.types"),
+        &metric_sets.rust_types_for(&expected.metric_set, metric),
+        &expected.rust_types,
         errors,
     );
 
@@ -2473,7 +2565,6 @@ fn check_generated_metric_contract(
         if rust.package.is_some()
             || rust.r#type.is_some()
             || rust.source.is_some()
-            || rust.instrument.is_some()
             || rust.value_type.is_some()
             || rust.temporality.is_some()
             || rust.availability.is_some()
@@ -2482,7 +2573,7 @@ fn check_generated_metric_contract(
                 "metric {metric} contains redundant per-metric Rust metadata"
             ));
         }
-        if rust.field.is_none() {
+        if rust.field.is_none() && rust.instrument.is_none() {
             errors.push(format!("metric {metric} has an empty rust override"));
         }
     }
@@ -2510,9 +2601,24 @@ fn check_generated_metric_contract(
                 ("", None)
             }
         };
+    let instrument_override = rust.and_then(|rust| rust.instrument.as_deref());
+    if instrument_override == Some(derived_instrument) {
+        errors.push(format!(
+            "metric {metric} redundantly declares the default Rust instrument {derived_instrument}"
+        ));
+    }
+    if let Some(instrument_override) = instrument_override
+        && (expected.instrument != "histogram"
+            || !matches!(instrument_override, "HistogramNormal" | "HistogramDetailed"))
+    {
+        errors.push(format!(
+            "metric {metric} has unsupported Rust instrument override {instrument_override}"
+        ));
+    }
+    let effective_instrument = instrument_override.unwrap_or(derived_instrument);
     check_equal(
-        &format!("metric {metric} derived Rust instrument"),
-        derived_instrument,
+        &format!("metric {metric} effective Rust instrument"),
+        effective_instrument,
         expected.rust_instrument.as_str(),
         errors,
     );
@@ -2629,6 +2735,20 @@ mod tests {
         assert_eq!(shape.rust_instrument, "ObserveCounter");
         assert_eq!(shape.value_type, "u64");
         assert_eq!(shape.temporality.as_deref(), Some("cumulative"));
+    }
+
+    /// Scenario: a metric field uses one of the exponential-histogram distribution tiers.
+    /// Guarantees: both tiers retain their concrete Rust type while sharing the standard histogram shape.
+    #[test]
+    fn metric_shape_preserves_distribution_histogram_tier() {
+        for rust_instrument in ["HistogramNormal", "HistogramDetailed"] {
+            let ty: Type = syn::parse_str(rust_instrument).unwrap();
+            let shape = metric_shape(&ty).unwrap();
+            assert_eq!(shape.instrument, "histogram");
+            assert_eq!(shape.rust_instrument, rust_instrument);
+            assert_eq!(shape.value_type, "f64");
+            assert_eq!(shape.temporality.as_deref(), Some("delta"));
+        }
     }
 
     /// Scenario: standard metric instruments use project defaults with sparse recording-mode overrides.

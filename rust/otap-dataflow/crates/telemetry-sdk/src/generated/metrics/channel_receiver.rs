@@ -31,56 +31,23 @@ impl AssociatedEntity for entities::ExtensionChannelAttributeSet {}
 #[derive(Debug, Default, Clone)]
 #[repr(C, align(64))]
 pub struct ChannelReceiverMetrics {
-    /// Maximum channel capacity (buffer size).
-    pub capacity: otap_df_telemetry::instrument::Gauge<u64>,
-    /// Count of messages successfully received from the channel.
-    pub recv_count: otap_df_telemetry::instrument::Counter<u64>,
-    /// Count of receive attempts after the channel was closed.
-    pub recv_error_closed: otap_df_telemetry::instrument::Counter<u64>,
-    /// Count of receive attempts when the channel was empty.
-    pub recv_error_empty: otap_df_telemetry::instrument::Counter<u64>,
+    /// Messages successfully dequeued from the channel.
+    pub messages: otap_df_telemetry::instrument::Counter<u64>,
 }
 
 /// Per-field conditional availability in descriptor order.
-pub const CHANNEL_RECEIVER_METRICS_METRIC_AVAILABILITY: &[Option<&str>] =
-    &[AVAILABILITY, AVAILABILITY, AVAILABILITY, AVAILABILITY];
+pub const CHANNEL_RECEIVER_METRICS_METRIC_AVAILABILITY: &[Option<&str>] = &[AVAILABILITY];
 
 static CHANNEL_RECEIVER_METRICS_DESCRIPTOR: MetricsDescriptor = MetricsDescriptor {
     name: METRIC_SET,
-    metrics: &[
-        MetricsField {
-            name: "capacity",
-            unit: "{message}",
-            brief: "Maximum channel capacity (buffer size).",
-            instrument: Instrument::Gauge,
-            temporality: None,
-            value_type: MetricValueType::U64,
-        },
-        MetricsField {
-            name: "recv.count",
-            unit: "{message}",
-            brief: "Count of messages successfully received from the channel.",
-            instrument: Instrument::Counter,
-            temporality: Some(otap_df_telemetry::descriptor::Temporality::Delta),
-            value_type: MetricValueType::U64,
-        },
-        MetricsField {
-            name: "recv.error_closed",
-            unit: "{1}",
-            brief: "Count of receive attempts after the channel was closed.",
-            instrument: Instrument::Counter,
-            temporality: Some(otap_df_telemetry::descriptor::Temporality::Delta),
-            value_type: MetricValueType::U64,
-        },
-        MetricsField {
-            name: "recv.error_empty",
-            unit: "{1}",
-            brief: "Count of receive attempts when the channel was empty.",
-            instrument: Instrument::Counter,
-            temporality: Some(otap_df_telemetry::descriptor::Temporality::Delta),
-            value_type: MetricValueType::U64,
-        },
-    ],
+    metrics: &[MetricsField {
+        name: "messages",
+        unit: "{message}",
+        brief: "Messages successfully dequeued from the channel.",
+        instrument: Instrument::Counter,
+        temporality: Some(otap_df_telemetry::descriptor::Temporality::Delta),
+        value_type: MetricValueType::U64,
+    }],
 };
 
 impl MetricSetHandler for ChannelReceiverMetrics {
@@ -91,37 +58,180 @@ impl MetricSetHandler for ChannelReceiverMetrics {
 
     #[inline]
     fn snapshot_values(&self) -> Vec<MetricValue> {
+        vec![MetricValue::from(self.messages.get())]
+    }
+
+    #[inline]
+    fn clear_values(&mut self) {
+        self.messages.reset();
+    }
+
+    #[inline]
+    fn needs_flush(&self) -> bool {
+        if !MetricValue::from(self.messages.get()).is_zero() {
+            return true;
+        }
+        false
+    }
+}
+
+impl ChannelReceiverMetrics {
+    /// Registers this metric set against a semantically compatible entity.
+    #[must_use]
+    pub fn register<E>(registry: &TelemetryRegistryHandle, entity: E) -> MetricSet<Self>
+    where
+        E: AssociatedEntity,
+    {
+        registry.register_metric_set(entity)
+    }
+}
+
+/// Strongly typed values for the `channel.receiver` metric set.
+#[derive(Debug, Default, Clone)]
+#[repr(C, align(64))]
+pub struct ChannelReceiverStateMetrics {
+    /// Configured maximum number of buffered messages.
+    pub capacity: otap_df_telemetry::instrument::Gauge<u64>,
+    /// Current number of messages buffered in the channel.
+    pub queue_depth: otap_df_telemetry::instrument::Gauge<u64>,
+}
+
+/// Per-field conditional availability in descriptor order.
+pub const CHANNEL_RECEIVER_STATE_METRICS_METRIC_AVAILABILITY: &[Option<&str>] =
+    &[AVAILABILITY, AVAILABILITY];
+
+static CHANNEL_RECEIVER_STATE_METRICS_DESCRIPTOR: MetricsDescriptor = MetricsDescriptor {
+    name: METRIC_SET,
+    metrics: &[
+        MetricsField {
+            name: "capacity",
+            unit: "{message}",
+            brief: "Configured maximum number of buffered messages.",
+            instrument: Instrument::Gauge,
+            temporality: None,
+            value_type: MetricValueType::U64,
+        },
+        MetricsField {
+            name: "queue.depth",
+            unit: "{message}",
+            brief: "Current number of messages buffered in the channel.",
+            instrument: Instrument::Gauge,
+            temporality: None,
+            value_type: MetricValueType::U64,
+        },
+    ],
+};
+
+impl MetricSetHandler for ChannelReceiverStateMetrics {
+    #[inline]
+    fn descriptor(&self) -> &'static MetricsDescriptor {
+        &CHANNEL_RECEIVER_STATE_METRICS_DESCRIPTOR
+    }
+
+    #[inline]
+    fn snapshot_values(&self) -> Vec<MetricValue> {
         vec![
             MetricValue::from(self.capacity.get()),
-            MetricValue::from(self.recv_count.get()),
-            MetricValue::from(self.recv_error_closed.get()),
-            MetricValue::from(self.recv_error_empty.get()),
+            MetricValue::from(self.queue_depth.get()),
+        ]
+    }
+
+    #[inline]
+    fn clear_values(&mut self) {}
+
+    #[inline]
+    fn needs_flush(&self) -> bool {
+        true
+    }
+}
+
+impl ChannelReceiverStateMetrics {
+    /// Registers this metric set against a semantically compatible entity.
+    #[must_use]
+    pub fn register<E>(registry: &TelemetryRegistryHandle, entity: E) -> MetricSet<Self>
+    where
+        E: AssociatedEntity,
+    {
+        registry.register_metric_set(entity)
+    }
+}
+
+/// Strongly typed values for the `channel.receiver` metric set.
+#[derive(Debug, Default, Clone)]
+#[repr(C, align(64))]
+pub struct ControlChannelReceiverMetrics {
+    /// Configured maximum number of buffered messages.
+    pub capacity: otap_df_telemetry::instrument::Gauge<u64>,
+    /// Messages successfully dequeued from the channel.
+    pub messages: otap_df_telemetry::instrument::Counter<u64>,
+    /// Current number of messages buffered in the channel.
+    pub queue_depth: otap_df_telemetry::instrument::Gauge<u64>,
+}
+
+/// Per-field conditional availability in descriptor order.
+pub const CONTROL_CHANNEL_RECEIVER_METRICS_METRIC_AVAILABILITY: &[Option<&str>] =
+    &[AVAILABILITY, AVAILABILITY, AVAILABILITY];
+
+static CONTROL_CHANNEL_RECEIVER_METRICS_DESCRIPTOR: MetricsDescriptor = MetricsDescriptor {
+    name: METRIC_SET,
+    metrics: &[
+        MetricsField {
+            name: "capacity",
+            unit: "{message}",
+            brief: "Configured maximum number of buffered messages.",
+            instrument: Instrument::Gauge,
+            temporality: None,
+            value_type: MetricValueType::U64,
+        },
+        MetricsField {
+            name: "messages",
+            unit: "{message}",
+            brief: "Messages successfully dequeued from the channel.",
+            instrument: Instrument::Counter,
+            temporality: Some(otap_df_telemetry::descriptor::Temporality::Delta),
+            value_type: MetricValueType::U64,
+        },
+        MetricsField {
+            name: "queue.depth",
+            unit: "{message}",
+            brief: "Current number of messages buffered in the channel.",
+            instrument: Instrument::Gauge,
+            temporality: None,
+            value_type: MetricValueType::U64,
+        },
+    ],
+};
+
+impl MetricSetHandler for ControlChannelReceiverMetrics {
+    #[inline]
+    fn descriptor(&self) -> &'static MetricsDescriptor {
+        &CONTROL_CHANNEL_RECEIVER_METRICS_DESCRIPTOR
+    }
+
+    #[inline]
+    fn snapshot_values(&self) -> Vec<MetricValue> {
+        vec![
+            MetricValue::from(self.capacity.get()),
+            MetricValue::from(self.messages.get()),
+            MetricValue::from(self.queue_depth.get()),
         ]
     }
 
     #[inline]
     fn clear_values(&mut self) {
-        self.recv_count.reset();
-        self.recv_error_closed.reset();
-        self.recv_error_empty.reset();
+        self.messages.reset();
     }
 
     #[inline]
     fn needs_flush(&self) -> bool {
-        if !MetricValue::from(self.recv_count.get()).is_zero() {
-            return true;
-        }
-        if !MetricValue::from(self.recv_error_closed.get()).is_zero() {
-            return true;
-        }
-        if !MetricValue::from(self.recv_error_empty.get()).is_zero() {
+        if !MetricValue::from(self.messages.get()).is_zero() {
             return true;
         }
         true
     }
 }
 
-impl ChannelReceiverMetrics {
+impl ControlChannelReceiverMetrics {
     /// Registers this metric set against a semantically compatible entity.
     #[must_use]
     pub fn register<E>(registry: &TelemetryRegistryHandle, entity: E) -> MetricSet<Self>

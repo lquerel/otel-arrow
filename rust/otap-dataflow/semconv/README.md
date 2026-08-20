@@ -29,8 +29,10 @@ under `registry/`.
 
 ## Signal and entity model
 
-Each Rust `#[attribute_set]` scope is represented by an entity. Composed
-attribute sets are flattened into the entity identity, along with
+Each Rust scope-level `#[attribute_set]` is represented by an entity. Item-level
+attribute sets used while recording metrics are referenced by the metric's
+standard `attributes` field instead. Composed scope attribute sets are
+flattened into the entity identity, along with
 `service.instance.id`. The hierarchy between scope entities is recorded in the
 `otap_dataflow.parent_entities` annotation. Semantic-convention v2 supports
 associating a metric or event with entities, but it does not define a native
@@ -58,6 +60,9 @@ temporalities, and wire identities are derived as follows:
   up/down counter uses `otap_dataflow.recording: additive`.
 - Gauges map to `Gauge`; histograms map to the pre-aggregated `Mmsc`
   implementation.
+- Histograms backed by a distribution tier use the sparse
+  `otap_dataflow.rust.instrument` override (`HistogramNormal` or
+  `HistogramDetailed`) and export as exponential histograms.
 - The wire scope is the metric-set identifier. The wire metric name is the
   canonical name after removing that prefix.
 
@@ -97,7 +102,7 @@ attributes, entities, metrics, events, generated metric shapes, availability,
 and entity associations.
 
 `cargo xtask check` includes the semantic-convention drift check through its
-structure-check step. CI pins Weaver to v0.24.2 and always passes `--v2`.
+structure-check step. CI pins Weaver to v0.25.1 and always passes `--v2`.
 
 ## Client SDK generation
 
@@ -109,7 +114,7 @@ markers. Generated events target a backend-independent sink defined by the
 experimental crate. The output is checked in for review but is not integrated
 into existing instrumentation.
 
-Run the generator from `rust/otap-dataflow` with Weaver v0.24.2:
+Run the generator from `rust/otap-dataflow` with Weaver v0.25.1:
 
 ```bash
 weaver registry generate rust crates/telemetry-sdk/src/generated \
@@ -138,4 +143,4 @@ definition in the same change. The drift checker reports the canonical name and
 the source-backed value expected for each mismatch. Validate with both commands
 above before submitting the change.
 
-[definition-v2]: https://github.com/open-telemetry/weaver/blob/v0.24.0/schemas/semconv-syntax.v2.md
+[definition-v2]: https://github.com/open-telemetry/weaver/blob/v0.25.1/schemas/semconv-syntax.v2.md

@@ -1,9 +1,9 @@
 file_format: definition/2
 metrics:
 - name: channel.receiver.capacity
-  brief: Maximum channel capacity (buffer size).
+  brief: Configured maximum number of buffered messages.
   instrument: gauge
-  unit: "{message}"
+  unit: '{message}'
   stability: development
   requirement_level: recommended
   entity_associations:
@@ -15,12 +15,15 @@ metrics:
       metric_value_type: int
     otap_dataflow:
       metric_set: channel.receiver
-- name: channel.receiver.recv.count
-  brief: Count of messages successfully received from the channel.
+- name: channel.receiver.messages
+  brief: Messages successfully dequeued from the channel.
   instrument: counter
-  unit: "{message}"
+  unit: '{message}'
   stability: development
   requirement_level: recommended
+  attributes:
+  - ref: signal
+    requirement_level: recommended
   entity_associations:
   - one_of:
     - otap.node.channel
@@ -30,25 +33,10 @@ metrics:
       metric_value_type: int
     otap_dataflow:
       metric_set: channel.receiver
-- name: channel.receiver.recv.error_closed
-  brief: Count of receive attempts after the channel was closed.
-  instrument: counter
-  unit: "{1}"
-  stability: development
-  requirement_level: recommended
-  entity_associations:
-  - one_of:
-    - otap.node.channel
-    - otap.extension.channel
-  annotations:
-    code_generation:
-      metric_value_type: int
-    otap_dataflow:
-      metric_set: channel.receiver
-- name: channel.receiver.recv.error_empty
-  brief: Count of receive attempts when the channel was empty.
-  instrument: counter
-  unit: "{1}"
+- name: channel.receiver.queue.depth
+  brief: Current number of messages buffered in the channel.
+  instrument: gauge
+  unit: '{message}'
   stability: development
   requirement_level: recommended
   entity_associations:

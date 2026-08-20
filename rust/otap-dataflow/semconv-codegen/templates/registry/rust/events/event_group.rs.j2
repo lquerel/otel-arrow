@@ -94,7 +94,7 @@ static {{ type_name | screaming_snake_case }}_DESCRIPTOR: EventDescriptor = Even
 {% for attribute in event_attributes %}
         EventAttributeDescriptor {
             key: {{ sdk.rust_string(attribute.key) }},
-            wire_key: {{ sdk.rust_string(attribute.annotations.otap_dataflow.wire.attribute_key) }},
+            wire_key: {{ sdk.rust_string(sdk.attribute_wire_key(attribute)) }},
             brief: {{ sdk.rust_string(attribute.brief) }},
             value_type: {{ sdk.event_attribute_value_type(attribute) }},
             requirement_level: {{ sdk.event_requirement_level(attribute.requirement_level) }},

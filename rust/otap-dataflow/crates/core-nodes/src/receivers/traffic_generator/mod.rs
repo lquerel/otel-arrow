@@ -5,6 +5,11 @@
 //! Note: This receiver will be replaced in the future with a more sophisticated implementation.
 //!
 
+otap_df_telemetry::otel_component_scope!(
+    urn = TRAFFIC_GENERATOR_RECEIVER_URN,
+    target = "otel.receiver.traffic_generator",
+);
+
 use crate::receivers::traffic_generator::config::Config;
 use async_trait::async_trait;
 use linkme::distributed_slice;
@@ -30,7 +35,6 @@ use otap_df_pdata::OtapPayload;
 #[cfg(test)]
 use otap_df_pdata::TryIntoWithOptions;
 use otap_df_telemetry::metrics::MetricSet;
-use otap_df_telemetry::{otel_debug, otel_info, otel_warn};
 use serde_json::Value;
 use std::collections::HashMap;
 use std::sync::Arc;
@@ -93,6 +97,7 @@ fn elapsed_nanos(start: StdInstant) -> f64 {
 /// Unsafe code is temporarily used here to allow the use of `distributed_slice` macro
 /// This macro is part of the `linkme` crate which is considered safe and well maintained.
 #[allow(unsafe_code)]
+#[otap_df_engine::component_inventory(category = Receiver)]
 #[distributed_slice(OTAP_RECEIVER_FACTORIES)]
 pub static TRAFFIC_GENERATOR_RECEIVER: ReceiverFactory<OtapPdata> = ReceiverFactory {
     name: TRAFFIC_GENERATOR_RECEIVER_URN,
@@ -170,7 +175,7 @@ impl TrafficGeneratorReceiver {
                     _ = run_ticker.tick() => {
                         let remaining_batches = current_run.len() + usize::from(next_pdata.is_some());
                         let remaining_items = current_run.remaining_signal_count()
-                            + next_pdata.as_ref().map_or(0, |pdata| pdata.num_items() as u64);
+                            + next_pdata.as_mut().map_or(0, |pdata| pdata.num_items() as u64);
                         if remaining_batches > 0 {
                             self.metrics.smooth_runs_behind.inc();
                             self.metrics
@@ -380,7 +385,7 @@ impl TrafficGeneratorReceiver {
     fn export_pdata(
         &mut self,
         handler: &local::EffectHandler<OtapPdata>,
-        pdata: OtapPdata,
+        mut pdata: OtapPdata,
     ) -> Result<Result<u64, OtapPdata>, Error> {
         let signal = pdata.signal_type();
         let count = pdata.num_items() as u64;
@@ -1253,7 +1258,7 @@ mod tests {
 
     /// Regression test: verifies that a non-terminal control message
     /// (CollectTelemetry) arriving during the rate-limit sleep does NOT
-    /// break the sleep early – the receiver should still respect the
+    /// break the sleep early - the receiver should still respect the
     /// original wait_till deadline.
     #[test]
     fn test_non_terminal_ctrl_msg_does_not_break_rate_limit_sleep() {

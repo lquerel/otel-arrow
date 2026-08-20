@@ -3,7 +3,7 @@ metrics:
 - name: node.completion_emission.notify_ack.routed
   brief: Count of successful `notify_ack` routings into the shared completion lane.
   instrument: counter
-  unit: "{message}"
+  unit: '{message}'
   stability: development
   requirement_level: recommended
   entity_associations:
@@ -18,7 +18,7 @@ metrics:
 - name: node.completion_emission.notify_nack.routed
   brief: Count of successful `notify_nack` routings into the shared completion lane.
   instrument: counter
-  unit: "{message}"
+  unit: '{message}'
   stability: development
   requirement_level: recommended
   entity_associations:

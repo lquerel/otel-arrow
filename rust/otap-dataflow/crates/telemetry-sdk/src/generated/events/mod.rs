@@ -6,6 +6,7 @@
 //! Typed events generated from semantic-convention event definitions.
 
 pub mod admin;
+pub mod contrib_extensions;
 pub mod contrib_nodes;
 pub mod controller;
 pub mod core_nodes;

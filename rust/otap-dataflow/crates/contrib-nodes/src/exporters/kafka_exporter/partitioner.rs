@@ -90,7 +90,7 @@ pub fn partition_key_for_signal(
     None
 }
 
-// TODO: Explore `partition_by_trace_id` — partition traces by hex-encoded trace ID.
+// TODO: Explore `partition_by_trace_id` -- partition traces by hex-encoded trace ID.
 //   Trace IDs are 16-byte FixedSizeBinary values in the OTAP Arrow Spans schema.
 //   A single OTAP batch can contain spans with different trace IDs, so implementing
 //   this requires splitting the batch into sub-batches grouped by trace ID (returning
@@ -267,7 +267,7 @@ mod tests {
 
         assert_eq!(
             key, expected,
-            "partition key no longer matches the documented hash pipeline — \
+            "partition key no longer matches the documented hash pipeline \u{2014} \
              this will cause a Kafka partition rebalance"
         );
         assert_eq!(key.len(), 16);
@@ -316,5 +316,61 @@ mod tests {
         let expected = partition_key_from_transport_headers(&headers);
         assert_eq!(key, expected);
         assert!(key.is_some());
+    }
+
+    // ---- Security: header values are never emitted in plaintext ----
+
+    /// Scenario: derive a partition key from a sensitive header value (an auth
+    /// token) and a sensitive header name.
+    /// Guarantees: the emitted key never contains the raw header value or name
+    /// as a substring -- it is a fixed-size hash, so a tenant/token identifier
+    /// is not exposed in plaintext via the Kafka record key.
+    #[test]
+    fn partition_key_never_contains_raw_header_value_or_name() {
+        let secret_value = "Bearer-super-secret-token-abcdef0123456789";
+        let sensitive_name = "authorization";
+        let mut headers = TransportHeaders::new();
+        headers.push(TransportHeader::text(
+            sensitive_name,
+            "Authorization",
+            secret_value.as_bytes(),
+        ));
+
+        let key = partition_key_from_transport_headers(&headers)
+            .expect("non-empty headers produce a key");
+
+        assert!(
+            !key.contains(secret_value),
+            "partition key must not leak the raw header value: {key}"
+        );
+        assert!(
+            !key.contains("secret") && !key.contains("token"),
+            "partition key must not leak fragments of the header value: {key}"
+        );
+        assert!(
+            !key.contains(sensitive_name),
+            "partition key must not leak the raw header name: {key}"
+        );
+        // It is a fixed-size lowercase-hex hash, not the plaintext.
+        assert_eq!(key.len(), 16);
+        assert!(key.chars().all(|c| c.is_ascii_hexdigit()));
+    }
+
+    /// Scenario: the same sensitive header set is hashed on two separate
+    /// requests.
+    /// Guarantees: the key is stable/deterministic (co-location works) while
+    /// remaining a non-plaintext hash -- the recorded fingerprinting tradeoff.
+    #[test]
+    fn partition_key_is_stable_hash_for_same_sensitive_header() {
+        let mut headers = TransportHeaders::new();
+        headers.push(TransportHeader::text(
+            "x_tenant_id",
+            "X-Tenant-Id",
+            b"tenant-super-secret",
+        ));
+        let k1 = partition_key_from_transport_headers(&headers).expect("key");
+        let k2 = partition_key_from_transport_headers(&headers).expect("key");
+        assert_eq!(k1, k2, "same headers must produce the same (stable) key");
+        assert!(!k1.contains("secret"), "key must not be plaintext: {k1}");
     }
 }

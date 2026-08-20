@@ -48,13 +48,6 @@ pub struct ExplicitMeasurementAttributes {
     pub outcome: LossOutcome,
 }
 
-/// Named measurement sets remain supported for existing metric declarations.
-#[attribute_set(name = "test.legacy.measurement", measurement)]
-#[derive(Debug, Clone, Copy)]
-pub struct LegacyMeasurementAttributes {
-    pub outcome: LossOutcome,
-}
-
 /// Registration fields also use their field names as keys without annotations.
 #[attribute_set(item, registration)]
 #[derive(Debug, Clone, Copy)]
@@ -69,7 +62,7 @@ pub struct TextRegistrationAttributes {
     pub label: String,
 }
 
-#[attribute_set(name = "test.scope")]
+#[attribute_set(scope, name = "test.scope")]
 #[derive(Debug, Clone)]
 pub struct TestScopeAttributes {
     pub scope: String,
@@ -252,14 +245,6 @@ fn signal_type_uses_canonical_values() {
 #[test]
 fn measurement_attribute_set_descriptors_and_bucketing() {
     assert_eq!(ImplicitMeasurementAttributes::CARDINALITY, 6);
-    assert_eq!(LegacyMeasurementAttributes::CARDINALITY, 2);
-    assert_eq!(
-        LegacyMeasurementAttributes {
-            outcome: LossOutcome::Dropped,
-        }
-        .schema_name(),
-        "test.legacy.measurement"
-    );
     let descriptors = ImplicitMeasurementAttributes::DESCRIPTORS;
     assert_eq!(descriptors.len(), 2);
     assert_eq!(descriptors[0].key, "signal");
@@ -415,7 +400,7 @@ fn measurement_metric_set_its_export_preserves_bucket_points() {
 
     let batch = registry.drain_metric_export_batch();
     assert_eq!(batch.metric_sets.len(), 2);
-    let encoder = MetricsOtlpEncoder::new(&ResourceLogs::default().encode_to_vec()).unwrap();
+    let encoder = MetricsOtlpEncoder::new(&ResourceLogs::default().encode_to_vec());
     let encoded = encoder.encode(&batch).unwrap().expect("non-empty metrics");
     let OtlpProtoBytes::ExportMetricsRequest(bytes) = encoded else {
         panic!("expected an OTLP metrics request");

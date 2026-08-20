@@ -74,7 +74,7 @@ impl TrafficProducer {
 
         // Build the production strategy.
         let shape = create_shape(traffic_config);
-        let strategy = match config.generation_strategy() {
+        let mut strategy = match config.generation_strategy() {
             GenerationStrategy::Fresh => ProductionStrategy::Fresh {
                 shape: shape.clone(),
             },
@@ -134,7 +134,7 @@ impl TrafficProducer {
 
         Ok(Some(TrafficRun {
             generator: &mut *self.generator,
-            strategy: &self.strategy,
+            strategy: &mut self.strategy,
             idx: 0,
         }))
     }
@@ -199,14 +199,14 @@ impl TrafficProducer {
 /// in the iterator within a second and grab a new iterator for the next second.
 pub struct TrafficRun<'a> {
     generator: &'a mut dyn SignalGenerator,
-    strategy: &'a ProductionStrategy,
+    strategy: &'a mut ProductionStrategy,
     idx: usize,
 }
 
 impl TrafficRun<'_> {
     /// The number of signals remaining in the current run.
     #[must_use]
-    pub fn remaining_signal_count(&self) -> u64 {
+    pub fn remaining_signal_count(&mut self) -> u64 {
         (self.idx..self.strategy.len())
             .map(|idx| self.strategy.size_at(idx) as u64)
             .sum()
@@ -254,7 +254,7 @@ fn create_shape(cfg: &TrafficConfig) -> TrafficShape {
 
     // When signals_per_second is None (uncapped / saturation mode), use a high
     // target so the shape contains enough batches to keep the open-loop sender
-    // busy for a full 1-second run window. We use 1024 × max_batch_size which
+    // busy for a full 1-second run window. We use 1024 x max_batch_size which
     // is large enough for any realistic throughput while remaining bounded for
     // PreGenerated mode memory usage.
     //
@@ -385,16 +385,16 @@ impl ProductionStrategy {
         }
     }
 
-    fn signal_count(&self) -> u64 {
+    fn signal_count(&mut self) -> u64 {
         match self {
             ProductionStrategy::Fresh { shape, .. } => shape.iter().map(|x| x.1 as u64).sum(),
             ProductionStrategy::Replay { payloads, .. } => {
-                payloads.iter().map(|x| x.num_items() as u64).sum()
+                payloads.iter_mut().map(|x| x.num_items() as u64).sum()
             }
         }
     }
 
-    fn size_at(&self, idx: usize) -> usize {
+    fn size_at(&mut self, idx: usize) -> usize {
         match self {
             ProductionStrategy::Fresh { shape, .. } => shape[idx].1,
             ProductionStrategy::Replay { payloads, .. } => payloads[idx].num_items(),
@@ -576,7 +576,7 @@ mod tests {
     /// Helper to build a `TrafficProducer` with a Fresh strategy from a config.
     fn fresh_producer(cfg: &TrafficConfig, max_signal_count: Option<u64>) -> TrafficProducer {
         let shape = create_shape(cfg);
-        let strategy = ProductionStrategy::Fresh { shape };
+        let mut strategy = ProductionStrategy::Fresh { shape };
         let signal_count = strategy.signal_count();
         TrafficProducer {
             strategy,
@@ -672,7 +672,7 @@ mod tests {
 
         let shape = create_shape(&cfg);
         let expected_batches = shape.len();
-        let strategy = ProductionStrategy::Fresh { shape };
+        let mut strategy = ProductionStrategy::Fresh { shape };
         let signal_count = strategy.signal_count();
         let mut producer = TrafficProducer {
             strategy,
@@ -724,7 +724,7 @@ mod tests {
             create_fresh_payloads(&mut generator, &shape).expect("pre-generation should succeed");
         let expected_count = payloads.len();
 
-        let strategy = ProductionStrategy::Replay {
+        let mut strategy = ProductionStrategy::Replay {
             payloads: payloads.clone(),
         };
         let signal_count = strategy.signal_count();
@@ -848,7 +848,7 @@ mod tests {
         use otap_df_pdata::proto::opentelemetry::logs::v1::LogsData;
         use prost::Message;
 
-        // synthetic_generator() has empty entries and rotation — no custom resource attrs.
+        // synthetic_generator() has empty entries and rotation -- no custom resource attrs.
         let mut generator = synthetic_generator();
 
         let batch_1 = generator
@@ -934,10 +934,10 @@ mod tests {
             .next_run()
             .expect("generation should succeed")
             .expect("should get a run");
-        let payloads: Vec<_> = run.collect();
+        let mut payloads: Vec<_> = run.collect();
         let total: usize = payloads
-            .iter()
-            .map(|r| r.as_ref().unwrap().num_items())
+            .iter_mut()
+            .map(|r| r.as_mut().unwrap().num_items())
             .sum();
         assert_eq!(total, 7, "truncated run should have exactly 7 signals");
 

@@ -2600,6 +2600,99 @@ impl QuiverWalEntryDecode {
     }
 }
 
+/// Emitted by OTAP Dataflow as `quiver.wal.expiry.accounting`.
+#[derive(Debug, Clone)]
+pub struct QuiverWalExpiryAccounting {
+    /// The reason value recorded by OTAP Dataflow internal telemetry.
+    pub reason: otap_df_telemetry::attributes::AttributeValue,
+    /// The sequence value recorded by OTAP Dataflow internal telemetry.
+    pub sequence: otap_df_telemetry::attributes::AttributeValue,
+    /// The slot_count value recorded by OTAP Dataflow internal telemetry.
+    pub slot_count: otap_df_telemetry::attributes::AttributeValue,
+}
+
+/// Marker implemented only by entity types allowed by `quiver.wal.expiry.accounting`.
+pub trait QuiverWalExpiryAccountingAssociatedEntity: entities::SemanticEntity {}
+
+impl QuiverWalExpiryAccountingAssociatedEntity for entities::NodeAttributeSet {}
+
+impl QuiverWalExpiryAccountingAssociatedEntity for entities::NodeWithCustomAttributeSet {}
+
+static QUIVER_WAL_EXPIRY_ACCOUNTING_DESCRIPTOR: EventDescriptor = EventDescriptor {
+    name: "quiver.wal.expiry.accounting",
+    wire_name: "quiver.wal.expiry.accounting",
+    brief: "Emitted by OTAP Dataflow as `quiver.wal.expiry.accounting`.",
+    stability: "development",
+    requirement_level: EventRequirementLevel::Recommended,
+    scope_names: &["otap-df-quiver"],
+    severity_levels: &[EventSeverity::Warn],
+    sources: &["crates/quiver/src/engine.rs"],
+    availability: &[],
+    entity_associations: &["otap.node", "otap.node.custom"],
+    attributes: &[
+        EventAttributeDescriptor {
+            key: "reason",
+            wire_key: "reason",
+            brief: "The reason value recorded by OTAP Dataflow internal telemetry.",
+            value_type: otap_df_telemetry::descriptor::AttributeValueType::Any,
+            requirement_level: EventRequirementLevel::Required,
+        },
+        EventAttributeDescriptor {
+            key: "sequence",
+            wire_key: "sequence",
+            brief: "The sequence value recorded by OTAP Dataflow internal telemetry.",
+            value_type: otap_df_telemetry::descriptor::AttributeValueType::Any,
+            requirement_level: EventRequirementLevel::Required,
+        },
+        EventAttributeDescriptor {
+            key: "slot_count",
+            wire_key: "slot_count",
+            brief: "The slot_count value recorded by OTAP Dataflow internal telemetry.",
+            value_type: otap_df_telemetry::descriptor::AttributeValueType::Any,
+            requirement_level: EventRequirementLevel::Required,
+        },
+    ],
+};
+
+impl EventAttributes for QuiverWalExpiryAccounting {
+    #[inline]
+    fn visit_attributes(
+        &self,
+        visitor: &mut dyn FnMut(&'static EventAttributeDescriptor, EventAttributeValueRef<'_>),
+    ) {
+        visitor(
+            &QUIVER_WAL_EXPIRY_ACCOUNTING_DESCRIPTOR.attributes[0],
+            EventAttributeValueRef::Any(&self.reason),
+        );
+        visitor(
+            &QUIVER_WAL_EXPIRY_ACCOUNTING_DESCRIPTOR.attributes[1],
+            EventAttributeValueRef::Any(&self.sequence),
+        );
+        visitor(
+            &QUIVER_WAL_EXPIRY_ACCOUNTING_DESCRIPTOR.attributes[2],
+            EventAttributeValueRef::Any(&self.slot_count),
+        );
+    }
+}
+
+impl SemanticEvent for QuiverWalExpiryAccounting {
+    const DESCRIPTOR: &'static EventDescriptor = &QUIVER_WAL_EXPIRY_ACCOUNTING_DESCRIPTOR;
+}
+
+impl QuiverWalExpiryAccounting {
+    /// Static semantic-convention descriptor for this event.
+    pub const DESCRIPTOR: &'static EventDescriptor = &QUIVER_WAL_EXPIRY_ACCOUNTING_DESCRIPTOR;
+
+    /// Sends this payload at the `warn` level with a compatible entity.
+    pub fn emit_warn<S, E>(&self, client: &mut EventClient<S>, entity: &E)
+    where
+        S: EventSink,
+        E: QuiverWalExpiryAccountingAssociatedEntity,
+    {
+        client.emit(entity, self, EventLevel::Warn);
+    }
+}
+
 /// The quiver.wal.file.init internal telemetry event occurred.
 #[derive(Debug, Clone)]
 pub struct QuiverWalFileInit {
@@ -3259,6 +3352,99 @@ impl QuiverWalReplay {
     where
         S: EventSink,
         E: QuiverWalReplayAssociatedEntity,
+    {
+        client.emit(entity, self, EventLevel::Warn);
+    }
+}
+
+/// Emitted by OTAP Dataflow as `quiver.wal.replay.accounting`.
+#[derive(Debug, Clone)]
+pub struct QuiverWalReplayAccounting {
+    /// The reason value recorded by OTAP Dataflow internal telemetry.
+    pub reason: otap_df_telemetry::attributes::AttributeValue,
+    /// The sequence value recorded by OTAP Dataflow internal telemetry.
+    pub sequence: otap_df_telemetry::attributes::AttributeValue,
+    /// The slot_count value recorded by OTAP Dataflow internal telemetry.
+    pub slot_count: otap_df_telemetry::attributes::AttributeValue,
+}
+
+/// Marker implemented only by entity types allowed by `quiver.wal.replay.accounting`.
+pub trait QuiverWalReplayAccountingAssociatedEntity: entities::SemanticEntity {}
+
+impl QuiverWalReplayAccountingAssociatedEntity for entities::NodeAttributeSet {}
+
+impl QuiverWalReplayAccountingAssociatedEntity for entities::NodeWithCustomAttributeSet {}
+
+static QUIVER_WAL_REPLAY_ACCOUNTING_DESCRIPTOR: EventDescriptor = EventDescriptor {
+    name: "quiver.wal.replay.accounting",
+    wire_name: "quiver.wal.replay.accounting",
+    brief: "Emitted by OTAP Dataflow as `quiver.wal.replay.accounting`.",
+    stability: "development",
+    requirement_level: EventRequirementLevel::Recommended,
+    scope_names: &["otap-df-quiver"],
+    severity_levels: &[EventSeverity::Warn],
+    sources: &["crates/quiver/src/engine.rs"],
+    availability: &[],
+    entity_associations: &["otap.node", "otap.node.custom"],
+    attributes: &[
+        EventAttributeDescriptor {
+            key: "reason",
+            wire_key: "reason",
+            brief: "The reason value recorded by OTAP Dataflow internal telemetry.",
+            value_type: otap_df_telemetry::descriptor::AttributeValueType::Any,
+            requirement_level: EventRequirementLevel::Required,
+        },
+        EventAttributeDescriptor {
+            key: "sequence",
+            wire_key: "sequence",
+            brief: "The sequence value recorded by OTAP Dataflow internal telemetry.",
+            value_type: otap_df_telemetry::descriptor::AttributeValueType::Any,
+            requirement_level: EventRequirementLevel::Required,
+        },
+        EventAttributeDescriptor {
+            key: "slot_count",
+            wire_key: "slot_count",
+            brief: "The slot_count value recorded by OTAP Dataflow internal telemetry.",
+            value_type: otap_df_telemetry::descriptor::AttributeValueType::Any,
+            requirement_level: EventRequirementLevel::Required,
+        },
+    ],
+};
+
+impl EventAttributes for QuiverWalReplayAccounting {
+    #[inline]
+    fn visit_attributes(
+        &self,
+        visitor: &mut dyn FnMut(&'static EventAttributeDescriptor, EventAttributeValueRef<'_>),
+    ) {
+        visitor(
+            &QUIVER_WAL_REPLAY_ACCOUNTING_DESCRIPTOR.attributes[0],
+            EventAttributeValueRef::Any(&self.reason),
+        );
+        visitor(
+            &QUIVER_WAL_REPLAY_ACCOUNTING_DESCRIPTOR.attributes[1],
+            EventAttributeValueRef::Any(&self.sequence),
+        );
+        visitor(
+            &QUIVER_WAL_REPLAY_ACCOUNTING_DESCRIPTOR.attributes[2],
+            EventAttributeValueRef::Any(&self.slot_count),
+        );
+    }
+}
+
+impl SemanticEvent for QuiverWalReplayAccounting {
+    const DESCRIPTOR: &'static EventDescriptor = &QUIVER_WAL_REPLAY_ACCOUNTING_DESCRIPTOR;
+}
+
+impl QuiverWalReplayAccounting {
+    /// Static semantic-convention descriptor for this event.
+    pub const DESCRIPTOR: &'static EventDescriptor = &QUIVER_WAL_REPLAY_ACCOUNTING_DESCRIPTOR;
+
+    /// Sends this payload at the `warn` level with a compatible entity.
+    pub fn emit_warn<S, E>(&self, client: &mut EventClient<S>, entity: &E)
+    where
+        S: EventSink,
+        E: QuiverWalReplayAccountingAssociatedEntity,
     {
         client.emit(entity, self, EventLevel::Warn);
     }

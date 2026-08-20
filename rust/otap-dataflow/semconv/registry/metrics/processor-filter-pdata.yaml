@@ -1,86 +1,14 @@
 file_format: definition/2
 metrics:
-- name: processor.filter.pdata.log.signals.consumed
-  brief: Number of log signals consumed
+- name: processor.filter.pdata.dropped.items
+  brief: Number of signal items (log records, spans, or metric data points) a decision node chose to drop.
   instrument: counter
-  unit: "{log}"
+  unit: '{item}'
   stability: development
   requirement_level: recommended
-  entity_associations:
-  - one_of:
-    - otap.node
-    - otap.node.custom
-  annotations:
-    code_generation:
-      metric_value_type: int
-    otap_dataflow:
-      metric_set: processor.filter.pdata
-- name: processor.filter.pdata.log.signals.filtered
-  brief: Number of log signals filtered
-  instrument: counter
-  unit: "{log}"
-  stability: development
-  requirement_level: recommended
-  entity_associations:
-  - one_of:
-    - otap.node
-    - otap.node.custom
-  annotations:
-    code_generation:
-      metric_value_type: int
-    otap_dataflow:
-      metric_set: processor.filter.pdata
-- name: processor.filter.pdata.metric.signals.consumed
-  brief: Number of metric signals consumed
-  instrument: counter
-  unit: "{metric}"
-  stability: development
-  requirement_level: recommended
-  entity_associations:
-  - one_of:
-    - otap.node
-    - otap.node.custom
-  annotations:
-    code_generation:
-      metric_value_type: int
-    otap_dataflow:
-      metric_set: processor.filter.pdata
-- name: processor.filter.pdata.metric.signals.filtered
-  brief: Number of metric signals filtered
-  instrument: counter
-  unit: "{metric}"
-  stability: development
-  requirement_level: recommended
-  entity_associations:
-  - one_of:
-    - otap.node
-    - otap.node.custom
-  annotations:
-    code_generation:
-      metric_value_type: int
-    otap_dataflow:
-      metric_set: processor.filter.pdata
-- name: processor.filter.pdata.span.signals.consumed
-  brief: Number of span signals consumed
-  instrument: counter
-  unit: "{span}"
-  stability: development
-  requirement_level: recommended
-  entity_associations:
-  - one_of:
-    - otap.node
-    - otap.node.custom
-  annotations:
-    code_generation:
-      metric_value_type: int
-    otap_dataflow:
-      metric_set: processor.filter.pdata
-- name: processor.filter.pdata.span.signals.filtered
-  brief: Number of span signals filtered
-  instrument: counter
-  unit: "{span}"
-  stability: development
-  requirement_level: recommended
+  attributes:
+  - ref: signal
+    requirement_level: recommended
   entity_associations:
   - one_of:
     - otap.node

@@ -11,69 +11,6 @@ use crate::event::{
     EventDescriptor, EventLevel, EventRequirementLevel, EventSeverity, EventSink, SemanticEvent,
 };
 
-/// The encoder.sdk_resource_value internal telemetry event occurred.
-#[derive(Debug, Clone)]
-pub struct EncoderSdkResourceValue {
-    /// The value value recorded by OTAP Dataflow internal telemetry.
-    pub value: String,
-}
-
-/// Marker implemented only by entity types allowed by `encoder.sdk_resource_value`.
-pub trait EncoderSdkResourceValueAssociatedEntity: entities::SemanticEntity {}
-
-impl EncoderSdkResourceValueAssociatedEntity for entities::EngineEntityAttributeSet {}
-
-static ENCODER_SDK_RESOURCE_VALUE_DESCRIPTOR: EventDescriptor = EventDescriptor {
-    name: "encoder.sdk_resource_value",
-    wire_name: "encoder.sdk_resource_value",
-    brief: "The encoder.sdk_resource_value internal telemetry event occurred.",
-    stability: "development",
-    requirement_level: EventRequirementLevel::Recommended,
-    scope_names: &["otap-df-telemetry"],
-    severity_levels: &[EventSeverity::Error],
-    sources: &["crates/telemetry/src/self_tracing/encoder.rs"],
-    availability: &[],
-    entity_associations: &["otap.engine"],
-    attributes: &[EventAttributeDescriptor {
-        key: "value",
-        wire_key: "value",
-        brief: "The value value recorded by OTAP Dataflow internal telemetry.",
-        value_type: otap_df_telemetry::descriptor::AttributeValueType::String,
-        requirement_level: EventRequirementLevel::Required,
-    }],
-};
-
-impl EventAttributes for EncoderSdkResourceValue {
-    #[inline]
-    fn visit_attributes(
-        &self,
-        visitor: &mut dyn FnMut(&'static EventAttributeDescriptor, EventAttributeValueRef<'_>),
-    ) {
-        visitor(
-            &ENCODER_SDK_RESOURCE_VALUE_DESCRIPTOR.attributes[0],
-            EventAttributeValueRef::String(self.value.as_str()),
-        );
-    }
-}
-
-impl SemanticEvent for EncoderSdkResourceValue {
-    const DESCRIPTOR: &'static EventDescriptor = &ENCODER_SDK_RESOURCE_VALUE_DESCRIPTOR;
-}
-
-impl EncoderSdkResourceValue {
-    /// Static semantic-convention descriptor for this event.
-    pub const DESCRIPTOR: &'static EventDescriptor = &ENCODER_SDK_RESOURCE_VALUE_DESCRIPTOR;
-
-    /// Sends this payload at the `error` level with a compatible entity.
-    pub fn emit_error<S, E>(&self, client: &mut EventClient<S>, entity: &E)
-    where
-        S: EventSink,
-        E: EncoderSdkResourceValueAssociatedEntity,
-    {
-        client.emit(entity, self, EventLevel::Error);
-    }
-}
-
 /// The engine.channel.disconnected internal telemetry event occurred.
 #[derive(Debug, Clone)]
 pub struct EngineChannelDisconnected {

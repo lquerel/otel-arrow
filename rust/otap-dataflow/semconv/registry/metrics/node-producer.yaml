@@ -1,13 +1,18 @@
 file_format: definition/2
 metrics:
 - name: node.producer.produced.duration
-  brief: 'Duration from production until the corresponding ack or nack is routed,
-    in nanoseconds. This is reported at the detailed level, only in receivers. Processors
-    report consumed_refused. TODO: make this Option<Box<Mmsc or Histogram>>.'
+  brief: 'Duration from production until the corresponding ack or nack is routed, in nanoseconds. This
+    is reported at the detailed level, only in receivers. Processors report `consumed.messages`. TODO:
+    make this Option<Box<Mmsc or Histogram>>.'
   instrument: histogram
   unit: ns
   stability: development
   requirement_level: recommended
+  attributes:
+  - ref: outcome
+    requirement_level: recommended
+  - ref: signal
+    requirement_level: recommended
   entity_associations:
   - otap.node.channel
   annotations:
@@ -17,12 +22,17 @@ metrics:
       metric_set: node.producer
       rust:
         field: produced_duration_ns
-- name: node.producer.produced.failure
-  brief: Produced requests that failed, this are retryable errors.
+- name: node.producer.produced.items
+  brief: Produced signal items, grouped by the `signal` datapoint attribute.
   instrument: counter
-  unit: "{requests}"
+  unit: '{item}'
   stability: development
   requirement_level: recommended
+  attributes:
+  - ref: outcome
+    requirement_level: recommended
+  - ref: signal
+    requirement_level: recommended
   entity_associations:
   - otap.node.channel
   annotations:
@@ -30,25 +40,17 @@ metrics:
       metric_value_type: int
     otap_dataflow:
       metric_set: node.producer
-- name: node.producer.produced.refused
-  brief: Produced requests refused, also known as permanent failures.
+- name: node.producer.produced.messages
+  brief: Produced messages, grouped by `signal` and `outcome` datapoint attributes.
   instrument: counter
-  unit: "{requests}"
+  unit: '{message}'
   stability: development
   requirement_level: recommended
-  entity_associations:
-  - otap.node.channel
-  annotations:
-    code_generation:
-      metric_value_type: int
-    otap_dataflow:
-      metric_set: node.producer
-- name: node.producer.produced.success
-  brief: Produced requests acknowledged by downstream.
-  instrument: counter
-  unit: "{requests}"
-  stability: development
-  requirement_level: recommended
+  attributes:
+  - ref: outcome
+    requirement_level: recommended
+  - ref: signal
+    requirement_level: recommended
   entity_associations:
   - otap.node.channel
   annotations:

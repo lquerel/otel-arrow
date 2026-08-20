@@ -30,71 +30,111 @@ impl AssociatedEntity for entities::NodeWithCustomAttributeSet {}
 /// Strongly typed values for the `processor.transform` metric set.
 #[derive(Debug, Default, Clone)]
 #[repr(C, align(64))]
-pub struct Metrics {
-    /// Number of failed transform attempts.
-    pub msgs_transform_failed: otap_df_telemetry::instrument::Counter<u64>,
-    /// Number of messages successfully transformed.
-    pub msgs_transformed: otap_df_telemetry::instrument::Counter<u64>,
+pub struct TransformFailureMetrics {
+    /// Number of failed transform operations.
+    pub failures: otap_df_telemetry::instrument::Counter<u64>,
 }
 
 /// Per-field conditional availability in descriptor order.
-pub const METRICS_METRIC_AVAILABILITY: &[Option<&str>] = &[AVAILABILITY, AVAILABILITY];
+pub const TRANSFORM_FAILURE_METRICS_METRIC_AVAILABILITY: &[Option<&str>] = &[AVAILABILITY];
 
-static METRICS_DESCRIPTOR: MetricsDescriptor = MetricsDescriptor {
+static TRANSFORM_FAILURE_METRICS_DESCRIPTOR: MetricsDescriptor = MetricsDescriptor {
     name: METRIC_SET,
-    metrics: &[
-        MetricsField {
-            name: "msgs.transform.failed",
-            unit: "{msg}",
-            brief: "Number of failed transform attempts.",
-            instrument: Instrument::Counter,
-            temporality: Some(otap_df_telemetry::descriptor::Temporality::Delta),
-            value_type: MetricValueType::U64,
-        },
-        MetricsField {
-            name: "msgs.transformed",
-            unit: "{msg}",
-            brief: "Number of messages successfully transformed.",
-            instrument: Instrument::Counter,
-            temporality: Some(otap_df_telemetry::descriptor::Temporality::Delta),
-            value_type: MetricValueType::U64,
-        },
-    ],
+    metrics: &[MetricsField {
+        name: "failures",
+        unit: "{operation}",
+        brief: "Number of failed transform operations.",
+        instrument: Instrument::Counter,
+        temporality: Some(otap_df_telemetry::descriptor::Temporality::Delta),
+        value_type: MetricValueType::U64,
+    }],
 };
 
-impl MetricSetHandler for Metrics {
+impl MetricSetHandler for TransformFailureMetrics {
     #[inline]
     fn descriptor(&self) -> &'static MetricsDescriptor {
-        &METRICS_DESCRIPTOR
+        &TRANSFORM_FAILURE_METRICS_DESCRIPTOR
     }
 
     #[inline]
     fn snapshot_values(&self) -> Vec<MetricValue> {
-        vec![
-            MetricValue::from(self.msgs_transform_failed.get()),
-            MetricValue::from(self.msgs_transformed.get()),
-        ]
+        vec![MetricValue::from(self.failures.get())]
     }
 
     #[inline]
     fn clear_values(&mut self) {
-        self.msgs_transform_failed.reset();
-        self.msgs_transformed.reset();
+        self.failures.reset();
     }
 
     #[inline]
     fn needs_flush(&self) -> bool {
-        if !MetricValue::from(self.msgs_transform_failed.get()).is_zero() {
-            return true;
-        }
-        if !MetricValue::from(self.msgs_transformed.get()).is_zero() {
+        if !MetricValue::from(self.failures.get()).is_zero() {
             return true;
         }
         false
     }
 }
 
-impl Metrics {
+impl TransformFailureMetrics {
+    /// Registers this metric set against a semantically compatible entity.
+    #[must_use]
+    pub fn register<E>(registry: &TelemetryRegistryHandle, entity: E) -> MetricSet<Self>
+    where
+        E: AssociatedEntity,
+    {
+        registry.register_metric_set(entity)
+    }
+}
+
+/// Strongly typed values for the `processor.transform` metric set.
+#[derive(Debug, Default, Clone)]
+#[repr(C, align(64))]
+pub struct TransformOperationMetrics {
+    /// Number of matching input messages whose local transform operation terminated.
+    pub operations: otap_df_telemetry::instrument::Counter<u64>,
+}
+
+/// Per-field conditional availability in descriptor order.
+pub const TRANSFORM_OPERATION_METRICS_METRIC_AVAILABILITY: &[Option<&str>] = &[AVAILABILITY];
+
+static TRANSFORM_OPERATION_METRICS_DESCRIPTOR: MetricsDescriptor = MetricsDescriptor {
+    name: METRIC_SET,
+    metrics: &[MetricsField {
+        name: "operations",
+        unit: "{operation}",
+        brief: "Number of matching input messages whose local transform operation terminated.",
+        instrument: Instrument::Counter,
+        temporality: Some(otap_df_telemetry::descriptor::Temporality::Delta),
+        value_type: MetricValueType::U64,
+    }],
+};
+
+impl MetricSetHandler for TransformOperationMetrics {
+    #[inline]
+    fn descriptor(&self) -> &'static MetricsDescriptor {
+        &TRANSFORM_OPERATION_METRICS_DESCRIPTOR
+    }
+
+    #[inline]
+    fn snapshot_values(&self) -> Vec<MetricValue> {
+        vec![MetricValue::from(self.operations.get())]
+    }
+
+    #[inline]
+    fn clear_values(&mut self) {
+        self.operations.reset();
+    }
+
+    #[inline]
+    fn needs_flush(&self) -> bool {
+        if !MetricValue::from(self.operations.get()).is_zero() {
+            return true;
+        }
+        false
+    }
+}
+
+impl TransformOperationMetrics {
     /// Registers this metric set against a semantically compatible entity.
     #[must_use]
     pub fn register<E>(registry: &TelemetryRegistryHandle, entity: E) -> MetricSet<Self>

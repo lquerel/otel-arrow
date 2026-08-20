@@ -3,7 +3,7 @@ metrics:
 - name: receiver.journald.acks
   brief: Number of downstream Acks observed.
   instrument: counter
-  unit: "{ack}"
+  unit: '{ack}'
   stability: development
   requirement_level: recommended
   entity_associations:
@@ -18,7 +18,7 @@ metrics:
 - name: receiver.journald.batches.sent
   brief: Number of log batches emitted downstream.
   instrument: counter
-  unit: "{batch}"
+  unit: '{batch}'
   stability: development
   requirement_level: recommended
   entity_associations:
@@ -33,7 +33,7 @@ metrics:
 - name: receiver.journald.checkpoint.failures
   brief: Number of durable cursor commit failures.
   instrument: counter
-  unit: "{failure}"
+  unit: '{failure}'
   stability: development
   requirement_level: recommended
   entity_associations:
@@ -48,7 +48,7 @@ metrics:
 - name: receiver.journald.cursor.commits
   brief: Number of durable cursor commits completed.
   instrument: counter
-  unit: "{commit}"
+  unit: '{commit}'
   stability: development
   requirement_level: recommended
   entity_associations:
@@ -63,7 +63,7 @@ metrics:
 - name: receiver.journald.drains
   brief: Number of clean drain transitions.
   instrument: counter
-  unit: "{drain}"
+  unit: '{drain}'
   stability: development
   requirement_level: recommended
   entity_associations:
@@ -78,7 +78,7 @@ metrics:
 - name: receiver.journald.nacks
   brief: Number of downstream Nacks observed.
   instrument: counter
-  unit: "{nack}"
+  unit: '{nack}'
   stability: development
   requirement_level: recommended
   entity_associations:
@@ -93,7 +93,7 @@ metrics:
 - name: receiver.journald.records.sent
   brief: Number of log records emitted downstream.
   instrument: counter
-  unit: "{record}"
+  unit: '{record}'
   stability: development
   requirement_level: recommended
   entity_associations:
@@ -108,7 +108,7 @@ metrics:
 - name: receiver.journald.rewinds
   brief: Number of times the worker was asked to rewind after a Nack.
   instrument: counter
-  unit: "{rewind}"
+  unit: '{rewind}'
   stability: development
   requirement_level: recommended
   entity_associations:
@@ -123,7 +123,7 @@ metrics:
 - name: receiver.journald.shutdowns
   brief: Number of clean shutdown transitions.
   instrument: counter
-  unit: "{shutdown}"
+  unit: '{shutdown}'
   stability: development
   requirement_level: recommended
   entity_associations:
@@ -138,7 +138,7 @@ metrics:
 - name: receiver.journald.source.dropped.fields
   brief: Number of journald fields dropped by extraction safety limits.
   instrument: counter
-  unit: "{field}"
+  unit: '{field}'
   stability: development
   requirement_level: recommended
   entity_associations:
@@ -153,7 +153,7 @@ metrics:
 - name: receiver.journald.source.failures
   brief: Number of source read failures reported by the worker.
   instrument: counter
-  unit: "{failure}"
+  unit: '{failure}'
   stability: development
   requirement_level: recommended
   entity_associations:
@@ -168,7 +168,7 @@ metrics:
 - name: receiver.journald.starts
   brief: Number of times the receiver was started.
   instrument: counter
-  unit: "{start}"
+  unit: '{start}'
   stability: development
   requirement_level: recommended
   entity_associations:

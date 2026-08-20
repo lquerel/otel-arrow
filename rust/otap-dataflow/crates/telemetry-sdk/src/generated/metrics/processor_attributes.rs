@@ -30,202 +30,53 @@ impl AssociatedEntity for entities::NodeWithCustomAttributeSet {}
 /// Strongly typed values for the `processor.attributes` metric set.
 #[derive(Debug, Default, Clone)]
 #[repr(C, align(64))]
-pub struct AttributesProcessorMetrics {
-    /// Total number of attribute entries actually deleted.
-    pub deleted_entries: otap_df_telemetry::instrument::Counter<u64>,
-    /// Number of times transforms were applied to resource-level payloads.
-    pub domains_resource: otap_df_telemetry::instrument::Counter<u64>,
-    /// Number of times transforms were applied to scope-level payloads.
-    pub domains_scope: otap_df_telemetry::instrument::Counter<u64>,
-    /// Number of times transforms were applied to signal-level payloads.
-    pub domains_signal: otap_df_telemetry::instrument::Counter<u64>,
-    /// Total number of attribute entries actually hashed.
-    pub hashed_entries: otap_df_telemetry::instrument::Counter<u64>,
-    /// Total number of attribute entries actually inserted.
-    pub inserted_entries: otap_df_telemetry::instrument::Counter<u64>,
-    /// Total number of attribute entries actually renamed.
-    pub renamed_entries: otap_df_telemetry::instrument::Counter<u64>,
-    /// Number of failed transform attempts.
-    pub transform_failed: otap_df_telemetry::instrument::Counter<u64>,
-    /// Total number of attribute entries actually updated.
-    pub updated_entries: otap_df_telemetry::instrument::Counter<u64>,
-    /// Total number of attribute entries actually upserted.
-    pub upserted_entries: otap_df_telemetry::instrument::Counter<u64>,
+pub struct AttributesProcessorTransformMetrics {
+    /// Number of attribute transformations attempted by the processor.
+    pub transforms: otap_df_telemetry::instrument::Counter<u64>,
 }
 
 /// Per-field conditional availability in descriptor order.
-pub const ATTRIBUTES_PROCESSOR_METRICS_METRIC_AVAILABILITY: &[Option<&str>] = &[
-    AVAILABILITY,
-    AVAILABILITY,
-    AVAILABILITY,
-    AVAILABILITY,
-    AVAILABILITY,
-    AVAILABILITY,
-    AVAILABILITY,
-    AVAILABILITY,
-    AVAILABILITY,
-    AVAILABILITY,
-];
+pub const ATTRIBUTES_PROCESSOR_TRANSFORM_METRICS_METRIC_AVAILABILITY: &[Option<&str>] =
+    &[AVAILABILITY];
 
-static ATTRIBUTES_PROCESSOR_METRICS_DESCRIPTOR: MetricsDescriptor = MetricsDescriptor {
+static ATTRIBUTES_PROCESSOR_TRANSFORM_METRICS_DESCRIPTOR: MetricsDescriptor = MetricsDescriptor {
     name: METRIC_SET,
-    metrics: &[
-        MetricsField {
-            name: "deleted.entries",
-            unit: "{attr}",
-            brief: "Total number of attribute entries actually deleted.",
-            instrument: Instrument::Counter,
-            temporality: Some(otap_df_telemetry::descriptor::Temporality::Delta),
-            value_type: MetricValueType::U64,
-        },
-        MetricsField {
-            name: "domains.resource",
-            unit: "{apply}",
-            brief: "Number of times transforms were applied to resource-level payloads.",
-            instrument: Instrument::Counter,
-            temporality: Some(otap_df_telemetry::descriptor::Temporality::Delta),
-            value_type: MetricValueType::U64,
-        },
-        MetricsField {
-            name: "domains.scope",
-            unit: "{apply}",
-            brief: "Number of times transforms were applied to scope-level payloads.",
-            instrument: Instrument::Counter,
-            temporality: Some(otap_df_telemetry::descriptor::Temporality::Delta),
-            value_type: MetricValueType::U64,
-        },
-        MetricsField {
-            name: "domains.signal",
-            unit: "{apply}",
-            brief: "Number of times transforms were applied to signal-level payloads.",
-            instrument: Instrument::Counter,
-            temporality: Some(otap_df_telemetry::descriptor::Temporality::Delta),
-            value_type: MetricValueType::U64,
-        },
-        MetricsField {
-            name: "hashed.entries",
-            unit: "{attr}",
-            brief: "Total number of attribute entries actually hashed.",
-            instrument: Instrument::Counter,
-            temporality: Some(otap_df_telemetry::descriptor::Temporality::Delta),
-            value_type: MetricValueType::U64,
-        },
-        MetricsField {
-            name: "inserted.entries",
-            unit: "{attr}",
-            brief: "Total number of attribute entries actually inserted.",
-            instrument: Instrument::Counter,
-            temporality: Some(otap_df_telemetry::descriptor::Temporality::Delta),
-            value_type: MetricValueType::U64,
-        },
-        MetricsField {
-            name: "renamed.entries",
-            unit: "{attr}",
-            brief: "Total number of attribute entries actually renamed.",
-            instrument: Instrument::Counter,
-            temporality: Some(otap_df_telemetry::descriptor::Temporality::Delta),
-            value_type: MetricValueType::U64,
-        },
-        MetricsField {
-            name: "transform.failed",
-            unit: "{op}",
-            brief: "Number of failed transform attempts.",
-            instrument: Instrument::Counter,
-            temporality: Some(otap_df_telemetry::descriptor::Temporality::Delta),
-            value_type: MetricValueType::U64,
-        },
-        MetricsField {
-            name: "updated.entries",
-            unit: "{attr}",
-            brief: "Total number of attribute entries actually updated.",
-            instrument: Instrument::Counter,
-            temporality: Some(otap_df_telemetry::descriptor::Temporality::Delta),
-            value_type: MetricValueType::U64,
-        },
-        MetricsField {
-            name: "upserted.entries",
-            unit: "{attr}",
-            brief: "Total number of attribute entries actually upserted.",
-            instrument: Instrument::Counter,
-            temporality: Some(otap_df_telemetry::descriptor::Temporality::Delta),
-            value_type: MetricValueType::U64,
-        },
-    ],
+    metrics: &[MetricsField {
+        name: "transforms",
+        unit: "{transform}",
+        brief: "Number of attribute transformations attempted by the processor.",
+        instrument: Instrument::Counter,
+        temporality: Some(otap_df_telemetry::descriptor::Temporality::Delta),
+        value_type: MetricValueType::U64,
+    }],
 };
 
-impl MetricSetHandler for AttributesProcessorMetrics {
+impl MetricSetHandler for AttributesProcessorTransformMetrics {
     #[inline]
     fn descriptor(&self) -> &'static MetricsDescriptor {
-        &ATTRIBUTES_PROCESSOR_METRICS_DESCRIPTOR
+        &ATTRIBUTES_PROCESSOR_TRANSFORM_METRICS_DESCRIPTOR
     }
 
     #[inline]
     fn snapshot_values(&self) -> Vec<MetricValue> {
-        vec![
-            MetricValue::from(self.deleted_entries.get()),
-            MetricValue::from(self.domains_resource.get()),
-            MetricValue::from(self.domains_scope.get()),
-            MetricValue::from(self.domains_signal.get()),
-            MetricValue::from(self.hashed_entries.get()),
-            MetricValue::from(self.inserted_entries.get()),
-            MetricValue::from(self.renamed_entries.get()),
-            MetricValue::from(self.transform_failed.get()),
-            MetricValue::from(self.updated_entries.get()),
-            MetricValue::from(self.upserted_entries.get()),
-        ]
+        vec![MetricValue::from(self.transforms.get())]
     }
 
     #[inline]
     fn clear_values(&mut self) {
-        self.deleted_entries.reset();
-        self.domains_resource.reset();
-        self.domains_scope.reset();
-        self.domains_signal.reset();
-        self.hashed_entries.reset();
-        self.inserted_entries.reset();
-        self.renamed_entries.reset();
-        self.transform_failed.reset();
-        self.updated_entries.reset();
-        self.upserted_entries.reset();
+        self.transforms.reset();
     }
 
     #[inline]
     fn needs_flush(&self) -> bool {
-        if !MetricValue::from(self.deleted_entries.get()).is_zero() {
-            return true;
-        }
-        if !MetricValue::from(self.domains_resource.get()).is_zero() {
-            return true;
-        }
-        if !MetricValue::from(self.domains_scope.get()).is_zero() {
-            return true;
-        }
-        if !MetricValue::from(self.domains_signal.get()).is_zero() {
-            return true;
-        }
-        if !MetricValue::from(self.hashed_entries.get()).is_zero() {
-            return true;
-        }
-        if !MetricValue::from(self.inserted_entries.get()).is_zero() {
-            return true;
-        }
-        if !MetricValue::from(self.renamed_entries.get()).is_zero() {
-            return true;
-        }
-        if !MetricValue::from(self.transform_failed.get()).is_zero() {
-            return true;
-        }
-        if !MetricValue::from(self.updated_entries.get()).is_zero() {
-            return true;
-        }
-        if !MetricValue::from(self.upserted_entries.get()).is_zero() {
+        if !MetricValue::from(self.transforms.get()).is_zero() {
             return true;
         }
         false
     }
 }
 
-impl AttributesProcessorMetrics {
+impl AttributesProcessorTransformMetrics {
     /// Registers this metric set against a semantically compatible entity.
     #[must_use]
     pub fn register<E>(registry: &TelemetryRegistryHandle, entity: E) -> MetricSet<Self>

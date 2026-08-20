@@ -18,7 +18,7 @@ metrics:
 - name: receiver.user_events.dropped.memory.pressure
   brief: Number of samples dropped due to process-wide memory pressure.
   instrument: counter
-  unit: "{item}"
+  unit: '{item}'
   stability: development
   requirement_level: recommended
   entity_associations:
@@ -33,7 +33,7 @@ metrics:
 - name: receiver.user_events.dropped.no.subscription
   brief: Number of samples dropped because no matching subscription was found.
   instrument: counter
-  unit: "{item}"
+  unit: '{item}'
   stability: development
   requirement_level: recommended
   entity_associations:
@@ -46,10 +46,10 @@ metrics:
     otap_dataflow:
       metric_set: receiver.user_events
 - name: receiver.user_events.dropped.pending.overflow
-  brief: Number of samples dropped before allocation because the adapter pending queue
-    reached its configured event or byte cap.
+  brief: Number of samples dropped before allocation because the adapter pending queue reached its configured
+    event or byte cap.
   instrument: counter
-  unit: "{item}"
+  unit: '{item}'
   stability: development
   requirement_level: recommended
   entity_associations:
@@ -64,7 +64,7 @@ metrics:
 - name: receiver.user_events.dropped.send.error
   brief: Number of records dropped because a downstream send failed.
   instrument: counter
-  unit: "{item}"
+  unit: '{item}'
   stability: development
   requirement_level: recommended
   entity_associations:
@@ -79,7 +79,7 @@ metrics:
 - name: receiver.user_events.flushed.batches
   brief: Number of Arrow batches flushed downstream.
   instrument: counter
-  unit: "{event}"
+  unit: '{event}'
   stability: development
   requirement_level: recommended
   entity_associations:
@@ -94,7 +94,7 @@ metrics:
 - name: receiver.user_events.forwarded.samples
   brief: Number of perf samples forwarded downstream.
   instrument: counter
-  unit: "{item}"
+  unit: '{item}'
   stability: development
   requirement_level: recommended
   entity_associations:
@@ -109,7 +109,7 @@ metrics:
 - name: receiver.user_events.late.registration.retries
   brief: Number of late-registration retries attempted while waiting for tracepoints.
   instrument: counter
-  unit: "{event}"
+  unit: '{event}'
   stability: development
   requirement_level: recommended
   entity_associations:
@@ -124,7 +124,7 @@ metrics:
 - name: receiver.user_events.lost.perf.samples
   brief: Number of lost samples reported by the perf ring.
   instrument: counter
-  unit: "{item}"
+  unit: '{item}'
   stability: development
   requirement_level: recommended
   entity_associations:
@@ -139,7 +139,7 @@ metrics:
 - name: receiver.user_events.received.samples
   brief: Number of perf samples received from the kernel ring.
   instrument: counter
-  unit: "{item}"
+  unit: '{item}'
   stability: development
   requirement_level: recommended
   entity_associations:
@@ -154,7 +154,7 @@ metrics:
 - name: receiver.user_events.sessions.started
   brief: Number of receiver sessions successfully started.
   instrument: counter
-  unit: "{event}"
+  unit: '{event}'
   stability: development
   requirement_level: recommended
   entity_associations:

@@ -9,7 +9,9 @@ use otap_df_telemetry::registry::TelemetryRegistryHandle;
 use otap_df_telemetry_sdk::entities::{
     NodeAttributeSet, NodeAttributeSetIdentity, ParentOf, PipelineAttributeSet, SemanticEntity,
 };
-use otap_df_telemetry_sdk::metrics::receiver_otlp::{AssociatedEntity, OtlpReceiverMetrics};
+use otap_df_telemetry_sdk::metrics::receiver_otlp_requests::{
+    AssociatedEntity, OtlpRequestMetrics,
+};
 
 fn node_identity(node_id: &str) -> NodeAttributeSet {
     NodeAttributeSet::new(NodeAttributeSetIdentity {
@@ -61,12 +63,12 @@ fn generated_metric_set_registers_and_snapshots() {
     assert_associated::<NodeAttributeSet>();
 
     let registry = TelemetryRegistryHandle::new();
-    let mut metrics = OtlpReceiverMetrics::register(&registry, node_identity("otlp"));
-    metrics.requests_started.inc();
-    metrics.request_bytes.add(512);
+    let mut metrics = OtlpRequestMetrics::register(&registry, node_identity("otlp"));
+    metrics.started.inc();
+    metrics.payload_size.add(512);
 
     let snapshot = metrics.snapshot();
-    assert_eq!(metrics.descriptor().name, "receiver.otlp");
+    assert_eq!(metrics.descriptor().name, "receiver.otlp.requests");
     assert_eq!(
         snapshot.get_metrics().len(),
         metrics.descriptor().metrics.len()

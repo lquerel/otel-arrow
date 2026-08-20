@@ -46,9 +46,9 @@ pub struct TrafficGeneratorReceiverMetrics {
     /// Number of signal items remaining when smooth mode detects that a run is behind.
     pub smooth_behind_remaining_items: otap_df_telemetry::instrument::Mmsc,
     /// Wall-clock time spent generating or cloning one smooth-mode payload.
-    pub smooth_payload_generate_duration_ns: otap_df_telemetry::instrument::Mmsc,
+    pub smooth_payload_generate_duration_ns: otap_df_telemetry::instrument::HistogramNormal,
     /// Wall-clock time spent sending one smooth-mode payload into the downstream channel.
-    pub smooth_payload_send_duration_ns: otap_df_telemetry::instrument::Mmsc,
+    pub smooth_payload_send_duration_ns: otap_df_telemetry::instrument::HistogramNormal,
     /// Number of smooth-mode payload send attempts rejected because the downstream channel was full.
     pub smooth_payload_send_full: otap_df_telemetry::instrument::Counter<u64>,
     /// Number of smooth-mode payloads retried after a previous full-channel send.
@@ -148,7 +148,7 @@ static TRAFFIC_GENERATOR_RECEIVER_METRICS_DESCRIPTOR: MetricsDescriptor = Metric
             name: "smooth.payload.generate.duration",
             unit: "ns",
             brief: "Wall-clock time spent generating or cloning one smooth-mode payload.",
-            instrument: Instrument::Mmsc,
+            instrument: Instrument::ExponentialHistogram,
             temporality: Some(otap_df_telemetry::descriptor::Temporality::Delta),
             value_type: MetricValueType::F64,
         },
@@ -156,7 +156,7 @@ static TRAFFIC_GENERATOR_RECEIVER_METRICS_DESCRIPTOR: MetricsDescriptor = Metric
             name: "smooth.payload.send.duration",
             unit: "ns",
             brief: "Wall-clock time spent sending one smooth-mode payload into the downstream channel.",
-            instrument: Instrument::Mmsc,
+            instrument: Instrument::ExponentialHistogram,
             temporality: Some(otap_df_telemetry::descriptor::Temporality::Delta),
             value_type: MetricValueType::F64,
         },

@@ -1,102 +1,16 @@
 file_format: definition/2
 metrics:
-- name: processor.content_router.signals.conversion.error
-  brief: Number of messages that failed due to internal conversion errors.
+- name: processor.content_router.messages
+  brief: Number of messages with this outcome.
   instrument: counter
-  unit: "{msg}"
+  unit: '{message}'
   stability: development
   requirement_level: recommended
-  entity_associations:
-  - one_of:
-    - otap.node
-    - otap.node.custom
-  annotations:
-    code_generation:
-      metric_value_type: int
-    otap_dataflow:
-      metric_set: processor.content_router
-- name: processor.content_router.signals.nacked
-  brief: Number of messages NACKed (no route match, missing key, mixed batch, conversion
-    error, or send failure).
-  instrument: counter
-  unit: "{msg}"
-  stability: development
-  requirement_level: recommended
-  entity_associations:
-  - one_of:
-    - otap.node
-    - otap.node.custom
-  annotations:
-    code_generation:
-      metric_value_type: int
-    otap_dataflow:
-      metric_set: processor.content_router
-- name: processor.content_router.signals.no.routing.key
-  brief: Number of messages where the routing key was missing.
-  instrument: counter
-  unit: "{msg}"
-  stability: development
-  requirement_level: recommended
-  entity_associations:
-  - one_of:
-    - otap.node
-    - otap.node.custom
-  annotations:
-    code_generation:
-      metric_value_type: int
-    otap_dataflow:
-      metric_set: processor.content_router
-- name: processor.content_router.signals.rejected.route.closed
-  brief: Number of messages rejected because the selected route was closed.
-  instrument: counter
-  unit: "{msg}"
-  stability: development
-  requirement_level: recommended
-  entity_associations:
-  - one_of:
-    - otap.node
-    - otap.node.custom
-  annotations:
-    code_generation:
-      metric_value_type: int
-    otap_dataflow:
-      metric_set: processor.content_router
-- name: processor.content_router.signals.rejected.route.full
-  brief: Number of messages rejected because the selected route was full.
-  instrument: counter
-  unit: "{msg}"
-  stability: development
-  requirement_level: recommended
-  entity_associations:
-  - one_of:
-    - otap.node
-    - otap.node.custom
-  annotations:
-    code_generation:
-      metric_value_type: int
-    otap_dataflow:
-      metric_set: processor.content_router
-- name: processor.content_router.signals.routed
-  brief: Number of messages routed to a named port.
-  instrument: counter
-  unit: "{msg}"
-  stability: development
-  requirement_level: recommended
-  entity_associations:
-  - one_of:
-    - otap.node
-    - otap.node.custom
-  annotations:
-    code_generation:
-      metric_value_type: int
-    otap_dataflow:
-      metric_set: processor.content_router
-- name: processor.content_router.signals.routed.default
-  brief: Number of messages routed to the default output.
-  instrument: counter
-  unit: "{msg}"
-  stability: development
-  requirement_level: recommended
+  attributes:
+  - ref: outcome
+    requirement_level: recommended
+  - ref: reason
+    requirement_level: recommended
   entity_associations:
   - one_of:
     - otap.node

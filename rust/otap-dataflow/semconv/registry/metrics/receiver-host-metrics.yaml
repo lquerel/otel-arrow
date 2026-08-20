@@ -3,7 +3,7 @@ metrics:
 - name: receiver.host_metrics.batches.sent
   brief: Number of batches sent downstream.
   instrument: counter
-  unit: "{batch}"
+  unit: '{batch}'
   stability: development
   requirement_level: recommended
   entity_associations:
@@ -18,7 +18,7 @@ metrics:
 - name: receiver.host_metrics.families.scraped
   brief: Number of due metric families processed.
   instrument: counter
-  unit: "{family}"
+  unit: '{family}'
   stability: development
   requirement_level: recommended
   entity_associations:
@@ -33,7 +33,7 @@ metrics:
 - name: receiver.host_metrics.partial.errors
   brief: Number of source read errors skipped because other families succeeded.
   instrument: counter
-  unit: "{error}"
+  unit: '{error}'
   stability: development
   requirement_level: recommended
   entity_associations:
@@ -78,7 +78,7 @@ metrics:
 - name: receiver.host_metrics.scraper.failures
   brief: Number of scraper worker failures.
   instrument: counter
-  unit: "{error}"
+  unit: '{error}'
   stability: development
   requirement_level: recommended
   entity_associations:
@@ -93,7 +93,7 @@ metrics:
 - name: receiver.host_metrics.scrapes.completed
   brief: Number of scrape ticks that built and sent a metrics batch.
   instrument: counter
-  unit: "{scrape}"
+  unit: '{scrape}'
   stability: development
   requirement_level: recommended
   entity_associations:
@@ -108,7 +108,7 @@ metrics:
 - name: receiver.host_metrics.scrapes.failed
   brief: Number of fatal scrape failures.
   instrument: counter
-  unit: "{scrape}"
+  unit: '{scrape}'
   stability: development
   requirement_level: recommended
   entity_associations:
@@ -123,7 +123,7 @@ metrics:
 - name: receiver.host_metrics.scrapes.overrun
   brief: Number of scrape ticks skipped or timed out before completion.
   instrument: counter
-  unit: "{scrape}"
+  unit: '{scrape}'
   stability: development
   requirement_level: recommended
   entity_associations:
@@ -138,7 +138,7 @@ metrics:
 - name: receiver.host_metrics.scrapes.started
   brief: Number of scrape ticks started.
   instrument: counter
-  unit: "{scrape}"
+  unit: '{scrape}'
   stability: development
   requirement_level: recommended
   entity_associations:
@@ -153,7 +153,7 @@ metrics:
 - name: receiver.host_metrics.send.failures
   brief: Number of downstream send failures.
   instrument: counter
-  unit: "{error}"
+  unit: '{error}'
   stability: development
   requirement_level: recommended
   entity_associations:
@@ -168,7 +168,7 @@ metrics:
 - name: receiver.host_metrics.source.read.errors
   brief: Number of source read errors seen during scrapes.
   instrument: counter
-  unit: "{error}"
+  unit: '{error}'
   stability: development
   requirement_level: recommended
   entity_associations:

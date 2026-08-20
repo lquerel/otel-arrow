@@ -28,20 +28,74 @@ impl AssociatedEntity for entities::NodeChannelAttributeSet {}
 /// Strongly typed values for the `node.consumer` metric set.
 #[derive(Debug, Default, Clone)]
 #[repr(C, align(64))]
-pub struct ConsumedMetrics {
-    /// Duration from entry until the corresponding ack or nack is routed, in nanoseconds. This is reported at the detailed level. TODO: make this Option<Box<Mmsc or Histogram>>.
-    pub consumed_duration_ns: otap_df_telemetry::instrument::Mmsc,
-    /// Consumed requests that failed, this are retryable errors.
-    pub consumed_failure: otap_df_telemetry::instrument::Counter<u64>,
-    /// Consumed requests refused, also known as permanent failures.
-    pub consumed_refused: otap_df_telemetry::instrument::Counter<u64>,
-    /// Consumed requests successfully processed.
-    pub consumed_success: otap_df_telemetry::instrument::Counter<u64>,
+pub struct ConsumedItemMetrics {
+    /// Consumed signal items, grouped by the `signal` datapoint attribute.
+    pub consumed_items: otap_df_telemetry::instrument::Counter<u64>,
 }
 
 /// Per-field conditional availability in descriptor order.
-pub const CONSUMED_METRICS_METRIC_AVAILABILITY: &[Option<&str>] =
-    &[AVAILABILITY, AVAILABILITY, AVAILABILITY, AVAILABILITY];
+pub const CONSUMED_ITEM_METRICS_METRIC_AVAILABILITY: &[Option<&str>] = &[AVAILABILITY];
+
+static CONSUMED_ITEM_METRICS_DESCRIPTOR: MetricsDescriptor = MetricsDescriptor {
+    name: METRIC_SET,
+    metrics: &[MetricsField {
+        name: "consumed.items",
+        unit: "{item}",
+        brief: "Consumed signal items, grouped by the `signal` datapoint attribute.",
+        instrument: Instrument::Counter,
+        temporality: Some(otap_df_telemetry::descriptor::Temporality::Delta),
+        value_type: MetricValueType::U64,
+    }],
+};
+
+impl MetricSetHandler for ConsumedItemMetrics {
+    #[inline]
+    fn descriptor(&self) -> &'static MetricsDescriptor {
+        &CONSUMED_ITEM_METRICS_DESCRIPTOR
+    }
+
+    #[inline]
+    fn snapshot_values(&self) -> Vec<MetricValue> {
+        vec![MetricValue::from(self.consumed_items.get())]
+    }
+
+    #[inline]
+    fn clear_values(&mut self) {
+        self.consumed_items.reset();
+    }
+
+    #[inline]
+    fn needs_flush(&self) -> bool {
+        if !MetricValue::from(self.consumed_items.get()).is_zero() {
+            return true;
+        }
+        false
+    }
+}
+
+impl ConsumedItemMetrics {
+    /// Registers this metric set against a semantically compatible entity.
+    #[must_use]
+    pub fn register<E>(registry: &TelemetryRegistryHandle, entity: E) -> MetricSet<Self>
+    where
+        E: AssociatedEntity,
+    {
+        registry.register_metric_set(entity)
+    }
+}
+
+/// Strongly typed values for the `node.consumer` metric set.
+#[derive(Debug, Default, Clone)]
+#[repr(C, align(64))]
+pub struct ConsumedMetrics {
+    /// Duration from entry until the corresponding ack or nack is routed, in nanoseconds. This is reported at the detailed level. TODO: make this Option<Box<Mmsc or Histogram>>.
+    pub consumed_duration_ns: otap_df_telemetry::instrument::Mmsc,
+    /// Consumed messages, grouped by `signal` and `outcome` datapoint attributes.
+    pub consumed_messages: otap_df_telemetry::instrument::Counter<u64>,
+}
+
+/// Per-field conditional availability in descriptor order.
+pub const CONSUMED_METRICS_METRIC_AVAILABILITY: &[Option<&str>] = &[AVAILABILITY, AVAILABILITY];
 
 static CONSUMED_METRICS_DESCRIPTOR: MetricsDescriptor = MetricsDescriptor {
     name: METRIC_SET,
@@ -55,25 +109,9 @@ static CONSUMED_METRICS_DESCRIPTOR: MetricsDescriptor = MetricsDescriptor {
             value_type: MetricValueType::F64,
         },
         MetricsField {
-            name: "consumed.failure",
-            unit: "{requests}",
-            brief: "Consumed requests that failed, this are retryable errors.",
-            instrument: Instrument::Counter,
-            temporality: Some(otap_df_telemetry::descriptor::Temporality::Delta),
-            value_type: MetricValueType::U64,
-        },
-        MetricsField {
-            name: "consumed.refused",
-            unit: "{requests}",
-            brief: "Consumed requests refused, also known as permanent failures.",
-            instrument: Instrument::Counter,
-            temporality: Some(otap_df_telemetry::descriptor::Temporality::Delta),
-            value_type: MetricValueType::U64,
-        },
-        MetricsField {
-            name: "consumed.success",
-            unit: "{requests}",
-            brief: "Consumed requests successfully processed.",
+            name: "consumed.messages",
+            unit: "{message}",
+            brief: "Consumed messages, grouped by `signal` and `outcome` datapoint attributes.",
             instrument: Instrument::Counter,
             temporality: Some(otap_df_telemetry::descriptor::Temporality::Delta),
             value_type: MetricValueType::U64,
@@ -91,18 +129,14 @@ impl MetricSetHandler for ConsumedMetrics {
     fn snapshot_values(&self) -> Vec<MetricValue> {
         vec![
             MetricValue::from(self.consumed_duration_ns.get()),
-            MetricValue::from(self.consumed_failure.get()),
-            MetricValue::from(self.consumed_refused.get()),
-            MetricValue::from(self.consumed_success.get()),
+            MetricValue::from(self.consumed_messages.get()),
         ]
     }
 
     #[inline]
     fn clear_values(&mut self) {
         self.consumed_duration_ns.reset();
-        self.consumed_failure.reset();
-        self.consumed_refused.reset();
-        self.consumed_success.reset();
+        self.consumed_messages.reset();
     }
 
     #[inline]
@@ -110,13 +144,7 @@ impl MetricSetHandler for ConsumedMetrics {
         if !MetricValue::from(self.consumed_duration_ns.get()).is_zero() {
             return true;
         }
-        if !MetricValue::from(self.consumed_failure.get()).is_zero() {
-            return true;
-        }
-        if !MetricValue::from(self.consumed_refused.get()).is_zero() {
-            return true;
-        }
-        if !MetricValue::from(self.consumed_success.get()).is_zero() {
+        if !MetricValue::from(self.consumed_messages.get()).is_zero() {
             return true;
         }
         false

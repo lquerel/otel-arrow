@@ -6,7 +6,7 @@
 use otap_df_telemetry::metrics::MetricSetHandler;
 use otap_df_telemetry::registry::TelemetryRegistryHandle;
 use otap_df_telemetry_sdk::entities::{NodeAttributeSet, NodeAttributeSetIdentity};
-use otap_df_telemetry_sdk::metrics::receiver_otlp::OtlpReceiverMetrics;
+use otap_df_telemetry_sdk::metrics::receiver_otlp_requests::OtlpRequestMetrics;
 
 fn main() {
     let registry = TelemetryRegistryHandle::new();
@@ -22,11 +22,11 @@ fn main() {
         service_instance_id: "engine-01".to_owned(),
     });
 
-    let mut metrics = OtlpReceiverMetrics::register(&registry, receiver);
-    metrics.requests_started.inc();
-    metrics.request_bytes.add(2_048);
+    let mut metrics = OtlpRequestMetrics::register(&registry, receiver);
+    metrics.started.inc();
+    metrics.payload_size.add(2_048);
 
     let snapshot = metrics.snapshot();
-    assert_eq!(snapshot.get_metrics().len(), 9);
-    assert_eq!(metrics.descriptor().name, "receiver.otlp");
+    assert_eq!(snapshot.get_metrics().len(), 3);
+    assert_eq!(metrics.descriptor().name, "receiver.otlp.requests");
 }

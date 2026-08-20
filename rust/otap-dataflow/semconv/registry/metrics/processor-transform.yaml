@@ -1,11 +1,18 @@
 file_format: definition/2
 metrics:
-- name: processor.transform.msgs.transform.failed
-  brief: Number of failed transform attempts.
+- name: processor.transform.failures
+  brief: Number of failed transform operations.
   instrument: counter
-  unit: "{msg}"
+  unit: '{operation}'
   stability: development
   requirement_level: recommended
+  attributes:
+  - ref: error.type
+    requirement_level: recommended
+  - ref: language
+    requirement_level: recommended
+  - ref: signal
+    requirement_level: recommended
   entity_associations:
   - one_of:
     - otap.node
@@ -15,12 +22,19 @@ metrics:
       metric_value_type: int
     otap_dataflow:
       metric_set: processor.transform
-- name: processor.transform.msgs.transformed
-  brief: Number of messages successfully transformed.
+- name: processor.transform.operations
+  brief: Number of matching input messages whose local transform operation terminated.
   instrument: counter
-  unit: "{msg}"
+  unit: '{operation}'
   stability: development
   requirement_level: recommended
+  attributes:
+  - ref: language
+    requirement_level: recommended
+  - ref: outcome
+    requirement_level: recommended
+  - ref: signal
+    requirement_level: recommended
   entity_associations:
   - one_of:
     - otap.node

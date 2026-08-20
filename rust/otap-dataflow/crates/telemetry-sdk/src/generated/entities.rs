@@ -423,9 +423,9 @@ pub struct ExtensionChannelAttributeSetIdentity {
     /// Unique channel identifier within the host scope.
     pub channel_id: String,
     /// Channel implementation ("tokio", "flume", "internal").
-    pub channel_impl: String,
+    pub channel_impl: AttributeValue,
     /// Concurrency mode of the channel ("local" or "shared").
-    pub channel_mode: String,
+    pub channel_mode: AttributeValue,
     /// Core identifier.
     pub core_id: i64,
     /// Deployment generation for this runtime instance.
@@ -473,8 +473,8 @@ impl ExtensionChannelAttributeSet {
         Self {
             values: [
                 AttributeValue::String(identity.channel_id),
-                AttributeValue::String(identity.channel_impl),
-                AttributeValue::String(identity.channel_mode),
+                identity.channel_impl,
+                identity.channel_mode,
                 AttributeValue::Int(identity.core_id),
                 AttributeValue::Int(identity.deployment_generation),
                 AttributeValue::String(identity.extension_id),
@@ -500,12 +500,12 @@ static EXTENSION_CHANNEL_ATTRIBUTE_SET_DESCRIPTOR: AttributesDescriptor = Attrib
         AttributeField {
             key: "channel.impl",
             brief: "Channel implementation (\"tokio\", \"flume\", \"internal\").",
-            r#type: AttributeValueType::String,
+            r#type: AttributeValueType::Any,
         },
         AttributeField {
             key: "channel.mode",
             brief: "Concurrency mode of the channel (\"local\" or \"shared\").",
-            r#type: AttributeValueType::String,
+            r#type: AttributeValueType::Any,
         },
         AttributeField {
             key: "core.id",
@@ -1034,13 +1034,13 @@ pub struct NodeChannelAttributeSetIdentity {
     /// Unique channel identifier within the host scope.
     pub channel_id: String,
     /// Channel implementation ("tokio", "flume", "internal").
-    pub channel_impl: String,
+    pub channel_impl: AttributeValue,
     /// Channel payload kind ("control" or "pdata").
-    pub channel_kind: String,
+    pub channel_kind: AttributeValue,
     /// Concurrency mode of the channel ("local" or "shared").
-    pub channel_mode: String,
+    pub channel_mode: AttributeValue,
     /// Channel type ("mpsc", "mpmc", "spsc", "spmc").
-    pub channel_type: String,
+    pub channel_type: AttributeValue,
     /// Core identifier.
     pub core_id: i64,
     /// Deployment generation for this runtime instance.
@@ -1090,10 +1090,10 @@ impl NodeChannelAttributeSet {
         Self {
             values: [
                 AttributeValue::String(identity.channel_id),
-                AttributeValue::String(identity.channel_impl),
-                AttributeValue::String(identity.channel_kind),
-                AttributeValue::String(identity.channel_mode),
-                AttributeValue::String(identity.channel_type),
+                identity.channel_impl,
+                identity.channel_kind,
+                identity.channel_mode,
+                identity.channel_type,
                 AttributeValue::Int(identity.core_id),
                 AttributeValue::Int(identity.deployment_generation),
                 AttributeValue::String(identity.node_id),
@@ -1120,22 +1120,22 @@ static NODE_CHANNEL_ATTRIBUTE_SET_DESCRIPTOR: AttributesDescriptor = AttributesD
         AttributeField {
             key: "channel.impl",
             brief: "Channel implementation (\"tokio\", \"flume\", \"internal\").",
-            r#type: AttributeValueType::String,
+            r#type: AttributeValueType::Any,
         },
         AttributeField {
             key: "channel.kind",
             brief: "Channel payload kind (\"control\" or \"pdata\").",
-            r#type: AttributeValueType::String,
+            r#type: AttributeValueType::Any,
         },
         AttributeField {
             key: "channel.mode",
             brief: "Concurrency mode of the channel (\"local\" or \"shared\").",
-            r#type: AttributeValueType::String,
+            r#type: AttributeValueType::Any,
         },
         AttributeField {
             key: "channel.type",
             brief: "Channel type (\"mpsc\", \"mpmc\", \"spsc\", \"spmc\").",
-            r#type: AttributeValueType::String,
+            r#type: AttributeValueType::Any,
         },
         AttributeField {
             key: "core.id",

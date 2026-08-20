@@ -5,16 +5,16 @@ use ahash::{AHashMap as HashMap, AHashSet as HashSet};
 use otap_df_otap::pdata::Context;
 use otap_df_pdata::OtapPayload;
 
-/// Tracks relationships between batches ⇄ messages + their data.
+/// Tracks relationships between batches <-> messages + their data.
 /// High-perf: uses AHashMap/AHashSet (fastest hashing for u64 keys).
 pub struct AzureMonitorExporterState {
-    /// batch_id → set of msg_ids
+    /// batch_id -> set of msg_ids
     pub batch_to_msg: HashMap<u64, HashSet<u64>>,
 
-    /// msg_id → set of batch_ids
+    /// msg_id -> set of batch_ids
     pub msg_to_batch: HashMap<u64, HashSet<u64>>,
 
-    /// msg_id → (context, optional payload for ack/nack)
+    /// msg_id -> (context, optional payload for ack/nack)
     pub msg_to_data: HashMap<u64, (Context, OtapPayload)>,
 }
 
@@ -32,14 +32,14 @@ impl AzureMonitorExporterState {
     /// If the msg already exists, its data will NOT be overwritten.
     #[inline]
     pub fn add_batch_msg_relationship(&mut self, batch_id: u64, msg_id: u64) {
-        // Batch → Msg
+        // Batch -> Msg
         _ = self
             .batch_to_msg
             .entry(batch_id)
             .or_default()
             .insert(msg_id);
 
-        // Msg → Batch
+        // Msg -> Batch
         _ = self
             .msg_to_batch
             .entry(msg_id)
@@ -144,11 +144,12 @@ mod tests {
     use super::*;
     use bytes::Bytes;
     use otap_df_otap::pdata::Context;
+    use otap_df_pdata::PayloadData;
     use otap_df_pdata::otlp::OtlpProtoBytes;
 
     /// Helper to create a test OtapPayload from bytes
     fn test_payload(data: &'static [u8]) -> OtapPayload {
-        OtapPayload::OtlpBytes(OtlpProtoBytes::ExportLogsRequest(Bytes::from_static(data)))
+        OtapPayload::from(OtlpProtoBytes::ExportLogsRequest(Bytes::from_static(data)))
     }
 
     /// Helper to create an empty OtapPayload
@@ -194,8 +195,8 @@ mod tests {
         assert!(removed.is_some());
         // Verify the payload matches
         let (_, payload) = removed.unwrap();
-        match payload {
-            OtapPayload::OtlpBytes(OtlpProtoBytes::ExportLogsRequest(bytes)) => {
+        match payload.into_data() {
+            PayloadData::OtlpBytes(OtlpProtoBytes::ExportLogsRequest(bytes)) => {
                 assert_eq!(bytes.as_ref(), b"test");
             }
             _ => panic!("Expected OtlpBytes::ExportLogsRequest"),
@@ -221,8 +222,8 @@ mod tests {
         let removed = state.delete_msg_data_if_orphaned(msg_id);
         assert!(removed.is_some());
         let (_, payload) = removed.unwrap();
-        match payload {
-            OtapPayload::OtlpBytes(OtlpProtoBytes::ExportLogsRequest(bytes)) => {
+        match payload.into_data() {
+            PayloadData::OtlpBytes(OtlpProtoBytes::ExportLogsRequest(bytes)) => {
                 assert!(bytes.is_empty());
             }
             _ => panic!("Expected OtlpBytes::ExportLogsRequest"),

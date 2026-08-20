@@ -3,7 +3,7 @@ metrics:
 - name: extension.azure_identity_auth.auth.failures
   brief: Number of failed credential acquisitions.
   instrument: counter
-  unit: "{acquisition}"
+  unit: '{acquisition}'
   stability: development
   requirement_level: recommended
   entity_associations:
@@ -29,7 +29,7 @@ metrics:
 - name: extension.azure_identity_auth.auth.successes
   brief: Number of successful credential acquisitions.
   instrument: counter
-  unit: "{acquisition}"
+  unit: '{acquisition}'
   stability: development
   requirement_level: recommended
   entity_associations:
@@ -42,7 +42,7 @@ metrics:
 - name: extension.azure_identity_auth.auth.token.publish
   brief: Number of tokens published to consumers via the watch channel.
   instrument: counter
-  unit: "{token}"
+  unit: '{token}'
   stability: development
   requirement_level: recommended
   entity_associations:

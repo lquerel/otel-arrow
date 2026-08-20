@@ -41,7 +41,7 @@ pub struct SyslogCefReceiverMetrics {
     pub received_logs_rejected_memory_pressure: otap_df_telemetry::instrument::Counter<u64>,
     /// Total number of log records observed at the socket before parsing
     pub received_logs_total: otap_df_telemetry::instrument::Counter<u64>,
-    /// Number of log records whose raw message exceeded [`MAX_MESSAGE_SIZE`] and were truncated before parsing. For TCP, truncation is detected precisely when a newline-delimited message exceeds the size limit. For UDP, it is a heuristic - a datagram that fills the entire receive buffer is assumed truncated, though a message exactly [`MAX_MESSAGE_SIZE`] bytes would also trigger this.
+    /// Number of log records whose raw message exceeded [`MAX_MESSAGE_SIZE`] and were truncated before parsing. For TCP, truncation is detected precisely when a newline-delimited message exceeds the size limit. For UDP, it is a heuristic -- a datagram that fills the entire receive buffer is assumed truncated, though a message exactly [`MAX_MESSAGE_SIZE`] bytes would also trigger this.
     pub received_logs_truncated: otap_df_telemetry::instrument::Counter<u64>,
     /// Number of active TCP connections
     pub tcp_connections_active: otap_df_telemetry::instrument::UpDownCounter<u64>,
@@ -110,7 +110,7 @@ static SYSLOG_CEF_RECEIVER_METRICS_DESCRIPTOR: MetricsDescriptor = MetricsDescri
         MetricsField {
             name: "received.logs.truncated",
             unit: "{item}",
-            brief: "Number of log records whose raw message exceeded [`MAX_MESSAGE_SIZE`] and were truncated before parsing. For TCP, truncation is detected precisely when a newline-delimited message exceeds the size limit. For UDP, it is a heuristic - a datagram that fills the entire receive buffer is assumed truncated, though a message exactly [`MAX_MESSAGE_SIZE`] bytes would also trigger this.",
+            brief: "Number of log records whose raw message exceeded [`MAX_MESSAGE_SIZE`] and were truncated before parsing. For TCP, truncation is detected precisely when a newline-delimited message exceeds the size limit. For UDP, it is a heuristic -- a datagram that fills the entire receive buffer is assumed truncated, though a message exactly [`MAX_MESSAGE_SIZE`] bytes would also trigger this.",
             instrument: Instrument::Counter,
             temporality: Some(otap_df_telemetry::descriptor::Temporality::Delta),
             value_type: MetricValueType::U64,
