@@ -3,6 +3,8 @@
 
 //! Source inventory and drift checks for the internal semantic-convention registry.
 
+mod diagram;
+
 use std::collections::{BTreeMap, BTreeSet, HashSet};
 use std::fs;
 use std::path::{Path, PathBuf};
@@ -51,6 +53,15 @@ pub fn print_inventory() -> Result<()> {
         );
     println!("{}", serde_json::to_string_pretty(&report)?);
     Ok(())
+}
+
+/// Renders the observable entity and signal graph from the checked-in registry.
+pub fn render_diagram(output: Option<&Path>) -> Result<()> {
+    let registry = Registry::load(Path::new(SEMCONV_DIR))?;
+    diagram::render(
+        &registry,
+        output.unwrap_or_else(|| Path::new(diagram::DEFAULT_OUTPUT)),
+    )
 }
 
 #[derive(Debug, Default, Serialize)]

@@ -14,6 +14,7 @@
 #![allow(clippy::print_stderr)]
 
 use std::io::{BufRead, BufReader};
+use std::path::Path;
 use std::process::{Command, ExitStatus, Stdio};
 use std::sync::mpsc;
 use std::thread;
@@ -55,6 +56,17 @@ fn main() -> anyhow::Result<()> {
                 ensure_no_extra_args("semconv-inventory", &args.collect::<Vec<_>>())?;
                 semconv::print_inventory()
             }
+            "semconv-graph" => {
+                let args = args.collect::<Vec<_>>();
+                let output = match args.as_slice() {
+                    [] => None,
+                    [output] => Some(Path::new(output)),
+                    _ => {
+                        anyhow::bail!("`cargo xtask semconv-graph` accepts at most one output path")
+                    }
+                };
+                semconv::render_diagram(output)
+            }
             "structure-check" => {
                 ensure_no_extra_args("structure-check", &args.collect::<Vec<_>>())?;
                 structure_check::run()
@@ -86,6 +98,7 @@ Tasks:
   - structure-check: Validate the entire structure of the project.
   - semconv-check: Check the v2 semantic-convention registry against production Rust telemetry declarations.
   - semconv-inventory: Print the discovered production Rust telemetry inventory as JSON.
+  - semconv-graph [output.svg]: Render the observable entity and signal architecture as SVG.
   - compile-proto: Compile the protobufs files
   - component-inventory [--check <baseline>] [--update-baseline] [--format <table|json|yaml>]: Manage and verify the component inventory baseline.
 "

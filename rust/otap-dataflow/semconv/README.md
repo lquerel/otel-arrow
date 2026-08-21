@@ -68,6 +68,19 @@ scope types, the association uses `one_of`.
 The `otap_dataflow` annotations are project metadata. Weaver validates the
 standard v2 fields and references.
 
+## Observable entity architecture
+
+The standalone interactive [entity and signal graph](entity-signal-graph.svg)
+presents the entity hierarchy and signal counts. Open it directly in a browser
+and select an entity to see its events and metrics, grouped by metric set. A
+shared `one_of` association is included in every eligible entity's details.
+Selecting another entity closes the previous details. Regenerate the checked-in
+diagram from the registry with:
+
+```bash
+cargo xtask semconv-graph
+```
+
 ## Validation
 
 Run both checks from `rust/otap-dataflow`:
