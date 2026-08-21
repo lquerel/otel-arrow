@@ -1,0 +1,5 @@
+change_type: bug_fix
+component: engine
+note: "Produce admin and OpAMP configuration snapshots through factory-owned typed config policies, redacting ClickHouse and OAuth secrets."
+issues: [3354, 3848]
+subtext: "Snapshots never fall back to source JSON. Components awaiting a safe typed serializer expose config as null; OAuth configs with inline TLS private keys are omitted."

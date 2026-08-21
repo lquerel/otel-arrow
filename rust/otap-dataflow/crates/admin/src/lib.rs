@@ -98,6 +98,17 @@ impl ControlPlaneError {
     }
 }
 
+fn safe_snapshot_error(error: otap_df_config::resolved_config::SnapshotError) -> ControlPlaneError {
+    otel_warn!(
+        "admin.config_snapshot.failed",
+        error = error.to_string(),
+        message = "Safe config snapshot production failed"
+    );
+    ControlPlaneError::Internal {
+        message: "safe config snapshot production failed".to_owned(),
+    }
+}
+
 /// Classifies the best-effort, unauthenticated initiator of an admin HTTP request.
 pub(crate) fn pipeline_shutdown_initiator(
     headers: &axum::http::HeaderMap,

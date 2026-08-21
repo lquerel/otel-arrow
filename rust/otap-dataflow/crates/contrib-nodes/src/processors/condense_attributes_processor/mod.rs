@@ -207,7 +207,9 @@ pub static CONDENSE_ATTRIBUTES_PROCESSOR_FACTORY: otap_df_engine::ProcessorFacto
                 create_condense_attributes_processor(pipeline_ctx, node, node_config, proc_cfg)
             },
         wiring_contract: otap_df_engine::wiring_contract::WiringContract::UNRESTRICTED,
-        validate_config: |config| Config::from_config(config).map(|_| ()),
+        config_resolver: otap_df_config::omit_component_config!(|config| {
+            Config::from_config(config).map(|_| ())
+        }),
     };
 
 impl CondenseAttributesProcessor {

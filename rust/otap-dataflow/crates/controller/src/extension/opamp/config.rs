@@ -15,7 +15,7 @@ use crate::extension::opamp::proto::opamp::v1::{AnyValue, any_value::Value};
 use crate::extension::opamp::util::ExponentialBackoff;
 
 /// Configuration for OpAMP Controller Extension
-#[derive(Deserialize, Serialize)]
+#[derive(Clone, Deserialize, Serialize)]
 pub struct Config {
     /// Initial instance_uid.
     ///
@@ -133,7 +133,7 @@ fn default_reconcile_config() -> EngineReconcileConfig {
 }
 
 /// Configuration for controlling engine reconciliation behaviour
-#[derive(Deserialize, Serialize)]
+#[derive(Clone, Deserialize, Serialize)]
 pub struct EngineReconcileConfig {
     /// timeout for reconcile step
     #[serde(default = "default_reconcile_timeout")]
@@ -163,7 +163,7 @@ const fn default_reconcile_delete_missing() -> bool {
 }
 
 /// Configuration for agent description
-#[derive(Deserialize, Debug, PartialEq, Serialize)]
+#[derive(Clone, Deserialize, Debug, PartialEq, Serialize)]
 pub struct AgentIdentityConfig {
     /// Defines identifying attributes
     pub identifying_attributes: Option<BTreeMap<String, AgentDescriptionAttribute>>,
@@ -184,7 +184,7 @@ pub struct AgentIdentityConfig {
 ///     attr3: 418.0
 ///     attr4: true
 /// ```
-#[derive(Debug, PartialEq)]
+#[derive(Clone, Debug, PartialEq)]
 pub enum AgentDescriptionAttribute {
     /// String attribute value
     String(String),

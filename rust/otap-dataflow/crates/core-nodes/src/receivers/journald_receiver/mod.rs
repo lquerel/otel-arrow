@@ -152,7 +152,7 @@ pub static JOURNALD_RECEIVER: ReceiverFactory<OtapPdata> = ReceiverFactory {
         create_journald_receiver(pipeline, node, node_config, receiver_config)
     },
     wiring_contract: otap_df_engine::wiring_contract::WiringContract::UNRESTRICTED,
-    validate_config: validate_journald_config,
+    config_resolver: otap_df_config::omit_component_config!(validate_journald_config),
 };
 
 #[cfg(target_os = "linux")]

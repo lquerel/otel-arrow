@@ -166,25 +166,25 @@ static TEST_RECEIVER_FACTORIES: &[ReceiverFactory<()>] = &[
         name: "urn:test:receiver:example",
         create: test_receiver_create,
         wiring_contract: WiringContract::UNRESTRICTED,
-        validate_config: test_validate_config,
+        config_resolver: otap_df_config::omit_component_config!(test_validate_config),
     },
     ReceiverFactory {
         name: "urn:otel:receiver:topic",
         create: test_receiver_create,
         wiring_contract: WiringContract::UNRESTRICTED,
-        validate_config: test_validate_config,
+        config_resolver: otap_df_config::omit_component_config!(test_validate_config),
     },
     ReceiverFactory {
         name: "urn:otel:receiver:otlp",
         create: test_receiver_create,
         wiring_contract: WiringContract::UNRESTRICTED,
-        validate_config: test_validate_config,
+        config_resolver: otap_df_config::omit_component_config!(test_validate_config),
     },
     ReceiverFactory {
         name: "urn:otel:receiver:internal_telemetry",
         create: test_receiver_create,
         wiring_contract: WiringContract::UNRESTRICTED,
-        validate_config: test_validate_config,
+        config_resolver: otap_df_config::omit_component_config!(test_validate_config),
     },
 ];
 
@@ -192,7 +192,7 @@ static TEST_PROCESSOR_FACTORIES: &[ProcessorFactory<()>] = &[ProcessorFactory {
     name: "urn:otel:processor:type_router",
     create: test_processor_create,
     wiring_contract: WiringContract::UNRESTRICTED,
-    validate_config: test_validate_config,
+    config_resolver: otap_df_config::omit_component_config!(test_validate_config),
 }];
 
 static TEST_EXPORTER_FACTORIES: &[ExporterFactory<()>] = &[
@@ -200,25 +200,25 @@ static TEST_EXPORTER_FACTORIES: &[ExporterFactory<()>] = &[
         name: "urn:test:exporter:example",
         create: test_exporter_create,
         wiring_contract: WiringContract::UNRESTRICTED,
-        validate_config: test_validate_config,
+        config_resolver: otap_df_config::omit_component_config!(test_validate_config),
     },
     ExporterFactory {
         name: "urn:otel:exporter:topic",
         create: test_exporter_create,
         wiring_contract: WiringContract::UNRESTRICTED,
-        validate_config: test_validate_config,
+        config_resolver: otap_df_config::omit_component_config!(test_validate_config),
     },
     ExporterFactory {
         name: "urn:otel:exporter:console",
         create: test_exporter_create,
         wiring_contract: WiringContract::UNRESTRICTED,
-        validate_config: test_validate_config,
+        config_resolver: otap_df_config::omit_component_config!(test_validate_config),
     },
     ExporterFactory {
         name: "urn:otel:exporter:noop",
         create: test_exporter_create,
         wiring_contract: WiringContract::UNRESTRICTED,
-        validate_config: test_validate_config,
+        config_resolver: otap_df_config::omit_component_config!(test_validate_config),
     },
 ];
 
@@ -234,13 +234,13 @@ static RECOVERY_TEST_RECEIVER_FACTORIES: &[ReceiverFactory<()>] = &[
         name: "urn:test:receiver:example",
         create: recovery_test_receiver_create,
         wiring_contract: WiringContract::UNRESTRICTED,
-        validate_config: test_validate_config,
+        config_resolver: otap_df_config::omit_component_config!(test_validate_config),
     },
     ReceiverFactory {
         name: "urn:otel:receiver:internal_telemetry",
         create: recovery_test_receiver_create,
         wiring_contract: WiringContract::UNRESTRICTED,
-        validate_config: test_validate_config,
+        config_resolver: otap_df_config::omit_component_config!(test_validate_config),
     },
 ];
 
@@ -249,19 +249,19 @@ static RECOVERY_TEST_EXPORTER_FACTORIES: &[ExporterFactory<()>] = &[
         name: "urn:test:exporter:example",
         create: recovery_test_exporter_create,
         wiring_contract: WiringContract::UNRESTRICTED,
-        validate_config: test_validate_config,
+        config_resolver: otap_df_config::omit_component_config!(test_validate_config),
     },
     ExporterFactory {
         name: "urn:otel:exporter:console",
         create: recovery_test_exporter_create,
         wiring_contract: WiringContract::UNRESTRICTED,
-        validate_config: test_validate_config,
+        config_resolver: otap_df_config::omit_component_config!(test_validate_config),
     },
     ExporterFactory {
         name: "urn:otel:exporter:noop",
         create: recovery_test_exporter_create,
         wiring_contract: WiringContract::UNRESTRICTED,
-        validate_config: test_validate_config,
+        config_resolver: otap_df_config::omit_component_config!(test_validate_config),
     },
 ];
 

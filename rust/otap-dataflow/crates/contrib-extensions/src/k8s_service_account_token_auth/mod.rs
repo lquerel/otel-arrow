@@ -117,5 +117,5 @@ pub static K8S_SERVICE_ACCOUNT_TOKEN_AUTH_EXTENSION: ExtensionFactory = Extensio
         (shared: SharedK8sServiceAccountTokenAuth, local: LocalK8sServiceAccountTokenAuth) => [BearerTokenAuthorizer]
     )),
     create,
-    validate_config,
+    config_resolver: otap_df_config::omit_component_config!(validate_config),
 };

@@ -3,10 +3,12 @@
 
 //! Validation helpers for node configuration.
 //!
-//! These helpers are intended for use with the `validate_config` field on
-//! factory structs ([`ReceiverFactory`], [`ProcessorFactory`], [`ExporterFactory`]).
+//! These helpers are intended for custom validators behind an explicit
+//! [`ComponentConfigResolver::Omit`](crate::resolved_config::ComponentConfigResolver::Omit)
+//! policy. New typed factories should normally use the resolution helpers in
+//! [`crate::resolved_config`].
 //!
-//! **Scope:** `validate_config` performs *static* validation only -- it checks
+//! **Scope:** validation performs *static* checks only -- it checks
 //! that the config value can be deserialized into the expected type. It does
 //! **not** detect runtime issues such as port conflicts, unreachable endpoints,
 //! missing files, or other conditions that only manifest when the engine starts.
@@ -23,7 +25,9 @@ use crate::error::Error;
 ///
 /// # Example
 /// ```ignore
-/// validate_config: validate_typed_config::<MyComponentConfig>,
+/// config_resolver: otap_df_config::omit_component_config!(
+///     otap_df_config::validation::validate_typed_config::<MyComponentConfig>
+/// ),
 /// ```
 pub fn validate_typed_config<T: serde::de::DeserializeOwned>(
     config: &serde_json::Value,
@@ -42,7 +46,9 @@ pub fn validate_typed_config<T: serde::de::DeserializeOwned>(
 ///
 /// # Example
 /// ```ignore
-/// validate_config: no_config,
+/// config_resolver: otap_df_config::resolve_component_config!(
+///     otap_df_config::resolved_config::resolve_no_config
+/// ),
 /// ```
 pub fn no_config(config: &serde_json::Value) -> Result<(), Error> {
     match config {

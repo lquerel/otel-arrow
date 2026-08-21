@@ -247,7 +247,9 @@ pub static CONSOLE_EXPORTER: ExporterFactory<OtapPdata> = ExporterFactory {
         ))
     },
     wiring_contract: otap_df_engine::wiring_contract::WiringContract::UNRESTRICTED,
-    validate_config: otap_df_config::validation::validate_typed_config::<ConsoleExporterConfig>,
+    config_resolver: otap_df_config::resolve_component_config!(
+        otap_df_config::resolved_config::resolve_omitted_typed_config::<ConsoleExporterConfig>
+    ),
 };
 
 #[async_trait(?Send)]

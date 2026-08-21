@@ -1023,7 +1023,9 @@ pub fn create_content_router(
 pub static CONTENT_ROUTER_FACTORY: ProcessorFactory<OtapPdata> = ProcessorFactory {
     name: CONTENT_ROUTER_URN,
     wiring_contract: otap_df_engine::wiring_contract::WiringContract::UNRESTRICTED,
-    validate_config: otap_df_config::validation::validate_typed_config::<ContentRouterConfig>,
+    config_resolver: otap_df_config::resolve_component_config!(
+        otap_df_config::resolved_config::resolve_omitted_typed_config::<ContentRouterConfig>
+    ),
     create: |pipeline: PipelineContext,
              node: NodeId,
              node_config: Arc<NodeUserConfig>,

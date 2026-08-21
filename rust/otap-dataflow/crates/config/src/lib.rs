@@ -35,6 +35,10 @@ pub mod observed_state;
 pub mod pipeline;
 pub mod pipeline_group;
 pub mod policy;
+/// Type-owned secret redaction for config snapshots.
+pub mod redaction;
+/// Factory-owned typed config resolution and safe snapshot policies.
+pub mod resolved_config;
 /// Engine telemetry settings.
 pub mod settings;
 /// TLS configuration.

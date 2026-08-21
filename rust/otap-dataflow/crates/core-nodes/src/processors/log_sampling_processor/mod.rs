@@ -63,7 +63,9 @@ static LOG_SAMPLING_PROCESSOR_FACTORY: otap_df_engine::ProcessorFactory<OtapPdat
              _capabilities: &otap_df_engine::capability::registry::Capabilities| {
                 create_log_sampling_processor(pipeline_ctx, node, node_config, proc_cfg)
             },
-        validate_config: otap_df_config::validation::validate_typed_config::<Config>,
+        config_resolver: otap_df_config::resolve_component_config!(
+            otap_df_config::resolved_config::resolve_omitted_typed_config::<Config>
+        ),
         wiring_contract: otap_df_engine::wiring_contract::WiringContract::UNRESTRICTED,
     };
 

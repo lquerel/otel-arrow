@@ -237,7 +237,9 @@ pub static KAFKA_RECEIVER: ReceiverFactory<OtapPdata> = ReceiverFactory {
             receiver_config,
         ))
     },
-    validate_config: validate_typed_config::<KafkaReceiverConfig>,
+    config_resolver: otap_df_config::resolve_component_config!(
+        otap_df_config::resolved_config::resolve_omitted_typed_config::<KafkaReceiverConfig>
+    ),
     wiring_contract: otap_df_engine::wiring_contract::WiringContract::UNRESTRICTED,
 };
 

@@ -121,5 +121,5 @@ pub static AZURE_IDENTITY_AUTH_EXTENSION: ExtensionFactory = ExtensionFactory {
         shared: AzureIdentityAuthExtension => [BearerTokenProvider]
     )),
     create,
-    validate_config,
+    config_resolver: otap_df_config::omit_component_config!(validate_config),
 };

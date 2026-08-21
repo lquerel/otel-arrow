@@ -76,7 +76,7 @@ pub static PARTITION_PROCESSOR_FACTORY: ProcessorFactory<OtapPdata> = ProcessorF
     name: PARTITION_PROCESSOR_URN,
     create: create_partition_processor,
     wiring_contract: WiringContract::UNRESTRICTED,
-    validate_config: |value| {
+    config_resolver: otap_df_config::omit_component_config!(|value| {
         let config: Config = serde_json::from_value(value.clone()).map_err(|e| {
             otap_df_config::error::Error::InvalidUserConfig {
                 error: e.to_string(),
@@ -102,7 +102,7 @@ pub static PARTITION_PROCESSOR_FACTORY: ProcessorFactory<OtapPdata> = ProcessorF
         };
 
         Ok(())
-    },
+    }),
 };
 
 /// partition processor.

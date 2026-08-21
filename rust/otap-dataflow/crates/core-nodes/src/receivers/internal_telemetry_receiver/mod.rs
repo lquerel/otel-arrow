@@ -220,7 +220,9 @@ pub static INTERNAL_TELEMETRY_RECEIVER: ReceiverFactory<OtapPdata> = ReceiverFac
         ))
     },
     wiring_contract: otap_df_engine::wiring_contract::WiringContract::UNRESTRICTED,
-    validate_config: InternalTelemetryReceiver::validate_config,
+    config_resolver: otap_df_config::omit_component_config!(
+        InternalTelemetryReceiver::validate_config
+    ),
 };
 
 impl InternalTelemetryReceiver {

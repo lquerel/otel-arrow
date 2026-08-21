@@ -36,7 +36,6 @@ use async_trait::async_trait;
 use futures::future::LocalBoxFuture;
 use linkme::distributed_slice;
 use otap_df_config::node::NodeUserConfig;
-use otap_df_config::validation::validate_typed_config;
 use otap_df_config::{SignalFormat, SignalType};
 use otap_df_engine::ExporterFactory;
 use otap_df_engine::config::ExporterConfig;
@@ -116,25 +115,16 @@ pub struct ClickhouseExporter {
 
 impl ClickhouseExporter {
     /// Create a new Clickhouse exporter from configuration
-    pub fn from_config(
-        pipeline_ctx: PipelineContext,
-        config: &serde_json::Value,
-    ) -> Result<Self, otap_df_config::error::Error> {
+    pub fn from_config(pipeline_ctx: PipelineContext, patch: ConfigPatch) -> Self {
         let ch_metrics = pipeline_ctx.register_metrics::<ClickhouseExporterMetrics>();
         let pdata_metrics = ExporterExportMetrics::register(&pipeline_ctx);
-
-        let patch: ConfigPatch = serde_json::from_value(config.clone()).map_err(|e| {
-            otap_df_config::error::Error::InvalidUserConfig {
-                error: e.to_string(),
-            }
-        })?;
         let config: Config = Config::from_patch(patch);
 
-        Ok(Self {
+        Self {
             config,
             pdata_metrics,
             ch_metrics,
-        })
+        }
     }
 
     /// Get exporter configuration
@@ -228,13 +218,18 @@ pub static CLICKHOUSE_EXPORTER: ExporterFactory<OtapPdata> = ExporterFactory {
              exporter_config: &ExporterConfig,
              _capabilities: &otap_df_engine::capability::registry::Capabilities| {
         Ok(ExporterWrapper::local(
-            ClickhouseExporter::from_config(pipeline, &node_config.config)?,
+            ClickhouseExporter::from_config(
+                pipeline,
+                node_config.resolved_config::<ConfigPatch>()?.clone(),
+            ),
             node,
             node_config,
             exporter_config,
         ))
     },
-    validate_config: validate_typed_config::<ConfigPatch>,
+    config_resolver: otap_df_config::resolve_component_config!(
+        otap_df_config::resolved_config::resolve_typed_config::<ConfigPatch>
+    ),
     wiring_contract: otap_df_engine::wiring_contract::WiringContract::UNRESTRICTED,
 };
 

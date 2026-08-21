@@ -151,7 +151,7 @@ pub static HOST_METRICS_RECEIVER: ReceiverFactory<OtapPdata> = ReceiverFactory {
         create_host_metrics_receiver(pipeline, node, node_config, receiver_config)
     },
     wiring_contract: otap_df_engine::wiring_contract::WiringContract::UNRESTRICTED,
-    validate_config: validate_host_metrics_config,
+    config_resolver: otap_df_config::omit_component_config!(validate_host_metrics_config),
 };
 
 #[cfg(target_os = "linux")]
@@ -1295,7 +1295,7 @@ mod tests {
         });
 
         assert!(matches!(
-            (HOST_METRICS_RECEIVER.validate_config)(&config),
+            HOST_METRICS_RECEIVER.config_resolver.validate(&config),
             Err(otap_df_config::error::Error::InvalidUserConfig { .. })
         ));
     }

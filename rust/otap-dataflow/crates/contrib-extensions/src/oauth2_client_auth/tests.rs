@@ -8,6 +8,8 @@ use std::time::{Duration, Instant};
 
 use futures::StreamExt;
 use otap_df_config::error::Error as ConfigError;
+use otap_df_config::extension::{ExtensionUrn, ExtensionUserConfig};
+use otap_df_config::redaction::REDACTED_VALUE;
 use otap_df_engine::shared::capability::auth::bearer_token_provider::BearerTokenProvider as SharedBearerTokenProvider;
 use otap_df_telemetry::registry::TelemetryRegistryHandle;
 use otap_df_telemetry::testing::EmptyAttributes;
@@ -40,6 +42,66 @@ fn valid_config_json(token_url: &str) -> serde_json::Value {
         "client_id": "id",
         "client_secret": "secret",
     })
+}
+
+/// Scenario: the OAuth factory resolves an inline client secret for runtime and snapshots.
+/// Guarantees: the typed snapshot masks the secret while retaining the runtime cleartext value.
+#[test]
+fn factory_owned_snapshot_masks_inline_oauth_secret() {
+    let raw = serde_json::json!({
+        "token_url": "https://identity.example/token",
+        "client_id": "client-id",
+        "client_secret": "oauth-client-secret"
+    });
+    let mut extension = ExtensionUserConfig::new(
+        ExtensionUrn::parse(OAUTH2_CLIENT_AUTH_URN).expect("extension URN should parse"),
+        raw.clone(),
+    );
+    let resolved = resolve_config(&extension.config).expect("OAuth config should resolve");
+    assert_eq!(
+        resolved
+            .typed::<Config>()
+            .expect("resolved runtime type should match")
+            .client_secret
+            .as_ref()
+            .expect("inline secret should be retained")
+            .expose(),
+        "oauth-client-secret"
+    );
+    extension.set_resolved_config(resolved);
+
+    let redacted = extension
+        .try_safe_snapshot()
+        .expect("OAuth safe snapshot should succeed");
+
+    assert_eq!(redacted.config["client_secret"], REDACTED_VALUE);
+    assert_eq!(extension.config, raw, "stored config must remain cleartext");
+}
+
+/// Scenario: OAuth TLS configuration contains an inline private key whose shared type is unsafe.
+/// Guarantees: the factory explicitly omits the config instead of serializing that key.
+#[test]
+fn factory_omits_snapshot_when_nested_tls_key_is_not_safely_typed() {
+    let mut extension = ExtensionUserConfig::new(
+        ExtensionUrn::parse(OAUTH2_CLIENT_AUTH_URN).expect("extension URN should parse"),
+        serde_json::json!({
+            "token_url": "https://identity.example/token",
+            "client_id": "client-id",
+            "client_secret": "oauth-client-secret",
+            "tls": {
+                "cert_pem": "certificate",
+                "key_pem": "tls-private-key"
+            }
+        }),
+    );
+    extension.set_resolved_config(
+        resolve_config(&extension.config).expect("OAuth config should resolve"),
+    );
+
+    let snapshot = extension
+        .try_safe_snapshot()
+        .expect("explicit omit policy should produce a snapshot");
+    assert_eq!(snapshot.config, serde_json::Value::Null);
 }
 
 fn make_tracker() -> TokenProviderMetricsTracker<OAuth2ClientAuthMetrics> {
@@ -476,11 +538,11 @@ fn insecure_false_with_https_token_url_is_accepted() {
     assert!(cfg.tls.is_some());
 }
 
-// Scenario: The factory's static `validate_config` hook is called with a valid config.
-// Guarantees: It accepts the config, mirroring the parse-then-validate path used at wiring time.
+/// Scenario: the factory's typed resolver is called with a valid config.
+/// Guarantees: it returns the same typed config contract used at wiring time.
 #[test]
-fn validate_config_hook_accepts_valid_config() {
-    assert!(validate_config(&valid_config_json("https://idp.example.com/token")).is_ok());
+fn config_resolver_accepts_valid_config() {
+    assert!(resolve_config(&valid_config_json("https://idp.example.com/token")).is_ok());
 }
 
 // Scenario: The extension registers itself into the factory slice.

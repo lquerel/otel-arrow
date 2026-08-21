@@ -29,12 +29,17 @@ fn operation_error_response(status: StatusCode, error: crate::ControlPlaneError)
 
 /// Returns the full controller-owned engine configuration.
 ///
-/// Credential header values are redacted from the response (see
-/// [`OtelDataflowSpec::redacted_for_snapshot`]) so secrets configured in node
-/// and extension `headers` are not exposed in cleartext through this endpoint.
+/// Component configs are exported only through their factory-owned safe
+/// snapshot policy (see [`OtelDataflowSpec::try_safe_snapshot`]).
 pub async fn show_config(State(state): State<AppState>) -> impl IntoResponse {
     match state.controller.engine_config_snapshot() {
-        Ok(config) => (StatusCode::OK, Json(config.redacted_for_snapshot())).into_response(),
+        Ok(config) => match config.try_safe_snapshot() {
+            Ok(redacted) => (StatusCode::OK, Json(redacted)).into_response(),
+            Err(error) => operation_error_response(
+                StatusCode::INTERNAL_SERVER_ERROR,
+                crate::safe_snapshot_error(error),
+            ),
+        },
         Err(error) => operation_error_response(StatusCode::INTERNAL_SERVER_ERROR, error),
     }
 }
@@ -85,10 +90,39 @@ mod tests {
     use otap_df_admin_types::operations::{OperationError, OperationErrorKind};
     use otap_df_config::engine::OtelDataflowSpec;
     use otap_df_config::observed_state::ObservedStateSettings;
+    use otap_df_config::redaction::RedactedString;
+    use otap_df_config::resolved_config::{ResolvedComponentConfig, resolve_typed_config};
     use otap_df_engine::memory_limiter::MemoryPressureState;
     use otap_df_state::store::ObservedStateStore;
     use otap_df_telemetry::registry::TelemetryRegistryHandle;
+    use serde::{Deserialize, Serialize};
+    use serde_json::Value;
     use std::sync::Arc;
+
+    #[derive(Deserialize, Serialize)]
+    struct AdminTypedConfig {
+        password: RedactedString,
+        endpoint: String,
+    }
+
+    fn resolve_admin_test_components(config: &mut OtelDataflowSpec) {
+        for group in config.groups.values_mut() {
+            for pipeline in group.pipelines.values_mut() {
+                for (_, node) in pipeline.node_iter_mut() {
+                    let resolved = if node.r#type.as_str() == "urn:test:exporter:typed-redaction" {
+                        resolve_typed_config::<AdminTypedConfig>(&node.config)
+                            .expect("typed test config should resolve")
+                    } else {
+                        ResolvedComponentConfig::omit()
+                    };
+                    Arc::make_mut(node).set_resolved_config(resolved);
+                }
+            }
+        }
+        for (_, node) in config.engine.observability.pipeline.nodes.iter_mut() {
+            Arc::make_mut(node).set_resolved_config(ResolvedComponentConfig::omit());
+        }
+    }
 
     #[derive(Clone)]
     struct StubControlPlane {
@@ -176,8 +210,10 @@ mod tests {
     }
 
     fn empty_engine_config() -> OtelDataflowSpec {
-        OtelDataflowSpec::from_yaml("version: otel_dataflow/v1\n")
-            .expect("empty engine config should parse")
+        let mut config = OtelDataflowSpec::from_yaml("version: otel_dataflow/v1\n")
+            .expect("empty engine config should parse");
+        resolve_admin_test_components(&mut config);
+        config
     }
 
     fn reconcile_status(state: EngineConfigReconcileState) -> EngineConfigReconcileStatus {
@@ -250,12 +286,16 @@ mod tests {
             .expect("body should collect");
         let decoded: OtelDataflowSpec =
             serde_json::from_slice(&body).expect("config body should deserialize");
-        assert_eq!(decoded, config);
+        assert_eq!(
+            decoded,
+            config
+                .try_safe_snapshot()
+                .expect("resolved config should produce a safe snapshot")
+        );
     }
 
-    /// Scenario: a node config contains credential header values.
-    /// Guarantees: `show_config` redacts them so the raw credential never
-    /// appears in the response body.
+    /// Scenario: a node factory has resolved a typed config containing a secret.
+    /// Guarantees: `show_config` uses its safe typed snapshot and leaves source config intact.
     #[tokio::test]
     async fn show_config_redacts_credential_header_values() {
         let yaml = r#"
@@ -270,17 +310,28 @@ groups:
             type: "urn:test:receiver:example"
             config: null
           exporter:
-            type: "urn:test:exporter:example"
+            type: "urn:test:exporter:typed-redaction"
             config:
-              headers:
-                authorization: "Bearer super-secret-token"
+              password: "admin-password-secret"
+              endpoint: "https://backend.example"
         connections:
           - from: receiver
             to: exporter
 "#;
-        let config = OtelDataflowSpec::from_yaml(yaml).expect("spec should parse and validate");
+        let mut config = OtelDataflowSpec::from_yaml(yaml).expect("spec should parse and validate");
+        resolve_admin_test_components(&mut config);
+        let original =
+            serde_json::to_value(&config).expect("stored config should serialize before request");
+        let cleartext_password = original
+            .pointer("/groups/default/pipelines/main/nodes/exporter/config/password")
+            .and_then(Value::as_str)
+            .expect("fixture password should be a string")
+            .to_owned();
+        let expected = config
+            .try_safe_snapshot()
+            .expect("typed safe snapshot should succeed");
         let response = show_config(State(test_app_state(stub(
-            Ok(config),
+            Ok(config.clone()),
             Ok(reconcile_status(EngineConfigReconcileState::Succeeded)),
         ))))
         .await
@@ -292,13 +343,78 @@ groups:
             .expect("body should collect");
         let text = String::from_utf8(body.to_vec()).expect("config body is utf-8");
         assert!(
-            !text.contains("Bearer super-secret-token"),
-            "raw credential must not appear in the config response: {text}"
+            !text.contains(&cleartext_password),
+            "typed password must not appear in the config response: {text}"
         );
         assert!(
             text.contains("[REDACTED]"),
             "redacted placeholder should appear in the config response: {text}"
         );
+        let decoded: OtelDataflowSpec =
+            serde_json::from_slice(&body).expect("config response should deserialize");
+        assert_eq!(
+            decoded, expected,
+            "the endpoint must preserve every non-secret field"
+        );
+        assert_eq!(
+            serde_json::to_value(&config).expect("stored config should serialize after request"),
+            original,
+            "the endpoint must not mutate stored config"
+        );
+    }
+
+    /// Scenario: an unresolved config reaches the admin snapshot boundary and contains sensitive text.
+    /// Guarantees: `show_config` fails closed and never includes the sensitive value in its response.
+    #[tokio::test]
+    async fn show_config_fails_closed_without_value_bearing_error() {
+        let config: OtelDataflowSpec = serde_json::from_value(serde_json::json!({
+            "version": "otel_dataflow/v1",
+            "groups": {
+                "default": {
+                    "pipelines": {
+                        "main": {
+                            "nodes": {
+                                "exporter": {
+                                    "type": "urn:test:exporter:typed-redaction",
+                                    "config": {
+                                        "password": {
+                                            "nested": "diagnostic-secret"
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }))
+        .expect("malformed typed config should remain raw JSON");
+        let sensitive_value = serde_json::to_value(&config)
+            .expect("fixture should serialize")
+            .pointer("/groups/default/pipelines/main/nodes/exporter/config/password/nested")
+            .and_then(Value::as_str)
+            .expect("fixture sensitive value should be a string")
+            .to_owned();
+
+        let response = show_config(State(test_app_state(stub(
+            Ok(config),
+            Ok(reconcile_status(EngineConfigReconcileState::Succeeded)),
+        ))))
+        .await
+        .into_response();
+
+        assert_eq!(response.status(), StatusCode::INTERNAL_SERVER_ERROR);
+        let body = to_bytes(response.into_body(), usize::MAX)
+            .await
+            .expect("body should collect");
+        let text = String::from_utf8(body.to_vec()).expect("error body is utf-8");
+        assert!(
+            !text.contains(&sensitive_value),
+            "redaction error must not expose the malformed value: {text}"
+        );
+        let error: OperationError =
+            serde_json::from_slice(&body).expect("error body should deserialize");
+        assert_eq!(error.kind, OperationErrorKind::Internal);
     }
 
     /// Scenario: the active control plane does not support full config

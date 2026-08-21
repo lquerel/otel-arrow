@@ -90,11 +90,13 @@ pub static OPAMP_CONTROLLER_EXTENSION: ControllerExtensionFactory = ControllerEx
     name: CONTROL_EXTENSION_URN,
     description: "OpAMP controller extension",
     documentation_url: "",
-    validate_config,
+    config_resolver: otap_df_config::resolve_component_config!(resolve_config),
     start,
 };
 
-fn validate_config(config: &serde_json::Value) -> Result<(), ConfigError> {
+fn resolve_config(
+    config: &serde_json::Value,
+) -> Result<otap_df_config::resolved_config::ResolvedComponentConfig, ConfigError> {
     let config: Config =
         serde_json::from_value(config.clone()).map_err(|e| ConfigError::InvalidUserConfig {
             error: e.to_string(),
@@ -104,16 +106,21 @@ fn validate_config(config: &serde_json::Value) -> Result<(), ConfigError> {
         .validate()
         .map_err(|e| ConfigError::InvalidUserConfig {
             error: e.to_string(),
-        })
+        })?;
+
+    // Endpoint URLs may contain credentials. Keep the typed runtime value, but
+    // omit this extension's config until every sensitive field has a safe type.
+    Ok(otap_df_config::resolved_config::ResolvedComponentConfig::omit_typed(config))
 }
 
 fn start(
     context: ControllerExtensionContext,
 ) -> Result<ControllerExtensionTaskFactory, ControllerExtensionError> {
-    // safety: we can 'expect' the deserialization to have succeeded because it's also deserialized
-    // in the `validate_config` call
-    let config: Config =
-        serde_json::from_value(context.extension.config.clone()).expect("config validated");
+    let config = context
+        .extension
+        .resolved_config::<Config>()
+        .map_err(|source| Box::new(source) as ControllerExtensionError)?
+        .clone();
 
     Ok(Box::new(move |cancellation_token| {
         Box::pin(
@@ -1122,13 +1129,15 @@ fn initial_message(
     context: &ControllerExtensionContext,
 ) -> AgentToServer {
     let status_snapshot = context.observed_state.snapshot();
+    let mut health = component_health(session_state, &status_snapshot);
+    let effective_config = effective_config(context, &mut health);
     AgentToServer {
         instance_uid: session_state.instance_uid.to_vec(),
         sequence_num: session_state.sequence_num,
         agent_description: agent_description(config),
         capabilities: capabilities(),
-        health: Some(component_health(session_state, &status_snapshot)),
-        effective_config: Some(effective_config(context)),
+        health: Some(health),
+        effective_config,
         flags: AgentToServerFlags::Unspecified as u64,
         custom_capabilities: Some(custom_capabilities()),
         remote_config_status: Some(RemoteConfigStatus {
@@ -1183,7 +1192,13 @@ fn applying_message(
     };
 
     if reply_to_server.report_full_state {
-        message.effective_config = Some(effective_config(context));
+        message.effective_config = effective_config(
+            context,
+            message
+                .health
+                .as_mut()
+                .expect("applying message always includes health"),
+        );
         message.agent_description = agent_description(config);
         message.custom_capabilities = Some(custom_capabilities());
 
@@ -1215,13 +1230,15 @@ fn applied_result_message(
     };
     set_remote_config_status_from_reconcile_result(&mut remote_config_status, Some(result));
     let status_snapshot = context.observed_state.snapshot();
+    let mut health = component_health(session_state, &status_snapshot);
+    let effective_config = effective_config(context, &mut health);
     AgentToServer {
         instance_uid: session_state.instance_uid.to_vec(),
         sequence_num: session_state.sequence_num,
         flags: AgentToServerFlags::Unspecified as u64,
         capabilities: capabilities(),
-        health: Some(component_health(session_state, &status_snapshot)),
-        effective_config: Some(effective_config(context)),
+        health: Some(health),
+        effective_config,
         remote_config_status: Some(remote_config_status),
         custom_message: pipeline_status_custom_message(&status_snapshot),
         ..Default::default()
@@ -1279,12 +1296,14 @@ fn full_state_reply_message(
         &mut remote_config_status,
         session_state.last_reconcile_result.as_ref(),
     );
+    let mut health = component_health(session_state, &status_snapshot);
+    let effective_config = effective_config(context, &mut health);
     AgentToServer {
         instance_uid: session_state.instance_uid.to_vec(),
         sequence_num: session_state.sequence_num,
         capabilities: capabilities(),
-        health: Some(component_health(session_state, &status_snapshot)),
-        effective_config: Some(effective_config(context)),
+        health: Some(health),
+        effective_config,
         agent_description: agent_description(config),
         custom_capabilities: Some(custom_capabilities()),
         remote_config_status: Some(remote_config_status),
@@ -1310,11 +1329,12 @@ fn heartbeat_message(
         &mut remote_config_status,
         session_state.last_reconcile_result.as_ref(),
     );
+    let health = component_health(session_state, &status_snapshot);
     AgentToServer {
         instance_uid: session_state.instance_uid.to_vec(),
         sequence_num: session_state.sequence_num,
         capabilities: capabilities(),
-        health: Some(component_health(session_state, &status_snapshot)),
+        health: Some(health),
         custom_message: pipeline_status_custom_message(&status_snapshot),
         remote_config_status: Some(remote_config_status),
         ..Default::default()
@@ -1544,11 +1564,19 @@ fn set_health_and_status_from_components(group_health: &mut ComponentHealth) {
 }
 
 /// Serialize the current applied config as the effective config for the AgentToServer message
-fn effective_config(context: &ControllerExtensionContext) -> EffectiveConfig {
+fn effective_config(
+    context: &ControllerExtensionContext,
+    health: &mut ComponentHealth,
+) -> Option<EffectiveConfig> {
     let config_result = context
         .control_plane
         .engine_config_snapshot()
         .map_err(|e| format!("Failed to get engine config snapshot: {e:?}"))
+        .and_then(|config| {
+            config
+                .try_safe_snapshot()
+                .map_err(|e| format!("Failed to produce safe engine config snapshot: {e}"))
+        })
         .and_then(|config| {
             serde_json::to_vec(&config)
                 .map_err(|e| format!("Failed to serialize engine config: {e}"))
@@ -1564,9 +1592,9 @@ fn effective_config(context: &ControllerExtensionContext) -> EffectiveConfig {
             let mut config_map = HashMap::new();
             _ = config_map.insert("state".into(), config_file);
 
-            EffectiveConfig {
+            Some(EffectiveConfig {
                 config_map: Some(AgentConfigMap { config_map }),
-            }
+            })
         }
         Err(e) => {
             otel_error!(
@@ -1574,7 +1602,12 @@ fn effective_config(context: &ControllerExtensionContext) -> EffectiveConfig {
                 message = "Could not build effective config",
                 error = e.as_str(),
             );
-            EffectiveConfig { config_map: None }
+            health.healthy = false;
+            if health.status.is_empty() || health.status == health_status::RUNNING {
+                health.status = health_status::DEGRADED.into();
+            }
+            health.last_error = e;
+            None
         }
     }
 }
@@ -1621,9 +1654,12 @@ mod test {
     use otap_df_config::{
         extension::{ExtensionUrn, ExtensionUserConfig},
         observed_state::ObservedStateSettings,
+        redaction::RedactedString,
+        resolved_config::{ResolvedComponentConfig, resolve_typed_config},
     };
     use otap_df_state::store::ObservedStateStore;
     use otap_df_telemetry::registry::TelemetryRegistryHandle;
+    use serde::{Deserialize, Serialize};
 
     use crate::extension::opamp::proto::opamp::v1::{
         AgentRemoteConfig, AnyValue, RetryInfo, ServerErrorResponse, any_value::Value,
@@ -1636,6 +1672,31 @@ mod test {
     use super::*;
 
     mod util;
+
+    #[derive(Deserialize, Serialize)]
+    struct OpampTypedConfig {
+        password: RedactedString,
+    }
+
+    fn resolve_opamp_test_components(config: &mut OtelDataflowSpec) {
+        for group in config.groups.values_mut() {
+            for pipeline in group.pipelines.values_mut() {
+                for (_, node) in pipeline.node_iter_mut() {
+                    let resolved =
+                        if node.r#type.as_str() == "urn:test:exporter:opamp-typed-redaction" {
+                            resolve_typed_config::<OpampTypedConfig>(&node.config)
+                                .expect("typed OpAMP test config should resolve")
+                        } else {
+                            ResolvedComponentConfig::omit()
+                        };
+                    Arc::make_mut(node).set_resolved_config(resolved);
+                }
+            }
+        }
+        for (_, node) in config.engine.observability.pipeline.nodes.iter_mut() {
+            Arc::make_mut(node).set_resolved_config(ResolvedComponentConfig::omit());
+        }
+    }
 
     /// Start a mock server, and the agent controller with the passed config. Messages will then
     /// be exchanged until the number of expected exchanges have occurred. Afterward, the requests
@@ -1693,6 +1754,140 @@ mod test {
         client_handle.await.unwrap().unwrap();
 
         server_state.take_requests().await
+    }
+
+    /// Scenario: the committed engine config contains a factory-resolved typed secret and
+    /// is reported to an OpAMP server as effective config.
+    /// Guarantees: the off-box AgentToServer payload contains only the
+    /// redaction marker and never the cleartext secret.
+    #[tokio::test]
+    async fn effective_config_redacts_type_owned_secrets() {
+        let mut engine_config: OtelDataflowSpec = serde_json::from_value(serde_json::json!({
+            "version": "otel_dataflow/v1",
+            "groups": {
+                "default": {
+                    "pipelines": {
+                        "main": {
+                            "nodes": {
+                                "exporter": {
+                                    "type": "urn:test:exporter:opamp-typed-redaction",
+                                    "config": {
+                                        "password": "opamp-effective-config-secret"
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }))
+        .expect("engine config should deserialize");
+        resolve_opamp_test_components(&mut engine_config);
+        let cleartext = serde_json::to_value(&engine_config)
+            .expect("engine config should serialize")
+            .pointer("/groups/default/pipelines/main/nodes/exporter/config/password")
+            .and_then(serde_json::Value::as_str)
+            .expect("fixture password should be a string")
+            .to_owned();
+        let control_plane = Arc::new(MockControlPlane::new(engine_config));
+        let config: Config = serde_json::from_value(serde_json::json!({
+            "instance_uid": EXPECTED_INSTANCE_UID_STR,
+            "endpoint": ""
+        }))
+        .expect("OpAMP config should deserialize");
+
+        let requests = run_web_socket_test_with_config(vec![None], control_plane, 1, config).await;
+        let effective = requests[0]
+            .effective_config
+            .as_ref()
+            .and_then(|effective| effective.config_map.as_ref())
+            .and_then(|map| map.config_map.get("state"))
+            .expect("initial message should contain effective config");
+        let body = String::from_utf8(effective.body.clone()).expect("effective config is utf-8");
+
+        assert!(
+            !body.contains(&cleartext),
+            "effective config must not contain the cleartext secret: {body}"
+        );
+        assert!(
+            body.contains(otap_df_config::redaction::REDACTED_VALUE),
+            "effective config should contain the redaction marker: {body}"
+        );
+    }
+
+    /// Scenario: safe effective-config production fails and a later heartbeat is built.
+    /// Guarantees: the requested effective config is omitted without exposing
+    /// cleartext, and the heartbeat does not rebuild the full config snapshot.
+    #[test]
+    fn effective_config_omits_report_when_safe_snapshot_fails() {
+        let engine_config: OtelDataflowSpec = serde_json::from_value(serde_json::json!({
+            "version": "otel_dataflow/v1",
+            "groups": {
+                "default": {
+                    "pipelines": {
+                        "main": {
+                            "nodes": {
+                                "exporter": {
+                                    "type": "urn:test:exporter:opamp-typed-redaction",
+                                    "config": {
+                                        "password": {
+                                            "nested": "opamp-diagnostic-secret"
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }))
+        .expect("engine config should deserialize");
+        let telemetry_registry = TelemetryRegistryHandle::default();
+        let observed_state_store = ObservedStateStore::new(
+            &ObservedStateSettings::default(),
+            telemetry_registry.clone(),
+        );
+        let control_plane = Arc::new(MockControlPlane::new(engine_config));
+        let context = ControllerExtensionContext {
+            extension_id: Cow::Borrowed("opamp"),
+            extension: Arc::new(ExtensionUserConfig::with_type(
+                ExtensionUrn::parse(CONTROL_EXTENSION_URN).expect("extension URN should parse"),
+            )),
+            control_plane: control_plane.clone(),
+            observed_state: observed_state_store.handle(),
+            telemetry_registry,
+            engine_config: empty_engine_config(),
+        };
+
+        let mut health = ComponentHealth::default();
+        assert!(effective_config(&context, &mut health).is_none());
+        assert!(!health.healthy);
+        assert_eq!(health.status, health_status::DEGRADED);
+        assert!(health.last_error.contains("safe engine config snapshot"));
+
+        let mut failed_health = ComponentHealth {
+            status: health_status::FAILED.into(),
+            ..Default::default()
+        };
+        assert!(effective_config(&context, &mut failed_health).is_none());
+        assert_eq!(failed_health.status, health_status::FAILED);
+
+        let opamp_config: Config = serde_json::from_value(serde_json::json!({
+            "instance_uid": EXPECTED_INSTANCE_UID_STR,
+            "endpoint": "ws://127.0.0.1:1/v1/opamp"
+        }))
+        .expect("OpAMP config should deserialize");
+        let session_state =
+            SessionState::try_new(&opamp_config).expect("session state should initialize");
+        let snapshot_count = control_plane.engine_config_snapshot_count();
+        let heartbeat = heartbeat_message(&session_state, &context);
+        let heartbeat_health = heartbeat.health.expect("heartbeat should include health");
+        assert!(heartbeat_health.last_error.is_empty());
+        assert_eq!(
+            control_plane.engine_config_snapshot_count(),
+            snapshot_count,
+            "heartbeat must not rebuild an effective-config snapshot"
+        );
     }
 
     #[tokio::test]
@@ -2485,7 +2680,7 @@ mod test {
         let config_value = serde_json::json!({
             "endpoint": "ws://127.0.0.1:4320/v1/opamp"
         });
-        assert!(validate_config(&config_value).is_ok());
+        assert!(resolve_config(&config_value).is_ok());
     }
 
     #[test]
@@ -2494,7 +2689,7 @@ mod test {
         let config_value = serde_json::json!({
             "not_a_real_field": "hello"
         });
-        let err = validate_config(&config_value).unwrap_err();
+        let err = resolve_config(&config_value).unwrap_err();
         assert!(
             err.to_string().contains("endpoint"),
             "expected error about missing endpoint, got: {err}"
@@ -2506,7 +2701,7 @@ mod test {
         let config_value = serde_json::json!({
             "endpoint": "ftp://nope.invalid:1234"
         });
-        let err = validate_config(&config_value).unwrap_err();
+        let err = resolve_config(&config_value).unwrap_err();
         assert!(
             err.to_string().contains("ftp"),
             "expected error mentioning invalid scheme, got: {err}"
@@ -2519,7 +2714,7 @@ mod test {
             "endpoint": "ws://127.0.0.1:4320",
             "instance_uid": "not-a-uuid"
         });
-        let err = validate_config(&config_value).unwrap_err();
+        let err = resolve_config(&config_value).unwrap_err();
         assert!(
             err.to_string().contains("invalid"),
             "expected error about invalid UUID, got: {err}"

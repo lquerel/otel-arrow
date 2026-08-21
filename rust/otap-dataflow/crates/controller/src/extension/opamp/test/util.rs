@@ -4,7 +4,6 @@
 //! Utilities for testing OpAMP Controller Extension
 
 use std::{
-    borrow::Cow,
     collections::{HashMap, VecDeque},
     sync::{
         Arc, Mutex,
@@ -26,11 +25,7 @@ use otap_df_admin::{
     ControlPlane, ControlPlaneError, EngineConfigReconcileRequest, EngineConfigReconcileState,
     EngineConfigReconcileStatus,
 };
-use otap_df_config::{
-    engine::{EngineConfig, OtelDataflowSpec},
-    pipeline_group::PipelineGroupConfig,
-    policy::Policies,
-};
+use otap_df_config::{engine::OtelDataflowSpec, pipeline_group::PipelineGroupConfig};
 use prost::Message as _;
 use tokio::{net::TcpListener, sync::RwLock};
 use tokio_util::sync::CancellationToken;
@@ -41,7 +36,34 @@ use crate::extension::opamp::proto::opamp::v1::{
 
 /// Returns an empty Engine configuration
 pub fn empty_engine_config() -> OtelDataflowSpec {
-    OtelDataflowSpec::from_yaml("version: otel_dataflow/v1").unwrap()
+    let mut config = OtelDataflowSpec::from_yaml("version: otel_dataflow/v1").unwrap();
+    resolve_test_config_for_snapshot(&mut config);
+    config
+}
+
+fn resolve_test_config_for_snapshot(config: &mut OtelDataflowSpec) {
+    for group in config.groups.values_mut() {
+        for pipeline in group.pipelines.values_mut() {
+            for (_, node) in pipeline.node_iter_mut() {
+                Arc::make_mut(node).set_resolved_config(
+                    otap_df_config::resolved_config::ResolvedComponentConfig::omit(),
+                );
+            }
+            for (_, extension) in pipeline.extension_iter_mut() {
+                Arc::make_mut(extension).set_resolved_config(
+                    otap_df_config::resolved_config::ResolvedComponentConfig::omit(),
+                );
+            }
+        }
+    }
+    for (_, node) in config.engine.observability.pipeline.nodes.iter_mut() {
+        Arc::make_mut(node)
+            .set_resolved_config(otap_df_config::resolved_config::ResolvedComponentConfig::omit());
+    }
+    for (_, extension) in config.engine.controller.extensions.iter_mut() {
+        Arc::make_mut(extension)
+            .set_resolved_config(otap_df_config::resolved_config::ResolvedComponentConfig::omit());
+    }
 }
 
 /// Mock [`ControlPlane`] implementation for testing behaviour of OpAMP controller extension.
@@ -52,6 +74,7 @@ pub fn empty_engine_config() -> OtelDataflowSpec {
 pub(crate) struct MockControlPlane {
     current_config: Mutex<OtelDataflowSpec>,
     reconcile_result: Mutex<Result<EngineConfigReconcileStatus, ControlPlaneError>>,
+    engine_config_snapshot_count: AtomicUsize,
 }
 
 impl MockControlPlane {
@@ -66,6 +89,7 @@ impl MockControlPlane {
         Self {
             current_config: Mutex::new(initial_config),
             reconcile_result: Mutex::new(default_result),
+            engine_config_snapshot_count: AtomicUsize::new(0),
         }
     }
 
@@ -75,10 +99,17 @@ impl MockControlPlane {
     ) {
         *self.reconcile_result.lock().unwrap() = result;
     }
+
+    pub fn engine_config_snapshot_count(&self) -> usize {
+        self.engine_config_snapshot_count.load(Ordering::Relaxed)
+    }
 }
 
 impl ControlPlane for MockControlPlane {
     fn engine_config_snapshot(&self) -> Result<OtelDataflowSpec, ControlPlaneError> {
+        let _ = self
+            .engine_config_snapshot_count
+            .fetch_add(1, Ordering::Relaxed);
         Ok(self.current_config.lock().unwrap().clone())
     }
 
@@ -86,7 +117,9 @@ impl ControlPlane for MockControlPlane {
         &self,
         request: EngineConfigReconcileRequest,
     ) -> Result<EngineConfigReconcileStatus, ControlPlaneError> {
-        *self.current_config.lock().unwrap() = request.config;
+        let mut config = request.config;
+        resolve_test_config_for_snapshot(&mut config);
+        *self.current_config.lock().unwrap() = config;
         self.reconcile_result.lock().unwrap().clone()
     }
 
@@ -158,13 +191,11 @@ pub const EXPECTED_INSTANCE_UID_STR: &str = "8be4df61-93ca-11d2-aa0d-00e098032b8
 
 /// Constructs a simple [`OtelDataflowSpec`] with a single pipeline group
 pub fn test_config() -> OtelDataflowSpec {
-    OtelDataflowSpec {
-        version: "otel_dataflow/v1".into(),
-        policies: Policies::default(),
-        topics: HashMap::new(),
-        engine: EngineConfig::default(),
-        groups: HashMap::from_iter([(Cow::Borrowed("test_pipeline"), PipelineGroupConfig::new())]),
-    }
+    let mut config = empty_engine_config();
+    _ = config
+        .groups
+        .insert("test_pipeline".into(), PipelineGroupConfig::new());
+    config
 }
 
 /// Constructs a [`ServerToAgent`] message containing the passed config & config hash

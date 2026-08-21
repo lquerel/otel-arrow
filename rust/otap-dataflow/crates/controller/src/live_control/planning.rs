@@ -713,7 +713,7 @@ impl<
             .map_err(|err| ControlPlaneError::InvalidRequest {
                 message: err.to_string(),
             })?;
-        startup::validate_engine_components(&candidate_config, self.pipeline_factory).map_err(
+        startup::resolve_engine_components(&mut candidate_config, self.pipeline_factory).map_err(
             |error| ControlPlaneError::InvalidRequest {
                 message: error.to_string(),
             },
@@ -1952,13 +1952,23 @@ impl<
         );
 
         let live_config = self.engine_config_snapshot();
-        let desired_config = request.config;
+        let mut desired_config = request.config;
         desired_config
             .validate()
             .map_err(|err| ControlPlaneError::InvalidRequest {
                 message: err.to_string(),
             })?;
-        startup::validate_engine_components(&desired_config, self.pipeline_factory).map_err(
+        if desired_config.engine.controller.extensions != live_config.engine.controller.extensions {
+            return Err(ControlPlaneError::InvalidRequest {
+                message: "desired config would require controller extension mutation; restart the controller to apply it"
+                    .to_owned(),
+            });
+        }
+        // Reconciliation cannot restart controller extensions. Retain their
+        // already-resolved configs so later admin and OpAMP snapshots remain safe.
+        desired_config.engine.controller.extensions =
+            live_config.engine.controller.extensions.clone();
+        startup::resolve_engine_components(&mut desired_config, self.pipeline_factory).map_err(
             |error| ControlPlaneError::InvalidRequest {
                 message: error.to_string(),
             },
