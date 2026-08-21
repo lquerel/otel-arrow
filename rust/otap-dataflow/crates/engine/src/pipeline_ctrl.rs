@@ -43,7 +43,7 @@ use std::cmp::Reverse;
 use std::collections::{BinaryHeap, HashMap, HashSet, VecDeque};
 use std::rc::Rc;
 use std::time::{Duration, Instant};
-use tokio::sync::watch;
+use tokio::sync::{mpsc as tokio_mpsc, oneshot, watch};
 
 /// Threshold for the pending sends buffer. When the buffer exceeds this size,
 /// a warning is logged to help operators diagnose sustained backpressure.
@@ -52,6 +52,30 @@ const PENDING_SENDS_WARN_THRESHOLD: usize = 100;
 /// Maximum number of consecutive runtime-control messages handled before the
 /// manager forces one due expiry pass.
 const RUNTIME_CTRL_BURST: usize = 64;
+
+pub(crate) type CompletionBarrierSender = tokio_mpsc::Sender<oneshot::Sender<()>>;
+pub(crate) type CompletionBarrierReceiver = tokio_mpsc::Receiver<oneshot::Sender<()>>;
+
+/// Internal node lifecycle transitions used to order graceful shutdown.
+pub(crate) enum ShutdownLifecycleMsg {
+    /// A processor closed its pdata outputs after completing forward drain.
+    ProcessorDrained { node_id: usize },
+    /// A processor or exporter task stopped.
+    NodeStopped { node_id: usize },
+}
+
+pub(crate) type ShutdownLifecycleSender = tokio_mpsc::Sender<ShutdownLifecycleMsg>;
+pub(crate) type ShutdownLifecycleReceiver = tokio_mpsc::Receiver<ShutdownLifecycleMsg>;
+
+pub(crate) fn completion_barrier_channel() -> (CompletionBarrierSender, CompletionBarrierReceiver) {
+    tokio_mpsc::channel(1)
+}
+
+pub(crate) fn shutdown_lifecycle_channel(
+    capacity: usize,
+) -> (ShutdownLifecycleSender, ShutdownLifecycleReceiver) {
+    tokio_mpsc::channel(capacity)
+}
 
 /// Timer state for a node.
 struct TimerState {
@@ -300,6 +324,14 @@ pub struct RuntimeCtrlMsgManager<PData> {
     runtime_control_metrics: RuntimeControlMetricsState,
     /// One absolute deadline shared by all pipeline terminal metric handoffs.
     terminal_metrics_deadline: TerminalMetricsDeadline,
+    /// Processor finalizers used to release nodes in reverse topological order.
+    processor_finalizers: HashMap<usize, oneshot::Sender<()>>,
+    /// Direct downstream dependencies for each processor.
+    processor_downstreams: HashMap<usize, HashSet<usize>>,
+    /// Requests a completion-dispatch barrier before releasing a processor layer.
+    completion_barrier_sender: Option<CompletionBarrierSender>,
+    /// Receives private node lifecycle transitions during graceful shutdown.
+    shutdown_lifecycle_receiver: Option<ShutdownLifecycleReceiver>,
 }
 
 impl<PData> RuntimeCtrlMsgManager<PData> {
@@ -344,6 +376,10 @@ impl<PData> RuntimeCtrlMsgManager<PData> {
             telemetry: telemetry_policy,
             pending_sends: VecDeque::new(),
             terminal_metrics_deadline,
+            processor_finalizers: HashMap::new(),
+            processor_downstreams: HashMap::new(),
+            completion_barrier_sender: None,
+            shutdown_lifecycle_receiver: None,
         };
 
         // Register telemetry timers for all nodes centrally, using the
@@ -357,6 +393,73 @@ impl<PData> RuntimeCtrlMsgManager<PData> {
         }
 
         result
+    }
+
+    pub(crate) fn with_shutdown_orchestration(
+        mut self,
+        processor_finalizers: HashMap<usize, oneshot::Sender<()>>,
+        connection_edges: &[(usize, usize)],
+        completion_barrier_sender: CompletionBarrierSender,
+        shutdown_lifecycle_receiver: ShutdownLifecycleReceiver,
+    ) -> Self {
+        let processor_downstreams = connection_edges
+            .iter()
+            .filter(|(source, _)| processor_finalizers.contains_key(source))
+            .fold(HashMap::new(), |mut downstreams, (source, destination)| {
+                let _ = downstreams
+                    .entry(*source)
+                    .or_insert_with(HashSet::new)
+                    .insert(*destination);
+                downstreams
+            });
+        self.processor_finalizers = processor_finalizers;
+        self.processor_downstreams = processor_downstreams;
+        self.completion_barrier_sender = Some(completion_barrier_sender);
+        self.shutdown_lifecycle_receiver = Some(shutdown_lifecycle_receiver);
+        self
+    }
+
+    fn begin_ready_processor_finalization(
+        &self,
+        drained_processors: &HashSet<usize>,
+        stopped_nodes: &HashSet<usize>,
+        finalization_requested: &HashSet<usize>,
+        pending_finalization: &mut Option<(oneshot::Receiver<()>, Vec<usize>)>,
+    ) {
+        if pending_finalization.is_some() {
+            return;
+        }
+        let ready: Vec<_> = self
+            .processor_finalizers
+            .keys()
+            .copied()
+            .filter(|node_id| drained_processors.contains(node_id))
+            .filter(|node_id| !finalization_requested.contains(node_id))
+            .filter(|node_id| {
+                self.processor_downstreams
+                    .get(node_id)
+                    .is_none_or(|downstreams| {
+                        downstreams
+                            .iter()
+                            .all(|downstream| stopped_nodes.contains(downstream))
+                    })
+            })
+            .collect();
+        if ready.is_empty() {
+            return;
+        }
+
+        let Some(barrier_sender) = &self.completion_barrier_sender else {
+            return;
+        };
+        let (done_tx, done_rx) = oneshot::channel();
+        match barrier_sender.try_send(done_tx) {
+            Ok(()) => *pending_finalization = Some((done_rx, ready)),
+            Err(error) => otel_warn!(
+                "pipeline.completion.barrier.request.fail",
+                error = error.to_string()
+            ),
+        }
     }
 
     /// Runs the runtime-control manager event loop.
@@ -384,10 +487,20 @@ impl<PData> RuntimeCtrlMsgManager<PData> {
         let mut metrics_flush_delay: Option<clock::Sleep> = None;
         let mut shutdown_deadline_forced = false;
         let mut memory_pressure_updates_open = true;
+        let mut drained_processors = HashSet::new();
+        let mut stopped_nodes = HashSet::new();
+        let mut finalization_requested = HashSet::new();
+        let mut pending_finalization: Option<(oneshot::Receiver<()>, Vec<usize>)> = None;
 
         loop {
             // Drain any buffered sends before processing new messages.
             self.drain_pending_sends();
+            self.begin_ready_processor_finalization(
+                &drained_processors,
+                &stopped_nodes,
+                &finalization_requested,
+                &mut pending_finalization,
+            );
 
             // Control-plane metrics are actor-owned state snapshots. Flush them
             // on the telemetry reporting interval while they are dirty instead
@@ -465,6 +578,41 @@ impl<PData> RuntimeCtrlMsgManager<PData> {
 
             tokio::select! {
                 biased;
+
+                _ = async {
+                    let (barrier, _) = pending_finalization
+                        .as_mut()
+                        .expect("pending finalization must exist");
+                    let _ = barrier.await;
+                }, if pending_finalization.is_some() => {
+                    let (_, ready) = pending_finalization
+                        .take()
+                        .expect("pending finalization must exist");
+                    for node_id in ready {
+                        if let Some(finalizer) = self.processor_finalizers.remove(&node_id) {
+                            let _ = finalizer.send(());
+                            let _ = finalization_requested.insert(node_id);
+                        }
+                    }
+                }
+
+                lifecycle_msg = async {
+                    self.shutdown_lifecycle_receiver
+                        .as_mut()
+                        .expect("shutdown lifecycle receiver must exist")
+                        .recv()
+                        .await
+                }, if self.shutdown_lifecycle_receiver.is_some() => {
+                    match lifecycle_msg {
+                        Some(ShutdownLifecycleMsg::ProcessorDrained { node_id }) => {
+                            let _ = drained_processors.insert(node_id);
+                        }
+                        Some(ShutdownLifecycleMsg::NodeStopped { node_id }) => {
+                            let _ = stopped_nodes.insert(node_id);
+                        }
+                        None => self.shutdown_lifecycle_receiver = None,
+                    }
+                }
 
                 msg = self.runtime_ctrl_msg_receiver.recv() => {
                     let Some(msg) = msg.ok() else { break; };
@@ -924,6 +1072,8 @@ pub struct PipelineCompletionMsgDispatcher<PData> {
     completion_metrics: PipelineCompletionMetricsState,
     control_plane_metrics_flush_interval: Duration,
     terminal_metrics_deadline: TerminalMetricsDeadline,
+    completion_barrier_receiver: Option<CompletionBarrierReceiver>,
+    pending_barriers: Vec<oneshot::Sender<()>>,
 }
 
 impl<PData> PipelineCompletionMsgDispatcher<PData> {
@@ -950,6 +1100,50 @@ impl<PData> PipelineCompletionMsgDispatcher<PData> {
                 telemetry_policy.runtime_metrics,
             ),
             terminal_metrics_deadline,
+            completion_barrier_receiver: None,
+            pending_barriers: Vec::new(),
+        }
+    }
+
+    pub(crate) fn with_completion_barriers(
+        mut self,
+        completion_barrier_receiver: CompletionBarrierReceiver,
+    ) -> Self {
+        self.completion_barrier_receiver = Some(completion_barrier_receiver);
+        self
+    }
+
+    fn handle_completion_msg(&mut self, msg: PipelineCompletionMsg<PData>)
+    where
+        PData: Unwindable,
+    {
+        match msg {
+            PipelineCompletionMsg::DeliverAck { ack } => {
+                self.completion_metrics.record_deliver_ack_received();
+                self.unwind_ack(ack);
+            }
+            PipelineCompletionMsg::DeliverNack { nack } => {
+                self.completion_metrics.record_deliver_nack_received();
+                self.unwind_nack(nack);
+            }
+        }
+    }
+
+    fn finish_ready_barriers(&mut self)
+    where
+        PData: Unwindable,
+    {
+        if self.pending_barriers.is_empty() {
+            return;
+        }
+        while let Ok(msg) = self.pipeline_completion_msg_receiver.try_recv() {
+            self.handle_completion_msg(msg);
+        }
+        self.drain_pending_sends();
+        if self.pending_sends.is_empty() && self.pipeline_completion_msg_receiver.is_empty() {
+            for barrier in self.pending_barriers.drain(..) {
+                let _ = barrier.send(());
+            }
         }
     }
 
@@ -1100,6 +1294,7 @@ impl<PData: Unwindable> PipelineCompletionMsgDispatcher<PData> {
 
         loop {
             self.drain_pending_sends();
+            self.finish_ready_barriers();
 
             // Completion metrics use the same dirty-on-transition model as the
             // runtime-control metrics, but they only flush on the periodic
@@ -1120,18 +1315,22 @@ impl<PData: Unwindable> PipelineCompletionMsgDispatcher<PData> {
             tokio::select! {
                 biased;
 
+                barrier = async {
+                    self.completion_barrier_receiver
+                        .as_mut()
+                        .expect("completion barrier receiver must exist")
+                        .recv()
+                        .await
+                }, if self.completion_barrier_receiver.is_some() => {
+                    match barrier {
+                        Some(barrier) => self.pending_barriers.push(barrier),
+                        None => self.completion_barrier_receiver = None,
+                    }
+                }
+
                 msg = self.pipeline_completion_msg_receiver.recv() => {
                     let Some(msg) = msg.ok() else { break; };
-                    match msg {
-                        PipelineCompletionMsg::DeliverAck { ack } => {
-                            self.completion_metrics.record_deliver_ack_received();
-                            self.unwind_ack(ack);
-                        }
-                        PipelineCompletionMsg::DeliverNack { nack } => {
-                            self.completion_metrics.record_deliver_nack_received();
-                            self.unwind_nack(nack);
-                        }
-                    }
+                    self.handle_completion_msg(msg);
                 }
 
                 _ = async {

@@ -555,9 +555,17 @@ the channel returns final shutdown once inputs are drained or the shutdown
 deadline is reached.
 
 As receivers exit and drop their `pdata` senders, downstream channels drain and
-close progressively toward exporters. Once a downstream input is fully drained
-or closed, the corresponding consumer receives `Shutdown` and exits its run
-loop.
+close progressively toward exporters. A processor handles `Shutdown`, including
+any final forward-path flush, then closes its output senders and enters a
+completion-only phase. Its control lane remains available for late Ack/Nack
+messages from downstream nodes.
+
+Exporters exit after their inputs drain and their shutdown handlers finish. The
+control manager then releases completion-only processors in reverse dependency
+order. Before releasing each ready processor layer, it waits for the completion
+dispatcher to deliver all Ack/Nack messages already in flight. This lets each
+processor handle and propagate final downstream outcomes before its own task
+stops, without adding work to the normal forward-data path.
 
 If the shutdown deadline expires, receivers may force-resolve remaining
 receiver-local waiters and the runtime control manager forces the remaining

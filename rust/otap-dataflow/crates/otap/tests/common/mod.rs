@@ -6,3 +6,4 @@
 
 pub mod counting_exporter;
 pub mod flaky_exporter;
+pub mod shutdown_ack;

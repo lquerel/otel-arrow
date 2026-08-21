@@ -30,6 +30,7 @@ use crate::memory_limiter::MemoryPressureChanged;
 use crate::node::{Node, NodeDefs, NodeId, NodeType, NodeWithPDataReceiver, NodeWithPDataSender};
 use crate::pipeline_ctrl::{
     NodeMetricHandles, PipelineCompletionMsgDispatcher, RuntimeCtrlMsgManager,
+    ShutdownLifecycleMsg, completion_barrier_channel, shutdown_lifecycle_channel,
     snapshot_node_metrics_with_handles,
 };
 use crate::processor::FlowMetricHook;
@@ -47,7 +48,7 @@ use std::fmt::Debug;
 use std::rc::Rc;
 use std::time::Duration;
 use tokio::runtime::Builder;
-use tokio::sync::watch;
+use tokio::sync::{oneshot, watch};
 use tokio::task::LocalSet;
 
 /// Cadence at which the per-pipeline extension monitor reports its
@@ -485,6 +486,15 @@ impl<PData: 'static + Debug + Clone + ReceivedAtNode + Unwindable + FlowMetricHo
         let mut control_senders = ControlSenders::default();
         let mut node_metric_entries: Vec<(usize, NodeMetricHandles)> = Vec::new();
         let mut node_telemetry_guards: Vec<NodeTelemetryGuard> = Vec::new();
+        let mut processor_finalizers: HashMap<usize, oneshot::Sender<()>> = HashMap::new();
+        let (completion_barrier_tx, completion_barrier_rx) = completion_barrier_channel();
+        let shutdown_lifecycle_capacity = processors
+            .len()
+            .saturating_mul(2)
+            .saturating_add(exporters.len())
+            .max(1);
+        let (shutdown_lifecycle_tx, shutdown_lifecycle_rx) =
+            shutdown_lifecycle_channel(shutdown_lifecycle_capacity);
 
         // Build a name->index map from NodeDefs so we can resolve flow_metric
         // config before processors are spawned.
@@ -549,12 +559,13 @@ impl<PData: 'static + Debug + Clone + ReceivedAtNode + Unwindable + FlowMetricHo
                 ),
             ));
             let runtime_ctrl_msg_tx = runtime_ctrl_msg_tx.clone();
+            let node_stopped_tx = shutdown_lifecycle_tx.clone();
             let pipeline_completion_msg_tx = pipeline_completion_msg_tx.clone();
             let effect_metrics_reporter = metrics_reporter.clone();
             let final_metrics_reporter = metrics_reporter.clone();
             let exporter_terminal_metrics_deadline = terminal_metrics_deadline.clone();
             let fut = async move {
-                match exporter
+                let result = exporter
                     .start_with_completion_metrics(
                         runtime_ctrl_msg_tx,
                         pipeline_completion_msg_tx,
@@ -562,8 +573,13 @@ impl<PData: 'static + Debug + Clone + ReceivedAtNode + Unwindable + FlowMetricHo
                         node_interests,
                         completion_emission_metrics,
                     )
-                    .await
-                {
+                    .await;
+                let _ = node_stopped_tx
+                    .send(ShutdownLifecycleMsg::NodeStopped {
+                        node_id: node_id.index,
+                    })
+                    .await;
+                match result {
                     Ok(terminal_state) => {
                         report_terminal_metrics(
                             &final_metrics_reporter,
@@ -629,6 +645,8 @@ impl<PData: 'static + Debug + Clone + ReceivedAtNode + Unwindable + FlowMetricHo
                 ),
             ));
             let runtime_ctrl_msg_tx = runtime_ctrl_msg_tx.clone();
+            let node_stopped_tx = shutdown_lifecycle_tx.clone();
+            let processor_shutdown_lifecycle_tx = shutdown_lifecycle_tx.clone();
             let pipeline_completion_msg_tx = pipeline_completion_msg_tx.clone();
             let metrics_reporter = metrics_reporter.clone();
             let final_metrics_reporter = metrics_reporter.clone();
@@ -670,9 +688,11 @@ impl<PData: 'static + Debug + Clone + ReceivedAtNode + Unwindable + FlowMetricHo
             }
             let flow_active = flow_metric_state.is_active();
             let flow_needs_timing = flow_metric_state.needs_timing();
+            let (processor_finalizer_tx, processor_finalizer_rx) = oneshot::channel();
+            let _ = processor_finalizers.insert(node_id.index, processor_finalizer_tx);
             let fut = async move {
                 let result = processor
-                    .start_with_completion_metrics(
+                    .start_with_completion_metrics_and_finalizer(
                         runtime_ctrl_msg_tx,
                         pipeline_completion_msg_tx,
                         metrics_reporter,
@@ -687,7 +707,14 @@ impl<PData: 'static + Debug + Clone + ReceivedAtNode + Unwindable + FlowMetricHo
                         flow_active,
                         flow_needs_timing,
                         processor_terminal_metrics_deadline.clone(),
+                        Some(processor_finalizer_rx),
+                        Some(processor_shutdown_lifecycle_tx),
                     )
+                    .await;
+                let _ = node_stopped_tx
+                    .send(ShutdownLifecycleMsg::NodeStopped {
+                        node_id: node_id.index,
+                    })
                     .await;
                 flush_metrics_reporter(
                     &final_metrics_reporter,
@@ -710,6 +737,8 @@ impl<PData: 'static + Debug + Clone + ReceivedAtNode + Unwindable + FlowMetricHo
                 futures.push(local_tasks.spawn_local(fut));
             }
         }
+
+        drop(shutdown_lifecycle_tx);
         for receiver in receivers {
             let mut receiver = receiver;
             let node_id = receiver.node_id();
@@ -838,6 +867,12 @@ impl<PData: 'static + Debug + Clone + ReceivedAtNode + Unwindable + FlowMetricHo
                 admission_metrics,
                 node_metric_handles,
                 manager_terminal_metrics_deadline,
+            )
+            .with_shutdown_orchestration(
+                processor_finalizers,
+                &pipeline_connections,
+                completion_barrier_tx,
+                shutdown_lifecycle_rx,
             );
             manager.run().await
         }));
@@ -852,7 +887,8 @@ impl<PData: 'static + Debug + Clone + ReceivedAtNode + Unwindable + FlowMetricHo
                 control_plane_metrics_flush_interval,
                 dispatcher_telemetry_policy,
                 dispatcher_terminal_metrics_deadline,
-            );
+            )
+            .with_completion_barriers(completion_barrier_rx);
             dispatcher.run().await
         }));
 

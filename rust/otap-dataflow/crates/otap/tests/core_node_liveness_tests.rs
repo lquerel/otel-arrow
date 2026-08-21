@@ -12,6 +12,7 @@ mod common;
 
 use common::counting_exporter::{self, COUNTING_EXPORTER_URN};
 use common::flaky_exporter::{self, FLAKY_EXPORTER_URN};
+use common::shutdown_ack::{self, SHUTDOWN_ACK_EXPORTER_URN, SHUTDOWN_ACK_PROCESSOR_URN};
 use otap_df_config::observed_state::{ObservedStateSettings, SendPolicy};
 use otap_df_config::pipeline::{PipelineConfig, PipelineConfigBuilder, PipelineType};
 use otap_df_config::policy::{ChannelCapacityPolicy, TelemetryPolicy};
@@ -145,6 +146,43 @@ fn build_batch_pipeline_config(
             pipeline_id.clone(),
         )
         .expect("failed to build batch liveness pipeline config")
+}
+
+fn build_shutdown_ack_pipeline_config(
+    pipeline_group_id: &PipelineGroupId,
+    pipeline_id: &PipelineId,
+    test_id: &str,
+) -> PipelineConfig {
+    PipelineConfigBuilder::new()
+        .add_receiver(
+            "fake_receiver",
+            TRAFFIC_GENERATOR_RECEIVER_URN,
+            Some(rate_limited_fake_receiver_config(1_000, 1, 100, false)),
+        )
+        .add_processor(
+            "shutdown_ack_processor_1",
+            SHUTDOWN_ACK_PROCESSOR_URN,
+            Some(json!({"test_id": test_id})),
+        )
+        .add_processor(
+            "shutdown_ack_processor_2",
+            SHUTDOWN_ACK_PROCESSOR_URN,
+            Some(json!({"test_id": test_id})),
+        )
+        .add_exporter(
+            "shutdown_ack_exporter",
+            SHUTDOWN_ACK_EXPORTER_URN,
+            Some(json!({"test_id": test_id})),
+        )
+        .one_of("fake_receiver", ["shutdown_ack_processor_1"])
+        .one_of("shutdown_ack_processor_1", ["shutdown_ack_processor_2"])
+        .one_of("shutdown_ack_processor_2", ["shutdown_ack_exporter"])
+        .build(
+            PipelineType::Otap,
+            pipeline_group_id.clone(),
+            pipeline_id.clone(),
+        )
+        .expect("failed to build shutdown acknowledgement pipeline config")
 }
 
 fn build_otlp_batch_local_wakeup_pipeline_config(
@@ -487,6 +525,35 @@ fn test_retry_pipeline_eventually_recovers_after_transient_nacks() {
         "all generated items should eventually be delivered after recovery"
     );
     flaky_exporter::unregister_state(test_id);
+}
+
+/// Scenario: an exporter holds pdata and emits its Ack only while a two-processor chain drains.
+/// Guarantees: both interested processors remain alive while the late Ack unwinds upstream.
+#[test]
+fn test_shutdown_delivers_exporter_ack_to_drained_processor() {
+    let pipeline_group_id: PipelineGroupId = "liveness-group".into();
+    let pipeline_id: PipelineId = "shutdown-ack-liveness".into();
+    let test_id = "shutdown-ack-liveness";
+    let handles = Arc::new(shutdown_ack::register_state(test_id));
+
+    let config = build_shutdown_ack_pipeline_config(&pipeline_group_id, &pipeline_id, test_id);
+    run_pipeline_with_condition(
+        config,
+        &pipeline_group_id,
+        &pipeline_id,
+        Duration::from_secs(5),
+        Duration::from_secs(2),
+        Some({
+            let handles = handles.clone();
+            move || handles.exported() >= 1
+        }),
+    );
+
+    assert!(
+        handles.observed() >= 2,
+        "both processors should observe the Ack emitted by the exporter during shutdown"
+    );
+    shutdown_ack::unregister_state(test_id);
 }
 
 // This pipeline never reaches the batch size threshold, so it only makes forward

@@ -11,6 +11,7 @@ use crate::Interests;
 use crate::ReceivedAtNode;
 use crate::channel_metrics::ChannelMetricsRegistry;
 use crate::channel_mode::{LocalMode, SharedMode, wrap_node_control_channel_metrics};
+use crate::clock;
 use crate::completion_emission_metrics::CompletionEmissionMetricsHandle;
 use crate::config::ProcessorConfig;
 use crate::context::PipelineContext;
@@ -29,6 +30,7 @@ use crate::local::processor as local;
 use crate::message::{Message, ProcessorInbox, Receiver, Sender};
 use crate::node::{Node, NodeId, NodeWithPDataReceiver, NodeWithPDataSender};
 use crate::node_local_scheduler::NodeLocalSchedulerHandle;
+use crate::pipeline_ctrl::{ShutdownLifecycleMsg, ShutdownLifecycleSender};
 use crate::shared::message::{SharedReceiver, SharedSender};
 use crate::shared::processor as shared;
 use crate::terminal_state::TerminalMetricsDeadline;
@@ -40,6 +42,7 @@ use otap_df_telemetry::metrics::MeasurementMetricSet;
 use otap_df_telemetry::reporter::MetricsReporter;
 use std::collections::HashMap;
 use std::sync::Arc;
+use tokio::sync::oneshot;
 
 /// FlowMetric-relevant slice of a processor `EffectHandler`'s surface.
 ///
@@ -623,6 +626,50 @@ impl<PData> ProcessorWrapper<PData> {
     where
         PData: ReceivedAtNode + FlowMetricHook,
     {
+        self.start_with_completion_metrics_and_finalizer(
+            runtime_ctrl_msg_tx,
+            pipeline_completion_msg_tx,
+            metrics_reporter,
+            node_interests,
+            completion_emission_metrics,
+            flow_is_start,
+            flow_is_end,
+            flow_consumed_items_metric,
+            flow_duration_metric,
+            flow_produced_items_metric,
+            flow_dropped_items_metric,
+            flow_metrics_active,
+            flow_needs_timing,
+            terminal_metrics_deadline,
+            None,
+            None,
+        )
+        .await
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    pub(crate) async fn start_with_completion_metrics_and_finalizer(
+        self,
+        runtime_ctrl_msg_tx: RuntimeCtrlMsgSender<PData>,
+        pipeline_completion_msg_tx: PipelineCompletionMsgSender<PData>,
+        metrics_reporter: MetricsReporter,
+        node_interests: Interests,
+        completion_emission_metrics: Option<CompletionEmissionMetricsHandle>,
+        flow_is_start: bool,
+        flow_is_end: bool,
+        flow_consumed_items_metric: Option<MeasurementMetricSet<FlowConsumedItemsMetrics>>,
+        flow_duration_metric: Option<MeasurementMetricSet<FlowDurationMetrics>>,
+        flow_produced_items_metric: Option<MeasurementMetricSet<FlowProducedItemsMetrics>>,
+        flow_dropped_items_metric: Option<MeasurementMetricSet<FlowDroppedItemsMetrics>>,
+        flow_metrics_active: bool,
+        flow_needs_timing: bool,
+        terminal_metrics_deadline: TerminalMetricsDeadline,
+        processor_finalizer: Option<oneshot::Receiver<()>>,
+        shutdown_lifecycle_tx: Option<ShutdownLifecycleSender>,
+    ) -> Result<(), Error>
+    where
+        PData: ReceivedAtNode + FlowMetricHook,
+    {
         let runtime = self
             .prepare_runtime(metrics_reporter.clone(), node_interests)
             .await?;
@@ -633,6 +680,7 @@ impl<PData> ProcessorWrapper<PData> {
                 mut inbox,
                 mut effect_handler,
             } => {
+                let processor_drained_tx = shutdown_lifecycle_tx.clone();
                 effect_handler
                     .core
                     .set_runtime_ctrl_msg_sender(runtime_ctrl_msg_tx);
@@ -677,6 +725,58 @@ impl<PData> ProcessorWrapper<PData> {
                     if let Err(err) = processor.process(msg, &mut effect_handler).await {
                         processing_error = Some(err);
                         break;
+                    }
+                }
+                if processing_error.is_none()
+                    && let Some(deadline) = inbox.take_forward_drained_deadline()
+                {
+                    effect_handler.router.close();
+                    if let Some(processor_drained_tx) = processor_drained_tx {
+                        let _ = processor_drained_tx
+                            .send(ShutdownLifecycleMsg::ProcessorDrained {
+                                node_id: effect_handler.processor_id().index,
+                            })
+                            .await;
+                    }
+                    if let Some(mut finalizer) = processor_finalizer {
+                        let mut deadline_sleep = clock::sleep_until(deadline);
+                        loop {
+                            tokio::select! {
+                                biased;
+
+                                ctrl = inbox.recv_control_after_drain() => match ctrl {
+                                    Ok(NodeControlMsg::Shutdown { .. }) => {}
+                                    Ok(ctrl) => {
+                                        if let Err(err) = processor
+                                            .process(Message::Control(ctrl), &mut effect_handler)
+                                            .await
+                                        {
+                                            processing_error = Some(err);
+                                            break;
+                                        }
+                                    }
+                                    Err(_) => break,
+                                },
+
+                                _ = &mut finalizer => {
+                                    while let Ok(ctrl) = inbox.try_recv_control_after_drain() {
+                                        if matches!(&ctrl, NodeControlMsg::Shutdown { .. }) {
+                                            continue;
+                                        }
+                                        if let Err(err) = processor
+                                            .process(Message::Control(ctrl), &mut effect_handler)
+                                            .await
+                                        {
+                                            processing_error = Some(err);
+                                            break;
+                                        }
+                                    }
+                                    break;
+                                },
+
+                                _ = &mut deadline_sleep => break,
+                            }
+                        }
                     }
                 }
                 // Collect final metrics before exiting
@@ -728,6 +828,7 @@ impl<PData> ProcessorWrapper<PData> {
                 mut inbox,
                 mut effect_handler,
             } => {
+                let processor_drained_tx = shutdown_lifecycle_tx.clone();
                 effect_handler
                     .core
                     .set_runtime_ctrl_msg_sender(runtime_ctrl_msg_tx);
@@ -772,6 +873,58 @@ impl<PData> ProcessorWrapper<PData> {
                     if let Err(err) = processor.process(msg, &mut effect_handler).await {
                         processing_error = Some(err);
                         break;
+                    }
+                }
+                if processing_error.is_none()
+                    && let Some(deadline) = inbox.take_forward_drained_deadline()
+                {
+                    effect_handler.router.close();
+                    if let Some(processor_drained_tx) = processor_drained_tx {
+                        let _ = processor_drained_tx
+                            .send(ShutdownLifecycleMsg::ProcessorDrained {
+                                node_id: effect_handler.processor_id().index,
+                            })
+                            .await;
+                    }
+                    if let Some(mut finalizer) = processor_finalizer {
+                        let mut deadline_sleep = clock::sleep_until(deadline);
+                        loop {
+                            tokio::select! {
+                                biased;
+
+                                ctrl = inbox.recv_control_after_drain() => match ctrl {
+                                    Ok(NodeControlMsg::Shutdown { .. }) => {}
+                                    Ok(ctrl) => {
+                                        if let Err(err) = processor
+                                            .process(Message::Control(ctrl), &mut effect_handler)
+                                            .await
+                                        {
+                                            processing_error = Some(err);
+                                            break;
+                                        }
+                                    }
+                                    Err(_) => break,
+                                },
+
+                                _ = &mut finalizer => {
+                                    while let Ok(ctrl) = inbox.try_recv_control_after_drain() {
+                                        if matches!(&ctrl, NodeControlMsg::Shutdown { .. }) {
+                                            continue;
+                                        }
+                                        if let Err(err) = processor
+                                            .process(Message::Control(ctrl), &mut effect_handler)
+                                            .await
+                                        {
+                                            processing_error = Some(err);
+                                            break;
+                                        }
+                                    }
+                                    break;
+                                },
+
+                                _ = &mut deadline_sleep => break,
+                            }
+                        }
                     }
                 }
                 // Collect final metrics before exiting

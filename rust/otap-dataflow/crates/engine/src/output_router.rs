@@ -107,6 +107,12 @@ impl<S: Clone> OutputRouter<S> {
     pub fn default_port(&self) -> Option<PortName> {
         self.default.as_ref().map(|(name, _, _)| name.clone())
     }
+
+    /// Drops every output sender after forward drain completes.
+    pub(crate) fn close(&mut self) {
+        self.default = None;
+        self.ports.clear();
+    }
 }
 
 impl<S: OutputSend> OutputRouter<S> {

@@ -283,6 +283,12 @@ struct InboxCore<PData, ControlRx, PDataRx> {
     shutting_down_deadline: Option<Instant>,
     /// Holds the ControlMsg::Shutdown until after we've drained pdata.
     pending_shutdown: Option<NodeControlMsg<PData>>,
+    /// Deadline retained after a processor completes its forward drain.
+    ///
+    /// The processor wrapper consumes this once the regular receive loop
+    /// closes, then keeps only the control lane alive for reverse completion
+    /// propagation.
+    forward_drained_deadline: Option<Instant>,
     /// Node ID for entry-frame stamping via `ReceivedAtNode`.
     node_id: usize,
     /// Node interests for entry-frame stamping via `ReceivedAtNode`.
@@ -305,6 +311,7 @@ impl<PData, ControlRx, PDataRx> InboxCore<PData, ControlRx, PDataRx> {
             local_scheduler,
             shutting_down_deadline: None,
             pending_shutdown: None,
+            forward_drained_deadline: None,
             node_id,
             interests,
             consecutive_control: 0,
@@ -313,11 +320,21 @@ impl<PData, ControlRx, PDataRx> InboxCore<PData, ControlRx, PDataRx> {
 
     fn shutdown(&mut self) {
         self.shutting_down_deadline = None;
+        self.forward_drained_deadline = None;
         self.consecutive_control = 0;
         if let Some(local_scheduler) = &self.local_scheduler {
             local_scheduler.begin_shutdown(clock::now());
         }
         drop(self.control_rx.take().expect("control_rx must exist"));
+        drop(self.pdata_rx.take().expect("pdata_rx must exist"));
+    }
+
+    fn finish_processor_forward_drain(&mut self) {
+        self.shutting_down_deadline = None;
+        self.consecutive_control = 0;
+        if let Some(local_scheduler) = &self.local_scheduler {
+            local_scheduler.begin_shutdown(clock::now());
+        }
         drop(self.pdata_rx.take().expect("pdata_rx must exist"));
     }
 }
@@ -339,12 +356,35 @@ where
         Message::PData(pdata)
     }
 
-    fn closed_pdata_shutdown(&mut self) -> Message<PData> {
-        self.shutdown();
-        Message::Control(NodeControlMsg::Shutdown {
+    fn closed_pdata_shutdown(&mut self, drain_policy: DrainPolicy) -> Message<PData> {
+        let shutdown = NodeControlMsg::Shutdown {
             deadline: clock::now().add(Duration::from_secs(1)),
             reason: "pdata channel closed".to_owned(),
-        })
+        };
+        self.release_shutdown(shutdown, drain_policy)
+    }
+
+    fn finish_shutdown_drain(&mut self, drain_policy: DrainPolicy) {
+        match drain_policy {
+            DrainPolicy::HonorAdmission => self.finish_processor_forward_drain(),
+            DrainPolicy::ForceDrainDuringShutdown => self.shutdown(),
+        }
+    }
+
+    fn release_shutdown(
+        &mut self,
+        shutdown: NodeControlMsg<PData>,
+        drain_policy: DrainPolicy,
+    ) -> Message<PData> {
+        let forward_drained_deadline = match (&shutdown, drain_policy) {
+            (NodeControlMsg::Shutdown { deadline, .. }, DrainPolicy::HonorAdmission) => {
+                Some(*deadline)
+            }
+            _ => None,
+        };
+        self.finish_shutdown_drain(drain_policy);
+        self.forward_drained_deadline = forward_drained_deadline;
+        Message::Control(shutdown)
     }
 
     /// Returns whether shutdown draining is allowed to pull `pdata` from the
@@ -423,7 +463,7 @@ where
                     .expect("pdata_rx must exist")
                     .try_recv()
                 {
-                    return Ok(self.closed_pdata_shutdown());
+                    return Ok(self.closed_pdata_shutdown(drain_policy));
                 }
             }
 
@@ -441,8 +481,7 @@ where
                         .pending_shutdown
                         .take()
                         .expect("pending_shutdown must exist");
-                    self.shutdown();
-                    return Ok(Message::Control(shutdown));
+                    return Ok(self.release_shutdown(shutdown, drain_policy));
                 }
 
                 if sleep_until_deadline.is_none() {
@@ -469,8 +508,7 @@ where
                                 .pending_shutdown
                                 .take()
                                 .expect("pending_shutdown must exist");
-                            self.shutdown();
-                            return Ok(Message::Control(shutdown));
+                            return Ok(self.release_shutdown(shutdown, drain_policy));
                         }
                         Err(RecvError::Empty) => {}
                     }
@@ -519,8 +557,7 @@ where
                                 let shutdown = self.pending_shutdown
                                     .take()
                                     .expect("pending_shutdown must exist");
-                                self.shutdown();
-                                return Ok(Message::Control(shutdown));
+                                return Ok(self.release_shutdown(shutdown, drain_policy));
                             }
                         },
 
@@ -568,8 +605,7 @@ where
                                 let shutdown = self.pending_shutdown
                                     .take()
                                     .expect("pending_shutdown must exist");
-                                self.shutdown();
-                                return Ok(Message::Control(shutdown));
+                                return Ok(self.release_shutdown(shutdown, drain_policy));
                             }
                         },
 
@@ -604,7 +640,9 @@ where
                     .try_recv()
                 {
                     Ok(pdata) => return Ok(self.pdata_message(pdata)),
-                    Err(RecvError::Closed) => return Ok(self.closed_pdata_shutdown()),
+                    Err(RecvError::Closed) => {
+                        return Ok(self.closed_pdata_shutdown(drain_policy));
+                    }
                     Err(RecvError::Empty) => {}
                 }
             }
@@ -653,7 +691,9 @@ where
                     pdata = self.pdata_rx.as_mut().expect("pdata_rx must exist").recv() => {
                         match pdata {
                             Ok(pdata) => return Ok(self.pdata_message(pdata)),
-                            Err(RecvError::Closed) => return Ok(self.closed_pdata_shutdown()),
+                            Err(RecvError::Closed) => {
+                                return Ok(self.closed_pdata_shutdown(drain_policy));
+                            }
                             Err(e) => return Err(e),
                         }
                         }
@@ -724,7 +764,9 @@ where
                     pdata = self.pdata_rx.as_mut().expect("pdata_rx must exist").recv(), if accept_pdata => {
                         match pdata {
                             Ok(pdata) => return Ok(self.pdata_message(pdata)),
-                            Err(RecvError::Closed) => return Ok(self.closed_pdata_shutdown()),
+                            Err(RecvError::Closed) => {
+                                return Ok(self.closed_pdata_shutdown(drain_policy));
+                            }
                             Err(e) => return Err(e),
                         }
                     },
@@ -792,6 +834,11 @@ impl<PData> ProcessorInbox<PData> {
             ),
         }
     }
+
+    /// Takes the shutdown deadline recorded when forward drain completed.
+    pub(crate) fn take_forward_drained_deadline(&mut self) -> Option<Instant> {
+        self.core.forward_drained_deadline.take()
+    }
 }
 
 impl<PData: ReceivedAtNode> ProcessorInbox<PData> {
@@ -801,6 +848,29 @@ impl<PData: ReceivedAtNode> ProcessorInbox<PData> {
         self.core
             .recv_with_policy(accept_pdata, DrainPolicy::HonorAdmission)
             .await
+    }
+
+    /// Receives control traffic after the processor has completed forward drain.
+    pub(crate) async fn recv_control_after_drain(
+        &mut self,
+    ) -> Result<NodeControlMsg<PData>, RecvError> {
+        self.core
+            .control_rx
+            .as_mut()
+            .ok_or(RecvError::Closed)?
+            .recv()
+            .await
+    }
+
+    /// Tries to receive queued control traffic after forward drain.
+    pub(crate) fn try_recv_control_after_drain(
+        &mut self,
+    ) -> Result<NodeControlMsg<PData>, RecvError> {
+        self.core
+            .control_rx
+            .as_mut()
+            .ok_or(RecvError::Closed)?
+            .try_recv()
     }
 }
 
@@ -1268,6 +1338,47 @@ mod tests {
             shutdown,
             Message::Control(NodeControlMsg::Shutdown { .. })
         ));
+    }
+
+    /// Scenario: a processor completes forward drain and receives another
+    /// control message before reverse shutdown finalization.
+    /// Guarantees: forward drain closes only the pdata lane, records the
+    /// original deadline, and leaves the control lane available.
+    #[tokio::test]
+    async fn processor_inbox_retains_control_after_forward_drain() {
+        let (control_tx, pdata_tx, _scheduler, mut inbox) = local_processor_inbox(4);
+        let deadline = Instant::now() + Duration::from_secs(1);
+        control_tx
+            .send_async(NodeControlMsg::Shutdown {
+                deadline,
+                reason: "shutdown".to_owned(),
+            })
+            .await
+            .expect("shutdown should enqueue");
+        drop(pdata_tx);
+
+        let shutdown = inbox
+            .recv_when(true)
+            .await
+            .expect("shutdown should follow forward drain");
+        assert!(matches!(
+            shutdown,
+            Message::Control(NodeControlMsg::Shutdown { deadline: observed, .. })
+                if observed == deadline
+        ));
+        assert_eq!(inbox.take_forward_drained_deadline(), Some(deadline));
+
+        control_tx
+            .send_async(NodeControlMsg::Config {
+                config: serde_json::json!({"mode": "late-control"}),
+            })
+            .await
+            .expect("late control should enqueue");
+        let late_control = inbox
+            .recv_control_after_drain()
+            .await
+            .expect("control lane should remain available");
+        assert!(matches!(late_control, NodeControlMsg::Config { .. }));
     }
 
     /// Scenario: an exporter has latched shutdown, its bounded inbox is

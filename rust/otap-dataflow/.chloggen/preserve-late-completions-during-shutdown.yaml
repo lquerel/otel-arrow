@@ -1,0 +1,5 @@
+change_type: bug_fix
+component: engine
+note: Preserve late Ack/Nack delivery while dataflow pipelines shut down.
+issues: [2477]
+subtext: Processors now finish forward drain before exiting in reverse dependency order, so final exporter outcomes can unwind through the processor chain.
