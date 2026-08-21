@@ -144,7 +144,7 @@ pub static OTLP_EXPORTER: ExporterFactory<OtapPdata> = ExporterFactory {
         ))
     },
     wiring_contract: otap_df_engine::wiring_contract::WiringContract::UNRESTRICTED,
-    validate_config,
+    config_resolver: otap_df_config::omit_component_config!(validate_config),
 };
 
 /// Validates the OTLP gRPC exporter configuration at config load time.

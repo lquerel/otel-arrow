@@ -7250,7 +7250,6 @@ dependencies = [
  "chrono",
  "include_dir",
  "jemalloc_pprof",
- "linkme",
  "mime_guess",
  "otap-df-admin-types",
  "otap-df-config",
@@ -7332,11 +7331,9 @@ name = "otap-df-config"
 version = "0.51.0"
 dependencies = [
  "byte-unit",
- "dhat",
  "humantime-serde",
  "k8s-openapi",
  "kube",
- "linkme",
  "miette",
  "reqwest 0.13.4",
  "rustls",

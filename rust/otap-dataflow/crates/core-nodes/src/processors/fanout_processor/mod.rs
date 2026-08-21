@@ -1177,7 +1177,9 @@ pub static FANOUT_PROCESSOR_FACTORY: ProcessorFactory<OtapPdata> = ProcessorFact
     wiring_contract: otap_df_engine::wiring_contract::WiringContract {
         output_fanout: otap_df_engine::wiring_contract::OutputFanoutRule::AtMostPerOutput(1),
     },
-    validate_config: otap_df_config::validation::validate_typed_config::<FanoutConfig>,
+    config_resolver: otap_df_config::resolve_component_config!(
+        otap_df_config::resolved_config::resolve_omitted_typed_config::<FanoutConfig>
+    ),
 };
 
 #[cfg(test)]
@@ -1242,23 +1244,15 @@ mod tests {
             .filter_map(|dest| dest.get("port").and_then(|v| v.as_str()))
             .map(|port| PortName::from(port.to_string()))
             .collect::<Vec<_>>();
-        let node_cfg = NodeUserConfig {
-            r#type: FANOUT_PROCESSOR_URN.into(),
-            description: None,
-            entity: None,
-            outputs: outputs.clone(),
-            default_output: None,
-            config: json!({
+        let mut node_cfg = NodeUserConfig::with_user_config(
+            FANOUT_PROCESSOR_URN.into(),
+            json!({
                 "mode": mode,
                 "await_ack": await_ack,
                 "destinations": destinations_cfg,
             }),
-            capabilities: HashMap::new(),
-            rate_limiters: None,
-            header_capture: None,
-            header_propagation: None,
-            policies: None,
-        };
+        );
+        node_cfg.outputs = outputs.clone();
 
         let pipeline_ctx =
             controller_ctx.pipeline_context_with("grp".into(), "pipe".into(), 0, 0, 0);
@@ -1302,24 +1296,17 @@ mod tests {
     }
 
     fn make_node_config() -> NodeUserConfig {
-        NodeUserConfig {
-            r#type: FANOUT_PROCESSOR_URN.into(),
-            description: None,
-            entity: None,
-            outputs: vec![TEST_OUT_PORT_NAME.into()],
-            default_output: None,
-            config: json!({
+        let mut config = NodeUserConfig::with_user_config(
+            FANOUT_PROCESSOR_URN.into(),
+            json!({
                 "destinations": [
                     { "port": TEST_OUT_PORT_NAME, "primary": true }
                 ],
                 "await_ack": "primary"
             }),
-            capabilities: HashMap::new(),
-            rate_limiters: None,
-            header_capture: None,
-            header_propagation: None,
-            policies: None,
-        }
+        );
+        config.outputs = vec![TEST_OUT_PORT_NAME.into()];
+        config
     }
 
     /// Simulated upstream node id for tests (e.g., a receiver before the fanout).
@@ -1360,19 +1347,8 @@ mod tests {
             destinations,
             ..Default::default()
         };
-        let node_cfg = NodeUserConfig {
-            r#type: FANOUT_PROCESSOR_URN.into(),
-            description: None,
-            entity: None,
-            outputs: (0..65).map(|i| PortName::from(format!("p{i}"))).collect(),
-            default_output: None,
-            config: json!({}),
-            capabilities: HashMap::new(),
-            rate_limiters: None,
-            header_capture: None,
-            header_propagation: None,
-            policies: None,
-        };
+        let mut node_cfg = NodeUserConfig::with_user_config(FANOUT_PROCESSOR_URN.into(), json!({}));
+        node_cfg.outputs = (0..65).map(|i| PortName::from(format!("p{i}"))).collect();
         let err = cfg
             .validate(&node_cfg)
             .expect_err("should reject >64 destinations");
@@ -1402,19 +1378,8 @@ mod tests {
             ],
             ..Default::default()
         };
-        let node_cfg = NodeUserConfig {
-            r#type: FANOUT_PROCESSOR_URN.into(),
-            description: None,
-            entity: None,
-            outputs: vec!["p1".into(), "p2".into()],
-            default_output: None,
-            config: json!({}),
-            capabilities: HashMap::new(),
-            rate_limiters: None,
-            header_capture: None,
-            header_propagation: None,
-            policies: None,
-        };
+        let mut node_cfg = NodeUserConfig::with_user_config(FANOUT_PROCESSOR_URN.into(), json!({}));
+        node_cfg.outputs = vec!["p1".into(), "p2".into()];
         assert!(cfg.validate(&node_cfg).is_err());
     }
 
@@ -1437,19 +1402,8 @@ mod tests {
             ],
             ..Default::default()
         };
-        let node_cfg = NodeUserConfig {
-            r#type: FANOUT_PROCESSOR_URN.into(),
-            description: None,
-            entity: None,
-            outputs: vec!["p1".into(), "p2".into()],
-            default_output: None,
-            config: json!({}),
-            capabilities: HashMap::new(),
-            rate_limiters: None,
-            header_capture: None,
-            header_propagation: None,
-            policies: None,
-        };
+        let mut node_cfg = NodeUserConfig::with_user_config(FANOUT_PROCESSOR_URN.into(), json!({}));
+        node_cfg.outputs = vec!["p1".into(), "p2".into()];
         assert!(cfg.validate(&node_cfg).is_err());
     }
 
@@ -1464,19 +1418,8 @@ mod tests {
             }],
             ..Default::default()
         };
-        let node_cfg = NodeUserConfig {
-            r#type: FANOUT_PROCESSOR_URN.into(),
-            description: None,
-            outputs: vec!["p1".into()],
-            entity: None,
-            default_output: None,
-            config: json!({}),
-            capabilities: HashMap::new(),
-            rate_limiters: None,
-            header_capture: None,
-            header_propagation: None,
-            policies: None,
-        };
+        let mut node_cfg = NodeUserConfig::with_user_config(FANOUT_PROCESSOR_URN.into(), json!({}));
+        node_cfg.outputs = vec!["p1".into()];
         assert!(cfg.validate(&node_cfg).is_err());
     }
 
@@ -1502,19 +1445,8 @@ mod tests {
             ],
             ..Default::default()
         };
-        let node_cfg = NodeUserConfig {
-            r#type: FANOUT_PROCESSOR_URN.into(),
-            description: None,
-            entity: None,
-            outputs: vec!["primary".into(), "backup".into()],
-            default_output: None,
-            config: json!({}),
-            capabilities: HashMap::new(),
-            rate_limiters: None,
-            header_capture: None,
-            header_propagation: None,
-            policies: None,
-        };
+        let mut node_cfg = NodeUserConfig::with_user_config(FANOUT_PROCESSOR_URN.into(), json!({}));
+        node_cfg.outputs = vec!["primary".into(), "backup".into()];
         let err = cfg
             .validate(&node_cfg)
             .expect_err("should reject fallback with fire-and-forget");
@@ -1539,19 +1471,8 @@ mod tests {
             }],
             ..Default::default()
         };
-        let node_cfg = NodeUserConfig {
-            r#type: FANOUT_PROCESSOR_URN.into(),
-            description: None,
-            entity: None,
-            outputs: vec!["dest".into()],
-            default_output: None,
-            config: json!({}),
-            capabilities: HashMap::new(),
-            rate_limiters: None,
-            header_capture: None,
-            header_propagation: None,
-            policies: None,
-        };
+        let mut node_cfg = NodeUserConfig::with_user_config(FANOUT_PROCESSOR_URN.into(), json!({}));
+        node_cfg.outputs = vec!["dest".into()];
         let err = cfg
             .validate(&node_cfg)
             .expect_err("should reject timeout with fire-and-forget");
@@ -1589,19 +1510,8 @@ mod tests {
             ],
             ..Default::default()
         };
-        let node_cfg = NodeUserConfig {
-            r#type: FANOUT_PROCESSOR_URN.into(),
-            description: None,
-            entity: None,
-            outputs: vec!["primary".into(), "a".into(), "b".into()],
-            default_output: None,
-            config: json!({}),
-            capabilities: HashMap::new(),
-            rate_limiters: None,
-            header_capture: None,
-            header_propagation: None,
-            policies: None,
-        };
+        let mut node_cfg = NodeUserConfig::with_user_config(FANOUT_PROCESSOR_URN.into(), json!({}));
+        node_cfg.outputs = vec!["primary".into(), "a".into(), "b".into()];
         let err = cfg
             .validate(&node_cfg)
             .expect_err("should reject fallback cycle");
@@ -1635,19 +1545,8 @@ mod tests {
             ],
             ..Default::default()
         };
-        let node_cfg = NodeUserConfig {
-            r#type: FANOUT_PROCESSOR_URN.into(),
-            description: None,
-            entity: None,
-            outputs: vec!["primary".into(), "fb1".into(), "fb2".into()],
-            default_output: None,
-            config: json!({}),
-            capabilities: HashMap::new(),
-            rate_limiters: None,
-            header_capture: None,
-            header_propagation: None,
-            policies: None,
-        };
+        let mut node_cfg = NodeUserConfig::with_user_config(FANOUT_PROCESSOR_URN.into(), json!({}));
+        node_cfg.outputs = vec!["primary".into(), "fb1".into(), "fb2".into()];
         let err = cfg
             .validate(&node_cfg)
             .expect_err("should reject duplicate fallback");
@@ -1684,25 +1583,17 @@ mod tests {
 
     #[test]
     fn duplicate_ports_are_rejected() {
-        let node_cfg = NodeUserConfig {
-            r#type: FANOUT_PROCESSOR_URN.into(),
-            description: None,
-            entity: None,
-            outputs: vec!["p1".into(), "p2".into()],
-            default_output: None,
-            config: json!({
+        let mut node_cfg = NodeUserConfig::with_user_config(
+            FANOUT_PROCESSOR_URN.into(),
+            json!({
                 "destinations": [
                     { "port": "p1", "primary": true },
                     { "port": "p1", "primary": false }
                 ],
                 "await_ack": "primary"
             }),
-            capabilities: HashMap::new(),
-            rate_limiters: None,
-            header_capture: None,
-            header_propagation: None,
-            policies: None,
-        };
+        );
+        node_cfg.outputs = vec!["p1".into(), "p2".into()];
 
         let metrics_system = InternalTelemetrySystem::default();
         let controller_ctx = ControllerContext::new(metrics_system.registry());
@@ -2556,19 +2447,8 @@ mod tests {
             }
         }
 
-        let node_cfg = NodeUserConfig {
-            r#type: FANOUT_PROCESSOR_URN.into(),
-            description: None,
-            entity: None,
-            outputs: outputs.clone(),
-            default_output: None,
-            config,
-            capabilities: HashMap::new(),
-            rate_limiters: None,
-            header_capture: None,
-            header_propagation: None,
-            policies: None,
-        };
+        let mut node_cfg = NodeUserConfig::with_user_config(FANOUT_PROCESSOR_URN.into(), config);
+        node_cfg.outputs = outputs.clone();
 
         let pipeline_ctx =
             controller_ctx.pipeline_context_with("grp".into(), "pipe".into(), 0, 0, 0);

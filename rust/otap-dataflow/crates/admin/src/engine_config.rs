@@ -29,15 +29,15 @@ fn operation_error_response(status: StatusCode, error: crate::ControlPlaneError)
 
 /// Returns the full controller-owned engine configuration.
 ///
-/// Registered type-owned secrets and credential header values are redacted
-/// from the response (see [`OtelDataflowSpec::try_redacted_for_snapshot`]).
+/// Component configs are exported only through their factory-owned safe
+/// snapshot policy (see [`OtelDataflowSpec::try_safe_snapshot`]).
 pub async fn show_config(State(state): State<AppState>) -> impl IntoResponse {
     match state.controller.engine_config_snapshot() {
-        Ok(config) => match config.try_redacted_for_snapshot() {
+        Ok(config) => match config.try_safe_snapshot() {
             Ok(redacted) => (StatusCode::OK, Json(redacted)).into_response(),
             Err(error) => operation_error_response(
                 StatusCode::INTERNAL_SERVER_ERROR,
-                crate::snapshot_redaction_error(error),
+                crate::safe_snapshot_error(error),
             ),
         },
         Err(error) => operation_error_response(StatusCode::INTERNAL_SERVER_ERROR, error),
@@ -87,45 +87,42 @@ mod tests {
         RolloutStatus, ShutdownStatus,
     };
     use axum::body::to_bytes;
-    use linkme::distributed_slice;
     use otap_df_admin_types::operations::{OperationError, OperationErrorKind};
     use otap_df_config::engine::OtelDataflowSpec;
     use otap_df_config::observed_state::ObservedStateSettings;
-    use otap_df_config::redaction::{
-        CONFIG_REDACTORS, ConfigRedactor, RedactedString, RedactionError,
-        redact_typed_config_in_place,
-    };
+    use otap_df_config::redaction::RedactedString;
+    use otap_df_config::resolved_config::{ResolvedComponentConfig, resolve_typed_config};
     use otap_df_engine::memory_limiter::MemoryPressureState;
     use otap_df_state::store::ObservedStateStore;
     use otap_df_telemetry::registry::TelemetryRegistryHandle;
     use serde::{Deserialize, Serialize};
     use serde_json::Value;
-    use std::collections::BTreeMap;
     use std::sync::Arc;
 
     #[derive(Deserialize, Serialize)]
     struct AdminTypedConfig {
         password: RedactedString,
-        #[serde(flatten)]
-        remaining: BTreeMap<String, Value>,
+        endpoint: String,
     }
 
-    fn redact_admin_typed_config(config: &mut Value) -> Result<(), RedactionError> {
-        redact_typed_config_in_place::<AdminTypedConfig>(
-            config,
-            &[otap_df_config::required_secret_field!(
-                AdminTypedConfig,
-                password
-            )],
-        )
+    fn resolve_admin_test_components(config: &mut OtelDataflowSpec) {
+        for group in config.groups.values_mut() {
+            for pipeline in group.pipelines.values_mut() {
+                for (_, node) in pipeline.node_iter_mut() {
+                    let resolved = if node.r#type.as_str() == "urn:test:exporter:typed-redaction" {
+                        resolve_typed_config::<AdminTypedConfig>(&node.config)
+                            .expect("typed test config should resolve")
+                    } else {
+                        ResolvedComponentConfig::omit()
+                    };
+                    Arc::make_mut(node).set_resolved_config(resolved);
+                }
+            }
+        }
+        for (_, node) in config.engine.observability.pipeline.nodes.iter_mut() {
+            Arc::make_mut(node).set_resolved_config(ResolvedComponentConfig::omit());
+        }
     }
-
-    #[allow(unsafe_code)]
-    #[distributed_slice(CONFIG_REDACTORS)]
-    static ADMIN_TEST_CONFIG_REDACTOR: ConfigRedactor = ConfigRedactor::new(
-        "urn:test:exporter:typed-redaction",
-        redact_admin_typed_config,
-    );
 
     #[derive(Clone)]
     struct StubControlPlane {
@@ -213,8 +210,10 @@ mod tests {
     }
 
     fn empty_engine_config() -> OtelDataflowSpec {
-        OtelDataflowSpec::from_yaml("version: otel_dataflow/v1\n")
-            .expect("empty engine config should parse")
+        let mut config = OtelDataflowSpec::from_yaml("version: otel_dataflow/v1\n")
+            .expect("empty engine config should parse");
+        resolve_admin_test_components(&mut config);
+        config
     }
 
     fn reconcile_status(state: EngineConfigReconcileState) -> EngineConfigReconcileStatus {
@@ -287,13 +286,16 @@ mod tests {
             .expect("body should collect");
         let decoded: OtelDataflowSpec =
             serde_json::from_slice(&body).expect("config body should deserialize");
-        assert_eq!(decoded, config);
+        assert_eq!(
+            decoded,
+            config
+                .try_safe_snapshot()
+                .expect("resolved config should produce a safe snapshot")
+        );
     }
 
-    /// Scenario: a node config contains credential header values alongside
-    /// non-secret fields.
-    /// Guarantees: `show_config` redacts only the credential values while
-    /// preserving the complete response shape and leaving stored config intact.
+    /// Scenario: a node factory has resolved a typed config containing a secret.
+    /// Guarantees: `show_config` uses its safe typed snapshot and leaves source config intact.
     #[tokio::test]
     async fn show_config_redacts_credential_header_values() {
         let yaml = r#"
@@ -312,13 +314,12 @@ groups:
             config:
               password: "admin-password-secret"
               endpoint: "https://backend.example"
-              headers:
-                authorization: "Bearer super-secret-token"
         connections:
           - from: receiver
             to: exporter
 "#;
-        let config = OtelDataflowSpec::from_yaml(yaml).expect("spec should parse and validate");
+        let mut config = OtelDataflowSpec::from_yaml(yaml).expect("spec should parse and validate");
+        resolve_admin_test_components(&mut config);
         let original =
             serde_json::to_value(&config).expect("stored config should serialize before request");
         let cleartext_password = original
@@ -327,8 +328,8 @@ groups:
             .expect("fixture password should be a string")
             .to_owned();
         let expected = config
-            .try_redacted_for_snapshot()
-            .expect("typed snapshot redaction should succeed");
+            .try_safe_snapshot()
+            .expect("typed safe snapshot should succeed");
         let response = show_config(State(test_app_state(stub(
             Ok(config.clone()),
             Ok(reconcile_status(EngineConfigReconcileState::Succeeded)),
@@ -344,10 +345,6 @@ groups:
         assert!(
             !text.contains(&cleartext_password),
             "typed password must not appear in the config response: {text}"
-        );
-        assert!(
-            !text.contains("Bearer super-secret-token"),
-            "raw credential must not appear in the config response: {text}"
         );
         assert!(
             text.contains("[REDACTED]"),
@@ -366,10 +363,8 @@ groups:
         );
     }
 
-    /// Scenario: a registered typed config cannot be deserialized for
-    /// redaction and its malformed value contains sensitive text.
-    /// Guarantees: `show_config` fails closed with the existing internal error
-    /// envelope and never includes the sensitive value in its response.
+    /// Scenario: an unresolved config reaches the admin snapshot boundary and contains sensitive text.
+    /// Guarantees: `show_config` fails closed and never includes the sensitive value in its response.
     #[tokio::test]
     async fn show_config_fails_closed_without_value_bearing_error() {
         let config: OtelDataflowSpec = serde_json::from_value(serde_json::json!({

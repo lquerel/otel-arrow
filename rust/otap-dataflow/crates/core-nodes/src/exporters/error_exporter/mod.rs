@@ -45,7 +45,9 @@ pub static ERROR_EXPORTER: ExporterFactory<OtapPdata> = ExporterFactory {
     name: ERROR_EXPORTER_URN,
     create: ErrorExporter::create_exporter,
     wiring_contract: otap_df_engine::wiring_contract::WiringContract::UNRESTRICTED,
-    validate_config: otap_df_config::validation::validate_typed_config::<ErrorExporterConfig>,
+    config_resolver: otap_df_config::resolve_component_config!(
+        otap_df_config::resolved_config::resolve_omitted_typed_config::<ErrorExporterConfig>
+    ),
 };
 
 impl ErrorExporter {

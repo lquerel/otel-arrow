@@ -34,7 +34,9 @@ fn all_receiver_validators_reject_invalid_config() {
     );
 
     for (urn, factory) in factory_map {
-        let result = (factory.validate_config)(&json!("this is not a valid config"));
+        let result = factory
+            .config_resolver
+            .validate(&json!("this is not a valid config"));
         assert!(
             result.is_err(),
             "Receiver `{urn}`: validate_config should reject a plain string"
@@ -51,7 +53,9 @@ fn all_processor_validators_reject_invalid_config() {
     );
 
     for (urn, factory) in factory_map {
-        let result = (factory.validate_config)(&json!("this is not a valid config"));
+        let result = factory
+            .config_resolver
+            .validate(&json!("this is not a valid config"));
         assert!(
             result.is_err(),
             "Processor `{urn}`: validate_config should reject a plain string"
@@ -68,7 +72,9 @@ fn all_exporter_validators_reject_invalid_config() {
     );
 
     for (urn, factory) in factory_map {
-        let result = (factory.validate_config)(&json!("this is not a valid config"));
+        let result = factory
+            .config_resolver
+            .validate(&json!("this is not a valid config"));
         assert!(
             result.is_err(),
             "Exporter `{urn}`: validate_config should reject a plain string"

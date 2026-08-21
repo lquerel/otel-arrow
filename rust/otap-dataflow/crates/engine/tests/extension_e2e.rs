@@ -445,7 +445,9 @@ const PROBE_RECEIVER_FACTORY: ReceiverFactory<()> = ReceiverFactory {
     name: PROBE_RECEIVER_URN,
     create: probe_receiver_create,
     wiring_contract: otap_df_engine::wiring_contract::WiringContract::UNRESTRICTED,
-    validate_config: otap_df_config::validation::no_config,
+    config_resolver: otap_df_config::resolve_component_config!(
+        otap_df_config::resolved_config::resolve_no_config
+    ),
 };
 
 // ---------------------------------------------------------------------
@@ -491,7 +493,9 @@ const NOOP_EXPORTER_FACTORY: ExporterFactory<()> = ExporterFactory {
     name: NOOP_EXPORTER_URN,
     create: noop_exporter_create,
     wiring_contract: otap_df_engine::wiring_contract::WiringContract::UNRESTRICTED,
-    validate_config: otap_df_config::validation::no_config,
+    config_resolver: otap_df_config::resolve_component_config!(
+        otap_df_config::resolved_config::resolve_no_config
+    ),
 };
 
 // ---------------------------------------------------------------------
@@ -588,7 +592,9 @@ const PASSIVE_EXTENSION_FACTORY: ExtensionFactory = ExtensionFactory {
         shared: NoOpStatelessImpl => [NoOpStateless]
     )),
     create: passive_extension_create,
-    validate_config: otap_df_config::validation::no_config,
+    config_resolver: otap_df_config::resolve_component_config!(
+        otap_df_config::resolved_config::resolve_no_config
+    ),
 };
 
 // ---------------------------------------------------------------------
@@ -620,7 +626,9 @@ const DUAL_EXTENSION_FACTORY: ExtensionFactory = ExtensionFactory {
         (shared: NoOpStatelessImpl, local: NoOpStatelessImplLocal) => [NoOpStateless]
     )),
     create: dual_extension_create,
-    validate_config: otap_df_config::validation::no_config,
+    config_resolver: otap_df_config::resolve_component_config!(
+        otap_df_config::resolved_config::resolve_no_config
+    ),
 };
 
 // ---------------------------------------------------------------------
@@ -737,7 +745,9 @@ const ACTIVE_EXTENSION_FACTORY: ExtensionFactory = ExtensionFactory {
         shared: ActiveExtImpl => [NoOpStateless]
     )),
     create: active_extension_create,
-    validate_config: otap_df_config::validation::no_config,
+    config_resolver: otap_df_config::resolve_component_config!(
+        otap_df_config::resolved_config::resolve_no_config
+    ),
 };
 
 // ---------------------------------------------------------------------
@@ -837,7 +847,9 @@ const ACTIVE_SHARED_COUNTER_EXTENSION_FACTORY: ExtensionFactory = ExtensionFacto
         shared: ActiveSharedCounterImpl => [NoOpStateful]
     )),
     create: active_shared_counter_extension_create,
-    validate_config: otap_df_config::validation::no_config,
+    config_resolver: otap_df_config::resolve_component_config!(
+        otap_df_config::resolved_config::resolve_no_config
+    ),
 };
 
 // ---------------------------------------------------------------------
@@ -898,7 +910,9 @@ const FAILING_EXTENSION_FACTORY: ExtensionFactory = ExtensionFactory {
         shared: FailingExtImpl => [NoOpStateless]
     )),
     create: failing_extension_create,
-    validate_config: otap_df_config::validation::no_config,
+    config_resolver: otap_df_config::resolve_component_config!(
+        otap_df_config::resolved_config::resolve_no_config
+    ),
 };
 
 // ---------------------------------------------------------------------
@@ -959,7 +973,9 @@ const IMMEDIATE_OK_EXTENSION_FACTORY: ExtensionFactory = ExtensionFactory {
         shared: ImmediateOkExtImpl => [NoOpStateless]
     )),
     create: immediate_ok_extension_create,
-    validate_config: otap_df_config::validation::no_config,
+    config_resolver: otap_df_config::resolve_component_config!(
+        otap_df_config::resolved_config::resolve_no_config
+    ),
 };
 
 // ---------------------------------------------------------------------
@@ -1070,7 +1086,9 @@ const SHUTDOWN_RECORDING_EXTENSION_FACTORY: ExtensionFactory = ExtensionFactory 
         shared: ShutdownRecordingExtImpl => [NoOpStateless]
     )),
     create: shutdown_recording_extension_create,
-    validate_config: otap_df_config::validation::no_config,
+    config_resolver: otap_df_config::resolve_component_config!(
+        otap_df_config::resolved_config::resolve_no_config
+    ),
 };
 
 // ---------------------------------------------------------------------
@@ -1178,7 +1196,9 @@ const DUAL_ACTIVE_EXTENSION_FACTORY: ExtensionFactory = ExtensionFactory {
         (shared: ActiveExtImpl, local: ActiveLocalExtImpl) => [NoOpStateless]
     )),
     create: dual_active_extension_create,
-    validate_config: otap_df_config::validation::no_config,
+    config_resolver: otap_df_config::resolve_component_config!(
+        otap_df_config::resolved_config::resolve_no_config
+    ),
 };
 
 // ---------------------------------------------------------------------
@@ -1278,7 +1298,9 @@ const BACKGROUND_EXTENSION_FACTORY: ExtensionFactory = ExtensionFactory {
     // pruning treats this bundle as "always kept".
     capabilities: None,
     create: background_extension_create,
-    validate_config: otap_df_config::validation::no_config,
+    config_resolver: otap_df_config::resolve_component_config!(
+        otap_df_config::resolved_config::resolve_no_config
+    ),
 };
 
 // ---------------------------------------------------------------------
@@ -1401,7 +1423,9 @@ const SHARED_COUNTER_EXTENSION_FACTORY: ExtensionFactory = ExtensionFactory {
         local: SharedCounterImpl => [NoOpStateful]
     )),
     create: shared_counter_extension_create,
-    validate_config: otap_df_config::validation::no_config,
+    config_resolver: otap_df_config::resolve_component_config!(
+        otap_df_config::resolved_config::resolve_no_config
+    ),
 };
 
 // ---------------------------------------------------------------------
@@ -1446,7 +1470,9 @@ const SHARED_COUNTER_SHARED_EXTENSION_FACTORY: ExtensionFactory = ExtensionFacto
         shared: SharedCounterImpl => [NoOpStateful]
     )),
     create: shared_counter_shared_extension_create,
-    validate_config: otap_df_config::validation::no_config,
+    config_resolver: otap_df_config::resolve_component_config!(
+        otap_df_config::resolved_config::resolve_no_config
+    ),
 };
 
 // ---------------------------------------------------------------------
@@ -1545,7 +1571,9 @@ const CONSTRUCTED_EXTENSION_FACTORY: ExtensionFactory = ExtensionFactory {
         local: ConstructedNoOpImpl => [NoOpStateless]
     )),
     create: constructed_extension_create,
-    validate_config: otap_df_config::validation::no_config,
+    config_resolver: otap_df_config::resolve_component_config!(
+        otap_df_config::resolved_config::resolve_no_config
+    ),
 };
 
 // ---------------------------------------------------------------------
@@ -1614,7 +1642,9 @@ const RC_COUNTER_EXTENSION_FACTORY: ExtensionFactory = ExtensionFactory {
         local: RcCounterImpl => [NoOpStateful]
     )),
     create: rc_counter_extension_create,
-    validate_config: otap_df_config::validation::no_config,
+    config_resolver: otap_df_config::resolve_component_config!(
+        otap_df_config::resolved_config::resolve_no_config
+    ),
 };
 
 // ---------------------------------------------------------------------
@@ -1739,7 +1769,9 @@ const PROBE_PROCESSOR_FACTORY: otap_df_engine::ProcessorFactory<()> =
         name: PROBE_PROCESSOR_URN,
         create: probe_processor_create,
         wiring_contract: otap_df_engine::wiring_contract::WiringContract::UNRESTRICTED,
-        validate_config: otap_df_config::validation::no_config,
+        config_resolver: otap_df_config::resolve_component_config!(
+            otap_df_config::resolved_config::resolve_no_config
+        ),
     };
 
 // ---------------------------------------------------------------------
@@ -1820,7 +1852,9 @@ const PROBE_EXPORTER_FACTORY: ExporterFactory<()> = ExporterFactory {
     name: PROBE_EXPORTER_URN,
     create: probe_exporter_create,
     wiring_contract: otap_df_engine::wiring_contract::WiringContract::UNRESTRICTED,
-    validate_config: otap_df_config::validation::no_config,
+    config_resolver: otap_df_config::resolve_component_config!(
+        otap_df_config::resolved_config::resolve_no_config
+    ),
 };
 
 // ---------------------------------------------------------------------
@@ -4270,7 +4304,9 @@ const READY_GATE_EXTENSION_FACTORY: ExtensionFactory = ExtensionFactory {
         shared: ReadyGateExtImpl => [NoOpStateless]
     )),
     create: ready_gate_extension_create,
-    validate_config: otap_df_config::validation::no_config,
+    config_resolver: otap_df_config::resolve_component_config!(
+        otap_df_config::resolved_config::resolve_no_config
+    ),
 };
 
 const READY_GATE_BG_EXTENSION_URN: &str = "urn:test:extension:ready_gate_extension_bg";
@@ -4319,7 +4355,9 @@ const READY_GATE_BG_EXTENSION_FACTORY: ExtensionFactory = ExtensionFactory {
     documentation_url: "",
     capabilities: None,
     create: ready_gate_bg_extension_create,
-    validate_config: otap_df_config::validation::no_config,
+    config_resolver: otap_df_config::resolve_component_config!(
+        otap_df_config::resolved_config::resolve_no_config
+    ),
 };
 
 fn build_runtime_pipeline_with_ready_gate(

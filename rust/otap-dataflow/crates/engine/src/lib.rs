@@ -35,6 +35,7 @@ use context::PipelineContext;
 pub use linkme::distributed_slice;
 use otap_df_config::MetricLevel;
 use otap_df_config::SignalType;
+use otap_df_config::resolved_config::ComponentConfigResolver;
 use otap_df_config::{
     PipelineGroupId, PipelineId, PortName,
     engine::INTERNAL_TELEMETRY_RECEIVER_URN,
@@ -159,12 +160,8 @@ pub struct ReceiverFactory<PData> {
     ) -> Result<ReceiverWrapper<PData>, otap_df_config::error::Error>,
     /// Optional wiring constraints enforced during pipeline build.
     pub wiring_contract: wiring_contract::WiringContract,
-    /// Validates the node-specific config statically, without creating the component.
-    ///
-    /// Use [`otap_df_config::validation::validate_typed_config`] for components with a
-    /// typed `Config` struct, or [`otap_df_config::validation::no_config`] for components
-    /// that accept no user configuration.
-    pub validate_config: fn(config: &serde_json::Value) -> Result<(), otap_df_config::error::Error>,
+    /// Resolves the node-specific config and establishes its safe snapshot policy.
+    pub config_resolver: ComponentConfigResolver,
 }
 
 // Note: We don't use `#[derive(Clone)]` here to avoid forcing the `PData` type to implement `Clone`.
@@ -174,7 +171,7 @@ impl<PData> Clone for ReceiverFactory<PData> {
             name: self.name,
             create: self.create,
             wiring_contract: self.wiring_contract,
-            validate_config: self.validate_config,
+            config_resolver: self.config_resolver,
         }
     }
 }
@@ -203,12 +200,8 @@ pub struct ProcessorFactory<PData> {
     ) -> Result<ProcessorWrapper<PData>, otap_df_config::error::Error>,
     /// Optional wiring constraints enforced during pipeline build.
     pub wiring_contract: wiring_contract::WiringContract,
-    /// Validates the node-specific config statically, without creating the component.
-    ///
-    /// Use [`otap_df_config::validation::validate_typed_config`] for components with a
-    /// typed `Config` struct, or [`otap_df_config::validation::no_config`] for components
-    /// that accept no user configuration.
-    pub validate_config: fn(config: &serde_json::Value) -> Result<(), otap_df_config::error::Error>,
+    /// Resolves the node-specific config and establishes its safe snapshot policy.
+    pub config_resolver: ComponentConfigResolver,
 }
 
 // Note: We don't use `#[derive(Clone)]` here to avoid forcing the `PData` type to implement `Clone`.
@@ -218,7 +211,7 @@ impl<PData> Clone for ProcessorFactory<PData> {
             name: self.name,
             create: self.create,
             wiring_contract: self.wiring_contract,
-            validate_config: self.validate_config,
+            config_resolver: self.config_resolver,
         }
     }
 }
@@ -247,12 +240,8 @@ pub struct ExporterFactory<PData> {
     ) -> Result<ExporterWrapper<PData>, otap_df_config::error::Error>,
     /// Optional wiring constraints enforced during pipeline build.
     pub wiring_contract: wiring_contract::WiringContract,
-    /// Validates the node-specific config statically, without creating the component.
-    ///
-    /// Use [`otap_df_config::validation::validate_typed_config`] for components with a
-    /// typed `Config` struct, or [`otap_df_config::validation::no_config`] for components
-    /// that accept no user configuration.
-    pub validate_config: fn(config: &serde_json::Value) -> Result<(), otap_df_config::error::Error>,
+    /// Resolves the node-specific config and establishes its safe snapshot policy.
+    pub config_resolver: ComponentConfigResolver,
 }
 
 // Note: We don't use `#[derive(Clone)]` here to avoid forcing the `PData` type to implement `Clone`.
@@ -262,7 +251,7 @@ impl<PData> Clone for ExporterFactory<PData> {
             name: self.name,
             create: self.create,
             wiring_contract: self.wiring_contract,
-            validate_config: self.validate_config,
+            config_resolver: self.config_resolver,
         }
     }
 }
@@ -299,8 +288,8 @@ pub struct ExtensionFactory {
         ext_config: Arc<otap_df_config::extension::ExtensionUserConfig>,
         extension_config: &ExtensionConfig,
     ) -> Result<ExtensionBundle, otap_df_config::error::Error>,
-    /// Validates the node-specific config statically, without creating the component.
-    pub validate_config: fn(config: &serde_json::Value) -> Result<(), otap_df_config::error::Error>,
+    /// Resolves the extension config and establishes its safe snapshot policy.
+    pub config_resolver: ComponentConfigResolver,
 }
 
 impl NamedFactory for ExtensionFactory {
@@ -733,6 +722,70 @@ impl<PData: 'static + Clone + Debug> PipelineFactory<PData> {
         })
     }
 
+    /// Resolves every component config through the factory that owns its URN.
+    ///
+    /// Controller startup normally performs this once before the config is
+    /// committed. The build-time call is a defensive fallback for embedders
+    /// that construct a `PipelineFactory` directly.
+    pub fn resolve_pipeline_config(&self, config: &mut PipelineConfig) -> Result<(), Error> {
+        for (_, node_config) in config.node_iter_mut() {
+            if node_config.is_config_resolved() {
+                continue;
+            }
+            let raw_urn = node_config.r#type.as_str();
+            let resolver = match node_config.kind() {
+                otap_df_config::node::NodeKind::Receiver => {
+                    self.get_receiver_factory_map()
+                        .get(raw_urn)
+                        .ok_or_else(|| Error::UnknownReceiver {
+                            plugin_urn: node_config.r#type.clone(),
+                        })?
+                        .config_resolver
+                }
+                otap_df_config::node::NodeKind::Processor => {
+                    self.get_processor_factory_map()
+                        .get(raw_urn)
+                        .ok_or_else(|| Error::UnknownProcessor {
+                            plugin_urn: node_config.r#type.clone(),
+                        })?
+                        .config_resolver
+                }
+                otap_df_config::node::NodeKind::Exporter => {
+                    self.get_exporter_factory_map()
+                        .get(raw_urn)
+                        .ok_or_else(|| Error::UnknownExporter {
+                            plugin_urn: node_config.r#type.clone(),
+                        })?
+                        .config_resolver
+                }
+            };
+            let resolved = resolver
+                .resolve(&node_config.config)
+                .map_err(|error| Error::ConfigError(Box::new(error)))?;
+            Arc::make_mut(node_config).set_resolved_config(resolved);
+        }
+
+        for (_, extension_config) in config.extension_iter_mut() {
+            if extension_config.is_config_resolved() {
+                continue;
+            }
+            let raw_urn = extension_config.r#type.as_str();
+            let factory = self
+                .get_extension_factory_map()
+                .get(raw_urn)
+                .ok_or_else(|| Error::UnknownExtension {
+                    plugin_urn: raw_urn.to_owned(),
+                })?;
+            let resolved = factory
+                .config_resolver
+                .resolve(&extension_config.config)
+                .map_err(|error| Error::ConfigError(Box::new(error)))?;
+            Arc::make_mut(extension_config).set_resolved_config(resolved);
+        }
+
+        Ok(())
+    }
+
     /// Builds a runtime pipeline from the given pipeline configuration.
     ///
     /// Main phases:
@@ -761,6 +814,8 @@ impl<PData: 'static + Clone + Debug> PipelineFactory<PData> {
     where
         PData: Unwindable,
     {
+        self.resolve_pipeline_config(&mut config)?;
+
         let mut receivers = Vec::new();
         let mut processors = Vec::new();
         let mut exporters = Vec::new();
@@ -2925,7 +2980,7 @@ mod test {
             documentation_url: "",
             capabilities: None,
             create: dummy_create,
-            validate_config: dummy_validate,
+            config_resolver: otap_df_config::omit_component_config!(dummy_validate),
         };
 
         assert_eq!(factory.name(), "urn:test:example");
@@ -2971,11 +3026,21 @@ mod test {
             documentation_url: "",
             capabilities: None,
             create: dummy_create,
-            validate_config: dummy_validate,
+            config_resolver: otap_df_config::omit_component_config!(dummy_validate),
         };
 
-        assert!((factory.validate_config)(&serde_json::Value::Null).is_ok());
-        assert!((factory.validate_config)(&serde_json::json!({"key": "val"})).is_err());
+        assert!(
+            factory
+                .config_resolver
+                .validate(&serde_json::Value::Null)
+                .is_ok()
+        );
+        assert!(
+            factory
+                .config_resolver
+                .validate(&serde_json::json!({"key": "val"}))
+                .is_err()
+        );
     }
 
     #[otap_df_telemetry_macros::metric_set(name = "test.extension.factory")]
@@ -3019,7 +3084,7 @@ mod test {
             documentation_url: "",
             capabilities: None,
             create: entity_registering_create,
-            validate_config: dummy_validate,
+            config_resolver: otap_df_config::omit_component_config!(dummy_validate),
         };
 
         let (ctx, registry) = test_extension_ctx();

@@ -106,22 +106,22 @@ pub fn validate_pipeline_components<PData: 'static + Clone + Debug>(
         let kind = node_cfg.kind();
         let urn_str = node_cfg.r#type.as_str();
 
-        let validate_config_fn = match kind {
+        let config_resolver = match kind {
             NodeKind::Receiver => factory
                 .get_receiver_factory_map()
                 .get(urn_str)
-                .map(|f| f.validate_config),
+                .map(|f| f.config_resolver),
             NodeKind::Processor => factory
                 .get_processor_factory_map()
                 .get(urn_str)
-                .map(|f| f.validate_config),
+                .map(|f| f.config_resolver),
             NodeKind::Exporter => factory
                 .get_exporter_factory_map()
                 .get(urn_str)
-                .map(|f| f.validate_config),
+                .map(|f| f.config_resolver),
         };
 
-        match validate_config_fn {
+        match config_resolver {
             None => {
                 let kind_name = match kind {
                     NodeKind::Receiver => "receiver",
@@ -138,8 +138,8 @@ pub fn validate_pipeline_components<PData: 'static + Clone + Debug>(
                 ))
                 .into());
             }
-            Some(validate_fn) => {
-                validate_fn(&node_cfg.config).map_err(|e| {
+            Some(resolver) => {
+                resolver.validate(&node_cfg.config).map_err(|e| {
                     std::io::Error::other(format!(
                         "Invalid config for component `{}` in pipeline_group={} pipeline={} node={}: {}",
                         urn_str,
@@ -172,7 +172,7 @@ pub fn validate_pipeline_components<PData: 'static + Clone + Debug>(
                 .into());
             }
             Some(factory) => {
-                (factory.validate_config)(&ext_cfg.config).map_err(|e| {
+                factory.config_resolver.validate(&ext_cfg.config).map_err(|e| {
                     std::io::Error::other(format!(
                         "Invalid config for extension `{}` in pipeline_group={} pipeline={} extension={}: {}",
                         urn_str,
@@ -184,6 +184,83 @@ pub fn validate_pipeline_components<PData: 'static + Clone + Debug>(
                 })?;
             }
         }
+    }
+
+    Ok(())
+}
+
+/// Resolves every node and pipeline extension through its owning factory.
+pub fn resolve_pipeline_components<PData: 'static + Clone + Debug>(
+    pipeline_group_id: &PipelineGroupId,
+    pipeline_id: &PipelineId,
+    pipeline_cfg: &mut PipelineConfig,
+    factory: &PipelineFactory<PData>,
+) -> Result<(), Box<dyn std::error::Error>> {
+    for (node_id, node_cfg) in pipeline_cfg.node_iter_mut() {
+        if node_cfg.is_config_resolved() {
+            continue;
+        }
+        let kind = node_cfg.kind();
+        let urn_str = node_cfg.r#type.as_str();
+        let resolver = match kind {
+            NodeKind::Receiver => factory
+                .get_receiver_factory_map()
+                .get(urn_str)
+                .map(|factory| factory.config_resolver),
+            NodeKind::Processor => factory
+                .get_processor_factory_map()
+                .get(urn_str)
+                .map(|factory| factory.config_resolver),
+            NodeKind::Exporter => factory
+                .get_exporter_factory_map()
+                .get(urn_str)
+                .map(|factory| factory.config_resolver),
+        }
+        .ok_or_else(|| {
+            std::io::Error::other(format!(
+                "Unknown component `{urn_str}` in pipeline_group={} pipeline={} node={}",
+                pipeline_group_id.as_ref(),
+                pipeline_id.as_ref(),
+                node_id.as_ref()
+            ))
+        })?;
+        let resolved = resolver.resolve(&node_cfg.config).map_err(|error| {
+            std::io::Error::other(format!(
+                "Invalid config for component `{urn_str}` in pipeline_group={} pipeline={} node={}: {error}",
+                pipeline_group_id.as_ref(),
+                pipeline_id.as_ref(),
+                node_id.as_ref()
+            ))
+        })?;
+        std::sync::Arc::make_mut(node_cfg).set_resolved_config(resolved);
+    }
+
+    for (extension_id, extension_cfg) in pipeline_cfg.extension_iter_mut() {
+        if extension_cfg.is_config_resolved() {
+            continue;
+        }
+        let urn_str = extension_cfg.r#type.as_str();
+        let resolver = factory
+            .get_extension_factory_map()
+            .get(urn_str)
+            .map(|factory| factory.config_resolver)
+            .ok_or_else(|| {
+                std::io::Error::other(format!(
+                    "Unknown extension component `{urn_str}` in pipeline_group={} pipeline={} extension={}",
+                    pipeline_group_id.as_ref(),
+                    pipeline_id.as_ref(),
+                    extension_id.as_ref()
+                ))
+            })?;
+        let resolved = resolver.resolve(&extension_cfg.config).map_err(|error| {
+            std::io::Error::other(format!(
+                "Invalid config for extension `{urn_str}` in pipeline_group={} pipeline={} extension={}: {error}",
+                pipeline_group_id.as_ref(),
+                pipeline_id.as_ref(),
+                extension_id.as_ref()
+            ))
+        })?;
+        std::sync::Arc::make_mut(extension_cfg).set_resolved_config(resolved);
     }
 
     Ok(())
@@ -257,6 +334,54 @@ pub fn validate_engine_components<PData: 'static + Clone + Debug>(
     Ok(())
 }
 
+/// Resolves all component configs before the engine config is committed.
+pub fn resolve_engine_components<PData: 'static + Clone + Debug>(
+    engine_cfg: &mut OtelDataflowSpec,
+    factory: &PipelineFactory<PData>,
+) -> Result<(), Box<dyn std::error::Error>> {
+    for (pipeline_group_id, group) in &mut engine_cfg.groups {
+        for (pipeline_id, pipeline) in &mut group.pipelines {
+            resolve_pipeline_components(pipeline_group_id, pipeline_id, pipeline, factory)?;
+        }
+    }
+
+    let system_group_id: PipelineGroupId = otap_df_config::engine::SYSTEM_PIPELINE_GROUP_ID.into();
+    let system_pipeline_id: PipelineId =
+        otap_df_config::engine::SYSTEM_OBSERVABILITY_PIPELINE_ID.into();
+    for (node_id, node_cfg) in engine_cfg.engine.observability.pipeline.nodes.iter_mut() {
+        if node_cfg.is_config_resolved() {
+            continue;
+        }
+        let urn_str = node_cfg.r#type.as_str();
+        let resolver = match node_cfg.kind() {
+            NodeKind::Receiver => factory
+                .get_receiver_factory_map()
+                .get(urn_str)
+                .map(|factory| factory.config_resolver),
+            NodeKind::Processor => factory
+                .get_processor_factory_map()
+                .get(urn_str)
+                .map(|factory| factory.config_resolver),
+            NodeKind::Exporter => factory
+                .get_exporter_factory_map()
+                .get(urn_str)
+                .map(|factory| factory.config_resolver),
+        }
+        .ok_or_else(|| std::io::Error::other(format!("Unknown component `{urn_str}`")))?;
+        let resolved = resolver.resolve(&node_cfg.config).map_err(|error| {
+            std::io::Error::other(format!(
+                "Invalid config for component `{urn_str}` in pipeline_group={} pipeline={} node={}: {error}",
+                system_group_id.as_ref(),
+                system_pipeline_id.as_ref(),
+                node_id.as_ref()
+            ))
+        })?;
+        std::sync::Arc::make_mut(node_cfg).set_resolved_config(resolved);
+    }
+
+    Ok(())
+}
+
 /// Validates configured controller extensions against the supplied registry.
 ///
 /// This is static validation only: it verifies that each configured controller
@@ -278,7 +403,7 @@ pub fn validate_controller_extensions(
                 .into());
             }
             Some(factory) => {
-                (factory.validate_config)(&extension.config).map_err(|e| {
+                factory.config_resolver.validate(&extension.config).map_err(|e| {
                     std::io::Error::other(format!(
                         "Invalid config for controller extension `{}` in engine.controller.extensions extension={}: {}",
                         urn_str,
@@ -290,6 +415,36 @@ pub fn validate_controller_extensions(
         }
     }
 
+    Ok(())
+}
+
+/// Resolves controller extension configs before starting or snapshotting them.
+pub fn resolve_controller_extensions(
+    engine_cfg: &mut OtelDataflowSpec,
+    registry: &ControllerExtensionRegistry,
+) -> Result<(), Box<dyn std::error::Error>> {
+    for (extension_id, extension) in engine_cfg.engine.controller.extensions.iter_mut() {
+        if extension.is_config_resolved() {
+            continue;
+        }
+        let urn_str = extension.r#type.as_str();
+        let resolver = registry
+            .get(&extension.r#type)
+            .map(|factory| factory.config_resolver)
+            .ok_or_else(|| {
+                std::io::Error::other(format!(
+                    "Unknown controller extension `{urn_str}` in engine.controller.extensions extension={}",
+                    extension_id.as_ref()
+                ))
+            })?;
+        let resolved = resolver.resolve(&extension.config).map_err(|error| {
+            std::io::Error::other(format!(
+                "Invalid config for controller extension `{urn_str}` in engine.controller.extensions extension={}: {error}",
+                extension_id.as_ref()
+            ))
+        })?;
+        std::sync::Arc::make_mut(extension).set_resolved_config(resolved);
+    }
     Ok(())
 }
 
@@ -427,39 +582,51 @@ mod tests {
                 name: "urn:test:receiver:example",
                 create: test_receiver_create,
                 wiring_contract: WiringContract::UNRESTRICTED,
-                validate_config: otap_df_config::validation::no_config,
+                config_resolver: otap_df_config::resolve_component_config!(
+                    otap_df_config::resolved_config::resolve_no_config
+                ),
             },
             ReceiverFactory {
                 name: "urn:otel:receiver:internal_telemetry",
                 create: test_receiver_create,
                 wiring_contract: WiringContract::UNRESTRICTED,
-                validate_config: otap_df_config::validation::no_config,
+                config_resolver: otap_df_config::resolve_component_config!(
+                    otap_df_config::resolved_config::resolve_no_config
+                ),
             },
         ]));
         let processor_factories = Box::leak(Box::new([ProcessorFactory {
             name: "urn:otel:processor:type_router",
             create: test_processor_create,
             wiring_contract: WiringContract::UNRESTRICTED,
-            validate_config: otap_df_config::validation::no_config,
+            config_resolver: otap_df_config::resolve_component_config!(
+                otap_df_config::resolved_config::resolve_no_config
+            ),
         }]));
         let exporter_factories = Box::leak(Box::new([
             ExporterFactory {
                 name: "urn:test:exporter:example",
                 create: test_exporter_create,
                 wiring_contract: WiringContract::UNRESTRICTED,
-                validate_config: otap_df_config::validation::no_config,
+                config_resolver: otap_df_config::resolve_component_config!(
+                    otap_df_config::resolved_config::resolve_no_config
+                ),
             },
             ExporterFactory {
                 name: "urn:otel:exporter:console",
                 create: test_exporter_create,
                 wiring_contract: WiringContract::UNRESTRICTED,
-                validate_config: otap_df_config::validation::no_config,
+                config_resolver: otap_df_config::resolve_component_config!(
+                    otap_df_config::resolved_config::resolve_no_config
+                ),
             },
             ExporterFactory {
                 name: "urn:otel:exporter:noop",
                 create: test_exporter_create,
                 wiring_contract: WiringContract::UNRESTRICTED,
-                validate_config: otap_df_config::validation::no_config,
+                config_resolver: otap_df_config::resolve_component_config!(
+                    otap_df_config::resolved_config::resolve_no_config
+                ),
             },
         ]));
         PipelineFactory::new(

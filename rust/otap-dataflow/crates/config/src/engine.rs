@@ -61,22 +61,21 @@ pub struct OtelDataflowSpec {
 }
 
 impl OtelDataflowSpec {
-    /// Returns a shape-preserving snapshot using registered type redactors and
-    /// the compatibility header policy.
-    pub fn try_redacted_for_snapshot(
+    /// Returns a snapshot using factory-owned resolved safe policies.
+    pub fn try_safe_snapshot(
         &self,
-    ) -> Result<OtelDataflowSpec, crate::redaction::RedactionError> {
-        let mut redacted = self.clone();
-        redacted.engine = redacted
+    ) -> Result<OtelDataflowSpec, crate::resolved_config::SnapshotError> {
+        let mut snapshot = self.clone();
+        snapshot.engine = snapshot
             .engine
-            .try_redacted_for_snapshot()
+            .try_safe_snapshot()
             .map_err(|error| error.at("engine"))?;
-        for (group_id, group) in &mut redacted.groups {
+        for (group_id, group) in &mut snapshot.groups {
             *group = group
-                .try_redacted_for_snapshot()
+                .try_safe_snapshot()
                 .map_err(|error| error.at(format!("group `{group_id}`")))?;
         }
-        Ok(redacted)
+        Ok(snapshot)
     }
 }
 
@@ -118,29 +117,14 @@ pub struct EngineConfig {
 }
 
 impl EngineConfig {
-    /// Returns a shape-preserving snapshot using registered type redactors and
-    /// the compatibility header policy.
-    pub fn try_redacted_for_snapshot(
-        &self,
-    ) -> Result<EngineConfig, crate::redaction::RedactionError> {
-        let mut redacted = self.clone();
-        redacted.controller.extensions =
-            redacted.controller.extensions.try_redacted_for_snapshot()?;
-        redacted.observability.pipeline.nodes = redacted
-            .observability
-            .pipeline
-            .nodes
-            .try_redacted_for_snapshot()?;
-        redact_custom_headers(&mut redacted.custom);
-        Ok(redacted)
-    }
-}
-
-fn redact_custom_headers(custom: &mut HashMap<String, Value>) {
-    let mut value = Value::Object(std::mem::take(custom).into_iter().collect());
-    crate::node::redact_secret_headers(&mut value);
-    if let Value::Object(map) = value {
-        *custom = map.into_iter().collect();
+    /// Returns a snapshot using factory-owned resolved safe policies.
+    pub fn try_safe_snapshot(&self) -> Result<EngineConfig, crate::resolved_config::SnapshotError> {
+        let mut snapshot = self.clone();
+        snapshot.controller.extensions = snapshot.controller.extensions.try_safe_snapshot()?;
+        snapshot.observability.pipeline.nodes =
+            snapshot.observability.pipeline.nodes.try_safe_snapshot()?;
+        snapshot.custom.clear();
+        Ok(snapshot)
     }
 }
 
@@ -252,25 +236,31 @@ impl ControllerExtensions {
         self.0.iter()
     }
 
+    /// Returns a mutable iterator visiting all controller extensions.
+    pub fn iter_mut(
+        &mut self,
+    ) -> impl Iterator<Item = (&ExtensionId, &mut Arc<ExtensionUserConfig>)> {
+        self.0.iter_mut()
+    }
+
     /// Returns an iterator over extension IDs.
     pub fn keys(&self) -> impl Iterator<Item = &ExtensionId> {
         self.0.keys()
     }
 
-    /// Returns a shape-preserving snapshot using registered type redactors and
-    /// the compatibility header policy.
-    pub fn try_redacted_for_snapshot(
+    /// Returns a snapshot using factory-owned resolved safe policies.
+    pub fn try_safe_snapshot(
         &self,
-    ) -> Result<ControllerExtensions, crate::redaction::RedactionError> {
-        let mut redacted = self.clone();
-        for (extension_id, extension) in &mut redacted.0 {
+    ) -> Result<ControllerExtensions, crate::resolved_config::SnapshotError> {
+        let mut snapshot = self.clone();
+        for (extension_id, extension) in &mut snapshot.0 {
             *extension = Arc::new(
                 extension
-                    .try_redacted_for_snapshot()
+                    .try_safe_snapshot()
                     .map_err(|error| error.at(format!("extension `{extension_id}`")))?,
             );
         }
-        Ok(redacted)
+        Ok(snapshot)
     }
 }
 
@@ -474,174 +464,30 @@ groups:
         )
     }
 
+    /// Scenario: opaque engine custom data contains values the engine cannot classify.
+    /// Guarantees: safe snapshots omit the entire custom map instead of exporting unknown data.
     #[test]
-    fn redacted_for_snapshot_masks_node_headers_across_groups() {
-        let yaml = r#"
-version: otel_dataflow/v1
-engine: {}
-groups:
-  default:
-    pipelines:
-      main:
-        nodes:
-          receiver:
-            type: "urn:test:receiver:example"
-            config: null
-          exporter:
-            type: "urn:test:exporter:example"
-            config:
-              endpoint: "https://backend.example"
-              headers:
-                authorization: "Bearer super-secret-token"
-        connections:
-          - from: receiver
-            to: exporter
-"#;
-        let spec = OtelDataflowSpec::from_yaml(yaml).expect("spec should parse and validate");
-        let redacted = spec
-            .try_redacted_for_snapshot()
-            .expect("snapshot redaction should succeed");
-
-        let redacted_json = serde_json::to_string(&redacted).expect("redacted spec serializes");
-        assert!(
-            !redacted_json.contains("Bearer super-secret-token"),
-            "credential must not survive redaction: {redacted_json}"
-        );
-        assert!(
-            redacted_json.contains(crate::node::REDACTED_HEADER_VALUE),
-            "redaction placeholder should be present: {redacted_json}"
-        );
-
-        // Redaction is a copy: the original snapshot keeps the cleartext for the
-        // controller's own use (it is never the thing serialized to clients).
-        let original_json = serde_json::to_string(&spec).expect("spec serializes");
-        assert!(
-            original_json.contains("Bearer super-secret-token"),
-            "original spec must retain the cleartext credential"
-        );
-    }
-
-    #[test]
-    fn redacted_for_snapshot_masks_engine_scoped_headers() {
-        // `/api/v1/config` serializes the whole spec, including engine-scoped
-        // config. Controller extensions and the engine observability pipeline's
-        // nodes carry raw header-bearing config, so redaction must reach them
-        // too -- not just `groups`. Deserialize directly (no validation) to keep
-        // the test focused on redaction.
-        let yaml = r#"
-version: otel_dataflow/v1
-engine:
-  controller:
-    extensions:
-      ctrl_auth:
-        type: "urn:otap:extension:headers_setter"
-        config:
-          headers:
-            authorization: "Bearer controller-super-secret"
-  observability:
-    pipeline:
-      nodes:
-        obs_exporter:
-          type: "urn:otel:exporter:otlp"
-          config:
-            headers:
-              authorization: "Bearer observability-super-secret"
-"#;
-        let spec: OtelDataflowSpec = serde_yaml::from_str(yaml).expect("spec should deserialize");
-        let redacted = spec
-            .try_redacted_for_snapshot()
-            .expect("snapshot redaction should succeed");
-
-        let redacted_json = serde_json::to_string(&redacted).expect("redacted spec serializes");
-        assert!(
-            !redacted_json.contains("controller-super-secret"),
-            "controller extension credential must not survive redaction: {redacted_json}"
-        );
-        assert!(
-            !redacted_json.contains("observability-super-secret"),
-            "observability node credential must not survive redaction: {redacted_json}"
-        );
-        assert!(
-            redacted_json.contains(crate::node::REDACTED_HEADER_VALUE),
-            "redaction placeholder should be present: {redacted_json}"
-        );
-
-        // Redaction is a copy: the stored spec keeps the cleartext for the
-        // controller's own use (it is never the thing serialized to clients).
-        let original_json = serde_json::to_string(&spec).expect("spec serializes");
-        assert!(
-            original_json.contains("controller-super-secret")
-                && original_json.contains("observability-super-secret"),
-            "original spec must retain the cleartext credentials: {original_json}"
-        );
-    }
-
-    #[test]
-    fn redacted_for_snapshot_masks_headers_under_engine_custom() {
-        // `engine.custom` is freeform metadata the engine never interprets, but
-        // `/api/v1/config` still serializes it -- so auth `headers` an embedder
-        // stashes there must be masked too, matching the policy applied to the
-        // structured engine arms. The whole map is treated as one object so a
-        // *top-level* `custom.headers` is caught just like a nested one, and the
-        // list form (`[{key, value}]`) and non-object scalars are handled.
-        let yaml = r#"
+    fn safe_snapshot_omits_engine_custom_data() {
+        let mut spec: OtelDataflowSpec = serde_yaml::from_str(
+            r#"
 version: otel_dataflow/v1
 engine:
   custom:
-    headers:
-      authorization: "Bearer toplevel-super-secret"
-    fleet_management:
-      endpoint: "https://fleet.example/api"
-      headers:
-        authorization: "Bearer nested-super-secret"
-    setter:
-      headers:
-        - key: Authorization
-          value: "Bearer list-super-secret"
-    schema_version: 3
-"#;
-        let spec: OtelDataflowSpec = serde_yaml::from_str(yaml).expect("spec should deserialize");
-        let redacted = spec
-            .try_redacted_for_snapshot()
-            .expect("snapshot redaction should succeed");
+    token: cleartext
+"#,
+        )
+        .expect("spec should deserialize");
+        spec.engine.observability.pipeline = EngineObservabilityPipelineConfig {
+            policies: None,
+            nodes: PipelineNodes::default(),
+            connections: vec![],
+        };
 
-        let redacted_json = serde_json::to_string(&redacted).expect("redacted spec serializes");
-        // Top-level (map form), nested, and list-form `headers` under `custom`
-        // must all be masked.
-        for secret in [
-            "toplevel-super-secret",
-            "nested-super-secret",
-            "list-super-secret",
-        ] {
-            assert!(
-                !redacted_json.contains(secret),
-                "custom header credential `{secret}` must not survive redaction: {redacted_json}"
-            );
-        }
-        assert!(
-            redacted_json.contains(crate::node::REDACTED_HEADER_VALUE),
-            "redaction placeholder should be present: {redacted_json}"
-        );
-        // Non-header values under `custom`, including non-object scalars, are
-        // preserved.
-        assert!(
-            redacted_json.contains("https://fleet.example/api")
-                && redacted_json.contains("schema_version"),
-            "non-header custom values must be preserved: {redacted_json}"
-        );
-
-        // Redaction is a copy: the stored spec keeps the cleartext.
-        let original_json = serde_json::to_string(&spec).expect("spec serializes");
-        for secret in [
-            "toplevel-super-secret",
-            "nested-super-secret",
-            "list-super-secret",
-        ] {
-            assert!(
-                original_json.contains(secret),
-                "original spec must retain cleartext `{secret}`: {original_json}"
-            );
-        }
+        let snapshot = spec
+            .try_safe_snapshot()
+            .expect("empty component tree should snapshot");
+        assert!(snapshot.engine.custom.is_empty());
+        assert_eq!(spec.engine.custom["token"], "cleartext");
     }
 
     fn write_temp_file(ext: &str, contents: &str) -> PathBuf {

@@ -110,7 +110,7 @@ pub static OTLP_HTTP_EXPORTER: ExporterFactory<OtapPdata> = ExporterFactory {
     name: OTLP_HTTP_EXPORTER_URN,
     create: factory_create,
     wiring_contract: WiringContract::UNRESTRICTED,
-    validate_config,
+    config_resolver: otap_df_config::omit_component_config!(validate_config),
 };
 
 /// Validates the OTLP HTTP exporter configuration at config load time.

@@ -378,24 +378,28 @@ impl PipelineNodes {
         self.0.contains_key(id)
     }
 
-    /// Returns a shape-preserving snapshot using registered type redactors and
-    /// the compatibility header policy.
-    pub fn try_redacted_for_snapshot(
+    /// Returns a snapshot using each node factory's resolved safe policy.
+    pub fn try_safe_snapshot(
         &self,
-    ) -> Result<PipelineNodes, crate::redaction::RedactionError> {
-        let mut redacted = self.clone();
-        for (node_id, node) in &mut redacted.0 {
+    ) -> Result<PipelineNodes, crate::resolved_config::SnapshotError> {
+        let mut snapshot = self.clone();
+        for (node_id, node) in &mut snapshot.0 {
             *node = Arc::new(
-                node.try_redacted_for_snapshot()
+                node.try_safe_snapshot()
                     .map_err(|error| error.at(format!("node `{node_id}`")))?,
             );
         }
-        Ok(redacted)
+        Ok(snapshot)
     }
 
     /// Returns an iterator visiting all nodes.
     pub fn iter(&self) -> impl Iterator<Item = (&NodeId, &Arc<NodeUserConfig>)> {
         self.0.iter()
+    }
+
+    /// Returns a mutable iterator visiting all nodes.
+    pub fn iter_mut(&mut self) -> impl Iterator<Item = (&NodeId, &mut Arc<NodeUserConfig>)> {
+        self.0.iter_mut()
     }
 
     /// Canonicalize node type URNs for all nodes in this collection.
@@ -540,6 +544,13 @@ impl PipelineExtensions {
         self.0.iter()
     }
 
+    /// Returns a mutable iterator visiting all extensions.
+    pub fn iter_mut(
+        &mut self,
+    ) -> impl Iterator<Item = (&ExtensionId, &mut Arc<ExtensionUserConfig>)> {
+        self.0.iter_mut()
+    }
+
     /// Returns an iterator over extension IDs.
     pub fn keys(&self) -> impl Iterator<Item = &ExtensionId> {
         self.0.keys()
@@ -644,26 +655,25 @@ impl PipelineConfig {
         &self.nodes
     }
 
-    /// Returns a shape-preserving snapshot using registered type redactors and
-    /// the compatibility header policy.
-    pub fn try_redacted_for_snapshot(
+    /// Returns a snapshot using factory-owned resolved safe policies.
+    pub fn try_safe_snapshot(
         &self,
-    ) -> Result<PipelineConfig, crate::redaction::RedactionError> {
-        let mut redacted = self.clone();
-        for (node_id, node) in &mut redacted.nodes.0 {
+    ) -> Result<PipelineConfig, crate::resolved_config::SnapshotError> {
+        let mut snapshot = self.clone();
+        for (node_id, node) in &mut snapshot.nodes.0 {
             *node = Arc::new(
-                node.try_redacted_for_snapshot()
+                node.try_safe_snapshot()
                     .map_err(|error| error.at(format!("node `{node_id}`")))?,
             );
         }
-        for (extension_id, extension) in &mut redacted.extensions.0 {
+        for (extension_id, extension) in &mut snapshot.extensions.0 {
             *extension = Arc::new(
                 extension
-                    .try_redacted_for_snapshot()
+                    .try_safe_snapshot()
                     .map_err(|error| error.at(format!("extension `{extension_id}`")))?,
             );
         }
-        Ok(redacted)
+        Ok(snapshot)
     }
 
     /// Returns a reference to the pipeline extensions.
@@ -677,11 +687,23 @@ impl PipelineConfig {
         self.nodes.iter()
     }
 
+    /// Returns a mutable iterator visiting all data-path nodes in the pipeline.
+    pub fn node_iter_mut(&mut self) -> impl Iterator<Item = (&NodeId, &mut Arc<NodeUserConfig>)> {
+        self.nodes.iter_mut()
+    }
+
     /// Returns an iterator visiting all extension nodes in the pipeline.
     pub fn extension_iter(
         &self,
     ) -> impl Iterator<Item = (&ExtensionId, &Arc<ExtensionUserConfig>)> {
         self.extensions.iter()
+    }
+
+    /// Returns a mutable iterator visiting all extensions in the pipeline.
+    pub fn extension_iter_mut(
+        &mut self,
+    ) -> impl Iterator<Item = (&ExtensionId, &mut Arc<ExtensionUserConfig>)> {
+        self.extensions.iter_mut()
     }
 
     /// Returns true if the pipeline graph is defined with top-level connections.
@@ -1168,19 +1190,7 @@ impl PipelineConfigBuilder {
         } else {
             _ = self.nodes.insert(
                 id.clone(),
-                NodeUserConfig {
-                    r#type: node_type,
-                    description: None,
-                    entity: None,
-                    outputs: Vec::new(),
-                    default_output: None,
-                    config: config.unwrap_or(Value::Null),
-                    capabilities: HashMap::new(),
-                    rate_limiters: None,
-                    header_capture: None,
-                    header_propagation: None,
-                    policies: None,
-                },
+                NodeUserConfig::with_user_config(node_type, config.unwrap_or(Value::Null)),
             );
         }
         self
@@ -1230,11 +1240,7 @@ impl PipelineConfigBuilder {
         } else {
             _ = self.extensions.insert(
                 id.clone(),
-                ExtensionUserConfig {
-                    r#type: ext_type,
-                    description: None,
-                    config: config.unwrap_or(Value::Null),
-                },
+                ExtensionUserConfig::new(ext_type, config.unwrap_or(Value::Null)),
             );
         }
         self
@@ -3202,75 +3208,24 @@ extensions:
         );
     }
 
+    /// Scenario: one node in a pipeline has not been resolved by its owning factory.
+    /// Guarantees: the pipeline snapshot fails with the node location and emits no partial tree.
     #[test]
-    fn redacted_for_snapshot_masks_exporter_headers() {
-        let yaml = r#"
+    fn safe_snapshot_propagates_unresolved_node_context() {
+        let config: super::PipelineConfig = serde_yaml::from_str(
+            r#"
             nodes:
-              receiver:
-                type: "urn:otel:receiver:otlp"
-                config: {}
               exporter:
-                type: "urn:otel:exporter:otlp_http"
+                type: "urn:otel:exporter:test"
                 config:
-                  endpoint: "https://backend.example"
-                  http:
-                    headers:
-                      authorization: "Bearer super-secret-token"
-            connections:
-              - from: receiver
-                to: exporter
-        "#;
-        let config = super::PipelineConfig::from_yaml("group".into(), "pipe".into(), yaml)
-            .expect("pipeline should parse and validate");
-        let redacted = config
-            .try_redacted_for_snapshot()
-            .expect("snapshot redaction should succeed");
+                  password: cleartext
+            "#,
+        )
+        .expect("pipeline should deserialize");
 
-        let redacted_json = serde_json::to_string(&redacted).expect("redacted serializes");
-        assert!(
-            !redacted_json.contains("Bearer super-secret-token"),
-            "credential must not survive redaction: {redacted_json}"
-        );
-        assert!(
-            redacted_json.contains(crate::node::REDACTED_HEADER_VALUE),
-            "redaction placeholder should be present"
-        );
-        // The stored pipeline config keeps the cleartext for runtime use.
-        let original_json = serde_json::to_string(&config).expect("config serializes");
-        assert!(original_json.contains("Bearer super-secret-token"));
-    }
-
-    #[test]
-    fn redacted_for_snapshot_masks_extension_headers() {
-        // Extensions carry the same raw `config` Value as nodes; an extension
-        // that holds static `headers` must be redacted too. Deserialize
-        // directly (no validation) so the test stays focused on redaction.
-        let yaml = r#"
-            nodes:
-              receiver:
-                type: "urn:otel:receiver:otlp"
-                config: {}
-            extensions:
-              auth:
-                type: "urn:otap:extension:headers_setter"
-                config:
-                  headers:
-                    authorization: "Bearer ext-super-secret"
-        "#;
-        let config: super::PipelineConfig =
-            serde_yaml::from_str(yaml).expect("pipeline should deserialize");
-        let redacted = config
-            .try_redacted_for_snapshot()
-            .expect("snapshot redaction should succeed");
-
-        let redacted_json = serde_json::to_string(&redacted).expect("redacted serializes");
-        assert!(
-            !redacted_json.contains("Bearer ext-super-secret"),
-            "extension credential must not survive redaction: {redacted_json}"
-        );
-        assert!(
-            redacted_json.contains(crate::node::REDACTED_HEADER_VALUE),
-            "redaction placeholder should be present"
-        );
+        let error = config
+            .try_safe_snapshot()
+            .expect_err("unresolved node must fail closed");
+        assert!(error.to_string().contains("node `exporter`"));
     }
 }

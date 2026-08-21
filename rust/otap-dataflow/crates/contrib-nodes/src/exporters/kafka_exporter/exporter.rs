@@ -332,7 +332,9 @@ pub static KAFKA_EXPORTER_FACTORY: ExporterFactory<OtapPdata> = ExporterFactory 
             exporter_config,
         ))
     },
-    validate_config: validate_typed_config::<KafkaExporterConfig>,
+    config_resolver: otap_df_config::resolve_component_config!(
+        otap_df_config::resolved_config::resolve_omitted_typed_config::<KafkaExporterConfig>
+    ),
     wiring_contract: otap_df_engine::wiring_contract::WiringContract::UNRESTRICTED,
 };
 

@@ -209,7 +209,9 @@ pub static TOPIC_RECEIVER: ReceiverFactory<OtapPdata> = ReceiverFactory {
         ))
     },
     wiring_contract: otap_df_engine::wiring_contract::WiringContract::UNRESTRICTED,
-    validate_config: |config| TopicReceiver::parse_config(config).map(|_| ()),
+    config_resolver: otap_df_config::omit_component_config!(|config| {
+        TopicReceiver::parse_config(config).map(|_| ())
+    }),
 };
 
 impl TopicReceiver {

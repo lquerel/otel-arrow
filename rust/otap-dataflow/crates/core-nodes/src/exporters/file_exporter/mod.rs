@@ -95,7 +95,9 @@ pub static FILE_EXPORTER: ExporterFactory<OtapPdata> = ExporterFactory {
         ))
     },
     wiring_contract: otap_df_engine::wiring_contract::WiringContract::UNRESTRICTED,
-    validate_config: |value| FileExporterConfig::parse(value).map(|_| ()),
+    config_resolver: otap_df_config::omit_component_config!(|value| {
+        FileExporterConfig::parse(value).map(|_| ())
+    }),
 };
 
 #[async_trait(?Send)]

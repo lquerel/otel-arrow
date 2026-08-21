@@ -180,10 +180,6 @@ pub type ControllerExtensionTask =
 pub type ControllerExtensionTaskFactory =
     Box<dyn FnOnce(CancellationToken) -> ControllerExtensionTask + Send + 'static>;
 
-/// Static validator for controller extension user configuration.
-pub type ControllerExtensionValidateFn =
-    fn(config: &serde_json::Value) -> Result<(), otap_df_config::error::Error>;
-
 type ControllerExtensionStartFn = dyn Fn(
         ControllerExtensionContext,
     ) -> Result<ControllerExtensionTaskFactory, ControllerExtensionError>
@@ -205,8 +201,8 @@ pub struct ControllerExtensionFactory {
     pub description: &'static str,
     /// URL to extension documentation, when available.
     pub documentation_url: &'static str,
-    /// Validates the extension-specific config statically, without starting the extension.
-    pub validate_config: ControllerExtensionValidateFn,
+    /// Resolves the config and establishes its safe snapshot policy.
+    pub config_resolver: otap_df_config::resolved_config::ComponentConfigResolver,
     /// Starts one configured controller extension instance.
     pub start: fn(
         ControllerExtensionContext,
@@ -237,7 +233,7 @@ pub struct ControllerExtensionContext {
 #[derive(Clone)]
 struct RegisteredControllerExtensionFactory {
     start: Arc<ControllerExtensionStartFn>,
-    validate_config: ControllerExtensionValidateFn,
+    config_resolver: otap_df_config::resolved_config::ComponentConfigResolver,
 }
 
 /// Registry of controller extension factories keyed by extension type URN.
@@ -273,7 +269,7 @@ impl ControllerExtensionRegistry {
 
     /// Registers a statically linked controller extension factory.
     pub fn register_factory(&mut self, factory: ControllerExtensionFactory) {
-        self.register(factory.name.into(), factory.start, factory.validate_config);
+        self.register(factory.name.into(), factory.start, factory.config_resolver);
     }
 
     /// Registers a factory for a controller extension type.
@@ -281,7 +277,7 @@ impl ControllerExtensionRegistry {
         &mut self,
         extension_type: ExtensionUrn,
         factory: F,
-        validate_config: ControllerExtensionValidateFn,
+        config_resolver: otap_df_config::resolved_config::ComponentConfigResolver,
     ) where
         F: Fn(
                 ControllerExtensionContext,
@@ -294,7 +290,7 @@ impl ControllerExtensionRegistry {
             extension_type.clone(),
             RegisteredControllerExtensionFactory {
                 start: Arc::new(factory),
-                validate_config,
+                config_resolver,
             },
         );
         if replaced.is_some() {
@@ -1271,7 +1267,7 @@ impl<
 
     fn run_with_mode(
         &self,
-        engine_config: OtelDataflowSpec,
+        mut engine_config: OtelDataflowSpec,
         run_mode: RunMode,
         options: ControllerRunOptions,
     ) -> Result<(), Error> {
@@ -1283,6 +1279,15 @@ impl<
                 errors: vec![other],
             },
         })?;
+
+        startup::resolve_engine_components(&mut engine_config, self.pipeline_factory).map_err(
+            |error| Error::InvalidConfiguration {
+                errors: vec![otap_df_config::error::Error::InvalidUserConfig {
+                    error: error.to_string(),
+                }],
+            },
+        )?;
+        Self::resolve_controller_extension_configs(&mut engine_config, &options)?;
 
         let num_pipeline_groups = engine_config.groups.len();
         let resolved_config = engine_config.resolve();
@@ -1902,6 +1907,34 @@ impl<
             });
         }
         Ok(prepared_extensions)
+    }
+
+    fn resolve_controller_extension_configs(
+        engine_config: &mut OtelDataflowSpec,
+        options: &ControllerRunOptions,
+    ) -> Result<(), Error> {
+        for (extension_id, extension) in engine_config.engine.controller.extensions.iter_mut() {
+            if extension.is_config_resolved() {
+                continue;
+            }
+            let extension_type = extension.r#type.clone();
+            let factory = options.extensions.get(&extension_type).ok_or_else(|| {
+                Error::ControllerExtensionNotRegistered {
+                    extension_id: extension_id.to_string(),
+                    extension_type: extension_type.to_string(),
+                }
+            })?;
+            let resolved =
+                factory
+                    .config_resolver
+                    .resolve(&extension.config)
+                    .map_err(|source| Error::ControllerExtensionStartError {
+                        extension_id: extension_id.to_string(),
+                        source: Box::new(source),
+                    })?;
+            Arc::make_mut(extension).set_resolved_config(resolved);
+        }
+        Ok(())
     }
 
     fn spawn_controller_extensions(
@@ -2969,18 +3002,26 @@ connections:
         ))
     }
 
-    static TEST_OBSERVABILITY_RECEIVERS: &[ReceiverFactory<()>] = &[ReceiverFactory {
-        name: "urn:otel:receiver:internal_telemetry",
-        create: create_test_observability_receiver,
-        wiring_contract: WiringContract::UNRESTRICTED,
-        validate_config: accept_any_test_config,
-    }];
+    static TEST_OBSERVABILITY_RECEIVERS: &[ReceiverFactory<()>] = &[
+        ReceiverFactory {
+            name: "urn:otel:receiver:internal_telemetry",
+            create: create_test_observability_receiver,
+            wiring_contract: WiringContract::UNRESTRICTED,
+            config_resolver: otap_df_config::omit_component_config!(accept_any_test_config),
+        },
+        ReceiverFactory {
+            name: "urn:test:receiver:example",
+            create: create_test_observability_receiver,
+            wiring_contract: WiringContract::UNRESTRICTED,
+            config_resolver: otap_df_config::omit_component_config!(accept_any_test_config),
+        },
+    ];
 
     static TEST_OBSERVABILITY_PROCESSORS: &[ProcessorFactory<()>] = &[ProcessorFactory {
         name: "urn:otel:processor:type_router",
         create: create_test_observability_processor,
         wiring_contract: WiringContract::UNRESTRICTED,
-        validate_config: accept_any_test_config,
+        config_resolver: otap_df_config::omit_component_config!(accept_any_test_config),
     }];
 
     static TEST_OBSERVABILITY_EXPORTERS: &[ExporterFactory<()>] = &[
@@ -2988,13 +3029,19 @@ connections:
             name: "urn:otel:exporter:console",
             create: create_test_observability_exporter,
             wiring_contract: WiringContract::UNRESTRICTED,
-            validate_config: accept_any_test_config,
+            config_resolver: otap_df_config::omit_component_config!(accept_any_test_config),
         },
         ExporterFactory {
             name: "urn:otel:exporter:noop",
             create: create_test_observability_exporter,
             wiring_contract: WiringContract::UNRESTRICTED,
-            validate_config: accept_any_test_config,
+            config_resolver: otap_df_config::omit_component_config!(accept_any_test_config),
+        },
+        ExporterFactory {
+            name: "urn:test:exporter:example",
+            create: create_test_observability_exporter,
+            wiring_contract: WiringContract::UNRESTRICTED,
+            config_resolver: otap_df_config::omit_component_config!(accept_any_test_config),
         },
     ];
 
@@ -3034,7 +3081,9 @@ connections:
             name: TEST_LINKED_CONTROLLER_EXTENSION_URN,
             description: "Test linked controller extension.",
             documentation_url: "",
-            validate_config: validate_test_linked_controller_extension_config,
+            config_resolver: otap_df_config::omit_component_config!(
+                validate_test_linked_controller_extension_config
+            ),
             start: start_test_linked_controller_extension,
         };
 
@@ -3363,18 +3412,22 @@ groups: {{}}
         registry.register(
             extension_type.clone(),
             start_test_linked_controller_extension,
-            otap_df_config::validation::no_config,
+            otap_df_config::resolve_component_config!(
+                otap_df_config::resolved_config::resolve_no_config
+            ),
         );
         registry.register(
             extension_type.clone(),
             start_test_linked_controller_extension,
-            accept_any_test_config,
+            otap_df_config::omit_component_config!(accept_any_test_config),
         );
 
         let factory = registry
             .get(&extension_type)
             .expect("extension factory should be registered");
-        (factory.validate_config)(&serde_json::json!({ "accepted_by_latest": true }))
+        factory
+            .config_resolver
+            .validate(&serde_json::json!({ "accepted_by_latest": true }))
             .expect("duplicate registration should keep the latest factory");
     }
 
@@ -3394,7 +3447,9 @@ groups: {{}}
                     .push(context.extension_id.to_string());
                 Ok(Box::new(|_cancellation_token| Box::pin(async { Ok(()) })))
             },
-            otap_df_config::validation::no_config,
+            otap_df_config::resolve_component_config!(
+                otap_df_config::resolved_config::resolve_no_config
+            ),
         );
 
         let controller = Controller::new(test_pipeline_factory());
@@ -3582,7 +3637,9 @@ groups: {{}}
                     std::io::Error::other("simulated controller extension start failure"),
                 ))
             },
-            otap_df_config::validation::no_config,
+            otap_df_config::resolve_component_config!(
+                otap_df_config::resolved_config::resolve_no_config
+            ),
         );
 
         let err = controller
@@ -3654,7 +3711,9 @@ groups: {{}}
                     })
                 }))
             },
-            otap_df_config::validation::no_config,
+            otap_df_config::resolve_component_config!(
+                otap_df_config::resolved_config::resolve_no_config
+            ),
         );
 
         let (result_tx, result_rx) = std_mpsc::channel();

@@ -98,14 +98,14 @@ impl ControlPlaneError {
     }
 }
 
-fn snapshot_redaction_error(error: otap_df_config::redaction::RedactionError) -> ControlPlaneError {
+fn safe_snapshot_error(error: otap_df_config::resolved_config::SnapshotError) -> ControlPlaneError {
     otel_warn!(
-        "admin.config_snapshot.redaction_failed",
+        "admin.config_snapshot.failed",
         error = error.to_string(),
-        message = "Config snapshot redaction failed"
+        message = "Safe config snapshot production failed"
     );
     ControlPlaneError::Internal {
-        message: "config snapshot redaction failed".to_owned(),
+        message: "safe config snapshot production failed".to_owned(),
     }
 }
 

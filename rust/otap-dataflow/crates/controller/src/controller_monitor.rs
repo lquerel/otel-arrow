@@ -69,7 +69,9 @@ pub static CONTROLLER_MONITOR_EXTENSION_FACTORY: ControllerExtensionFactory =
         name: CONTROLLER_MONITOR_EXTENSION_URN,
         description: "Read-only controller state and telemetry monitor.",
         documentation_url: "",
-        validate_config: validate_controller_monitor_config,
+        config_resolver: otap_df_config::resolve_component_config!(
+            resolve_controller_monitor_config
+        ),
         start: start_controller_monitor_extension,
     };
 
@@ -139,21 +141,27 @@ pub fn register_builtin_controller_extensions(registry: &mut ControllerExtension
     registry.register_factory(CONTROLLER_MONITOR_EXTENSION_FACTORY);
 }
 
-fn validate_controller_monitor_config(config: &serde_json::Value) -> Result<(), ConfigError> {
+fn resolve_controller_monitor_config(
+    config: &serde_json::Value,
+) -> Result<otap_df_config::resolved_config::ResolvedComponentConfig, ConfigError> {
     let extension =
         ExtensionUserConfig::new(CONTROLLER_MONITOR_EXTENSION_URN.into(), config.clone());
-    ControllerMonitorConfig::from_extension(&extension)
-        .map(|_| ())
-        .map_err(|source| ConfigError::InvalidUserConfig {
+    let config = ControllerMonitorConfig::from_extension(&extension).map_err(|source| {
+        ConfigError::InvalidUserConfig {
             error: source.to_string(),
-        })
+        }
+    })?;
+    otap_df_config::resolved_config::ResolvedComponentConfig::export_typed(config)
 }
 
 fn start_controller_monitor_extension(
     context: ControllerExtensionContext,
 ) -> Result<ControllerExtensionTaskFactory, ControllerExtensionError> {
-    let config = ControllerMonitorConfig::from_extension(&context.extension)
-        .map_err(|source| Box::new(source) as ControllerExtensionError)?;
+    let config = context
+        .extension
+        .resolved_config::<ControllerMonitorConfig>()
+        .map_err(|source| Box::new(source) as ControllerExtensionError)?
+        .clone();
     let monitor = ControllerMonitor::new(
         context.extension_id.clone(),
         context.observed_state,
@@ -324,11 +332,7 @@ mod tests {
     use std::collections::HashMap;
 
     fn extension_config(config: serde_json::Value) -> ExtensionUserConfig {
-        ExtensionUserConfig {
-            r#type: CONTROLLER_MONITOR_EXTENSION_URN.into(),
-            description: None,
-            config,
-        }
+        ExtensionUserConfig::new(CONTROLLER_MONITOR_EXTENSION_URN.into(), config)
     }
 
     fn monitor_test_parts() -> (

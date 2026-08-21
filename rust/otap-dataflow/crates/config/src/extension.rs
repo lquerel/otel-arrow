@@ -16,7 +16,7 @@ use serde_json::Value;
 /// Unlike [`NodeUserConfig`](crate::node::NodeUserConfig), extensions have no
 /// output ports, wiring contracts, or transport header policies -- they only
 /// need a type URN and extension-specific configuration.
-#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, PartialEq)]
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
 pub struct ExtensionUserConfig {
     /// The extension type URN identifying the plugin (factory) to use.
@@ -30,6 +30,19 @@ pub struct ExtensionUserConfig {
     #[serde(default)]
     #[schemars(extend("x-kubernetes-preserve-unknown-fields" = true))]
     pub config: Value,
+
+    /// Factory-owned typed configuration derived from `config`.
+    #[serde(skip)]
+    #[schemars(skip)]
+    resolved_config: crate::resolved_config::ResolvedComponentConfig,
+}
+
+impl PartialEq for ExtensionUserConfig {
+    fn eq(&self, other: &Self) -> bool {
+        self.r#type == other.r#type
+            && self.description == other.description
+            && self.config == other.config
+    }
 }
 
 impl ExtensionUserConfig {
@@ -40,6 +53,7 @@ impl ExtensionUserConfig {
             r#type,
             description: None,
             config,
+            resolved_config: crate::resolved_config::ResolvedComponentConfig::unresolved(),
         }
     }
 
@@ -51,23 +65,43 @@ impl ExtensionUserConfig {
             r#type: r#type.into(),
             description: None,
             config: Value::Null,
+            resolved_config: crate::resolved_config::ResolvedComponentConfig::unresolved(),
         }
     }
 
-    /// Returns a shape-preserving snapshot that applies an exact component
-    /// redactor before the compatibility header walk.
-    ///
-    /// Extensions without a registration receive header redaction only.
-    /// Extension owners must register every non-header type-owned secret;
-    /// schema-wide and untyped redaction remains tracked by #3347.
-    pub fn try_redacted_for_snapshot(
+    /// Installs the typed configuration produced by this extension's factory.
+    pub fn set_resolved_config(
+        &mut self,
+        resolved: crate::resolved_config::ResolvedComponentConfig,
+    ) {
+        self.resolved_config = resolved;
+    }
+
+    /// Returns whether this extension's factory has resolved its config.
+    #[must_use]
+    pub fn is_config_resolved(&self) -> bool {
+        self.resolved_config.is_resolved()
+    }
+
+    /// Returns the factory-owned typed configuration.
+    pub fn resolved_config<T>(&self) -> Result<&T, crate::error::Error>
+    where
+        T: Send + Sync + 'static,
+    {
+        self.resolved_config.typed::<T>()
+    }
+
+    /// Returns a snapshot using only the policy established by the factory.
+    pub fn try_safe_snapshot(
         &self,
-    ) -> Result<ExtensionUserConfig, crate::redaction::RedactionError> {
-        let mut redacted = self.clone();
-        let _ =
-            crate::redaction::redact_registered_config(self.r#type.as_str(), &mut redacted.config)?;
-        crate::node::redact_secret_headers(&mut redacted.config);
-        Ok(redacted)
+    ) -> Result<ExtensionUserConfig, crate::resolved_config::SnapshotError> {
+        let mut snapshot = self.clone();
+        snapshot.config = match self.resolved_config.snapshot()? {
+            crate::resolved_config::ComponentSnapshot::Export(value) => value.clone(),
+            crate::resolved_config::ComponentSnapshot::Omit => Value::Null,
+        };
+        snapshot.resolved_config = crate::resolved_config::ResolvedComponentConfig::unresolved();
+        Ok(snapshot)
     }
 }
 
@@ -98,26 +132,19 @@ capabilities:
         assert!(result.is_err());
     }
 
+    /// Scenario: an extension config is intentionally omitted by its factory.
+    /// Guarantees: snapshot traversal exports no extension-specific source JSON.
     #[test]
-    fn redacted_for_snapshot_masks_extension_headers() {
-        let yaml = r#"
-type: "urn:otap:extension:headers_setter"
-config:
-  headers:
-    authorization: "Bearer ext-super-secret"
-"#;
-        let cfg: ExtensionUserConfig = serde_yaml::from_str(yaml).unwrap();
-        let redacted = cfg
-            .try_redacted_for_snapshot()
-            .expect("snapshot redaction should succeed");
-        assert_eq!(
-            redacted.config["headers"]["authorization"],
-            crate::node::REDACTED_HEADER_VALUE
+    fn explicit_omit_policy_removes_extension_config() {
+        let mut config = ExtensionUserConfig::new(
+            "urn:otap:extension:auth".into(),
+            serde_json::json!({ "token": "cleartext" }),
         );
-        // The original extension config is left untouched (redaction is a copy).
-        assert_eq!(
-            cfg.config["headers"]["authorization"],
-            "Bearer ext-super-secret"
-        );
+        config.set_resolved_config(crate::resolved_config::ResolvedComponentConfig::omit());
+
+        let snapshot = config
+            .try_safe_snapshot()
+            .expect("explicit omit policy should produce a snapshot");
+        assert_eq!(snapshot.config, Value::Null);
     }
 }

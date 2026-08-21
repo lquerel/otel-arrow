@@ -90,11 +90,13 @@ pub static OPAMP_CONTROLLER_EXTENSION: ControllerExtensionFactory = ControllerEx
     name: CONTROL_EXTENSION_URN,
     description: "OpAMP controller extension",
     documentation_url: "",
-    validate_config,
+    config_resolver: otap_df_config::resolve_component_config!(resolve_config),
     start,
 };
 
-fn validate_config(config: &serde_json::Value) -> Result<(), ConfigError> {
+fn resolve_config(
+    config: &serde_json::Value,
+) -> Result<otap_df_config::resolved_config::ResolvedComponentConfig, ConfigError> {
     let config: Config =
         serde_json::from_value(config.clone()).map_err(|e| ConfigError::InvalidUserConfig {
             error: e.to_string(),
@@ -104,16 +106,21 @@ fn validate_config(config: &serde_json::Value) -> Result<(), ConfigError> {
         .validate()
         .map_err(|e| ConfigError::InvalidUserConfig {
             error: e.to_string(),
-        })
+        })?;
+
+    // Endpoint URLs may contain credentials. Keep the typed runtime value, but
+    // omit this extension's config until every sensitive field has a safe type.
+    Ok(otap_df_config::resolved_config::ResolvedComponentConfig::omit_typed(config))
 }
 
 fn start(
     context: ControllerExtensionContext,
 ) -> Result<ControllerExtensionTaskFactory, ControllerExtensionError> {
-    // safety: we can 'expect' the deserialization to have succeeded because it's also deserialized
-    // in the `validate_config` call
-    let config: Config =
-        serde_json::from_value(context.extension.config.clone()).expect("config validated");
+    let config = context
+        .extension
+        .resolved_config::<Config>()
+        .map_err(|source| Box::new(source) as ControllerExtensionError)?
+        .clone();
 
     Ok(Box::new(move |cancellation_token| {
         Box::pin(
@@ -1567,8 +1574,8 @@ fn effective_config(
         .map_err(|e| format!("Failed to get engine config snapshot: {e:?}"))
         .and_then(|config| {
             config
-                .try_redacted_for_snapshot()
-                .map_err(|e| format!("Failed to redact engine config snapshot: {e}"))
+                .try_safe_snapshot()
+                .map_err(|e| format!("Failed to produce safe engine config snapshot: {e}"))
         })
         .and_then(|config| {
             serde_json::to_vec(&config)
@@ -1643,15 +1650,12 @@ fn pipeline_status_custom_message(
 mod test {
     use std::{borrow::Cow, sync::Arc};
 
-    use linkme::distributed_slice;
     use otap_df_admin::ControlPlane;
     use otap_df_config::{
         extension::{ExtensionUrn, ExtensionUserConfig},
         observed_state::ObservedStateSettings,
-        redaction::{
-            CONFIG_REDACTORS, ConfigRedactor, RedactedString, RedactionError,
-            redact_typed_config_in_place,
-        },
+        redaction::RedactedString,
+        resolved_config::{ResolvedComponentConfig, resolve_typed_config},
     };
     use otap_df_state::store::ObservedStateStore;
     use otap_df_telemetry::registry::TelemetryRegistryHandle;
@@ -1674,22 +1678,25 @@ mod test {
         password: RedactedString,
     }
 
-    fn redact_opamp_test_config(config: &mut serde_json::Value) -> Result<(), RedactionError> {
-        redact_typed_config_in_place::<OpampTypedConfig>(
-            config,
-            &[otap_df_config::required_secret_field!(
-                OpampTypedConfig,
-                password
-            )],
-        )
+    fn resolve_opamp_test_components(config: &mut OtelDataflowSpec) {
+        for group in config.groups.values_mut() {
+            for pipeline in group.pipelines.values_mut() {
+                for (_, node) in pipeline.node_iter_mut() {
+                    let resolved =
+                        if node.r#type.as_str() == "urn:test:exporter:opamp-typed-redaction" {
+                            resolve_typed_config::<OpampTypedConfig>(&node.config)
+                                .expect("typed OpAMP test config should resolve")
+                        } else {
+                            ResolvedComponentConfig::omit()
+                        };
+                    Arc::make_mut(node).set_resolved_config(resolved);
+                }
+            }
+        }
+        for (_, node) in config.engine.observability.pipeline.nodes.iter_mut() {
+            Arc::make_mut(node).set_resolved_config(ResolvedComponentConfig::omit());
+        }
     }
-
-    #[allow(unsafe_code)]
-    #[distributed_slice(CONFIG_REDACTORS)]
-    static OPAMP_TEST_CONFIG_REDACTOR: ConfigRedactor = ConfigRedactor::new(
-        "urn:test:exporter:opamp-typed-redaction",
-        redact_opamp_test_config,
-    );
 
     /// Start a mock server, and the agent controller with the passed config. Messages will then
     /// be exchanged until the number of expected exchanges have occurred. Afterward, the requests
@@ -1749,13 +1756,13 @@ mod test {
         server_state.take_requests().await
     }
 
-    /// Scenario: the committed engine config contains a type-owned secret and
+    /// Scenario: the committed engine config contains a factory-resolved typed secret and
     /// is reported to an OpAMP server as effective config.
     /// Guarantees: the off-box AgentToServer payload contains only the
     /// redaction marker and never the cleartext secret.
     #[tokio::test]
     async fn effective_config_redacts_type_owned_secrets() {
-        let engine_config: OtelDataflowSpec = serde_json::from_value(serde_json::json!({
+        let mut engine_config: OtelDataflowSpec = serde_json::from_value(serde_json::json!({
             "version": "otel_dataflow/v1",
             "groups": {
                 "default": {
@@ -1775,6 +1782,7 @@ mod test {
             }
         }))
         .expect("engine config should deserialize");
+        resolve_opamp_test_components(&mut engine_config);
         let cleartext = serde_json::to_value(&engine_config)
             .expect("engine config should serialize")
             .pointer("/groups/default/pipelines/main/nodes/exporter/config/password")
@@ -1807,11 +1815,11 @@ mod test {
         );
     }
 
-    /// Scenario: effective-config redaction fails and a later heartbeat is built.
+    /// Scenario: safe effective-config production fails and a later heartbeat is built.
     /// Guarantees: the requested effective config is omitted without exposing
     /// cleartext, and the heartbeat does not rebuild the full config snapshot.
     #[test]
-    fn effective_config_omits_report_when_redaction_fails() {
+    fn effective_config_omits_report_when_safe_snapshot_fails() {
         let engine_config: OtelDataflowSpec = serde_json::from_value(serde_json::json!({
             "version": "otel_dataflow/v1",
             "groups": {
@@ -1855,7 +1863,7 @@ mod test {
         assert!(effective_config(&context, &mut health).is_none());
         assert!(!health.healthy);
         assert_eq!(health.status, health_status::DEGRADED);
-        assert!(health.last_error.contains("snapshot redaction"));
+        assert!(health.last_error.contains("safe engine config snapshot"));
 
         let mut failed_health = ComponentHealth {
             status: health_status::FAILED.into(),
@@ -2672,7 +2680,7 @@ mod test {
         let config_value = serde_json::json!({
             "endpoint": "ws://127.0.0.1:4320/v1/opamp"
         });
-        assert!(validate_config(&config_value).is_ok());
+        assert!(resolve_config(&config_value).is_ok());
     }
 
     #[test]
@@ -2681,7 +2689,7 @@ mod test {
         let config_value = serde_json::json!({
             "not_a_real_field": "hello"
         });
-        let err = validate_config(&config_value).unwrap_err();
+        let err = resolve_config(&config_value).unwrap_err();
         assert!(
             err.to_string().contains("endpoint"),
             "expected error about missing endpoint, got: {err}"
@@ -2693,7 +2701,7 @@ mod test {
         let config_value = serde_json::json!({
             "endpoint": "ftp://nope.invalid:1234"
         });
-        let err = validate_config(&config_value).unwrap_err();
+        let err = resolve_config(&config_value).unwrap_err();
         assert!(
             err.to_string().contains("ftp"),
             "expected error mentioning invalid scheme, got: {err}"
@@ -2706,7 +2714,7 @@ mod test {
             "endpoint": "ws://127.0.0.1:4320",
             "instance_uid": "not-a-uuid"
         });
-        let err = validate_config(&config_value).unwrap_err();
+        let err = resolve_config(&config_value).unwrap_err();
         assert!(
             err.to_string().contains("invalid"),
             "expected error about invalid UUID, got: {err}"

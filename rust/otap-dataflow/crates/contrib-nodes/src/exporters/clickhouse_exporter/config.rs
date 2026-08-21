@@ -404,12 +404,10 @@ mod tests {
         assert_eq!(config.tables.metrics.sum.name, "otel_metrics_sum");
     }
 
-    /// Scenario: a ClickHouse node config is exposed through the registered
-    /// snapshot redaction path.
-    /// Guarantees: the password is masked, omitted/default fields stay omitted,
-    /// non-secret fields are unchanged, and the source config remains cleartext.
+    /// Scenario: the ClickHouse factory resolves a typed config for runtime and snapshots.
+    /// Guarantees: its safe serializer masks the password and leaves source JSON untouched.
     #[test]
-    fn registered_snapshot_redactor_masks_password_without_shape_drift() {
+    fn factory_owned_snapshot_masks_password() {
         let raw_config = serde_json::json!({
             "endpoint": "http://localhost:8123",
             "database": "otap",
@@ -421,26 +419,28 @@ mod tests {
                 }
             }
         });
-        let node: NodeUserConfig = serde_json::from_value(serde_json::json!({
+        let mut node: NodeUserConfig = serde_json::from_value(serde_json::json!({
             "type": crate::exporters::clickhouse_exporter::CLICKHOUSE_EXPORTER_URN,
             "config": raw_config.clone()
         }))
         .expect("ClickHouse node config should deserialize");
+        let resolved = crate::exporters::clickhouse_exporter::CLICKHOUSE_EXPORTER
+            .config_resolver
+            .resolve(&node.config)
+            .expect("ClickHouse factory should resolve config");
+        node.set_resolved_config(resolved);
 
         let redacted = node
-            .try_redacted_for_snapshot()
-            .expect("registered ClickHouse redaction should succeed");
+            .try_safe_snapshot()
+            .expect("ClickHouse safe snapshot should succeed");
 
         assert_eq!(redacted.config["password"], REDACTED_VALUE);
         assert_eq!(
             redacted.config["endpoint"], raw_config["endpoint"],
             "non-secret fields must be preserved"
         );
-        assert_eq!(redacted.config["tables"], raw_config["tables"]);
-        assert!(
-            redacted.config.get("async_insert").is_none(),
-            "omitted defaults must stay omitted"
-        );
+        assert_eq!(redacted.config["tables"]["logs"]["ttl"], "12 HOUR");
+        assert_eq!(redacted.config["async_insert"], serde_json::Value::Null);
         assert_eq!(node.config, raw_config, "stored config must stay cleartext");
     }
 

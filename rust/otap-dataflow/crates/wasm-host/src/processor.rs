@@ -457,5 +457,7 @@ pub static WASM_PROCESSOR_FACTORY: otap_df_engine::ProcessorFactory<OtapPdata> =
                 create_wasm_processor(pipeline, node, node_config, proc_cfg)
             },
         wiring_contract: otap_df_engine::wiring_contract::WiringContract::UNRESTRICTED,
-        validate_config: otap_df_config::validation::validate_typed_config::<WasmProcessorConfig>,
+        config_resolver: otap_df_config::resolve_component_config!(
+            otap_df_config::resolved_config::resolve_omitted_typed_config::<WasmProcessorConfig>
+        ),
     };

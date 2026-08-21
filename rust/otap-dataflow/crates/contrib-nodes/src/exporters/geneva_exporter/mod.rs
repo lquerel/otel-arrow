@@ -1603,7 +1603,7 @@ pub static GENEVA_EXPORTER: ExporterFactory<OtapPdata> = ExporterFactory {
         ))
     },
     wiring_contract: otap_df_engine::wiring_contract::WiringContract::UNRESTRICTED,
-    validate_config: validate_geneva_config,
+    config_resolver: otap_df_config::omit_component_config!(validate_geneva_config),
 };
 
 #[async_trait(?Send)]

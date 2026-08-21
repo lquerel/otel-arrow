@@ -59,7 +59,7 @@ where
 }
 
 /// User configuration for a node in the pipeline.
-#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, PartialEq)]
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
 pub struct NodeUserConfig {
     /// The node type URN identifying the plugin (factory) to use for this node.
@@ -99,6 +99,14 @@ pub struct NodeUserConfig {
     // The preserve-unknown-fields extension allows this to be correctly interpreted as "Any JSON type"
     #[schemars(extend("x-kubernetes-preserve-unknown-fields" = true))]
     pub config: Value,
+
+    /// Factory-owned typed configuration derived from `config`.
+    ///
+    /// This state is intentionally absent from source serialization and schema
+    /// generation. It is populated before a config is committed or used.
+    #[serde(skip)]
+    #[schemars(skip)]
+    resolved_config: crate::resolved_config::ResolvedComponentConfig,
 
     /// Capability bindings mapping capability names to extension instance names.
     ///
@@ -172,6 +180,22 @@ pub struct NodeUserConfig {
     pub policies: Option<NodePolicies>,
 }
 
+impl PartialEq for NodeUserConfig {
+    fn eq(&self, other: &Self) -> bool {
+        self.r#type == other.r#type
+            && self.description == other.description
+            && self.outputs == other.outputs
+            && self.default_output == other.default_output
+            && self.config == other.config
+            && self.capabilities == other.capabilities
+            && self.rate_limiters == other.rate_limiters
+            && self.entity == other.entity
+            && self.header_capture == other.header_capture
+            && self.header_propagation == other.header_propagation
+            && self.policies == other.policies
+    }
+}
+
 /// Node-level policy overrides supported by the pipeline engine.
 #[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
@@ -236,6 +260,7 @@ impl NodeUserConfig {
             default_output: None,
             entity: None,
             config: Value::Null,
+            resolved_config: crate::resolved_config::ResolvedComponentConfig::unresolved(),
             capabilities: HashMap::new(),
             rate_limiters: None,
             header_capture: None,
@@ -257,6 +282,7 @@ impl NodeUserConfig {
             outputs: Vec::new(),
             default_output: None,
             config: Value::Null,
+            resolved_config: crate::resolved_config::ResolvedComponentConfig::unresolved(),
             capabilities: HashMap::new(),
             rate_limiters: None,
             header_capture: None,
@@ -278,6 +304,7 @@ impl NodeUserConfig {
             outputs: Vec::new(),
             default_output: None,
             config: Value::Null,
+            resolved_config: crate::resolved_config::ResolvedComponentConfig::unresolved(),
             capabilities: HashMap::new(),
             rate_limiters: None,
             header_capture: None,
@@ -296,6 +323,7 @@ impl NodeUserConfig {
             outputs: Vec::new(),
             default_output: None,
             config: user_config,
+            resolved_config: crate::resolved_config::ResolvedComponentConfig::unresolved(),
             capabilities: HashMap::new(),
             rate_limiters: None,
             header_capture: None,
@@ -380,80 +408,39 @@ impl NodeUserConfig {
         self.r#type.kind()
     }
 
-    /// Returns a shape-preserving snapshot that applies an exact component
-    /// redactor before the compatibility header walk.
-    ///
-    /// Components without a registration receive header redaction only.
-    /// Component owners must register every non-header type-owned secret;
-    /// schema-wide and untyped redaction remains tracked by #3347.
-    pub fn try_redacted_for_snapshot(
-        &self,
-    ) -> Result<NodeUserConfig, crate::redaction::RedactionError> {
-        let mut redacted = self.clone();
-        let _ =
-            crate::redaction::redact_registered_config(self.r#type.as_str(), &mut redacted.config)?;
-        redact_secret_headers(&mut redacted.config);
-        Ok(redacted)
+    /// Installs the typed configuration produced by this node's factory.
+    pub fn set_resolved_config(
+        &mut self,
+        resolved: crate::resolved_config::ResolvedComponentConfig,
+    ) {
+        self.resolved_config = resolved;
     }
-}
 
-/// Placeholder substituted for credential values that have been redacted from a
-/// config snapshot exposed through the admin/config APIs.
-pub const REDACTED_HEADER_VALUE: &str = crate::redaction::REDACTED_VALUE;
+    /// Returns whether this node's factory has resolved its config.
+    #[must_use]
+    pub fn is_config_resolved(&self) -> bool {
+        self.resolved_config.is_resolved()
+    }
 
-/// Recursively redacts credential values held under any `headers` field,
-/// replacing them with [`REDACTED_HEADER_VALUE`].
-///
-/// Two header shapes carry credentials in the OpenTelemetry ecosystem and are
-/// both handled, since node/extension `config` is opaque JSON:
-///
-/// - **Map form** -- `headers: { name: value }` (e.g. `config.headers` for
-///   OTAP/gRPC, `config.http.headers` for OTLP/HTTP exporters). Every value is
-///   masked; the keys are preserved so a snapshot still shows which headers are
-///   configured.
-/// - **List form** -- `headers: [ { key, value, ... }, ... ]` (e.g. the
-///   `headers_setter` schema). The static `value` of each entry is masked;
-///   reference fields such as `from_context` / `from_attribute` are not secrets
-///   and are left intact.
-///
-/// Other subtrees are traversed so a `headers` field is redacted regardless of
-/// nesting depth. Shared with
-/// [`ExtensionUserConfig::try_redacted_for_snapshot`](crate::extension::ExtensionUserConfig::try_redacted_for_snapshot).
-pub(crate) fn redact_secret_headers(value: &mut Value) {
-    match value {
-        Value::Object(map) => {
-            for (key, child) in map.iter_mut() {
-                if key == "headers" {
-                    match child {
-                        Value::Object(headers) => {
-                            for header_value in headers.values_mut() {
-                                *header_value = Value::String(REDACTED_HEADER_VALUE.to_owned());
-                            }
-                            continue;
-                        }
-                        Value::Array(entries) => {
-                            for entry in entries.iter_mut() {
-                                if let Value::Object(fields) = entry {
-                                    if let Some(static_value) = fields.get_mut("value") {
-                                        *static_value =
-                                            Value::String(REDACTED_HEADER_VALUE.to_owned());
-                                    }
-                                }
-                            }
-                            continue;
-                        }
-                        _ => {}
-                    }
-                }
-                redact_secret_headers(child);
-            }
-        }
-        Value::Array(items) => {
-            for item in items.iter_mut() {
-                redact_secret_headers(item);
-            }
-        }
-        Value::Null | Value::Bool(_) | Value::Number(_) | Value::String(_) => {}
+    /// Returns the factory-owned typed configuration.
+    pub fn resolved_config<T>(&self) -> Result<&T, Error>
+    where
+        T: Send + Sync + 'static,
+    {
+        self.resolved_config.typed::<T>()
+    }
+
+    /// Returns a snapshot using only the policy established by the factory.
+    pub fn try_safe_snapshot(
+        &self,
+    ) -> Result<NodeUserConfig, crate::resolved_config::SnapshotError> {
+        let mut snapshot = self.clone();
+        snapshot.config = match self.resolved_config.snapshot()? {
+            crate::resolved_config::ComponentSnapshot::Export(value) => value.clone(),
+            crate::resolved_config::ComponentSnapshot::Omit => Value::Null,
+        };
+        snapshot.resolved_config = crate::resolved_config::ResolvedComponentConfig::unresolved();
+        Ok(snapshot)
     }
 }
 
@@ -849,190 +836,35 @@ capabilities:
         );
     }
 
+    /// Scenario: a source node config reaches snapshot production before factory resolution.
+    /// Guarantees: raw component JSON is never used as a snapshot fallback.
     #[test]
-    fn redacted_for_snapshot_masks_nested_http_headers() {
-        // OTLP/HTTP exporter shape: `config.http.headers.*`.
-        let json = r#"{
-            "type": "urn:otel:exporter:otlp_http",
-            "config": {
-                "endpoint": "https://backend.example/v1/logs",
-                "http": {
-                    "headers": {
-                        "authorization": "Bearer super-secret-token",
-                        "x-scope-orgid": "tenant-1"
-                    }
-                }
-            }
-        }"#;
-        let cfg: NodeUserConfig = serde_json::from_str(json).unwrap();
-        let redacted = cfg
-            .try_redacted_for_snapshot()
-            .expect("snapshot redaction should succeed");
+    fn unresolved_config_fails_closed_at_snapshot_boundary() {
+        let config = NodeUserConfig::with_user_config(
+            "urn:otel:exporter:test".into(),
+            serde_json::json!({ "password": "cleartext" }),
+        );
 
-        let headers = &redacted.config["http"]["headers"];
         assert_eq!(
-            headers["authorization"],
-            Value::String(REDACTED_HEADER_VALUE.to_owned())
-        );
-        assert_eq!(
-            headers["x-scope-orgid"],
-            Value::String(REDACTED_HEADER_VALUE.to_owned())
-        );
-        // Non-credential fields and the header keys themselves are preserved.
-        assert_eq!(
-            redacted.config["endpoint"],
-            "https://backend.example/v1/logs"
-        );
-        assert!(headers.get("authorization").is_some());
-
-        // The original config is left untouched (redaction is a copy).
-        assert_eq!(
-            cfg.config["http"]["headers"]["authorization"],
-            "Bearer super-secret-token"
+            config.try_safe_snapshot(),
+            Err(crate::resolved_config::SnapshotError::Unresolved)
         );
     }
 
-    /// Scenario: a config mixes omitted fields, nulls, arrays, ordinary values,
-    /// and a non-secret string equal to the redaction marker.
-    /// Guarantees: snapshot redaction changes only credential header values and
-    /// preserves the exact raw config shape without mutating the source.
+    /// Scenario: a factory explicitly omits a component config from snapshots.
+    /// Guarantees: the snapshot contains null and the stored source remains unchanged.
     #[test]
-    fn redacted_for_snapshot_preserves_exact_non_secret_shape() {
-        let original_config = serde_json::json!({
-            "endpoint": "https://backend.example/v1/logs",
-            "headers": {
-                "authorization": "secret-token"
-            },
-            "metadata": {
-                "literal_marker": REDACTED_HEADER_VALUE,
-                "null_value": null,
-                "items": [1, "two", false]
-            }
-        });
-        let cfg: NodeUserConfig = serde_json::from_value(serde_json::json!({
-            "type": "urn:otel:exporter:shape-test",
-            "config": original_config.clone()
-        }))
-        .expect("shape fixture should deserialize");
-
-        let redacted = cfg
-            .try_redacted_for_snapshot()
-            .expect("snapshot redaction should succeed");
-
-        assert_eq!(
-            redacted.config,
-            serde_json::json!({
-                "endpoint": "https://backend.example/v1/logs",
-                "headers": {
-                    "authorization": REDACTED_HEADER_VALUE
-                },
-                "metadata": {
-                    "literal_marker": REDACTED_HEADER_VALUE,
-                    "null_value": null,
-                    "items": [1, "two", false]
-                }
-            })
+    fn explicit_omit_policy_never_copies_source_config() {
+        let mut config = NodeUserConfig::with_user_config(
+            "urn:otel:exporter:test".into(),
+            serde_json::json!({ "password": "cleartext" }),
         );
-        assert_eq!(
-            cfg.config, original_config,
-            "redaction must not mutate stored config"
-        );
-    }
+        config.set_resolved_config(crate::resolved_config::ResolvedComponentConfig::omit());
 
-    #[test]
-    fn redacted_for_snapshot_masks_flattened_grpc_headers() {
-        // OTAP/gRPC exporter shape: `headers` is flattened to `config.headers.*`.
-        let json = r#"{
-            "type": "urn:otel:exporter:otap",
-            "config": {
-                "grpc_endpoint": "https://backend.example:4317",
-                "headers": {
-                    "authorization": "Basic abc123"
-                }
-            }
-        }"#;
-        let cfg: NodeUserConfig = serde_json::from_str(json).unwrap();
-        let redacted = cfg
-            .try_redacted_for_snapshot()
-            .expect("snapshot redaction should succeed");
-
-        assert_eq!(
-            redacted.config["headers"]["authorization"],
-            Value::String(REDACTED_HEADER_VALUE.to_owned())
-        );
-        // Non-header sibling settings are untouched.
-        assert_eq!(
-            redacted.config["grpc_endpoint"],
-            "https://backend.example:4317"
-        );
-    }
-
-    #[test]
-    fn redacted_for_snapshot_without_headers_is_noop() {
-        let json = r#"{
-            "type": "urn:otel:processor:batch",
-            "config": { "send_batch_size": 1024, "timeout": "5s" }
-        }"#;
-        let cfg: NodeUserConfig = serde_json::from_str(json).unwrap();
-        let redacted = cfg
-            .try_redacted_for_snapshot()
-            .expect("snapshot redaction should succeed");
-        assert_eq!(cfg, redacted, "config without headers must be unchanged");
-    }
-
-    #[test]
-    fn redacted_for_snapshot_masks_headers_inside_arrays() {
-        // Defense-in-depth: a `headers` map nested under an array element must
-        // still be redacted (the walk descends through arrays).
-        let json = r#"{
-            "type": "urn:otel:exporter:multi",
-            "config": {
-                "backends": [
-                    { "headers": { "authorization": "secret-a" } },
-                    { "headers": { "x-api-key": "secret-b" } }
-                ]
-            }
-        }"#;
-        let cfg: NodeUserConfig = serde_json::from_str(json).unwrap();
-        let redacted = cfg
-            .try_redacted_for_snapshot()
-            .expect("snapshot redaction should succeed");
-        assert_eq!(
-            redacted.config["backends"][0]["headers"]["authorization"],
-            REDACTED_HEADER_VALUE
-        );
-        assert_eq!(
-            redacted.config["backends"][1]["headers"]["x-api-key"],
-            REDACTED_HEADER_VALUE
-        );
-    }
-
-    #[test]
-    fn redacted_for_snapshot_masks_list_form_headers() {
-        // `headers_setter`-style schema: `headers` is a list of entries. The
-        // static `value` is a credential and must be masked; reference fields
-        // (`from_context`) and the `key` are not secrets and are left intact.
-        let json = r#"{
-            "type": "urn:test:processor:headers_setter",
-            "config": {
-                "headers": [
-                    { "action": "upsert", "key": "Authorization", "value": "Bearer super-secret" },
-                    { "key": "X-Scope-OrgID", "from_context": "X-Scope-OrgID" }
-                ]
-            }
-        }"#;
-        let cfg: NodeUserConfig = serde_json::from_str(json).unwrap();
-        let redacted = cfg
-            .try_redacted_for_snapshot()
-            .expect("snapshot redaction should succeed");
-
-        let entries = redacted.config["headers"].as_array().unwrap();
-        assert_eq!(entries[0]["value"], REDACTED_HEADER_VALUE);
-        assert_eq!(entries[0]["key"], "Authorization");
-        // The reference-only entry is untouched (no static secret to mask).
-        assert_eq!(entries[1]["from_context"], "X-Scope-OrgID");
-        assert!(entries[1].get("value").is_none());
-        // Original config retains the cleartext (redaction is a copy).
-        assert_eq!(cfg.config["headers"][0]["value"], "Bearer super-secret");
+        let snapshot = config
+            .try_safe_snapshot()
+            .expect("explicit omit policy should produce a snapshot");
+        assert_eq!(snapshot.config, Value::Null);
+        assert_eq!(config.config["password"], "cleartext");
     }
 }

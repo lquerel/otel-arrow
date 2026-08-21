@@ -128,9 +128,9 @@ fn shutdown_is_success(state: &str) -> bool {
 
 /// Returns committed configuration details for one logical pipeline.
 ///
-/// Registered type-owned secrets and credential header values are redacted
-/// from the response (see
-/// [`otap_df_config::pipeline::PipelineConfig::try_redacted_for_snapshot`]).
+/// Component configs are returned only through their factory-owned safe
+/// snapshot policy (see
+/// [`otap_df_config::pipeline::PipelineConfig::try_safe_snapshot`]).
 pub async fn show_pipeline(
     Path((pipeline_group_id, pipeline_id)): Path<(String, String)>,
     State(state): State<AppState>,
@@ -140,13 +140,10 @@ pub async fn show_pipeline(
         .pipeline_details(&pipeline_group_id, &pipeline_id)
     {
         Ok(Some(mut details)) => {
-            details.pipeline = details
-                .pipeline
-                .try_redacted_for_snapshot()
-                .map_err(|error| {
-                    let _ = crate::snapshot_redaction_error(error);
-                    StatusCode::INTERNAL_SERVER_ERROR
-                })?;
+            details.pipeline = details.pipeline.try_safe_snapshot().map_err(|error| {
+                let _ = crate::safe_snapshot_error(error);
+                StatusCode::INTERNAL_SERVER_ERROR
+            })?;
             Ok(Json(details))
         }
         Ok(None) => Err(StatusCode::NOT_FOUND),
@@ -497,11 +494,34 @@ mod tests {
     use axum::body::to_bytes;
     use otap_df_admin_types::operations::{OperationError, OperationErrorKind};
     use otap_df_config::observed_state::ObservedStateSettings;
+    use otap_df_config::pipeline::PipelineConfig;
+    use otap_df_config::redaction::RedactedString;
+    use otap_df_config::resolved_config::{ResolvedComponentConfig, resolve_typed_config};
     use otap_df_engine::memory_limiter::MemoryPressureState;
     use otap_df_state::store::ObservedStateStore;
     use otap_df_telemetry::registry::TelemetryRegistryHandle;
+    use serde::{Deserialize, Serialize};
     use serde_json::json;
+    use std::collections::HashMap;
     use std::sync::Arc;
+
+    #[derive(Deserialize, Serialize)]
+    struct PipelineTypedConfig {
+        password: RedactedString,
+        headers: HashMap<String, RedactedString>,
+    }
+
+    fn resolve_pipeline_test_components(pipeline: &mut PipelineConfig) {
+        for (_, node) in pipeline.node_iter_mut() {
+            let resolved = if node.r#type.as_str() == "urn:test:exporter:typed-redaction" {
+                resolve_typed_config::<PipelineTypedConfig>(&node.config)
+                    .expect("typed pipeline test config should resolve")
+            } else {
+                ResolvedComponentConfig::omit()
+            };
+            Arc::make_mut(node).set_resolved_config(resolved);
+        }
+    }
 
     #[derive(Clone)]
     struct StubControlPlane {
@@ -650,8 +670,8 @@ mod tests {
         }
     }
 
-    /// Minimal control plane that serves a configured `pipeline_details`, used
-    /// to exercise the `show_pipeline` redaction path end-to-end.
+    /// Minimal control plane that serves configured `pipeline_details`, used
+    /// to exercise the safe `show_pipeline` snapshot path end-to-end.
     struct PipelineDetailsStub {
         details: Result<Option<PipelineDetails>, ControlPlaneError>,
     }
@@ -702,13 +722,11 @@ mod tests {
         }
     }
 
-    /// Scenario: a pipeline's node config contains typed and header credential
-    /// values.
-    /// Guarantees: `show_pipeline` redacts both secret classes before returning
-    /// the response.
+    /// Scenario: a factory resolves a pipeline config with typed secret fields.
+    /// Guarantees: `show_pipeline` returns only the factory-owned redacted snapshot.
     #[tokio::test]
     async fn show_pipeline_redacts_credential_header_values() {
-        let details: PipelineDetails = serde_json::from_value(json!({
+        let mut details: PipelineDetails = serde_json::from_value(json!({
             "pipelineGroupId": "default",
             "pipelineId": "main",
             "pipeline": {
@@ -731,6 +749,7 @@ mod tests {
             .and_then(|node| node.config["password"].as_str())
             .expect("fixture password should be a string")
             .to_owned();
+        resolve_pipeline_test_components(&mut details.pipeline);
 
         let response = show_pipeline(
             Path(("default".to_string(), "main".to_string())),
@@ -760,10 +779,8 @@ mod tests {
         );
     }
 
-    /// Scenario: a pipeline detail contains malformed config for a registered
-    /// typed redactor.
-    /// Guarantees: `show_pipeline` returns HTTP 500 and never serializes the
-    /// raw pipeline snapshot.
+    /// Scenario: a pipeline detail reaches the API without factory resolution.
+    /// Guarantees: `show_pipeline` returns HTTP 500 and never serializes raw config.
     #[tokio::test]
     async fn show_pipeline_fails_closed_when_typed_redaction_fails() {
         let details: PipelineDetails = serde_json::from_value(json!({

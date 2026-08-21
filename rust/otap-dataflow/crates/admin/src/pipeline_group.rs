@@ -69,21 +69,18 @@ fn operation_error_response(status: StatusCode, error: crate::ControlPlaneError)
 
 /// Returns the committed configuration for one pipeline group.
 ///
-/// Registered type-owned secrets and credential header values are redacted
-/// from the response (see
-/// [`PipelineGroupConfig::try_redacted_for_snapshot`]).
+/// Component configs are returned only through their factory-owned safe
+/// snapshot policy (see
+/// [`PipelineGroupConfig::try_safe_snapshot`]).
 pub async fn show_group(
     Path(pipeline_group_id): Path<String>,
     State(state): State<AppState>,
 ) -> Result<Json<PipelineGroupConfig>, StatusCode> {
     match state.controller.group_details(&pipeline_group_id) {
-        Ok(Some(group)) => group
-            .try_redacted_for_snapshot()
-            .map(Json)
-            .map_err(|error| {
-                let _ = crate::snapshot_redaction_error(error);
-                StatusCode::INTERNAL_SERVER_ERROR
-            }),
+        Ok(Some(group)) => group.try_safe_snapshot().map(Json).map_err(|error| {
+            let _ = crate::safe_snapshot_error(error);
+            StatusCode::INTERNAL_SERVER_ERROR
+        }),
         Ok(None) | Err(crate::ControlPlaneError::GroupNotFound) => Err(StatusCode::NOT_FOUND),
         Err(_) => Err(StatusCode::INTERNAL_SERVER_ERROR),
     }
@@ -101,11 +98,11 @@ pub async fn create_group(
     );
 
     match state.controller.create_group(&pipeline_group_id, group) {
-        Ok(group) => match group.try_redacted_for_snapshot() {
+        Ok(group) => match group.try_safe_snapshot() {
             Ok(redacted) => (StatusCode::CREATED, Json(redacted)).into_response(),
             Err(error) => operation_error_response(
                 StatusCode::INTERNAL_SERVER_ERROR,
-                crate::snapshot_redaction_error(error),
+                crate::safe_snapshot_error(error),
             ),
         },
         Err(error @ crate::ControlPlaneError::GroupAlreadyExists)
@@ -260,10 +257,34 @@ mod tests {
     use axum::body::to_bytes;
     use otap_df_admin_types::operations::{OperationError, OperationErrorKind};
     use otap_df_config::observed_state::ObservedStateSettings;
+    use otap_df_config::redaction::RedactedString;
+    use otap_df_config::resolved_config::{ResolvedComponentConfig, resolve_typed_config};
     use otap_df_engine::memory_limiter::MemoryPressureState;
     use otap_df_state::store::ObservedStateStore;
     use otap_df_telemetry::registry::TelemetryRegistryHandle;
+    use serde::{Deserialize, Serialize};
+    use std::collections::HashMap;
     use std::sync::Arc;
+
+    #[derive(Deserialize, Serialize)]
+    struct GroupTypedConfig {
+        password: RedactedString,
+        headers: HashMap<String, RedactedString>,
+    }
+
+    fn resolve_group_test_components(group: &mut PipelineGroupConfig) {
+        for pipeline in group.pipelines.values_mut() {
+            for (_, node) in pipeline.node_iter_mut() {
+                let resolved = if node.r#type.as_str() == "urn:test:exporter:typed-redaction" {
+                    resolve_typed_config::<GroupTypedConfig>(&node.config)
+                        .expect("typed group test config should resolve")
+                } else {
+                    ResolvedComponentConfig::omit()
+                };
+                Arc::make_mut(node).set_resolved_config(resolved);
+            }
+        }
+    }
 
     #[derive(Clone)]
     struct StubControlPlane {
@@ -413,13 +434,11 @@ mod tests {
         assert_eq!(decoded, group);
     }
 
-    /// Scenario: a pipeline group contains a node with typed and header
-    /// credential values.
-    /// Guarantees: `show_group` redacts both secret classes before returning
-    /// the response.
+    /// Scenario: a factory resolves a group config with typed secret fields.
+    /// Guarantees: `show_group` returns only the factory-owned redacted snapshot.
     #[tokio::test]
     async fn show_group_redacts_credential_header_values() {
-        let group: PipelineGroupConfig = serde_json::from_value(serde_json::json!({
+        let mut group: PipelineGroupConfig = serde_json::from_value(serde_json::json!({
             "pipelines": {
                 "main": {
                     "nodes": {
@@ -444,6 +463,7 @@ mod tests {
             .and_then(|node| node.config["password"].as_str())
             .expect("fixture password should be a string")
             .to_owned();
+        resolve_group_test_components(&mut group);
 
         let response = show_group(
             Path("default".to_string()),
@@ -475,10 +495,8 @@ mod tests {
         );
     }
 
-    /// Scenario: a group detail contains malformed config for a registered
-    /// typed redactor.
-    /// Guarantees: `show_group` returns HTTP 500 and never serializes the raw
-    /// group snapshot.
+    /// Scenario: a group detail reaches the API without factory resolution.
+    /// Guarantees: `show_group` returns HTTP 500 and never serializes raw config.
     #[tokio::test]
     async fn show_group_fails_closed_when_typed_redaction_fails() {
         let group: PipelineGroupConfig = serde_json::from_value(serde_json::json!({
@@ -545,10 +563,8 @@ mod tests {
         assert_eq!(decoded, group);
     }
 
-    /// Scenario: a created group's nodes carry typed and header credential
-    /// values.
-    /// Guarantees: `create_group` redacts both secret classes in its echoed
-    /// response before clients or proxies can log them.
+    /// Scenario: a created group is committed with factory-resolved typed secrets.
+    /// Guarantees: `create_group` returns only the factory-owned redacted snapshot.
     #[tokio::test]
     async fn create_group_redacts_credential_header_values() {
         let group: PipelineGroupConfig = serde_json::from_value(serde_json::json!({
@@ -574,12 +590,14 @@ mod tests {
             .and_then(|node| node.config["password"].as_str())
             .expect("fixture password should be a string")
             .to_owned();
+        let mut committed = group.clone();
+        resolve_group_test_components(&mut committed);
 
         let response = create_group(
             Path("default".to_string()),
             State(test_app_state(stub(
                 Ok(None),
-                Ok(group.clone()),
+                Ok(committed),
                 Ok(delete_status("succeeded")),
             ))),
             Json(group.clone()),
