@@ -111,6 +111,13 @@ multiple Rust enums use the same wire key, their known members are combined;
 because semantic-convention enums are open, compatible string observations do
 not discard the known member set. Truly dynamic values continue to use `any`.
 
+For event expressions that the syntax-only inventory reports as `any`, the
+registry may record a more precise type established by a compiler-assisted
+audit. The drift checker treats source `any` as unknown and accepts that
+refinement, but continues to require exact agreement whenever source discovery
+finds a concrete type. Attributes that are intentionally dynamic or observed
+with multiple wire types remain `any`.
+
 ## Client SDK generation
 
 The custom Weaver templates under `semconv-codegen/templates/registry/rust`

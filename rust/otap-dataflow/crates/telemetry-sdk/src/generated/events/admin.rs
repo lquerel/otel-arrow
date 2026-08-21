@@ -65,9 +65,9 @@ impl ConfigReconcileRequested {
 #[derive(Debug, Clone)]
 pub struct EndpointBindFailed {
     /// The bind_address value recorded by OTAP Dataflow internal telemetry.
-    pub bind_address: otap_df_telemetry::attributes::AttributeValue,
+    pub bind_address: String,
     /// The error value recorded by OTAP Dataflow internal telemetry.
-    pub error: otap_df_telemetry::attributes::AttributeValue,
+    pub error: String,
 }
 
 /// Marker implemented only by entity types allowed by `endpoint.bind_failed`.
@@ -91,14 +91,14 @@ static ENDPOINT_BIND_FAILED_DESCRIPTOR: EventDescriptor = EventDescriptor {
             key: "bind_address",
             wire_key: "bind_address",
             brief: "The bind_address value recorded by OTAP Dataflow internal telemetry.",
-            value_type: otap_df_telemetry::descriptor::AttributeValueType::Any,
+            value_type: otap_df_telemetry::descriptor::AttributeValueType::String,
             requirement_level: EventRequirementLevel::Required,
         },
         EventAttributeDescriptor {
             key: "error",
             wire_key: "error",
             brief: "The error value recorded by OTAP Dataflow internal telemetry.",
-            value_type: otap_df_telemetry::descriptor::AttributeValueType::Any,
+            value_type: otap_df_telemetry::descriptor::AttributeValueType::String,
             requirement_level: EventRequirementLevel::Required,
         },
     ],
@@ -112,11 +112,11 @@ impl EventAttributes for EndpointBindFailed {
     ) {
         visitor(
             &ENDPOINT_BIND_FAILED_DESCRIPTOR.attributes[0],
-            EventAttributeValueRef::Any(&self.bind_address),
+            EventAttributeValueRef::String(self.bind_address.as_str()),
         );
         visitor(
             &ENDPOINT_BIND_FAILED_DESCRIPTOR.attributes[1],
-            EventAttributeValueRef::Any(&self.error),
+            EventAttributeValueRef::String(self.error.as_str()),
         );
     }
 }
@@ -143,9 +143,9 @@ impl EndpointBindFailed {
 #[derive(Debug, Clone)]
 pub struct EndpointParseAddressFailed {
     /// The bind_address value recorded by OTAP Dataflow internal telemetry.
-    pub bind_address: otap_df_telemetry::attributes::AttributeValue,
+    pub bind_address: String,
     /// The error value recorded by OTAP Dataflow internal telemetry.
-    pub error: otap_df_telemetry::attributes::AttributeValue,
+    pub error: String,
 }
 
 /// Marker implemented only by entity types allowed by `endpoint.parse_address_failed`.
@@ -169,14 +169,14 @@ static ENDPOINT_PARSE_ADDRESS_FAILED_DESCRIPTOR: EventDescriptor = EventDescript
             key: "bind_address",
             wire_key: "bind_address",
             brief: "The bind_address value recorded by OTAP Dataflow internal telemetry.",
-            value_type: otap_df_telemetry::descriptor::AttributeValueType::Any,
+            value_type: otap_df_telemetry::descriptor::AttributeValueType::String,
             requirement_level: EventRequirementLevel::Required,
         },
         EventAttributeDescriptor {
             key: "error",
             wire_key: "error",
             brief: "The error value recorded by OTAP Dataflow internal telemetry.",
-            value_type: otap_df_telemetry::descriptor::AttributeValueType::Any,
+            value_type: otap_df_telemetry::descriptor::AttributeValueType::String,
             requirement_level: EventRequirementLevel::Required,
         },
     ],
@@ -190,11 +190,11 @@ impl EventAttributes for EndpointParseAddressFailed {
     ) {
         visitor(
             &ENDPOINT_PARSE_ADDRESS_FAILED_DESCRIPTOR.attributes[0],
-            EventAttributeValueRef::Any(&self.bind_address),
+            EventAttributeValueRef::String(self.bind_address.as_str()),
         );
         visitor(
             &ENDPOINT_PARSE_ADDRESS_FAILED_DESCRIPTOR.attributes[1],
-            EventAttributeValueRef::Any(&self.error),
+            EventAttributeValueRef::String(self.error.as_str()),
         );
     }
 }
@@ -221,7 +221,7 @@ impl EndpointParseAddressFailed {
 #[derive(Debug, Clone)]
 pub struct EndpointStart {
     /// The bind_address value recorded by OTAP Dataflow internal telemetry.
-    pub bind_address: otap_df_telemetry::attributes::AttributeValue,
+    pub bind_address: String,
 }
 
 /// Marker implemented only by entity types allowed by `endpoint.start`.
@@ -244,7 +244,7 @@ static ENDPOINT_START_DESCRIPTOR: EventDescriptor = EventDescriptor {
         key: "bind_address",
         wire_key: "bind_address",
         brief: "The bind_address value recorded by OTAP Dataflow internal telemetry.",
-        value_type: otap_df_telemetry::descriptor::AttributeValueType::Any,
+        value_type: otap_df_telemetry::descriptor::AttributeValueType::String,
         requirement_level: EventRequirementLevel::Required,
     }],
 };
@@ -257,7 +257,7 @@ impl EventAttributes for EndpointStart {
     ) {
         visitor(
             &ENDPOINT_START_DESCRIPTOR.attributes[0],
-            EventAttributeValueRef::Any(&self.bind_address),
+            EventAttributeValueRef::String(self.bind_address.as_str()),
         );
     }
 }
@@ -284,7 +284,7 @@ impl EndpointStart {
 #[derive(Debug, Clone)]
 pub struct GroupCreateRequested {
     /// The pipeline_group_id value recorded by OTAP Dataflow internal telemetry.
-    pub pipeline_group_id: otap_df_telemetry::attributes::AttributeValue,
+    pub pipeline_group_id: String,
 }
 
 /// Marker implemented only by entity types allowed by `group.create.requested`.
@@ -307,7 +307,7 @@ static GROUP_CREATE_REQUESTED_DESCRIPTOR: EventDescriptor = EventDescriptor {
         key: "pipeline_group_id",
         wire_key: "pipeline_group_id",
         brief: "The pipeline_group_id value recorded by OTAP Dataflow internal telemetry.",
-        value_type: otap_df_telemetry::descriptor::AttributeValueType::Any,
+        value_type: otap_df_telemetry::descriptor::AttributeValueType::String,
         requirement_level: EventRequirementLevel::Required,
     }],
 };
@@ -320,7 +320,7 @@ impl EventAttributes for GroupCreateRequested {
     ) {
         visitor(
             &GROUP_CREATE_REQUESTED_DESCRIPTOR.attributes[0],
-            EventAttributeValueRef::Any(&self.pipeline_group_id),
+            EventAttributeValueRef::String(self.pipeline_group_id.as_str()),
         );
     }
 }
@@ -347,9 +347,9 @@ impl GroupCreateRequested {
 #[derive(Debug, Clone)]
 pub struct GroupDeleteRequested {
     /// The pipeline_group_id value recorded by OTAP Dataflow internal telemetry.
-    pub pipeline_group_id: otap_df_telemetry::attributes::AttributeValue,
+    pub pipeline_group_id: String,
     /// The timeout_secs value recorded by OTAP Dataflow internal telemetry.
-    pub timeout_secs: otap_df_telemetry::attributes::AttributeValue,
+    pub timeout_secs: i64,
 }
 
 /// Marker implemented only by entity types allowed by `group.delete.requested`.
@@ -373,14 +373,14 @@ static GROUP_DELETE_REQUESTED_DESCRIPTOR: EventDescriptor = EventDescriptor {
             key: "pipeline_group_id",
             wire_key: "pipeline_group_id",
             brief: "The pipeline_group_id value recorded by OTAP Dataflow internal telemetry.",
-            value_type: otap_df_telemetry::descriptor::AttributeValueType::Any,
+            value_type: otap_df_telemetry::descriptor::AttributeValueType::String,
             requirement_level: EventRequirementLevel::Required,
         },
         EventAttributeDescriptor {
             key: "timeout_secs",
             wire_key: "timeout_secs",
             brief: "The timeout_secs value recorded by OTAP Dataflow internal telemetry.",
-            value_type: otap_df_telemetry::descriptor::AttributeValueType::Any,
+            value_type: otap_df_telemetry::descriptor::AttributeValueType::Int,
             requirement_level: EventRequirementLevel::Required,
         },
     ],
@@ -394,11 +394,11 @@ impl EventAttributes for GroupDeleteRequested {
     ) {
         visitor(
             &GROUP_DELETE_REQUESTED_DESCRIPTOR.attributes[0],
-            EventAttributeValueRef::Any(&self.pipeline_group_id),
+            EventAttributeValueRef::String(self.pipeline_group_id.as_str()),
         );
         visitor(
             &GROUP_DELETE_REQUESTED_DESCRIPTOR.attributes[1],
-            EventAttributeValueRef::Any(&self.timeout_secs),
+            EventAttributeValueRef::Int(self.timeout_secs),
         );
     }
 }
@@ -425,11 +425,11 @@ impl GroupDeleteRequested {
 #[derive(Debug, Clone)]
 pub struct PipelineDeleteRequested {
     /// The pipeline_group_id value recorded by OTAP Dataflow internal telemetry.
-    pub pipeline_group_id: otap_df_telemetry::attributes::AttributeValue,
+    pub pipeline_group_id: String,
     /// The pipeline_id value recorded by OTAP Dataflow internal telemetry.
-    pub pipeline_id: otap_df_telemetry::attributes::AttributeValue,
+    pub pipeline_id: String,
     /// The timeout_secs value recorded by OTAP Dataflow internal telemetry.
-    pub timeout_secs: otap_df_telemetry::attributes::AttributeValue,
+    pub timeout_secs: i64,
 }
 
 /// Marker implemented only by entity types allowed by `pipeline.delete.requested`.
@@ -453,21 +453,21 @@ static PIPELINE_DELETE_REQUESTED_DESCRIPTOR: EventDescriptor = EventDescriptor {
             key: "pipeline_group_id",
             wire_key: "pipeline_group_id",
             brief: "The pipeline_group_id value recorded by OTAP Dataflow internal telemetry.",
-            value_type: otap_df_telemetry::descriptor::AttributeValueType::Any,
+            value_type: otap_df_telemetry::descriptor::AttributeValueType::String,
             requirement_level: EventRequirementLevel::Required,
         },
         EventAttributeDescriptor {
             key: "pipeline_id",
             wire_key: "pipeline_id",
             brief: "The pipeline_id value recorded by OTAP Dataflow internal telemetry.",
-            value_type: otap_df_telemetry::descriptor::AttributeValueType::Any,
+            value_type: otap_df_telemetry::descriptor::AttributeValueType::String,
             requirement_level: EventRequirementLevel::Required,
         },
         EventAttributeDescriptor {
             key: "timeout_secs",
             wire_key: "timeout_secs",
             brief: "The timeout_secs value recorded by OTAP Dataflow internal telemetry.",
-            value_type: otap_df_telemetry::descriptor::AttributeValueType::Any,
+            value_type: otap_df_telemetry::descriptor::AttributeValueType::Int,
             requirement_level: EventRequirementLevel::Required,
         },
     ],
@@ -481,15 +481,15 @@ impl EventAttributes for PipelineDeleteRequested {
     ) {
         visitor(
             &PIPELINE_DELETE_REQUESTED_DESCRIPTOR.attributes[0],
-            EventAttributeValueRef::Any(&self.pipeline_group_id),
+            EventAttributeValueRef::String(self.pipeline_group_id.as_str()),
         );
         visitor(
             &PIPELINE_DELETE_REQUESTED_DESCRIPTOR.attributes[1],
-            EventAttributeValueRef::Any(&self.pipeline_id),
+            EventAttributeValueRef::String(self.pipeline_id.as_str()),
         );
         visitor(
             &PIPELINE_DELETE_REQUESTED_DESCRIPTOR.attributes[2],
-            EventAttributeValueRef::Any(&self.timeout_secs),
+            EventAttributeValueRef::Int(self.timeout_secs),
         );
     }
 }
@@ -516,13 +516,13 @@ impl PipelineDeleteRequested {
 #[derive(Debug, Clone)]
 pub struct PipelineShutdownRequested {
     /// The pipeline_group_id value recorded by OTAP Dataflow internal telemetry.
-    pub pipeline_group_id: otap_df_telemetry::attributes::AttributeValue,
+    pub pipeline_group_id: String,
     /// The pipeline_id value recorded by OTAP Dataflow internal telemetry.
-    pub pipeline_id: otap_df_telemetry::attributes::AttributeValue,
+    pub pipeline_id: String,
     /// The timeout_secs value recorded by OTAP Dataflow internal telemetry.
-    pub timeout_secs: otap_df_telemetry::attributes::AttributeValue,
+    pub timeout_secs: i64,
     /// The wait value recorded by OTAP Dataflow internal telemetry.
-    pub wait: otap_df_telemetry::attributes::AttributeValue,
+    pub wait: bool,
 }
 
 /// Marker implemented only by entity types allowed by `pipeline.shutdown.requested`.
@@ -546,28 +546,28 @@ static PIPELINE_SHUTDOWN_REQUESTED_DESCRIPTOR: EventDescriptor = EventDescriptor
             key: "pipeline_group_id",
             wire_key: "pipeline_group_id",
             brief: "The pipeline_group_id value recorded by OTAP Dataflow internal telemetry.",
-            value_type: otap_df_telemetry::descriptor::AttributeValueType::Any,
+            value_type: otap_df_telemetry::descriptor::AttributeValueType::String,
             requirement_level: EventRequirementLevel::Required,
         },
         EventAttributeDescriptor {
             key: "pipeline_id",
             wire_key: "pipeline_id",
             brief: "The pipeline_id value recorded by OTAP Dataflow internal telemetry.",
-            value_type: otap_df_telemetry::descriptor::AttributeValueType::Any,
+            value_type: otap_df_telemetry::descriptor::AttributeValueType::String,
             requirement_level: EventRequirementLevel::Required,
         },
         EventAttributeDescriptor {
             key: "timeout_secs",
             wire_key: "timeout_secs",
             brief: "The timeout_secs value recorded by OTAP Dataflow internal telemetry.",
-            value_type: otap_df_telemetry::descriptor::AttributeValueType::Any,
+            value_type: otap_df_telemetry::descriptor::AttributeValueType::Int,
             requirement_level: EventRequirementLevel::Required,
         },
         EventAttributeDescriptor {
             key: "wait",
             wire_key: "wait",
             brief: "The wait value recorded by OTAP Dataflow internal telemetry.",
-            value_type: otap_df_telemetry::descriptor::AttributeValueType::Any,
+            value_type: otap_df_telemetry::descriptor::AttributeValueType::Boolean,
             requirement_level: EventRequirementLevel::Required,
         },
     ],
@@ -581,19 +581,19 @@ impl EventAttributes for PipelineShutdownRequested {
     ) {
         visitor(
             &PIPELINE_SHUTDOWN_REQUESTED_DESCRIPTOR.attributes[0],
-            EventAttributeValueRef::Any(&self.pipeline_group_id),
+            EventAttributeValueRef::String(self.pipeline_group_id.as_str()),
         );
         visitor(
             &PIPELINE_SHUTDOWN_REQUESTED_DESCRIPTOR.attributes[1],
-            EventAttributeValueRef::Any(&self.pipeline_id),
+            EventAttributeValueRef::String(self.pipeline_id.as_str()),
         );
         visitor(
             &PIPELINE_SHUTDOWN_REQUESTED_DESCRIPTOR.attributes[2],
-            EventAttributeValueRef::Any(&self.timeout_secs),
+            EventAttributeValueRef::Int(self.timeout_secs),
         );
         visitor(
             &PIPELINE_SHUTDOWN_REQUESTED_DESCRIPTOR.attributes[3],
-            EventAttributeValueRef::Any(&self.wait),
+            EventAttributeValueRef::Boolean(self.wait),
         );
     }
 }
@@ -683,7 +683,7 @@ impl ShutdownAccepted {
 #[derive(Debug, Clone)]
 pub struct ShutdownBlockingWait {
     /// The timeout_secs value recorded by OTAP Dataflow internal telemetry.
-    pub timeout_secs: otap_df_telemetry::attributes::AttributeValue,
+    pub timeout_secs: i64,
 }
 
 /// Marker implemented only by entity types allowed by `shutdown.blocking_wait`.
@@ -706,7 +706,7 @@ static SHUTDOWN_BLOCKING_WAIT_DESCRIPTOR: EventDescriptor = EventDescriptor {
         key: "timeout_secs",
         wire_key: "timeout_secs",
         brief: "The timeout_secs value recorded by OTAP Dataflow internal telemetry.",
-        value_type: otap_df_telemetry::descriptor::AttributeValueType::Any,
+        value_type: otap_df_telemetry::descriptor::AttributeValueType::Int,
         requirement_level: EventRequirementLevel::Required,
     }],
 };
@@ -719,7 +719,7 @@ impl EventAttributes for ShutdownBlockingWait {
     ) {
         visitor(
             &SHUTDOWN_BLOCKING_WAIT_DESCRIPTOR.attributes[0],
-            EventAttributeValueRef::Any(&self.timeout_secs),
+            EventAttributeValueRef::Int(self.timeout_secs),
         );
     }
 }
@@ -746,7 +746,7 @@ impl ShutdownBlockingWait {
 #[derive(Debug, Clone)]
 pub struct ShutdownCompleted {
     /// The elapsed_ms value recorded by OTAP Dataflow internal telemetry.
-    pub elapsed_ms: otap_df_telemetry::attributes::AttributeValue,
+    pub elapsed_ms: i64,
 }
 
 /// Marker implemented only by entity types allowed by `shutdown.completed`.
@@ -769,7 +769,7 @@ static SHUTDOWN_COMPLETED_DESCRIPTOR: EventDescriptor = EventDescriptor {
         key: "elapsed_ms",
         wire_key: "elapsed_ms",
         brief: "The elapsed_ms value recorded by OTAP Dataflow internal telemetry.",
-        value_type: otap_df_telemetry::descriptor::AttributeValueType::Any,
+        value_type: otap_df_telemetry::descriptor::AttributeValueType::Int,
         requirement_level: EventRequirementLevel::Required,
     }],
 };
@@ -782,7 +782,7 @@ impl EventAttributes for ShutdownCompleted {
     ) {
         visitor(
             &SHUTDOWN_COMPLETED_DESCRIPTOR.attributes[0],
-            EventAttributeValueRef::Any(&self.elapsed_ms),
+            EventAttributeValueRef::Int(self.elapsed_ms),
         );
     }
 }
@@ -809,7 +809,7 @@ impl ShutdownCompleted {
 #[derive(Debug, Clone)]
 pub struct ShutdownFailed {
     /// The error value recorded by OTAP Dataflow internal telemetry.
-    pub error: otap_df_telemetry::attributes::AttributeValue,
+    pub error: String,
 }
 
 /// Marker implemented only by entity types allowed by `shutdown.failed`.
@@ -832,7 +832,7 @@ static SHUTDOWN_FAILED_DESCRIPTOR: EventDescriptor = EventDescriptor {
         key: "error",
         wire_key: "error",
         brief: "The error value recorded by OTAP Dataflow internal telemetry.",
-        value_type: otap_df_telemetry::descriptor::AttributeValueType::Any,
+        value_type: otap_df_telemetry::descriptor::AttributeValueType::String,
         requirement_level: EventRequirementLevel::Required,
     }],
 };
@@ -845,7 +845,7 @@ impl EventAttributes for ShutdownFailed {
     ) {
         visitor(
             &SHUTDOWN_FAILED_DESCRIPTOR.attributes[0],
-            EventAttributeValueRef::Any(&self.error),
+            EventAttributeValueRef::String(self.error.as_str()),
         );
     }
 }
@@ -872,9 +872,9 @@ impl ShutdownFailed {
 #[derive(Debug, Clone)]
 pub struct ShutdownRequested {
     /// The timeout_secs value recorded by OTAP Dataflow internal telemetry.
-    pub timeout_secs: otap_df_telemetry::attributes::AttributeValue,
+    pub timeout_secs: i64,
     /// The wait value recorded by OTAP Dataflow internal telemetry.
-    pub wait: otap_df_telemetry::attributes::AttributeValue,
+    pub wait: bool,
 }
 
 /// Marker implemented only by entity types allowed by `shutdown.requested`.
@@ -898,14 +898,14 @@ static SHUTDOWN_REQUESTED_DESCRIPTOR: EventDescriptor = EventDescriptor {
             key: "timeout_secs",
             wire_key: "timeout_secs",
             brief: "The timeout_secs value recorded by OTAP Dataflow internal telemetry.",
-            value_type: otap_df_telemetry::descriptor::AttributeValueType::Any,
+            value_type: otap_df_telemetry::descriptor::AttributeValueType::Int,
             requirement_level: EventRequirementLevel::Required,
         },
         EventAttributeDescriptor {
             key: "wait",
             wire_key: "wait",
             brief: "The wait value recorded by OTAP Dataflow internal telemetry.",
-            value_type: otap_df_telemetry::descriptor::AttributeValueType::Any,
+            value_type: otap_df_telemetry::descriptor::AttributeValueType::Boolean,
             requirement_level: EventRequirementLevel::Required,
         },
     ],
@@ -919,11 +919,11 @@ impl EventAttributes for ShutdownRequested {
     ) {
         visitor(
             &SHUTDOWN_REQUESTED_DESCRIPTOR.attributes[0],
-            EventAttributeValueRef::Any(&self.timeout_secs),
+            EventAttributeValueRef::Int(self.timeout_secs),
         );
         visitor(
             &SHUTDOWN_REQUESTED_DESCRIPTOR.attributes[1],
-            EventAttributeValueRef::Any(&self.wait),
+            EventAttributeValueRef::Boolean(self.wait),
         );
     }
 }
@@ -950,9 +950,9 @@ impl ShutdownRequested {
 #[derive(Debug, Clone)]
 pub struct ShutdownTimeout {
     /// The elapsed_ms value recorded by OTAP Dataflow internal telemetry.
-    pub elapsed_ms: otap_df_telemetry::attributes::AttributeValue,
+    pub elapsed_ms: i64,
     /// The timeout_secs value recorded by OTAP Dataflow internal telemetry.
-    pub timeout_secs: otap_df_telemetry::attributes::AttributeValue,
+    pub timeout_secs: i64,
 }
 
 /// Marker implemented only by entity types allowed by `shutdown.timeout`.
@@ -976,14 +976,14 @@ static SHUTDOWN_TIMEOUT_DESCRIPTOR: EventDescriptor = EventDescriptor {
             key: "elapsed_ms",
             wire_key: "elapsed_ms",
             brief: "The elapsed_ms value recorded by OTAP Dataflow internal telemetry.",
-            value_type: otap_df_telemetry::descriptor::AttributeValueType::Any,
+            value_type: otap_df_telemetry::descriptor::AttributeValueType::Int,
             requirement_level: EventRequirementLevel::Required,
         },
         EventAttributeDescriptor {
             key: "timeout_secs",
             wire_key: "timeout_secs",
             brief: "The timeout_secs value recorded by OTAP Dataflow internal telemetry.",
-            value_type: otap_df_telemetry::descriptor::AttributeValueType::Any,
+            value_type: otap_df_telemetry::descriptor::AttributeValueType::Int,
             requirement_level: EventRequirementLevel::Required,
         },
     ],
@@ -997,11 +997,11 @@ impl EventAttributes for ShutdownTimeout {
     ) {
         visitor(
             &SHUTDOWN_TIMEOUT_DESCRIPTOR.attributes[0],
-            EventAttributeValueRef::Any(&self.elapsed_ms),
+            EventAttributeValueRef::Int(self.elapsed_ms),
         );
         visitor(
             &SHUTDOWN_TIMEOUT_DESCRIPTOR.attributes[1],
-            EventAttributeValueRef::Any(&self.timeout_secs),
+            EventAttributeValueRef::Int(self.timeout_secs),
         );
     }
 }

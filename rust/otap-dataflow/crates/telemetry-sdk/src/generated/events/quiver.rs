@@ -15,11 +15,11 @@ use crate::event::{
 #[derive(Debug, Clone)]
 pub struct QuiverDictKeyWidened {
     /// The field value recorded by OTAP Dataflow internal telemetry.
-    pub field: otap_df_telemetry::attributes::AttributeValue,
+    pub field: String,
     /// The original_key_type value recorded by OTAP Dataflow internal telemetry.
     pub original_key_type: String,
     /// The total_values value recorded by OTAP Dataflow internal telemetry.
-    pub total_values: otap_df_telemetry::attributes::AttributeValue,
+    pub total_values: i64,
     /// The widened_key_type value recorded by OTAP Dataflow internal telemetry.
     pub widened_key_type: String,
 }
@@ -47,7 +47,7 @@ static QUIVER_DICT_KEY_WIDENED_DESCRIPTOR: EventDescriptor = EventDescriptor {
             key: "field",
             wire_key: "field",
             brief: "The field value recorded by OTAP Dataflow internal telemetry.",
-            value_type: otap_df_telemetry::descriptor::AttributeValueType::Any,
+            value_type: otap_df_telemetry::descriptor::AttributeValueType::String,
             requirement_level: EventRequirementLevel::Required,
         },
         EventAttributeDescriptor {
@@ -61,7 +61,7 @@ static QUIVER_DICT_KEY_WIDENED_DESCRIPTOR: EventDescriptor = EventDescriptor {
             key: "total_values",
             wire_key: "total_values",
             brief: "The total_values value recorded by OTAP Dataflow internal telemetry.",
-            value_type: otap_df_telemetry::descriptor::AttributeValueType::Any,
+            value_type: otap_df_telemetry::descriptor::AttributeValueType::Int,
             requirement_level: EventRequirementLevel::Required,
         },
         EventAttributeDescriptor {
@@ -82,7 +82,7 @@ impl EventAttributes for QuiverDictKeyWidened {
     ) {
         visitor(
             &QUIVER_DICT_KEY_WIDENED_DESCRIPTOR.attributes[0],
-            EventAttributeValueRef::Any(&self.field),
+            EventAttributeValueRef::String(self.field.as_str()),
         );
         visitor(
             &QUIVER_DICT_KEY_WIDENED_DESCRIPTOR.attributes[1],
@@ -90,7 +90,7 @@ impl EventAttributes for QuiverDictKeyWidened {
         );
         visitor(
             &QUIVER_DICT_KEY_WIDENED_DESCRIPTOR.attributes[2],
-            EventAttributeValueRef::Any(&self.total_values),
+            EventAttributeValueRef::Int(self.total_values),
         );
         visitor(
             &QUIVER_DICT_KEY_WIDENED_DESCRIPTOR.attributes[3],
@@ -121,11 +121,11 @@ impl QuiverDictKeyWidened {
 #[derive(Debug, Clone)]
 pub struct QuiverDictNativeFallback {
     /// The field value recorded by OTAP Dataflow internal telemetry.
-    pub field: otap_df_telemetry::attributes::AttributeValue,
+    pub field: String,
     /// The original_key_type value recorded by OTAP Dataflow internal telemetry.
     pub original_key_type: String,
     /// The total_values value recorded by OTAP Dataflow internal telemetry.
-    pub total_values: otap_df_telemetry::attributes::AttributeValue,
+    pub total_values: i64,
 }
 
 /// Marker implemented only by entity types allowed by `quiver.dict.native_fallback`.
@@ -151,7 +151,7 @@ static QUIVER_DICT_NATIVE_FALLBACK_DESCRIPTOR: EventDescriptor = EventDescriptor
             key: "field",
             wire_key: "field",
             brief: "The field value recorded by OTAP Dataflow internal telemetry.",
-            value_type: otap_df_telemetry::descriptor::AttributeValueType::Any,
+            value_type: otap_df_telemetry::descriptor::AttributeValueType::String,
             requirement_level: EventRequirementLevel::Required,
         },
         EventAttributeDescriptor {
@@ -165,7 +165,7 @@ static QUIVER_DICT_NATIVE_FALLBACK_DESCRIPTOR: EventDescriptor = EventDescriptor
             key: "total_values",
             wire_key: "total_values",
             brief: "The total_values value recorded by OTAP Dataflow internal telemetry.",
-            value_type: otap_df_telemetry::descriptor::AttributeValueType::Any,
+            value_type: otap_df_telemetry::descriptor::AttributeValueType::Int,
             requirement_level: EventRequirementLevel::Required,
         },
     ],
@@ -179,7 +179,7 @@ impl EventAttributes for QuiverDictNativeFallback {
     ) {
         visitor(
             &QUIVER_DICT_NATIVE_FALLBACK_DESCRIPTOR.attributes[0],
-            EventAttributeValueRef::Any(&self.field),
+            EventAttributeValueRef::String(self.field.as_str()),
         );
         visitor(
             &QUIVER_DICT_NATIVE_FALLBACK_DESCRIPTOR.attributes[1],
@@ -187,7 +187,7 @@ impl EventAttributes for QuiverDictNativeFallback {
         );
         visitor(
             &QUIVER_DICT_NATIVE_FALLBACK_DESCRIPTOR.attributes[2],
-            EventAttributeValueRef::Any(&self.total_values),
+            EventAttributeValueRef::Int(self.total_values),
         );
     }
 }
@@ -214,19 +214,19 @@ impl QuiverDictNativeFallback {
 #[derive(Debug, Clone)]
 pub struct QuiverEngineInit {
     /// The budget_cap value recorded by OTAP Dataflow internal telemetry.
-    pub budget_cap: Option<otap_df_telemetry::attributes::AttributeValue>,
+    pub budget_cap: Option<i64>,
     /// The error value recorded by OTAP Dataflow internal telemetry.
-    pub error: Option<otap_df_telemetry::attributes::AttributeValue>,
+    pub error: Option<String>,
     /// The error_type value recorded by OTAP Dataflow internal telemetry.
     pub error_type: Option<String>,
     /// The min_budget value recorded by OTAP Dataflow internal telemetry.
-    pub min_budget: Option<otap_df_telemetry::attributes::AttributeValue>,
+    pub min_budget: Option<i64>,
     /// The path value recorded by OTAP Dataflow internal telemetry.
     pub path: Option<String>,
     /// The reason value recorded by OTAP Dataflow internal telemetry.
     pub reason: Option<String>,
     /// The segment_size value recorded by OTAP Dataflow internal telemetry.
-    pub segment_size: Option<otap_df_telemetry::attributes::AttributeValue>,
+    pub segment_size: Option<i64>,
     /// The set_permissions_supported value recorded by OTAP Dataflow internal telemetry.
     pub set_permissions_supported: Option<bool>,
 }
@@ -258,14 +258,14 @@ static QUIVER_ENGINE_INIT_DESCRIPTOR: EventDescriptor = EventDescriptor {
             key: "budget_cap",
             wire_key: "budget_cap",
             brief: "The budget_cap value recorded by OTAP Dataflow internal telemetry.",
-            value_type: otap_df_telemetry::descriptor::AttributeValueType::Any,
+            value_type: otap_df_telemetry::descriptor::AttributeValueType::Int,
             requirement_level: EventRequirementLevel::Recommended,
         },
         EventAttributeDescriptor {
             key: "error",
             wire_key: "error",
             brief: "The error value recorded by OTAP Dataflow internal telemetry.",
-            value_type: otap_df_telemetry::descriptor::AttributeValueType::Any,
+            value_type: otap_df_telemetry::descriptor::AttributeValueType::String,
             requirement_level: EventRequirementLevel::Recommended,
         },
         EventAttributeDescriptor {
@@ -279,7 +279,7 @@ static QUIVER_ENGINE_INIT_DESCRIPTOR: EventDescriptor = EventDescriptor {
             key: "min_budget",
             wire_key: "min_budget",
             brief: "The min_budget value recorded by OTAP Dataflow internal telemetry.",
-            value_type: otap_df_telemetry::descriptor::AttributeValueType::Any,
+            value_type: otap_df_telemetry::descriptor::AttributeValueType::Int,
             requirement_level: EventRequirementLevel::Recommended,
         },
         EventAttributeDescriptor {
@@ -300,7 +300,7 @@ static QUIVER_ENGINE_INIT_DESCRIPTOR: EventDescriptor = EventDescriptor {
             key: "segment_size",
             wire_key: "segment_size",
             brief: "The segment_size value recorded by OTAP Dataflow internal telemetry.",
-            value_type: otap_df_telemetry::descriptor::AttributeValueType::Any,
+            value_type: otap_df_telemetry::descriptor::AttributeValueType::Int,
             requirement_level: EventRequirementLevel::Recommended,
         },
         EventAttributeDescriptor {
@@ -322,13 +322,13 @@ impl EventAttributes for QuiverEngineInit {
         if let Some(value) = &self.budget_cap {
             visitor(
                 &QUIVER_ENGINE_INIT_DESCRIPTOR.attributes[0],
-                EventAttributeValueRef::Any(value),
+                EventAttributeValueRef::Int(*value),
             );
         }
         if let Some(value) = &self.error {
             visitor(
                 &QUIVER_ENGINE_INIT_DESCRIPTOR.attributes[1],
-                EventAttributeValueRef::Any(value),
+                EventAttributeValueRef::String(value.as_str()),
             );
         }
         if let Some(value) = &self.error_type {
@@ -340,7 +340,7 @@ impl EventAttributes for QuiverEngineInit {
         if let Some(value) = &self.min_budget {
             visitor(
                 &QUIVER_ENGINE_INIT_DESCRIPTOR.attributes[3],
-                EventAttributeValueRef::Any(value),
+                EventAttributeValueRef::Int(*value),
             );
         }
         if let Some(value) = &self.path {
@@ -358,7 +358,7 @@ impl EventAttributes for QuiverEngineInit {
         if let Some(value) = &self.segment_size {
             visitor(
                 &QUIVER_ENGINE_INIT_DESCRIPTOR.attributes[6],
-                EventAttributeValueRef::Any(value),
+                EventAttributeValueRef::Int(*value),
             );
         }
         if let Some(value) = &self.set_permissions_supported {
@@ -408,15 +408,15 @@ impl QuiverEngineInit {
 #[derive(Debug, Clone)]
 pub struct QuiverEngineStop {
     /// The cumulative_segment_bytes value recorded by OTAP Dataflow internal telemetry.
-    pub cumulative_segment_bytes: Option<otap_df_telemetry::attributes::AttributeValue>,
+    pub cumulative_segment_bytes: Option<i64>,
     /// The error value recorded by OTAP Dataflow internal telemetry.
-    pub error: Option<otap_df_telemetry::attributes::AttributeValue>,
+    pub error: Option<String>,
     /// The error_type value recorded by OTAP Dataflow internal telemetry.
     pub error_type: Option<String>,
     /// The force_dropped_bundles value recorded by OTAP Dataflow internal telemetry.
-    pub force_dropped_bundles: Option<otap_df_telemetry::attributes::AttributeValue>,
+    pub force_dropped_bundles: Option<i64>,
     /// The force_dropped_segments value recorded by OTAP Dataflow internal telemetry.
-    pub force_dropped_segments: Option<otap_df_telemetry::attributes::AttributeValue>,
+    pub force_dropped_segments: Option<i64>,
 }
 
 /// Marker implemented only by entity types allowed by `quiver.engine.stop`.
@@ -446,14 +446,14 @@ static QUIVER_ENGINE_STOP_DESCRIPTOR: EventDescriptor = EventDescriptor {
             key: "cumulative_segment_bytes",
             wire_key: "cumulative_segment_bytes",
             brief: "The cumulative_segment_bytes value recorded by OTAP Dataflow internal telemetry.",
-            value_type: otap_df_telemetry::descriptor::AttributeValueType::Any,
+            value_type: otap_df_telemetry::descriptor::AttributeValueType::Int,
             requirement_level: EventRequirementLevel::Recommended,
         },
         EventAttributeDescriptor {
             key: "error",
             wire_key: "error",
             brief: "The error value recorded by OTAP Dataflow internal telemetry.",
-            value_type: otap_df_telemetry::descriptor::AttributeValueType::Any,
+            value_type: otap_df_telemetry::descriptor::AttributeValueType::String,
             requirement_level: EventRequirementLevel::Recommended,
         },
         EventAttributeDescriptor {
@@ -467,14 +467,14 @@ static QUIVER_ENGINE_STOP_DESCRIPTOR: EventDescriptor = EventDescriptor {
             key: "force_dropped_bundles",
             wire_key: "force_dropped_bundles",
             brief: "The force_dropped_bundles value recorded by OTAP Dataflow internal telemetry.",
-            value_type: otap_df_telemetry::descriptor::AttributeValueType::Any,
+            value_type: otap_df_telemetry::descriptor::AttributeValueType::Int,
             requirement_level: EventRequirementLevel::Recommended,
         },
         EventAttributeDescriptor {
             key: "force_dropped_segments",
             wire_key: "force_dropped_segments",
             brief: "The force_dropped_segments value recorded by OTAP Dataflow internal telemetry.",
-            value_type: otap_df_telemetry::descriptor::AttributeValueType::Any,
+            value_type: otap_df_telemetry::descriptor::AttributeValueType::Int,
             requirement_level: EventRequirementLevel::Recommended,
         },
     ],
@@ -489,13 +489,13 @@ impl EventAttributes for QuiverEngineStop {
         if let Some(value) = &self.cumulative_segment_bytes {
             visitor(
                 &QUIVER_ENGINE_STOP_DESCRIPTOR.attributes[0],
-                EventAttributeValueRef::Any(value),
+                EventAttributeValueRef::Int(*value),
             );
         }
         if let Some(value) = &self.error {
             visitor(
                 &QUIVER_ENGINE_STOP_DESCRIPTOR.attributes[1],
-                EventAttributeValueRef::Any(value),
+                EventAttributeValueRef::String(value.as_str()),
             );
         }
         if let Some(value) = &self.error_type {
@@ -507,13 +507,13 @@ impl EventAttributes for QuiverEngineStop {
         if let Some(value) = &self.force_dropped_bundles {
             visitor(
                 &QUIVER_ENGINE_STOP_DESCRIPTOR.attributes[3],
-                EventAttributeValueRef::Any(value),
+                EventAttributeValueRef::Int(*value),
             );
         }
         if let Some(value) = &self.force_dropped_segments {
             visitor(
                 &QUIVER_ENGINE_STOP_DESCRIPTOR.attributes[4],
-                EventAttributeValueRef::Any(value),
+                EventAttributeValueRef::Int(*value),
             );
         }
     }
@@ -557,13 +557,13 @@ impl QuiverEngineStop {
 #[derive(Debug, Clone)]
 pub struct QuiverEngineTick {
     /// The deleted value recorded by OTAP Dataflow internal telemetry.
-    pub deleted: otap_df_telemetry::attributes::AttributeValue,
+    pub deleted: i64,
     /// The expired value recorded by OTAP Dataflow internal telemetry.
-    pub expired: otap_df_telemetry::attributes::AttributeValue,
+    pub expired: i64,
     /// The flushed value recorded by OTAP Dataflow internal telemetry.
-    pub flushed: otap_df_telemetry::attributes::AttributeValue,
+    pub flushed: i64,
     /// The pending_deletes_cleared value recorded by OTAP Dataflow internal telemetry.
-    pub pending_deletes_cleared: otap_df_telemetry::attributes::AttributeValue,
+    pub pending_deletes_cleared: i64,
 }
 
 /// Marker implemented only by entity types allowed by `quiver.engine.tick`.
@@ -589,28 +589,28 @@ static QUIVER_ENGINE_TICK_DESCRIPTOR: EventDescriptor = EventDescriptor {
             key: "deleted",
             wire_key: "deleted",
             brief: "The deleted value recorded by OTAP Dataflow internal telemetry.",
-            value_type: otap_df_telemetry::descriptor::AttributeValueType::Any,
+            value_type: otap_df_telemetry::descriptor::AttributeValueType::Int,
             requirement_level: EventRequirementLevel::Required,
         },
         EventAttributeDescriptor {
             key: "expired",
             wire_key: "expired",
             brief: "The expired value recorded by OTAP Dataflow internal telemetry.",
-            value_type: otap_df_telemetry::descriptor::AttributeValueType::Any,
+            value_type: otap_df_telemetry::descriptor::AttributeValueType::Int,
             requirement_level: EventRequirementLevel::Required,
         },
         EventAttributeDescriptor {
             key: "flushed",
             wire_key: "flushed",
             brief: "The flushed value recorded by OTAP Dataflow internal telemetry.",
-            value_type: otap_df_telemetry::descriptor::AttributeValueType::Any,
+            value_type: otap_df_telemetry::descriptor::AttributeValueType::Int,
             requirement_level: EventRequirementLevel::Required,
         },
         EventAttributeDescriptor {
             key: "pending_deletes_cleared",
             wire_key: "pending_deletes_cleared",
             brief: "The pending_deletes_cleared value recorded by OTAP Dataflow internal telemetry.",
-            value_type: otap_df_telemetry::descriptor::AttributeValueType::Any,
+            value_type: otap_df_telemetry::descriptor::AttributeValueType::Int,
             requirement_level: EventRequirementLevel::Required,
         },
     ],
@@ -624,19 +624,19 @@ impl EventAttributes for QuiverEngineTick {
     ) {
         visitor(
             &QUIVER_ENGINE_TICK_DESCRIPTOR.attributes[0],
-            EventAttributeValueRef::Any(&self.deleted),
+            EventAttributeValueRef::Int(self.deleted),
         );
         visitor(
             &QUIVER_ENGINE_TICK_DESCRIPTOR.attributes[1],
-            EventAttributeValueRef::Any(&self.expired),
+            EventAttributeValueRef::Int(self.expired),
         );
         visitor(
             &QUIVER_ENGINE_TICK_DESCRIPTOR.attributes[2],
-            EventAttributeValueRef::Any(&self.flushed),
+            EventAttributeValueRef::Int(self.flushed),
         );
         visitor(
             &QUIVER_ENGINE_TICK_DESCRIPTOR.attributes[3],
-            EventAttributeValueRef::Any(&self.pending_deletes_cleared),
+            EventAttributeValueRef::Int(self.pending_deletes_cleared),
         );
     }
 }
@@ -663,11 +663,11 @@ impl QuiverEngineTick {
 #[derive(Debug, Clone)]
 pub struct QuiverSegmentCleanup {
     /// The error value recorded by OTAP Dataflow internal telemetry.
-    pub error: Option<otap_df_telemetry::attributes::AttributeValue>,
+    pub error: Option<String>,
     /// The path value recorded by OTAP Dataflow internal telemetry.
     pub path: Option<String>,
     /// The segment value recorded by OTAP Dataflow internal telemetry.
-    pub segment: otap_df_telemetry::attributes::AttributeValue,
+    pub segment: i64,
 }
 
 /// Marker implemented only by entity types allowed by `quiver.segment.cleanup`.
@@ -693,7 +693,7 @@ static QUIVER_SEGMENT_CLEANUP_DESCRIPTOR: EventDescriptor = EventDescriptor {
             key: "error",
             wire_key: "error",
             brief: "The error value recorded by OTAP Dataflow internal telemetry.",
-            value_type: otap_df_telemetry::descriptor::AttributeValueType::Any,
+            value_type: otap_df_telemetry::descriptor::AttributeValueType::String,
             requirement_level: EventRequirementLevel::Recommended,
         },
         EventAttributeDescriptor {
@@ -707,7 +707,7 @@ static QUIVER_SEGMENT_CLEANUP_DESCRIPTOR: EventDescriptor = EventDescriptor {
             key: "segment",
             wire_key: "segment",
             brief: "The segment value recorded by OTAP Dataflow internal telemetry.",
-            value_type: otap_df_telemetry::descriptor::AttributeValueType::Any,
+            value_type: otap_df_telemetry::descriptor::AttributeValueType::Int,
             requirement_level: EventRequirementLevel::Required,
         },
     ],
@@ -722,7 +722,7 @@ impl EventAttributes for QuiverSegmentCleanup {
         if let Some(value) = &self.error {
             visitor(
                 &QUIVER_SEGMENT_CLEANUP_DESCRIPTOR.attributes[0],
-                EventAttributeValueRef::Any(value),
+                EventAttributeValueRef::String(value.as_str()),
             );
         }
         if let Some(value) = &self.path {
@@ -733,7 +733,7 @@ impl EventAttributes for QuiverSegmentCleanup {
         }
         visitor(
             &QUIVER_SEGMENT_CLEANUP_DESCRIPTOR.attributes[2],
-            EventAttributeValueRef::Any(&self.segment),
+            EventAttributeValueRef::Int(self.segment),
         );
     }
 }
@@ -768,21 +768,21 @@ impl QuiverSegmentCleanup {
 #[derive(Debug, Clone)]
 pub struct QuiverSegmentDrop {
     /// The attempt value recorded by OTAP Dataflow internal telemetry.
-    pub attempt: Option<otap_df_telemetry::attributes::AttributeValue>,
+    pub attempt: Option<i64>,
     /// The attempts value recorded by OTAP Dataflow internal telemetry.
-    pub attempts: Option<otap_df_telemetry::attributes::AttributeValue>,
+    pub attempts: Option<i64>,
     /// The error value recorded by OTAP Dataflow internal telemetry.
-    pub error: Option<otap_df_telemetry::attributes::AttributeValue>,
+    pub error: Option<String>,
     /// The error_type value recorded by OTAP Dataflow internal telemetry.
     pub error_type: Option<String>,
     /// The max_age_secs value recorded by OTAP Dataflow internal telemetry.
-    pub max_age_secs: Option<otap_df_telemetry::attributes::AttributeValue>,
+    pub max_age_secs: Option<i64>,
     /// The phase value recorded by OTAP Dataflow internal telemetry.
-    pub phase: Option<otap_df_telemetry::attributes::AttributeValue>,
+    pub phase: Option<String>,
     /// The reason value recorded by OTAP Dataflow internal telemetry.
     pub reason: Option<String>,
     /// The segment value recorded by OTAP Dataflow internal telemetry.
-    pub segment: otap_df_telemetry::attributes::AttributeValue,
+    pub segment: i64,
 }
 
 /// Marker implemented only by entity types allowed by `quiver.segment.drop`.
@@ -816,21 +816,21 @@ static QUIVER_SEGMENT_DROP_DESCRIPTOR: EventDescriptor = EventDescriptor {
             key: "attempt",
             wire_key: "attempt",
             brief: "The attempt value recorded by OTAP Dataflow internal telemetry.",
-            value_type: otap_df_telemetry::descriptor::AttributeValueType::Any,
+            value_type: otap_df_telemetry::descriptor::AttributeValueType::Int,
             requirement_level: EventRequirementLevel::Recommended,
         },
         EventAttributeDescriptor {
             key: "attempts",
             wire_key: "attempts",
             brief: "The attempts value recorded by OTAP Dataflow internal telemetry.",
-            value_type: otap_df_telemetry::descriptor::AttributeValueType::Any,
+            value_type: otap_df_telemetry::descriptor::AttributeValueType::Int,
             requirement_level: EventRequirementLevel::Recommended,
         },
         EventAttributeDescriptor {
             key: "error",
             wire_key: "error",
             brief: "The error value recorded by OTAP Dataflow internal telemetry.",
-            value_type: otap_df_telemetry::descriptor::AttributeValueType::Any,
+            value_type: otap_df_telemetry::descriptor::AttributeValueType::String,
             requirement_level: EventRequirementLevel::Recommended,
         },
         EventAttributeDescriptor {
@@ -844,14 +844,14 @@ static QUIVER_SEGMENT_DROP_DESCRIPTOR: EventDescriptor = EventDescriptor {
             key: "max_age_secs",
             wire_key: "max_age_secs",
             brief: "The max_age_secs value recorded by OTAP Dataflow internal telemetry.",
-            value_type: otap_df_telemetry::descriptor::AttributeValueType::Any,
+            value_type: otap_df_telemetry::descriptor::AttributeValueType::Int,
             requirement_level: EventRequirementLevel::Recommended,
         },
         EventAttributeDescriptor {
             key: "phase",
             wire_key: "phase",
             brief: "The phase value recorded by OTAP Dataflow internal telemetry.",
-            value_type: otap_df_telemetry::descriptor::AttributeValueType::Any,
+            value_type: otap_df_telemetry::descriptor::AttributeValueType::String,
             requirement_level: EventRequirementLevel::Recommended,
         },
         EventAttributeDescriptor {
@@ -865,7 +865,7 @@ static QUIVER_SEGMENT_DROP_DESCRIPTOR: EventDescriptor = EventDescriptor {
             key: "segment",
             wire_key: "segment",
             brief: "The segment value recorded by OTAP Dataflow internal telemetry.",
-            value_type: otap_df_telemetry::descriptor::AttributeValueType::Any,
+            value_type: otap_df_telemetry::descriptor::AttributeValueType::Int,
             requirement_level: EventRequirementLevel::Required,
         },
     ],
@@ -880,19 +880,19 @@ impl EventAttributes for QuiverSegmentDrop {
         if let Some(value) = &self.attempt {
             visitor(
                 &QUIVER_SEGMENT_DROP_DESCRIPTOR.attributes[0],
-                EventAttributeValueRef::Any(value),
+                EventAttributeValueRef::Int(*value),
             );
         }
         if let Some(value) = &self.attempts {
             visitor(
                 &QUIVER_SEGMENT_DROP_DESCRIPTOR.attributes[1],
-                EventAttributeValueRef::Any(value),
+                EventAttributeValueRef::Int(*value),
             );
         }
         if let Some(value) = &self.error {
             visitor(
                 &QUIVER_SEGMENT_DROP_DESCRIPTOR.attributes[2],
-                EventAttributeValueRef::Any(value),
+                EventAttributeValueRef::String(value.as_str()),
             );
         }
         if let Some(value) = &self.error_type {
@@ -904,13 +904,13 @@ impl EventAttributes for QuiverSegmentDrop {
         if let Some(value) = &self.max_age_secs {
             visitor(
                 &QUIVER_SEGMENT_DROP_DESCRIPTOR.attributes[4],
-                EventAttributeValueRef::Any(value),
+                EventAttributeValueRef::Int(*value),
             );
         }
         if let Some(value) = &self.phase {
             visitor(
                 &QUIVER_SEGMENT_DROP_DESCRIPTOR.attributes[5],
-                EventAttributeValueRef::Any(value),
+                EventAttributeValueRef::String(value.as_str()),
             );
         }
         if let Some(value) = &self.reason {
@@ -921,7 +921,7 @@ impl EventAttributes for QuiverSegmentDrop {
         }
         visitor(
             &QUIVER_SEGMENT_DROP_DESCRIPTOR.attributes[7],
-            EventAttributeValueRef::Any(&self.segment),
+            EventAttributeValueRef::Int(self.segment),
         );
     }
 }
@@ -972,13 +972,13 @@ impl QuiverSegmentDrop {
 #[derive(Debug, Clone)]
 pub struct QuiverSegmentDropMetadataFailed {
     /// The error value recorded by OTAP Dataflow internal telemetry.
-    pub error: otap_df_telemetry::attributes::AttributeValue,
+    pub error: String,
     /// The error_type value recorded by OTAP Dataflow internal telemetry.
     pub error_type: String,
     /// The reason value recorded by OTAP Dataflow internal telemetry.
     pub reason: String,
     /// The segment value recorded by OTAP Dataflow internal telemetry.
-    pub segment: otap_df_telemetry::attributes::AttributeValue,
+    pub segment: i64,
 }
 
 /// Marker implemented only by entity types allowed by `quiver.segment.drop_metadata_failed`.
@@ -1004,7 +1004,7 @@ static QUIVER_SEGMENT_DROP_METADATA_FAILED_DESCRIPTOR: EventDescriptor = EventDe
             key: "error",
             wire_key: "error",
             brief: "The error value recorded by OTAP Dataflow internal telemetry.",
-            value_type: otap_df_telemetry::descriptor::AttributeValueType::Any,
+            value_type: otap_df_telemetry::descriptor::AttributeValueType::String,
             requirement_level: EventRequirementLevel::Required,
         },
         EventAttributeDescriptor {
@@ -1025,7 +1025,7 @@ static QUIVER_SEGMENT_DROP_METADATA_FAILED_DESCRIPTOR: EventDescriptor = EventDe
             key: "segment",
             wire_key: "segment",
             brief: "The segment value recorded by OTAP Dataflow internal telemetry.",
-            value_type: otap_df_telemetry::descriptor::AttributeValueType::Any,
+            value_type: otap_df_telemetry::descriptor::AttributeValueType::Int,
             requirement_level: EventRequirementLevel::Required,
         },
     ],
@@ -1039,7 +1039,7 @@ impl EventAttributes for QuiverSegmentDropMetadataFailed {
     ) {
         visitor(
             &QUIVER_SEGMENT_DROP_METADATA_FAILED_DESCRIPTOR.attributes[0],
-            EventAttributeValueRef::Any(&self.error),
+            EventAttributeValueRef::String(self.error.as_str()),
         );
         visitor(
             &QUIVER_SEGMENT_DROP_METADATA_FAILED_DESCRIPTOR.attributes[1],
@@ -1051,7 +1051,7 @@ impl EventAttributes for QuiverSegmentDropMetadataFailed {
         );
         visitor(
             &QUIVER_SEGMENT_DROP_METADATA_FAILED_DESCRIPTOR.attributes[3],
-            EventAttributeValueRef::Any(&self.segment),
+            EventAttributeValueRef::Int(self.segment),
         );
     }
 }
@@ -1079,15 +1079,15 @@ impl QuiverSegmentDropMetadataFailed {
 #[derive(Debug, Clone)]
 pub struct QuiverSegmentFlush {
     /// The bytes_written value recorded by OTAP Dataflow internal telemetry.
-    pub bytes_written: Option<otap_df_telemetry::attributes::AttributeValue>,
+    pub bytes_written: Option<i64>,
     /// The error value recorded by OTAP Dataflow internal telemetry.
-    pub error: Option<otap_df_telemetry::attributes::AttributeValue>,
+    pub error: Option<String>,
     /// The error_type value recorded by OTAP Dataflow internal telemetry.
     pub error_type: Option<String>,
     /// The path value recorded by OTAP Dataflow internal telemetry.
     pub path: Option<String>,
     /// The segment value recorded by OTAP Dataflow internal telemetry.
-    pub segment: otap_df_telemetry::attributes::AttributeValue,
+    pub segment: i64,
 }
 
 /// Marker implemented only by entity types allowed by `quiver.segment.flush`.
@@ -1113,14 +1113,14 @@ static QUIVER_SEGMENT_FLUSH_DESCRIPTOR: EventDescriptor = EventDescriptor {
             key: "bytes_written",
             wire_key: "bytes_written",
             brief: "The bytes_written value recorded by OTAP Dataflow internal telemetry.",
-            value_type: otap_df_telemetry::descriptor::AttributeValueType::Any,
+            value_type: otap_df_telemetry::descriptor::AttributeValueType::Int,
             requirement_level: EventRequirementLevel::Recommended,
         },
         EventAttributeDescriptor {
             key: "error",
             wire_key: "error",
             brief: "The error value recorded by OTAP Dataflow internal telemetry.",
-            value_type: otap_df_telemetry::descriptor::AttributeValueType::Any,
+            value_type: otap_df_telemetry::descriptor::AttributeValueType::String,
             requirement_level: EventRequirementLevel::Recommended,
         },
         EventAttributeDescriptor {
@@ -1141,7 +1141,7 @@ static QUIVER_SEGMENT_FLUSH_DESCRIPTOR: EventDescriptor = EventDescriptor {
             key: "segment",
             wire_key: "segment",
             brief: "The segment value recorded by OTAP Dataflow internal telemetry.",
-            value_type: otap_df_telemetry::descriptor::AttributeValueType::Any,
+            value_type: otap_df_telemetry::descriptor::AttributeValueType::Int,
             requirement_level: EventRequirementLevel::Required,
         },
     ],
@@ -1156,13 +1156,13 @@ impl EventAttributes for QuiverSegmentFlush {
         if let Some(value) = &self.bytes_written {
             visitor(
                 &QUIVER_SEGMENT_FLUSH_DESCRIPTOR.attributes[0],
-                EventAttributeValueRef::Any(value),
+                EventAttributeValueRef::Int(*value),
             );
         }
         if let Some(value) = &self.error {
             visitor(
                 &QUIVER_SEGMENT_FLUSH_DESCRIPTOR.attributes[1],
-                EventAttributeValueRef::Any(value),
+                EventAttributeValueRef::String(value.as_str()),
             );
         }
         if let Some(value) = &self.error_type {
@@ -1179,7 +1179,7 @@ impl EventAttributes for QuiverSegmentFlush {
         }
         visitor(
             &QUIVER_SEGMENT_FLUSH_DESCRIPTOR.attributes[4],
-            EventAttributeValueRef::Any(&self.segment),
+            EventAttributeValueRef::Int(self.segment),
         );
     }
 }
@@ -1214,19 +1214,19 @@ impl QuiverSegmentFlush {
 #[derive(Debug, Clone)]
 pub struct QuiverSegmentScan {
     /// The deleted_count value recorded by OTAP Dataflow internal telemetry.
-    pub deleted_count: Option<otap_df_telemetry::attributes::AttributeValue>,
+    pub deleted_count: Option<i64>,
     /// The error value recorded by OTAP Dataflow internal telemetry.
-    pub error: Option<otap_df_telemetry::attributes::AttributeValue>,
+    pub error: Option<String>,
     /// The error_type value recorded by OTAP Dataflow internal telemetry.
     pub error_type: Option<String>,
     /// The next_segment_seq value recorded by OTAP Dataflow internal telemetry.
-    pub next_segment_seq: Option<otap_df_telemetry::attributes::AttributeValue>,
+    pub next_segment_seq: Option<i64>,
     /// The path value recorded by OTAP Dataflow internal telemetry.
     pub path: Option<String>,
     /// The segment value recorded by OTAP Dataflow internal telemetry.
-    pub segment: Option<otap_df_telemetry::attributes::AttributeValue>,
+    pub segment: Option<i64>,
     /// The segment_count value recorded by OTAP Dataflow internal telemetry.
-    pub segment_count: Option<otap_df_telemetry::attributes::AttributeValue>,
+    pub segment_count: Option<i64>,
 }
 
 /// Marker implemented only by entity types allowed by `quiver.segment.scan`.
@@ -1260,14 +1260,14 @@ static QUIVER_SEGMENT_SCAN_DESCRIPTOR: EventDescriptor = EventDescriptor {
             key: "deleted_count",
             wire_key: "deleted_count",
             brief: "The deleted_count value recorded by OTAP Dataflow internal telemetry.",
-            value_type: otap_df_telemetry::descriptor::AttributeValueType::Any,
+            value_type: otap_df_telemetry::descriptor::AttributeValueType::Int,
             requirement_level: EventRequirementLevel::Recommended,
         },
         EventAttributeDescriptor {
             key: "error",
             wire_key: "error",
             brief: "The error value recorded by OTAP Dataflow internal telemetry.",
-            value_type: otap_df_telemetry::descriptor::AttributeValueType::Any,
+            value_type: otap_df_telemetry::descriptor::AttributeValueType::String,
             requirement_level: EventRequirementLevel::Recommended,
         },
         EventAttributeDescriptor {
@@ -1281,7 +1281,7 @@ static QUIVER_SEGMENT_SCAN_DESCRIPTOR: EventDescriptor = EventDescriptor {
             key: "next_segment_seq",
             wire_key: "next_segment_seq",
             brief: "The next_segment_seq value recorded by OTAP Dataflow internal telemetry.",
-            value_type: otap_df_telemetry::descriptor::AttributeValueType::Any,
+            value_type: otap_df_telemetry::descriptor::AttributeValueType::Int,
             requirement_level: EventRequirementLevel::Recommended,
         },
         EventAttributeDescriptor {
@@ -1295,14 +1295,14 @@ static QUIVER_SEGMENT_SCAN_DESCRIPTOR: EventDescriptor = EventDescriptor {
             key: "segment",
             wire_key: "segment",
             brief: "The segment value recorded by OTAP Dataflow internal telemetry.",
-            value_type: otap_df_telemetry::descriptor::AttributeValueType::Any,
+            value_type: otap_df_telemetry::descriptor::AttributeValueType::Int,
             requirement_level: EventRequirementLevel::Recommended,
         },
         EventAttributeDescriptor {
             key: "segment_count",
             wire_key: "segment_count",
             brief: "The segment_count value recorded by OTAP Dataflow internal telemetry.",
-            value_type: otap_df_telemetry::descriptor::AttributeValueType::Any,
+            value_type: otap_df_telemetry::descriptor::AttributeValueType::Int,
             requirement_level: EventRequirementLevel::Recommended,
         },
     ],
@@ -1317,13 +1317,13 @@ impl EventAttributes for QuiverSegmentScan {
         if let Some(value) = &self.deleted_count {
             visitor(
                 &QUIVER_SEGMENT_SCAN_DESCRIPTOR.attributes[0],
-                EventAttributeValueRef::Any(value),
+                EventAttributeValueRef::Int(*value),
             );
         }
         if let Some(value) = &self.error {
             visitor(
                 &QUIVER_SEGMENT_SCAN_DESCRIPTOR.attributes[1],
-                EventAttributeValueRef::Any(value),
+                EventAttributeValueRef::String(value.as_str()),
             );
         }
         if let Some(value) = &self.error_type {
@@ -1335,7 +1335,7 @@ impl EventAttributes for QuiverSegmentScan {
         if let Some(value) = &self.next_segment_seq {
             visitor(
                 &QUIVER_SEGMENT_SCAN_DESCRIPTOR.attributes[3],
-                EventAttributeValueRef::Any(value),
+                EventAttributeValueRef::Int(*value),
             );
         }
         if let Some(value) = &self.path {
@@ -1347,13 +1347,13 @@ impl EventAttributes for QuiverSegmentScan {
         if let Some(value) = &self.segment {
             visitor(
                 &QUIVER_SEGMENT_SCAN_DESCRIPTOR.attributes[5],
-                EventAttributeValueRef::Any(value),
+                EventAttributeValueRef::Int(*value),
             );
         }
         if let Some(value) = &self.segment_count {
             visitor(
                 &QUIVER_SEGMENT_SCAN_DESCRIPTOR.attributes[6],
-                EventAttributeValueRef::Any(value),
+                EventAttributeValueRef::Int(*value),
             );
         }
     }
@@ -1535,7 +1535,7 @@ impl QuiverSubscriberDeactivate {
 #[derive(Debug, Clone)]
 pub struct QuiverSubscriberProgressFlush {
     /// The error value recorded by OTAP Dataflow internal telemetry.
-    pub error: otap_df_telemetry::attributes::AttributeValue,
+    pub error: String,
     /// The error_type value recorded by OTAP Dataflow internal telemetry.
     pub error_type: String,
     /// The subscriber_id value recorded by OTAP Dataflow internal telemetry.
@@ -1565,7 +1565,7 @@ static QUIVER_SUBSCRIBER_PROGRESS_FLUSH_DESCRIPTOR: EventDescriptor = EventDescr
             key: "error",
             wire_key: "error",
             brief: "The error value recorded by OTAP Dataflow internal telemetry.",
-            value_type: otap_df_telemetry::descriptor::AttributeValueType::Any,
+            value_type: otap_df_telemetry::descriptor::AttributeValueType::String,
             requirement_level: EventRequirementLevel::Required,
         },
         EventAttributeDescriptor {
@@ -1593,7 +1593,7 @@ impl EventAttributes for QuiverSubscriberProgressFlush {
     ) {
         visitor(
             &QUIVER_SUBSCRIBER_PROGRESS_FLUSH_DESCRIPTOR.attributes[0],
-            EventAttributeValueRef::Any(&self.error),
+            EventAttributeValueRef::String(self.error.as_str()),
         );
         visitor(
             &QUIVER_SUBSCRIBER_PROGRESS_FLUSH_DESCRIPTOR.attributes[1],
@@ -1628,7 +1628,7 @@ impl QuiverSubscriberProgressFlush {
 #[derive(Debug, Clone)]
 pub struct QuiverSubscriberProgressLoad {
     /// The error value recorded by OTAP Dataflow internal telemetry.
-    pub error: otap_df_telemetry::attributes::AttributeValue,
+    pub error: String,
     /// The error_type value recorded by OTAP Dataflow internal telemetry.
     pub error_type: String,
     /// The subscriber_id value recorded by OTAP Dataflow internal telemetry.
@@ -1658,7 +1658,7 @@ static QUIVER_SUBSCRIBER_PROGRESS_LOAD_DESCRIPTOR: EventDescriptor = EventDescri
             key: "error",
             wire_key: "error",
             brief: "The error value recorded by OTAP Dataflow internal telemetry.",
-            value_type: otap_df_telemetry::descriptor::AttributeValueType::Any,
+            value_type: otap_df_telemetry::descriptor::AttributeValueType::String,
             requirement_level: EventRequirementLevel::Required,
         },
         EventAttributeDescriptor {
@@ -1686,7 +1686,7 @@ impl EventAttributes for QuiverSubscriberProgressLoad {
     ) {
         visitor(
             &QUIVER_SUBSCRIBER_PROGRESS_LOAD_DESCRIPTOR.attributes[0],
-            EventAttributeValueRef::Any(&self.error),
+            EventAttributeValueRef::String(self.error.as_str()),
         );
         visitor(
             &QUIVER_SUBSCRIBER_PROGRESS_LOAD_DESCRIPTOR.attributes[1],
@@ -1721,7 +1721,7 @@ impl QuiverSubscriberProgressLoad {
 #[derive(Debug, Clone)]
 pub struct QuiverSubscriberProgressScan {
     /// The error value recorded by OTAP Dataflow internal telemetry.
-    pub error: otap_df_telemetry::attributes::AttributeValue,
+    pub error: String,
     /// The error_type value recorded by OTAP Dataflow internal telemetry.
     pub error_type: String,
     /// The file value recorded by OTAP Dataflow internal telemetry.
@@ -1751,7 +1751,7 @@ static QUIVER_SUBSCRIBER_PROGRESS_SCAN_DESCRIPTOR: EventDescriptor = EventDescri
             key: "error",
             wire_key: "error",
             brief: "The error value recorded by OTAP Dataflow internal telemetry.",
-            value_type: otap_df_telemetry::descriptor::AttributeValueType::Any,
+            value_type: otap_df_telemetry::descriptor::AttributeValueType::String,
             requirement_level: EventRequirementLevel::Required,
         },
         EventAttributeDescriptor {
@@ -1779,7 +1779,7 @@ impl EventAttributes for QuiverSubscriberProgressScan {
     ) {
         visitor(
             &QUIVER_SUBSCRIBER_PROGRESS_SCAN_DESCRIPTOR.attributes[0],
-            EventAttributeValueRef::Any(&self.error),
+            EventAttributeValueRef::String(self.error.as_str()),
         );
         visitor(
             &QUIVER_SUBSCRIBER_PROGRESS_SCAN_DESCRIPTOR.attributes[1],
@@ -1944,23 +1944,23 @@ impl QuiverSubscriberUnregister {
 #[derive(Debug, Clone)]
 pub struct QuiverWalBackpressure {
     /// The aggregate_bytes value recorded by OTAP Dataflow internal telemetry.
-    pub aggregate_bytes: Option<otap_df_telemetry::attributes::AttributeValue>,
+    pub aggregate_bytes: Option<i64>,
     /// The entry_count value recorded by OTAP Dataflow internal telemetry.
-    pub entry_count: Option<otap_df_telemetry::attributes::AttributeValue>,
+    pub entry_count: Option<i64>,
     /// The max_rotated_files value recorded by OTAP Dataflow internal telemetry.
-    pub max_rotated_files: Option<otap_df_telemetry::attributes::AttributeValue>,
+    pub max_rotated_files: Option<i64>,
     /// The max_wal_size value recorded by OTAP Dataflow internal telemetry.
-    pub max_wal_size: Option<otap_df_telemetry::attributes::AttributeValue>,
+    pub max_wal_size: Option<i64>,
     /// The phase value recorded by OTAP Dataflow internal telemetry.
-    pub phase: Option<otap_df_telemetry::attributes::AttributeValue>,
+    pub phase: Option<String>,
     /// The projected_bytes value recorded by OTAP Dataflow internal telemetry.
-    pub projected_bytes: Option<otap_df_telemetry::attributes::AttributeValue>,
+    pub projected_bytes: Option<i64>,
     /// The reason value recorded by OTAP Dataflow internal telemetry.
     pub reason: Option<String>,
     /// The rotated_file_count value recorded by OTAP Dataflow internal telemetry.
-    pub rotated_file_count: Option<otap_df_telemetry::attributes::AttributeValue>,
+    pub rotated_file_count: Option<i64>,
     /// The rotation_target_bytes value recorded by OTAP Dataflow internal telemetry.
-    pub rotation_target_bytes: Option<otap_df_telemetry::attributes::AttributeValue>,
+    pub rotation_target_bytes: Option<i64>,
 }
 
 /// Marker implemented only by entity types allowed by `quiver.wal.backpressure`.
@@ -1989,42 +1989,42 @@ static QUIVER_WAL_BACKPRESSURE_DESCRIPTOR: EventDescriptor = EventDescriptor {
             key: "aggregate_bytes",
             wire_key: "aggregate_bytes",
             brief: "The aggregate_bytes value recorded by OTAP Dataflow internal telemetry.",
-            value_type: otap_df_telemetry::descriptor::AttributeValueType::Any,
+            value_type: otap_df_telemetry::descriptor::AttributeValueType::Int,
             requirement_level: EventRequirementLevel::Recommended,
         },
         EventAttributeDescriptor {
             key: "entry_count",
             wire_key: "entry_count",
             brief: "The entry_count value recorded by OTAP Dataflow internal telemetry.",
-            value_type: otap_df_telemetry::descriptor::AttributeValueType::Any,
+            value_type: otap_df_telemetry::descriptor::AttributeValueType::Int,
             requirement_level: EventRequirementLevel::Recommended,
         },
         EventAttributeDescriptor {
             key: "max_rotated_files",
             wire_key: "max_rotated_files",
             brief: "The max_rotated_files value recorded by OTAP Dataflow internal telemetry.",
-            value_type: otap_df_telemetry::descriptor::AttributeValueType::Any,
+            value_type: otap_df_telemetry::descriptor::AttributeValueType::Int,
             requirement_level: EventRequirementLevel::Recommended,
         },
         EventAttributeDescriptor {
             key: "max_wal_size",
             wire_key: "max_wal_size",
             brief: "The max_wal_size value recorded by OTAP Dataflow internal telemetry.",
-            value_type: otap_df_telemetry::descriptor::AttributeValueType::Any,
+            value_type: otap_df_telemetry::descriptor::AttributeValueType::Int,
             requirement_level: EventRequirementLevel::Recommended,
         },
         EventAttributeDescriptor {
             key: "phase",
             wire_key: "phase",
             brief: "The phase value recorded by OTAP Dataflow internal telemetry.",
-            value_type: otap_df_telemetry::descriptor::AttributeValueType::Any,
+            value_type: otap_df_telemetry::descriptor::AttributeValueType::String,
             requirement_level: EventRequirementLevel::Recommended,
         },
         EventAttributeDescriptor {
             key: "projected_bytes",
             wire_key: "projected_bytes",
             brief: "The projected_bytes value recorded by OTAP Dataflow internal telemetry.",
-            value_type: otap_df_telemetry::descriptor::AttributeValueType::Any,
+            value_type: otap_df_telemetry::descriptor::AttributeValueType::Int,
             requirement_level: EventRequirementLevel::Recommended,
         },
         EventAttributeDescriptor {
@@ -2038,14 +2038,14 @@ static QUIVER_WAL_BACKPRESSURE_DESCRIPTOR: EventDescriptor = EventDescriptor {
             key: "rotated_file_count",
             wire_key: "rotated_file_count",
             brief: "The rotated_file_count value recorded by OTAP Dataflow internal telemetry.",
-            value_type: otap_df_telemetry::descriptor::AttributeValueType::Any,
+            value_type: otap_df_telemetry::descriptor::AttributeValueType::Int,
             requirement_level: EventRequirementLevel::Recommended,
         },
         EventAttributeDescriptor {
             key: "rotation_target_bytes",
             wire_key: "rotation_target_bytes",
             brief: "The rotation_target_bytes value recorded by OTAP Dataflow internal telemetry.",
-            value_type: otap_df_telemetry::descriptor::AttributeValueType::Any,
+            value_type: otap_df_telemetry::descriptor::AttributeValueType::Int,
             requirement_level: EventRequirementLevel::Recommended,
         },
     ],
@@ -2060,37 +2060,37 @@ impl EventAttributes for QuiverWalBackpressure {
         if let Some(value) = &self.aggregate_bytes {
             visitor(
                 &QUIVER_WAL_BACKPRESSURE_DESCRIPTOR.attributes[0],
-                EventAttributeValueRef::Any(value),
+                EventAttributeValueRef::Int(*value),
             );
         }
         if let Some(value) = &self.entry_count {
             visitor(
                 &QUIVER_WAL_BACKPRESSURE_DESCRIPTOR.attributes[1],
-                EventAttributeValueRef::Any(value),
+                EventAttributeValueRef::Int(*value),
             );
         }
         if let Some(value) = &self.max_rotated_files {
             visitor(
                 &QUIVER_WAL_BACKPRESSURE_DESCRIPTOR.attributes[2],
-                EventAttributeValueRef::Any(value),
+                EventAttributeValueRef::Int(*value),
             );
         }
         if let Some(value) = &self.max_wal_size {
             visitor(
                 &QUIVER_WAL_BACKPRESSURE_DESCRIPTOR.attributes[3],
-                EventAttributeValueRef::Any(value),
+                EventAttributeValueRef::Int(*value),
             );
         }
         if let Some(value) = &self.phase {
             visitor(
                 &QUIVER_WAL_BACKPRESSURE_DESCRIPTOR.attributes[4],
-                EventAttributeValueRef::Any(value),
+                EventAttributeValueRef::String(value.as_str()),
             );
         }
         if let Some(value) = &self.projected_bytes {
             visitor(
                 &QUIVER_WAL_BACKPRESSURE_DESCRIPTOR.attributes[5],
-                EventAttributeValueRef::Any(value),
+                EventAttributeValueRef::Int(*value),
             );
         }
         if let Some(value) = &self.reason {
@@ -2102,13 +2102,13 @@ impl EventAttributes for QuiverWalBackpressure {
         if let Some(value) = &self.rotated_file_count {
             visitor(
                 &QUIVER_WAL_BACKPRESSURE_DESCRIPTOR.attributes[7],
-                EventAttributeValueRef::Any(value),
+                EventAttributeValueRef::Int(*value),
             );
         }
         if let Some(value) = &self.rotation_target_bytes {
             visitor(
                 &QUIVER_WAL_BACKPRESSURE_DESCRIPTOR.attributes[8],
-                EventAttributeValueRef::Any(value),
+                EventAttributeValueRef::Int(*value),
             );
         }
     }
@@ -2136,15 +2136,15 @@ impl QuiverWalBackpressure {
 #[derive(Debug, Clone)]
 pub struct QuiverWalCursorLoad {
     /// The cursor_position value recorded by OTAP Dataflow internal telemetry.
-    pub cursor_position: Option<otap_df_telemetry::attributes::AttributeValue>,
+    pub cursor_position: Option<i64>,
     /// The error value recorded by OTAP Dataflow internal telemetry.
-    pub error: Option<otap_df_telemetry::attributes::AttributeValue>,
+    pub error: Option<String>,
     /// The error_type value recorded by OTAP Dataflow internal telemetry.
     pub error_type: Option<String>,
     /// The reason value recorded by OTAP Dataflow internal telemetry.
     pub reason: String,
     /// The wal_end value recorded by OTAP Dataflow internal telemetry.
-    pub wal_end: Option<otap_df_telemetry::attributes::AttributeValue>,
+    pub wal_end: Option<i64>,
 }
 
 /// Marker implemented only by entity types allowed by `quiver.wal.cursor.load`.
@@ -2170,14 +2170,14 @@ static QUIVER_WAL_CURSOR_LOAD_DESCRIPTOR: EventDescriptor = EventDescriptor {
             key: "cursor_position",
             wire_key: "cursor_position",
             brief: "The cursor_position value recorded by OTAP Dataflow internal telemetry.",
-            value_type: otap_df_telemetry::descriptor::AttributeValueType::Any,
+            value_type: otap_df_telemetry::descriptor::AttributeValueType::Int,
             requirement_level: EventRequirementLevel::Recommended,
         },
         EventAttributeDescriptor {
             key: "error",
             wire_key: "error",
             brief: "The error value recorded by OTAP Dataflow internal telemetry.",
-            value_type: otap_df_telemetry::descriptor::AttributeValueType::Any,
+            value_type: otap_df_telemetry::descriptor::AttributeValueType::String,
             requirement_level: EventRequirementLevel::Recommended,
         },
         EventAttributeDescriptor {
@@ -2198,7 +2198,7 @@ static QUIVER_WAL_CURSOR_LOAD_DESCRIPTOR: EventDescriptor = EventDescriptor {
             key: "wal_end",
             wire_key: "wal_end",
             brief: "The wal_end value recorded by OTAP Dataflow internal telemetry.",
-            value_type: otap_df_telemetry::descriptor::AttributeValueType::Any,
+            value_type: otap_df_telemetry::descriptor::AttributeValueType::Int,
             requirement_level: EventRequirementLevel::Recommended,
         },
     ],
@@ -2213,13 +2213,13 @@ impl EventAttributes for QuiverWalCursorLoad {
         if let Some(value) = &self.cursor_position {
             visitor(
                 &QUIVER_WAL_CURSOR_LOAD_DESCRIPTOR.attributes[0],
-                EventAttributeValueRef::Any(value),
+                EventAttributeValueRef::Int(*value),
             );
         }
         if let Some(value) = &self.error {
             visitor(
                 &QUIVER_WAL_CURSOR_LOAD_DESCRIPTOR.attributes[1],
-                EventAttributeValueRef::Any(value),
+                EventAttributeValueRef::String(value.as_str()),
             );
         }
         if let Some(value) = &self.error_type {
@@ -2235,7 +2235,7 @@ impl EventAttributes for QuiverWalCursorLoad {
         if let Some(value) = &self.wal_end {
             visitor(
                 &QUIVER_WAL_CURSOR_LOAD_DESCRIPTOR.attributes[4],
-                EventAttributeValueRef::Any(value),
+                EventAttributeValueRef::Int(*value),
             );
         }
     }
@@ -2263,11 +2263,11 @@ impl QuiverWalCursorLoad {
 #[derive(Debug, Clone)]
 pub struct QuiverWalDrop {
     /// The aggregate_bytes value recorded by OTAP Dataflow internal telemetry.
-    pub aggregate_bytes: otap_df_telemetry::attributes::AttributeValue,
+    pub aggregate_bytes: i64,
     /// The purged_bytes value recorded by OTAP Dataflow internal telemetry.
-    pub purged_bytes: otap_df_telemetry::attributes::AttributeValue,
+    pub purged_bytes: i64,
     /// The remaining_rotated_files value recorded by OTAP Dataflow internal telemetry.
-    pub remaining_rotated_files: otap_df_telemetry::attributes::AttributeValue,
+    pub remaining_rotated_files: i64,
 }
 
 /// Marker implemented only by entity types allowed by `quiver.wal.drop`.
@@ -2293,21 +2293,21 @@ static QUIVER_WAL_DROP_DESCRIPTOR: EventDescriptor = EventDescriptor {
             key: "aggregate_bytes",
             wire_key: "aggregate_bytes",
             brief: "The aggregate_bytes value recorded by OTAP Dataflow internal telemetry.",
-            value_type: otap_df_telemetry::descriptor::AttributeValueType::Any,
+            value_type: otap_df_telemetry::descriptor::AttributeValueType::Int,
             requirement_level: EventRequirementLevel::Required,
         },
         EventAttributeDescriptor {
             key: "purged_bytes",
             wire_key: "purged_bytes",
             brief: "The purged_bytes value recorded by OTAP Dataflow internal telemetry.",
-            value_type: otap_df_telemetry::descriptor::AttributeValueType::Any,
+            value_type: otap_df_telemetry::descriptor::AttributeValueType::Int,
             requirement_level: EventRequirementLevel::Required,
         },
         EventAttributeDescriptor {
             key: "remaining_rotated_files",
             wire_key: "remaining_rotated_files",
             brief: "The remaining_rotated_files value recorded by OTAP Dataflow internal telemetry.",
-            value_type: otap_df_telemetry::descriptor::AttributeValueType::Any,
+            value_type: otap_df_telemetry::descriptor::AttributeValueType::Int,
             requirement_level: EventRequirementLevel::Required,
         },
     ],
@@ -2321,15 +2321,15 @@ impl EventAttributes for QuiverWalDrop {
     ) {
         visitor(
             &QUIVER_WAL_DROP_DESCRIPTOR.attributes[0],
-            EventAttributeValueRef::Any(&self.aggregate_bytes),
+            EventAttributeValueRef::Int(self.aggregate_bytes),
         );
         visitor(
             &QUIVER_WAL_DROP_DESCRIPTOR.attributes[1],
-            EventAttributeValueRef::Any(&self.purged_bytes),
+            EventAttributeValueRef::Int(self.purged_bytes),
         );
         visitor(
             &QUIVER_WAL_DROP_DESCRIPTOR.attributes[2],
-            EventAttributeValueRef::Any(&self.remaining_rotated_files),
+            EventAttributeValueRef::Int(self.remaining_rotated_files),
         );
     }
 }
@@ -2356,7 +2356,7 @@ impl QuiverWalDrop {
 #[derive(Debug, Clone)]
 pub struct QuiverWalDropFlush {
     /// The error value recorded by OTAP Dataflow internal telemetry.
-    pub error: Option<otap_df_telemetry::attributes::AttributeValue>,
+    pub error: Option<String>,
     /// The error_type value recorded by OTAP Dataflow internal telemetry.
     pub error_type: Option<String>,
     /// The reason value recorded by OTAP Dataflow internal telemetry.
@@ -2386,7 +2386,7 @@ static QUIVER_WAL_DROP_FLUSH_DESCRIPTOR: EventDescriptor = EventDescriptor {
             key: "error",
             wire_key: "error",
             brief: "The error value recorded by OTAP Dataflow internal telemetry.",
-            value_type: otap_df_telemetry::descriptor::AttributeValueType::Any,
+            value_type: otap_df_telemetry::descriptor::AttributeValueType::String,
             requirement_level: EventRequirementLevel::Recommended,
         },
         EventAttributeDescriptor {
@@ -2415,7 +2415,7 @@ impl EventAttributes for QuiverWalDropFlush {
         if let Some(value) = &self.error {
             visitor(
                 &QUIVER_WAL_DROP_FLUSH_DESCRIPTOR.attributes[0],
-                EventAttributeValueRef::Any(value),
+                EventAttributeValueRef::String(value.as_str()),
             );
         }
         if let Some(value) = &self.error_type {
@@ -2453,17 +2453,17 @@ impl QuiverWalDropFlush {
 #[derive(Debug, Clone)]
 pub struct QuiverWalEntryDecode {
     /// The payload_len value recorded by OTAP Dataflow internal telemetry.
-    pub payload_len: Option<otap_df_telemetry::attributes::AttributeValue>,
+    pub payload_len: Option<i64>,
     /// The scope value recorded by OTAP Dataflow internal telemetry.
     pub scope: String,
     /// The sequence value recorded by OTAP Dataflow internal telemetry.
-    pub sequence: otap_df_telemetry::attributes::AttributeValue,
+    pub sequence: i64,
     /// The slot_count value recorded by OTAP Dataflow internal telemetry.
-    pub slot_count: Option<otap_df_telemetry::attributes::AttributeValue>,
+    pub slot_count: Option<i64>,
     /// The slot_id value recorded by OTAP Dataflow internal telemetry.
-    pub slot_id: Option<otap_df_telemetry::attributes::AttributeValue>,
+    pub slot_id: Option<i64>,
     /// The timestamp_nanos value recorded by OTAP Dataflow internal telemetry.
-    pub timestamp_nanos: Option<otap_df_telemetry::attributes::AttributeValue>,
+    pub timestamp_nanos: Option<i64>,
 }
 
 /// Marker implemented only by entity types allowed by `quiver.wal.entry.decode`.
@@ -2492,7 +2492,7 @@ static QUIVER_WAL_ENTRY_DECODE_DESCRIPTOR: EventDescriptor = EventDescriptor {
             key: "payload_len",
             wire_key: "payload_len",
             brief: "The payload_len value recorded by OTAP Dataflow internal telemetry.",
-            value_type: otap_df_telemetry::descriptor::AttributeValueType::Any,
+            value_type: otap_df_telemetry::descriptor::AttributeValueType::Int,
             requirement_level: EventRequirementLevel::Recommended,
         },
         EventAttributeDescriptor {
@@ -2506,28 +2506,28 @@ static QUIVER_WAL_ENTRY_DECODE_DESCRIPTOR: EventDescriptor = EventDescriptor {
             key: "sequence",
             wire_key: "sequence",
             brief: "The sequence value recorded by OTAP Dataflow internal telemetry.",
-            value_type: otap_df_telemetry::descriptor::AttributeValueType::Any,
+            value_type: otap_df_telemetry::descriptor::AttributeValueType::Int,
             requirement_level: EventRequirementLevel::Required,
         },
         EventAttributeDescriptor {
             key: "slot_count",
             wire_key: "slot_count",
             brief: "The slot_count value recorded by OTAP Dataflow internal telemetry.",
-            value_type: otap_df_telemetry::descriptor::AttributeValueType::Any,
+            value_type: otap_df_telemetry::descriptor::AttributeValueType::Int,
             requirement_level: EventRequirementLevel::Recommended,
         },
         EventAttributeDescriptor {
             key: "slot_id",
             wire_key: "slot_id",
             brief: "The slot_id value recorded by OTAP Dataflow internal telemetry.",
-            value_type: otap_df_telemetry::descriptor::AttributeValueType::Any,
+            value_type: otap_df_telemetry::descriptor::AttributeValueType::Int,
             requirement_level: EventRequirementLevel::Recommended,
         },
         EventAttributeDescriptor {
             key: "timestamp_nanos",
             wire_key: "timestamp_nanos",
             brief: "The timestamp_nanos value recorded by OTAP Dataflow internal telemetry.",
-            value_type: otap_df_telemetry::descriptor::AttributeValueType::Any,
+            value_type: otap_df_telemetry::descriptor::AttributeValueType::Int,
             requirement_level: EventRequirementLevel::Recommended,
         },
     ],
@@ -2542,7 +2542,7 @@ impl EventAttributes for QuiverWalEntryDecode {
         if let Some(value) = &self.payload_len {
             visitor(
                 &QUIVER_WAL_ENTRY_DECODE_DESCRIPTOR.attributes[0],
-                EventAttributeValueRef::Any(value),
+                EventAttributeValueRef::Int(*value),
             );
         }
         visitor(
@@ -2551,24 +2551,24 @@ impl EventAttributes for QuiverWalEntryDecode {
         );
         visitor(
             &QUIVER_WAL_ENTRY_DECODE_DESCRIPTOR.attributes[2],
-            EventAttributeValueRef::Any(&self.sequence),
+            EventAttributeValueRef::Int(self.sequence),
         );
         if let Some(value) = &self.slot_count {
             visitor(
                 &QUIVER_WAL_ENTRY_DECODE_DESCRIPTOR.attributes[3],
-                EventAttributeValueRef::Any(value),
+                EventAttributeValueRef::Int(*value),
             );
         }
         if let Some(value) = &self.slot_id {
             visitor(
                 &QUIVER_WAL_ENTRY_DECODE_DESCRIPTOR.attributes[4],
-                EventAttributeValueRef::Any(value),
+                EventAttributeValueRef::Int(*value),
             );
         }
         if let Some(value) = &self.timestamp_nanos {
             visitor(
                 &QUIVER_WAL_ENTRY_DECODE_DESCRIPTOR.attributes[5],
-                EventAttributeValueRef::Any(value),
+                EventAttributeValueRef::Int(*value),
             );
         }
     }
@@ -2606,9 +2606,9 @@ pub struct QuiverWalExpiryAccounting {
     /// The reason value recorded by OTAP Dataflow internal telemetry.
     pub reason: String,
     /// The sequence value recorded by OTAP Dataflow internal telemetry.
-    pub sequence: otap_df_telemetry::attributes::AttributeValue,
+    pub sequence: i64,
     /// The slot_count value recorded by OTAP Dataflow internal telemetry.
-    pub slot_count: otap_df_telemetry::attributes::AttributeValue,
+    pub slot_count: i64,
 }
 
 /// Marker implemented only by entity types allowed by `quiver.wal.expiry.accounting`.
@@ -2641,14 +2641,14 @@ static QUIVER_WAL_EXPIRY_ACCOUNTING_DESCRIPTOR: EventDescriptor = EventDescripto
             key: "sequence",
             wire_key: "sequence",
             brief: "The sequence value recorded by OTAP Dataflow internal telemetry.",
-            value_type: otap_df_telemetry::descriptor::AttributeValueType::Any,
+            value_type: otap_df_telemetry::descriptor::AttributeValueType::Int,
             requirement_level: EventRequirementLevel::Required,
         },
         EventAttributeDescriptor {
             key: "slot_count",
             wire_key: "slot_count",
             brief: "The slot_count value recorded by OTAP Dataflow internal telemetry.",
-            value_type: otap_df_telemetry::descriptor::AttributeValueType::Any,
+            value_type: otap_df_telemetry::descriptor::AttributeValueType::Int,
             requirement_level: EventRequirementLevel::Required,
         },
     ],
@@ -2666,11 +2666,11 @@ impl EventAttributes for QuiverWalExpiryAccounting {
         );
         visitor(
             &QUIVER_WAL_EXPIRY_ACCOUNTING_DESCRIPTOR.attributes[1],
-            EventAttributeValueRef::Any(&self.sequence),
+            EventAttributeValueRef::Int(self.sequence),
         );
         visitor(
             &QUIVER_WAL_EXPIRY_ACCOUNTING_DESCRIPTOR.attributes[2],
-            EventAttributeValueRef::Any(&self.slot_count),
+            EventAttributeValueRef::Int(self.slot_count),
         );
     }
 }
@@ -2697,7 +2697,7 @@ impl QuiverWalExpiryAccounting {
 #[derive(Debug, Clone)]
 pub struct QuiverWalFileInit {
     /// The error value recorded by OTAP Dataflow internal telemetry.
-    pub error: otap_df_telemetry::attributes::AttributeValue,
+    pub error: String,
     /// The error_type value recorded by OTAP Dataflow internal telemetry.
     pub error_type: String,
     /// The file_type value recorded by OTAP Dataflow internal telemetry.
@@ -2705,7 +2705,7 @@ pub struct QuiverWalFileInit {
     /// The path value recorded by OTAP Dataflow internal telemetry.
     pub path: String,
     /// The rotation_id value recorded by OTAP Dataflow internal telemetry.
-    pub rotation_id: Option<otap_df_telemetry::attributes::AttributeValue>,
+    pub rotation_id: Option<i64>,
 }
 
 /// Marker implemented only by entity types allowed by `quiver.wal.file.init`.
@@ -2731,7 +2731,7 @@ static QUIVER_WAL_FILE_INIT_DESCRIPTOR: EventDescriptor = EventDescriptor {
             key: "error",
             wire_key: "error",
             brief: "The error value recorded by OTAP Dataflow internal telemetry.",
-            value_type: otap_df_telemetry::descriptor::AttributeValueType::Any,
+            value_type: otap_df_telemetry::descriptor::AttributeValueType::String,
             requirement_level: EventRequirementLevel::Required,
         },
         EventAttributeDescriptor {
@@ -2759,7 +2759,7 @@ static QUIVER_WAL_FILE_INIT_DESCRIPTOR: EventDescriptor = EventDescriptor {
             key: "rotation_id",
             wire_key: "rotation_id",
             brief: "The rotation_id value recorded by OTAP Dataflow internal telemetry.",
-            value_type: otap_df_telemetry::descriptor::AttributeValueType::Any,
+            value_type: otap_df_telemetry::descriptor::AttributeValueType::Int,
             requirement_level: EventRequirementLevel::Recommended,
         },
     ],
@@ -2773,7 +2773,7 @@ impl EventAttributes for QuiverWalFileInit {
     ) {
         visitor(
             &QUIVER_WAL_FILE_INIT_DESCRIPTOR.attributes[0],
-            EventAttributeValueRef::Any(&self.error),
+            EventAttributeValueRef::String(self.error.as_str()),
         );
         visitor(
             &QUIVER_WAL_FILE_INIT_DESCRIPTOR.attributes[1],
@@ -2790,7 +2790,7 @@ impl EventAttributes for QuiverWalFileInit {
         if let Some(value) = &self.rotation_id {
             visitor(
                 &QUIVER_WAL_FILE_INIT_DESCRIPTOR.attributes[4],
-                EventAttributeValueRef::Any(value),
+                EventAttributeValueRef::Int(*value),
             );
         }
     }
@@ -2826,33 +2826,33 @@ impl QuiverWalFileInit {
 #[derive(Debug, Clone)]
 pub struct QuiverWalInit {
     /// The aggregate_bytes value recorded by OTAP Dataflow internal telemetry.
-    pub aggregate_bytes: Option<otap_df_telemetry::attributes::AttributeValue>,
+    pub aggregate_bytes: Option<i64>,
     /// The cursor_position value recorded by OTAP Dataflow internal telemetry.
-    pub cursor_position: Option<otap_df_telemetry::attributes::AttributeValue>,
+    pub cursor_position: Option<i64>,
     /// The denominator value recorded by OTAP Dataflow internal telemetry.
-    pub denominator: Option<otap_df_telemetry::attributes::AttributeValue>,
+    pub denominator: Option<i64>,
     /// The error_type value recorded by OTAP Dataflow internal telemetry.
     pub error_type: Option<String>,
     /// The expected value recorded by OTAP Dataflow internal telemetry.
     pub expected: Option<String>,
     /// The file_size value recorded by OTAP Dataflow internal telemetry.
-    pub file_size: Option<otap_df_telemetry::attributes::AttributeValue>,
+    pub file_size: Option<i64>,
     /// The found value recorded by OTAP Dataflow internal telemetry.
     pub found: Option<String>,
     /// The is_new_file value recorded by OTAP Dataflow internal telemetry.
-    pub is_new_file: Option<otap_df_telemetry::attributes::AttributeValue>,
+    pub is_new_file: Option<bool>,
     /// The min_header_size value recorded by OTAP Dataflow internal telemetry.
-    pub min_header_size: Option<otap_df_telemetry::attributes::AttributeValue>,
+    pub min_header_size: Option<i64>,
     /// The next_sequence value recorded by OTAP Dataflow internal telemetry.
-    pub next_sequence: Option<otap_df_telemetry::attributes::AttributeValue>,
+    pub next_sequence: Option<i64>,
     /// The numerator value recorded by OTAP Dataflow internal telemetry.
-    pub numerator: Option<otap_df_telemetry::attributes::AttributeValue>,
+    pub numerator: Option<i64>,
     /// The path value recorded by OTAP Dataflow internal telemetry.
     pub path: Option<String>,
     /// The reason value recorded by OTAP Dataflow internal telemetry.
     pub reason: Option<String>,
     /// The rotated_file_count value recorded by OTAP Dataflow internal telemetry.
-    pub rotated_file_count: Option<otap_df_telemetry::attributes::AttributeValue>,
+    pub rotated_file_count: Option<i64>,
 }
 
 /// Marker implemented only by entity types allowed by `quiver.wal.init`.
@@ -2878,21 +2878,21 @@ static QUIVER_WAL_INIT_DESCRIPTOR: EventDescriptor = EventDescriptor {
             key: "aggregate_bytes",
             wire_key: "aggregate_bytes",
             brief: "The aggregate_bytes value recorded by OTAP Dataflow internal telemetry.",
-            value_type: otap_df_telemetry::descriptor::AttributeValueType::Any,
+            value_type: otap_df_telemetry::descriptor::AttributeValueType::Int,
             requirement_level: EventRequirementLevel::Recommended,
         },
         EventAttributeDescriptor {
             key: "cursor_position",
             wire_key: "cursor_position",
             brief: "The cursor_position value recorded by OTAP Dataflow internal telemetry.",
-            value_type: otap_df_telemetry::descriptor::AttributeValueType::Any,
+            value_type: otap_df_telemetry::descriptor::AttributeValueType::Int,
             requirement_level: EventRequirementLevel::Recommended,
         },
         EventAttributeDescriptor {
             key: "denominator",
             wire_key: "denominator",
             brief: "The denominator value recorded by OTAP Dataflow internal telemetry.",
-            value_type: otap_df_telemetry::descriptor::AttributeValueType::Any,
+            value_type: otap_df_telemetry::descriptor::AttributeValueType::Int,
             requirement_level: EventRequirementLevel::Recommended,
         },
         EventAttributeDescriptor {
@@ -2913,7 +2913,7 @@ static QUIVER_WAL_INIT_DESCRIPTOR: EventDescriptor = EventDescriptor {
             key: "file_size",
             wire_key: "file_size",
             brief: "The file_size value recorded by OTAP Dataflow internal telemetry.",
-            value_type: otap_df_telemetry::descriptor::AttributeValueType::Any,
+            value_type: otap_df_telemetry::descriptor::AttributeValueType::Int,
             requirement_level: EventRequirementLevel::Recommended,
         },
         EventAttributeDescriptor {
@@ -2927,28 +2927,28 @@ static QUIVER_WAL_INIT_DESCRIPTOR: EventDescriptor = EventDescriptor {
             key: "is_new_file",
             wire_key: "is_new_file",
             brief: "The is_new_file value recorded by OTAP Dataflow internal telemetry.",
-            value_type: otap_df_telemetry::descriptor::AttributeValueType::Any,
+            value_type: otap_df_telemetry::descriptor::AttributeValueType::Boolean,
             requirement_level: EventRequirementLevel::Recommended,
         },
         EventAttributeDescriptor {
             key: "min_header_size",
             wire_key: "min_header_size",
             brief: "The min_header_size value recorded by OTAP Dataflow internal telemetry.",
-            value_type: otap_df_telemetry::descriptor::AttributeValueType::Any,
+            value_type: otap_df_telemetry::descriptor::AttributeValueType::Int,
             requirement_level: EventRequirementLevel::Recommended,
         },
         EventAttributeDescriptor {
             key: "next_sequence",
             wire_key: "next_sequence",
             brief: "The next_sequence value recorded by OTAP Dataflow internal telemetry.",
-            value_type: otap_df_telemetry::descriptor::AttributeValueType::Any,
+            value_type: otap_df_telemetry::descriptor::AttributeValueType::Int,
             requirement_level: EventRequirementLevel::Recommended,
         },
         EventAttributeDescriptor {
             key: "numerator",
             wire_key: "numerator",
             brief: "The numerator value recorded by OTAP Dataflow internal telemetry.",
-            value_type: otap_df_telemetry::descriptor::AttributeValueType::Any,
+            value_type: otap_df_telemetry::descriptor::AttributeValueType::Int,
             requirement_level: EventRequirementLevel::Recommended,
         },
         EventAttributeDescriptor {
@@ -2969,7 +2969,7 @@ static QUIVER_WAL_INIT_DESCRIPTOR: EventDescriptor = EventDescriptor {
             key: "rotated_file_count",
             wire_key: "rotated_file_count",
             brief: "The rotated_file_count value recorded by OTAP Dataflow internal telemetry.",
-            value_type: otap_df_telemetry::descriptor::AttributeValueType::Any,
+            value_type: otap_df_telemetry::descriptor::AttributeValueType::Int,
             requirement_level: EventRequirementLevel::Recommended,
         },
     ],
@@ -2984,19 +2984,19 @@ impl EventAttributes for QuiverWalInit {
         if let Some(value) = &self.aggregate_bytes {
             visitor(
                 &QUIVER_WAL_INIT_DESCRIPTOR.attributes[0],
-                EventAttributeValueRef::Any(value),
+                EventAttributeValueRef::Int(*value),
             );
         }
         if let Some(value) = &self.cursor_position {
             visitor(
                 &QUIVER_WAL_INIT_DESCRIPTOR.attributes[1],
-                EventAttributeValueRef::Any(value),
+                EventAttributeValueRef::Int(*value),
             );
         }
         if let Some(value) = &self.denominator {
             visitor(
                 &QUIVER_WAL_INIT_DESCRIPTOR.attributes[2],
-                EventAttributeValueRef::Any(value),
+                EventAttributeValueRef::Int(*value),
             );
         }
         if let Some(value) = &self.error_type {
@@ -3014,7 +3014,7 @@ impl EventAttributes for QuiverWalInit {
         if let Some(value) = &self.file_size {
             visitor(
                 &QUIVER_WAL_INIT_DESCRIPTOR.attributes[5],
-                EventAttributeValueRef::Any(value),
+                EventAttributeValueRef::Int(*value),
             );
         }
         if let Some(value) = &self.found {
@@ -3026,25 +3026,25 @@ impl EventAttributes for QuiverWalInit {
         if let Some(value) = &self.is_new_file {
             visitor(
                 &QUIVER_WAL_INIT_DESCRIPTOR.attributes[7],
-                EventAttributeValueRef::Any(value),
+                EventAttributeValueRef::Boolean(*value),
             );
         }
         if let Some(value) = &self.min_header_size {
             visitor(
                 &QUIVER_WAL_INIT_DESCRIPTOR.attributes[8],
-                EventAttributeValueRef::Any(value),
+                EventAttributeValueRef::Int(*value),
             );
         }
         if let Some(value) = &self.next_sequence {
             visitor(
                 &QUIVER_WAL_INIT_DESCRIPTOR.attributes[9],
-                EventAttributeValueRef::Any(value),
+                EventAttributeValueRef::Int(*value),
             );
         }
         if let Some(value) = &self.numerator {
             visitor(
                 &QUIVER_WAL_INIT_DESCRIPTOR.attributes[10],
-                EventAttributeValueRef::Any(value),
+                EventAttributeValueRef::Int(*value),
             );
         }
         if let Some(value) = &self.path {
@@ -3062,7 +3062,7 @@ impl EventAttributes for QuiverWalInit {
         if let Some(value) = &self.rotated_file_count {
             visitor(
                 &QUIVER_WAL_INIT_DESCRIPTOR.attributes[13],
-                EventAttributeValueRef::Any(value),
+                EventAttributeValueRef::Int(*value),
             );
         }
     }
@@ -3098,29 +3098,29 @@ impl QuiverWalInit {
 #[derive(Debug, Clone)]
 pub struct QuiverWalReplay {
     /// The context value recorded by OTAP Dataflow internal telemetry.
-    pub context: Option<otap_df_telemetry::attributes::AttributeValue>,
+    pub context: Option<String>,
     /// The cursor_position value recorded by OTAP Dataflow internal telemetry.
-    pub cursor_position: Option<otap_df_telemetry::attributes::AttributeValue>,
+    pub cursor_position: Option<i64>,
     /// The error value recorded by OTAP Dataflow internal telemetry.
-    pub error: Option<otap_df_telemetry::attributes::AttributeValue>,
+    pub error: Option<String>,
     /// The error_type value recorded by OTAP Dataflow internal telemetry.
     pub error_type: Option<String>,
     /// The reason value recorded by OTAP Dataflow internal telemetry.
     pub reason: Option<String>,
     /// The replayed value recorded by OTAP Dataflow internal telemetry.
-    pub replayed: Option<otap_df_telemetry::attributes::AttributeValue>,
+    pub replayed: Option<i64>,
     /// The replayed_count value recorded by OTAP Dataflow internal telemetry.
-    pub replayed_count: Option<otap_df_telemetry::attributes::AttributeValue>,
+    pub replayed_count: Option<i64>,
     /// The replayed_so_far value recorded by OTAP Dataflow internal telemetry.
-    pub replayed_so_far: Option<otap_df_telemetry::attributes::AttributeValue>,
+    pub replayed_so_far: Option<i64>,
     /// The sequence value recorded by OTAP Dataflow internal telemetry.
-    pub sequence: Option<otap_df_telemetry::attributes::AttributeValue>,
+    pub sequence: Option<i64>,
     /// The skipped_expired value recorded by OTAP Dataflow internal telemetry.
-    pub skipped_expired: Option<otap_df_telemetry::attributes::AttributeValue>,
+    pub skipped_expired: Option<i64>,
     /// The status value recorded by OTAP Dataflow internal telemetry.
     pub status: Option<otap_df_telemetry::attributes::AttributeValue>,
     /// The stopped_at_corruption value recorded by OTAP Dataflow internal telemetry.
-    pub stopped_at_corruption: Option<otap_df_telemetry::attributes::AttributeValue>,
+    pub stopped_at_corruption: Option<bool>,
 }
 
 /// Marker implemented only by entity types allowed by `quiver.wal.replay`.
@@ -3151,21 +3151,21 @@ static QUIVER_WAL_REPLAY_DESCRIPTOR: EventDescriptor = EventDescriptor {
             key: "context",
             wire_key: "context",
             brief: "The context value recorded by OTAP Dataflow internal telemetry.",
-            value_type: otap_df_telemetry::descriptor::AttributeValueType::Any,
+            value_type: otap_df_telemetry::descriptor::AttributeValueType::String,
             requirement_level: EventRequirementLevel::Recommended,
         },
         EventAttributeDescriptor {
             key: "cursor_position",
             wire_key: "cursor_position",
             brief: "The cursor_position value recorded by OTAP Dataflow internal telemetry.",
-            value_type: otap_df_telemetry::descriptor::AttributeValueType::Any,
+            value_type: otap_df_telemetry::descriptor::AttributeValueType::Int,
             requirement_level: EventRequirementLevel::Recommended,
         },
         EventAttributeDescriptor {
             key: "error",
             wire_key: "error",
             brief: "The error value recorded by OTAP Dataflow internal telemetry.",
-            value_type: otap_df_telemetry::descriptor::AttributeValueType::Any,
+            value_type: otap_df_telemetry::descriptor::AttributeValueType::String,
             requirement_level: EventRequirementLevel::Recommended,
         },
         EventAttributeDescriptor {
@@ -3186,35 +3186,35 @@ static QUIVER_WAL_REPLAY_DESCRIPTOR: EventDescriptor = EventDescriptor {
             key: "replayed",
             wire_key: "replayed",
             brief: "The replayed value recorded by OTAP Dataflow internal telemetry.",
-            value_type: otap_df_telemetry::descriptor::AttributeValueType::Any,
+            value_type: otap_df_telemetry::descriptor::AttributeValueType::Int,
             requirement_level: EventRequirementLevel::Recommended,
         },
         EventAttributeDescriptor {
             key: "replayed_count",
             wire_key: "replayed_count",
             brief: "The replayed_count value recorded by OTAP Dataflow internal telemetry.",
-            value_type: otap_df_telemetry::descriptor::AttributeValueType::Any,
+            value_type: otap_df_telemetry::descriptor::AttributeValueType::Int,
             requirement_level: EventRequirementLevel::Recommended,
         },
         EventAttributeDescriptor {
             key: "replayed_so_far",
             wire_key: "replayed_so_far",
             brief: "The replayed_so_far value recorded by OTAP Dataflow internal telemetry.",
-            value_type: otap_df_telemetry::descriptor::AttributeValueType::Any,
+            value_type: otap_df_telemetry::descriptor::AttributeValueType::Int,
             requirement_level: EventRequirementLevel::Recommended,
         },
         EventAttributeDescriptor {
             key: "sequence",
             wire_key: "sequence",
             brief: "The sequence value recorded by OTAP Dataflow internal telemetry.",
-            value_type: otap_df_telemetry::descriptor::AttributeValueType::Any,
+            value_type: otap_df_telemetry::descriptor::AttributeValueType::Int,
             requirement_level: EventRequirementLevel::Recommended,
         },
         EventAttributeDescriptor {
             key: "skipped_expired",
             wire_key: "skipped_expired",
             brief: "The skipped_expired value recorded by OTAP Dataflow internal telemetry.",
-            value_type: otap_df_telemetry::descriptor::AttributeValueType::Any,
+            value_type: otap_df_telemetry::descriptor::AttributeValueType::Int,
             requirement_level: EventRequirementLevel::Recommended,
         },
         EventAttributeDescriptor {
@@ -3228,7 +3228,7 @@ static QUIVER_WAL_REPLAY_DESCRIPTOR: EventDescriptor = EventDescriptor {
             key: "stopped_at_corruption",
             wire_key: "stopped_at_corruption",
             brief: "The stopped_at_corruption value recorded by OTAP Dataflow internal telemetry.",
-            value_type: otap_df_telemetry::descriptor::AttributeValueType::Any,
+            value_type: otap_df_telemetry::descriptor::AttributeValueType::Boolean,
             requirement_level: EventRequirementLevel::Recommended,
         },
     ],
@@ -3243,19 +3243,19 @@ impl EventAttributes for QuiverWalReplay {
         if let Some(value) = &self.context {
             visitor(
                 &QUIVER_WAL_REPLAY_DESCRIPTOR.attributes[0],
-                EventAttributeValueRef::Any(value),
+                EventAttributeValueRef::String(value.as_str()),
             );
         }
         if let Some(value) = &self.cursor_position {
             visitor(
                 &QUIVER_WAL_REPLAY_DESCRIPTOR.attributes[1],
-                EventAttributeValueRef::Any(value),
+                EventAttributeValueRef::Int(*value),
             );
         }
         if let Some(value) = &self.error {
             visitor(
                 &QUIVER_WAL_REPLAY_DESCRIPTOR.attributes[2],
-                EventAttributeValueRef::Any(value),
+                EventAttributeValueRef::String(value.as_str()),
             );
         }
         if let Some(value) = &self.error_type {
@@ -3273,31 +3273,31 @@ impl EventAttributes for QuiverWalReplay {
         if let Some(value) = &self.replayed {
             visitor(
                 &QUIVER_WAL_REPLAY_DESCRIPTOR.attributes[5],
-                EventAttributeValueRef::Any(value),
+                EventAttributeValueRef::Int(*value),
             );
         }
         if let Some(value) = &self.replayed_count {
             visitor(
                 &QUIVER_WAL_REPLAY_DESCRIPTOR.attributes[6],
-                EventAttributeValueRef::Any(value),
+                EventAttributeValueRef::Int(*value),
             );
         }
         if let Some(value) = &self.replayed_so_far {
             visitor(
                 &QUIVER_WAL_REPLAY_DESCRIPTOR.attributes[7],
-                EventAttributeValueRef::Any(value),
+                EventAttributeValueRef::Int(*value),
             );
         }
         if let Some(value) = &self.sequence {
             visitor(
                 &QUIVER_WAL_REPLAY_DESCRIPTOR.attributes[8],
-                EventAttributeValueRef::Any(value),
+                EventAttributeValueRef::Int(*value),
             );
         }
         if let Some(value) = &self.skipped_expired {
             visitor(
                 &QUIVER_WAL_REPLAY_DESCRIPTOR.attributes[9],
-                EventAttributeValueRef::Any(value),
+                EventAttributeValueRef::Int(*value),
             );
         }
         if let Some(value) = &self.status {
@@ -3309,7 +3309,7 @@ impl EventAttributes for QuiverWalReplay {
         if let Some(value) = &self.stopped_at_corruption {
             visitor(
                 &QUIVER_WAL_REPLAY_DESCRIPTOR.attributes[11],
-                EventAttributeValueRef::Any(value),
+                EventAttributeValueRef::Boolean(*value),
             );
         }
     }
@@ -3363,9 +3363,9 @@ pub struct QuiverWalReplayAccounting {
     /// The reason value recorded by OTAP Dataflow internal telemetry.
     pub reason: String,
     /// The sequence value recorded by OTAP Dataflow internal telemetry.
-    pub sequence: otap_df_telemetry::attributes::AttributeValue,
+    pub sequence: i64,
     /// The slot_count value recorded by OTAP Dataflow internal telemetry.
-    pub slot_count: otap_df_telemetry::attributes::AttributeValue,
+    pub slot_count: i64,
 }
 
 /// Marker implemented only by entity types allowed by `quiver.wal.replay.accounting`.
@@ -3398,14 +3398,14 @@ static QUIVER_WAL_REPLAY_ACCOUNTING_DESCRIPTOR: EventDescriptor = EventDescripto
             key: "sequence",
             wire_key: "sequence",
             brief: "The sequence value recorded by OTAP Dataflow internal telemetry.",
-            value_type: otap_df_telemetry::descriptor::AttributeValueType::Any,
+            value_type: otap_df_telemetry::descriptor::AttributeValueType::Int,
             requirement_level: EventRequirementLevel::Required,
         },
         EventAttributeDescriptor {
             key: "slot_count",
             wire_key: "slot_count",
             brief: "The slot_count value recorded by OTAP Dataflow internal telemetry.",
-            value_type: otap_df_telemetry::descriptor::AttributeValueType::Any,
+            value_type: otap_df_telemetry::descriptor::AttributeValueType::Int,
             requirement_level: EventRequirementLevel::Required,
         },
     ],
@@ -3423,11 +3423,11 @@ impl EventAttributes for QuiverWalReplayAccounting {
         );
         visitor(
             &QUIVER_WAL_REPLAY_ACCOUNTING_DESCRIPTOR.attributes[1],
-            EventAttributeValueRef::Any(&self.sequence),
+            EventAttributeValueRef::Int(self.sequence),
         );
         visitor(
             &QUIVER_WAL_REPLAY_ACCOUNTING_DESCRIPTOR.attributes[2],
-            EventAttributeValueRef::Any(&self.slot_count),
+            EventAttributeValueRef::Int(self.slot_count),
         );
     }
 }
@@ -3454,13 +3454,13 @@ impl QuiverWalReplayAccounting {
 #[derive(Debug, Clone)]
 pub struct QuiverWalRotate {
     /// The aggregate_bytes value recorded by OTAP Dataflow internal telemetry.
-    pub aggregate_bytes: otap_df_telemetry::attributes::AttributeValue,
+    pub aggregate_bytes: i64,
     /// The rotated_file_bytes value recorded by OTAP Dataflow internal telemetry.
-    pub rotated_file_bytes: otap_df_telemetry::attributes::AttributeValue,
+    pub rotated_file_bytes: i64,
     /// The rotated_file_count value recorded by OTAP Dataflow internal telemetry.
-    pub rotated_file_count: otap_df_telemetry::attributes::AttributeValue,
+    pub rotated_file_count: i64,
     /// The rotation_id value recorded by OTAP Dataflow internal telemetry.
-    pub rotation_id: otap_df_telemetry::attributes::AttributeValue,
+    pub rotation_id: i64,
 }
 
 /// Marker implemented only by entity types allowed by `quiver.wal.rotate`.
@@ -3486,28 +3486,28 @@ static QUIVER_WAL_ROTATE_DESCRIPTOR: EventDescriptor = EventDescriptor {
             key: "aggregate_bytes",
             wire_key: "aggregate_bytes",
             brief: "The aggregate_bytes value recorded by OTAP Dataflow internal telemetry.",
-            value_type: otap_df_telemetry::descriptor::AttributeValueType::Any,
+            value_type: otap_df_telemetry::descriptor::AttributeValueType::Int,
             requirement_level: EventRequirementLevel::Required,
         },
         EventAttributeDescriptor {
             key: "rotated_file_bytes",
             wire_key: "rotated_file_bytes",
             brief: "The rotated_file_bytes value recorded by OTAP Dataflow internal telemetry.",
-            value_type: otap_df_telemetry::descriptor::AttributeValueType::Any,
+            value_type: otap_df_telemetry::descriptor::AttributeValueType::Int,
             requirement_level: EventRequirementLevel::Required,
         },
         EventAttributeDescriptor {
             key: "rotated_file_count",
             wire_key: "rotated_file_count",
             brief: "The rotated_file_count value recorded by OTAP Dataflow internal telemetry.",
-            value_type: otap_df_telemetry::descriptor::AttributeValueType::Any,
+            value_type: otap_df_telemetry::descriptor::AttributeValueType::Int,
             requirement_level: EventRequirementLevel::Required,
         },
         EventAttributeDescriptor {
             key: "rotation_id",
             wire_key: "rotation_id",
             brief: "The rotation_id value recorded by OTAP Dataflow internal telemetry.",
-            value_type: otap_df_telemetry::descriptor::AttributeValueType::Any,
+            value_type: otap_df_telemetry::descriptor::AttributeValueType::Int,
             requirement_level: EventRequirementLevel::Required,
         },
     ],
@@ -3521,19 +3521,19 @@ impl EventAttributes for QuiverWalRotate {
     ) {
         visitor(
             &QUIVER_WAL_ROTATE_DESCRIPTOR.attributes[0],
-            EventAttributeValueRef::Any(&self.aggregate_bytes),
+            EventAttributeValueRef::Int(self.aggregate_bytes),
         );
         visitor(
             &QUIVER_WAL_ROTATE_DESCRIPTOR.attributes[1],
-            EventAttributeValueRef::Any(&self.rotated_file_bytes),
+            EventAttributeValueRef::Int(self.rotated_file_bytes),
         );
         visitor(
             &QUIVER_WAL_ROTATE_DESCRIPTOR.attributes[2],
-            EventAttributeValueRef::Any(&self.rotated_file_count),
+            EventAttributeValueRef::Int(self.rotated_file_count),
         );
         visitor(
             &QUIVER_WAL_ROTATE_DESCRIPTOR.attributes[3],
-            EventAttributeValueRef::Any(&self.rotation_id),
+            EventAttributeValueRef::Int(self.rotation_id),
         );
     }
 }

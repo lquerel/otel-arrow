@@ -15,7 +15,7 @@ use crate::event::{
 #[derive(Debug, Clone)]
 pub struct AzureIdentityAuthTokenRefreshFailed {
     /// The error value recorded by OTAP Dataflow internal telemetry.
-    pub error: otap_df_telemetry::attributes::AttributeValue,
+    pub error: String,
 }
 
 /// Marker implemented only by entity types allowed by `azure_identity_auth.token_refresh_failed`.
@@ -38,7 +38,7 @@ static AZURE_IDENTITY_AUTH_TOKEN_REFRESH_FAILED_DESCRIPTOR: EventDescriptor = Ev
         key: "error",
         wire_key: "error",
         brief: "The error value recorded by OTAP Dataflow internal telemetry.",
-        value_type: otap_df_telemetry::descriptor::AttributeValueType::Any,
+        value_type: otap_df_telemetry::descriptor::AttributeValueType::String,
         requirement_level: EventRequirementLevel::Required,
     }],
 };
@@ -51,7 +51,7 @@ impl EventAttributes for AzureIdentityAuthTokenRefreshFailed {
     ) {
         visitor(
             &AZURE_IDENTITY_AUTH_TOKEN_REFRESH_FAILED_DESCRIPTOR.attributes[0],
-            EventAttributeValueRef::Any(&self.error),
+            EventAttributeValueRef::String(self.error.as_str()),
         );
     }
 }
@@ -80,7 +80,7 @@ impl AzureIdentityAuthTokenRefreshFailed {
 #[derive(Debug, Clone)]
 pub struct K8sServiceAccountTokenAuthAccessReviewFailed {
     /// The error value recorded by OTAP Dataflow internal telemetry.
-    pub error: otap_df_telemetry::attributes::AttributeValue,
+    pub error: String,
 }
 
 /// Marker implemented only by entity types allowed by `k8s_service_account_token_auth.access_review_failed`.
@@ -110,7 +110,7 @@ static K8S_SERVICE_ACCOUNT_TOKEN_AUTH_ACCESS_REVIEW_FAILED_DESCRIPTOR: EventDesc
             key: "error",
             wire_key: "error",
             brief: "The error value recorded by OTAP Dataflow internal telemetry.",
-            value_type: otap_df_telemetry::descriptor::AttributeValueType::Any,
+            value_type: otap_df_telemetry::descriptor::AttributeValueType::String,
             requirement_level: EventRequirementLevel::Required,
         }],
     };
@@ -123,7 +123,7 @@ impl EventAttributes for K8sServiceAccountTokenAuthAccessReviewFailed {
     ) {
         visitor(
             &K8S_SERVICE_ACCOUNT_TOKEN_AUTH_ACCESS_REVIEW_FAILED_DESCRIPTOR.attributes[0],
-            EventAttributeValueRef::Any(&self.error),
+            EventAttributeValueRef::String(self.error.as_str()),
         );
     }
 }
@@ -516,7 +516,7 @@ impl K8sServiceAccountTokenAuthAuthorized {
 #[derive(Debug, Clone)]
 pub struct K8sServiceAccountTokenAuthClientInitFailed {
     /// The error value recorded by OTAP Dataflow internal telemetry.
-    pub error: otap_df_telemetry::attributes::AttributeValue,
+    pub error: String,
 }
 
 /// Marker implemented only by entity types allowed by `k8s_service_account_token_auth.client_init_failed`.
@@ -546,7 +546,7 @@ static K8S_SERVICE_ACCOUNT_TOKEN_AUTH_CLIENT_INIT_FAILED_DESCRIPTOR: EventDescri
             key: "error",
             wire_key: "error",
             brief: "The error value recorded by OTAP Dataflow internal telemetry.",
-            value_type: otap_df_telemetry::descriptor::AttributeValueType::Any,
+            value_type: otap_df_telemetry::descriptor::AttributeValueType::String,
             requirement_level: EventRequirementLevel::Required,
         }],
     };
@@ -559,7 +559,7 @@ impl EventAttributes for K8sServiceAccountTokenAuthClientInitFailed {
     ) {
         visitor(
             &K8S_SERVICE_ACCOUNT_TOKEN_AUTH_CLIENT_INIT_FAILED_DESCRIPTOR.attributes[0],
-            EventAttributeValueRef::Any(&self.error),
+            EventAttributeValueRef::String(self.error.as_str()),
         );
     }
 }
@@ -719,7 +719,7 @@ impl K8sServiceAccountTokenAuthNotServiceAccount {
 #[derive(Debug, Clone)]
 pub struct K8sServiceAccountTokenAuthTokenReviewFailed {
     /// The error value recorded by OTAP Dataflow internal telemetry.
-    pub error: otap_df_telemetry::attributes::AttributeValue,
+    pub error: String,
 }
 
 /// Marker implemented only by entity types allowed by `k8s_service_account_token_auth.token_review_failed`.
@@ -749,7 +749,7 @@ static K8S_SERVICE_ACCOUNT_TOKEN_AUTH_TOKEN_REVIEW_FAILED_DESCRIPTOR: EventDescr
             key: "error",
             wire_key: "error",
             brief: "The error value recorded by OTAP Dataflow internal telemetry.",
-            value_type: otap_df_telemetry::descriptor::AttributeValueType::Any,
+            value_type: otap_df_telemetry::descriptor::AttributeValueType::String,
             requirement_level: EventRequirementLevel::Required,
         }],
     };
@@ -762,7 +762,7 @@ impl EventAttributes for K8sServiceAccountTokenAuthTokenReviewFailed {
     ) {
         visitor(
             &K8S_SERVICE_ACCOUNT_TOKEN_AUTH_TOKEN_REVIEW_FAILED_DESCRIPTOR.attributes[0],
-            EventAttributeValueRef::Any(&self.error),
+            EventAttributeValueRef::String(self.error.as_str()),
         );
     }
 }
@@ -994,7 +994,7 @@ impl K8sServiceAccountTokenAuthTokenUnauthenticated {
 #[derive(Debug, Clone)]
 pub struct Oauth2ClientAuthInsecureTokenUrl {
     /// The token_url value recorded by OTAP Dataflow internal telemetry.
-    pub token_url: otap_df_telemetry::attributes::AttributeValue,
+    pub token_url: String,
 }
 
 /// Marker implemented only by entity types allowed by `oauth2_client_auth.insecure_token_url`.
@@ -1017,7 +1017,7 @@ static OAUTH2CLIENT_AUTH_INSECURE_TOKEN_URL_DESCRIPTOR: EventDescriptor = EventD
         key: "token_url",
         wire_key: "token_url",
         brief: "The token_url value recorded by OTAP Dataflow internal telemetry.",
-        value_type: otap_df_telemetry::descriptor::AttributeValueType::Any,
+        value_type: otap_df_telemetry::descriptor::AttributeValueType::String,
         requirement_level: EventRequirementLevel::Required,
     }],
 };
@@ -1030,7 +1030,7 @@ impl EventAttributes for Oauth2ClientAuthInsecureTokenUrl {
     ) {
         visitor(
             &OAUTH2CLIENT_AUTH_INSECURE_TOKEN_URL_DESCRIPTOR.attributes[0],
-            EventAttributeValueRef::Any(&self.token_url),
+            EventAttributeValueRef::String(self.token_url.as_str()),
         );
     }
 }
@@ -1058,7 +1058,7 @@ impl Oauth2ClientAuthInsecureTokenUrl {
 #[derive(Debug, Clone)]
 pub struct Oauth2ClientAuthTokenRefreshFailed {
     /// The error value recorded by OTAP Dataflow internal telemetry.
-    pub error: otap_df_telemetry::attributes::AttributeValue,
+    pub error: String,
 }
 
 /// Marker implemented only by entity types allowed by `oauth2_client_auth.token_refresh_failed`.
@@ -1081,7 +1081,7 @@ static OAUTH2CLIENT_AUTH_TOKEN_REFRESH_FAILED_DESCRIPTOR: EventDescriptor = Even
         key: "error",
         wire_key: "error",
         brief: "The error value recorded by OTAP Dataflow internal telemetry.",
-        value_type: otap_df_telemetry::descriptor::AttributeValueType::Any,
+        value_type: otap_df_telemetry::descriptor::AttributeValueType::String,
         requirement_level: EventRequirementLevel::Required,
     }],
 };
@@ -1094,7 +1094,7 @@ impl EventAttributes for Oauth2ClientAuthTokenRefreshFailed {
     ) {
         visitor(
             &OAUTH2CLIENT_AUTH_TOKEN_REFRESH_FAILED_DESCRIPTOR.attributes[0],
-            EventAttributeValueRef::Any(&self.error),
+            EventAttributeValueRef::String(self.error.as_str()),
         );
     }
 }

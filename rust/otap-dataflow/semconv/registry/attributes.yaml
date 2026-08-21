@@ -1,15 +1,15 @@
 file_format: definition/2
 attributes:
 - key: abandoned_writes
-  type: any
+  type: int
   stability: development
   brief: The abandoned_writes value recorded by OTAP Dataflow internal telemetry.
 - key: account
-  type: any
+  type: string
   stability: development
   brief: The account value recorded by OTAP Dataflow internal telemetry.
 - key: ack_propagation
-  type: any
+  type: string
   stability: development
   brief: The ack_propagation value recorded by OTAP Dataflow internal telemetry.
 - key: action
@@ -36,31 +36,31 @@ attributes:
   stability: development
   brief: The action value recorded by OTAP Dataflow internal telemetry.
 - key: active_tasks
-  type: any
+  type: int
   stability: development
   brief: The active_tasks value recorded by OTAP Dataflow internal telemetry.
 - key: actual_len
-  type: any
+  type: int
   stability: development
   brief: The actual_len value recorded by OTAP Dataflow internal telemetry.
 - key: added
-  type: any
+  type: int
   stability: development
   brief: The added value recorded by OTAP Dataflow internal telemetry.
 - key: aggregate_bytes
-  type: any
+  type: int
   stability: development
   brief: The aggregate_bytes value recorded by OTAP Dataflow internal telemetry.
 - key: attempt
-  type: any
+  type: int
   stability: development
   brief: The attempt value recorded by OTAP Dataflow internal telemetry.
 - key: attempts
-  type: any
+  type: int
   stability: development
   brief: The attempts value recorded by OTAP Dataflow internal telemetry.
 - key: attribute_key
-  type: any
+  type: string
   stability: development
   brief: The attribute_key value recorded by OTAP Dataflow internal telemetry.
 - key: audience
@@ -76,47 +76,47 @@ attributes:
   stability: development
   brief: The backoff value recorded by OTAP Dataflow internal telemetry.
 - key: backoff_ms
-  type: any
+  type: int
   stability: development
   brief: The backoff_ms value recorded by OTAP Dataflow internal telemetry.
 - key: balanced_group_count
-  type: any
+  type: int
   stability: development
   brief: The balanced_group_count value recorded by OTAP Dataflow internal telemetry.
 - key: batch_id
-  type: any
+  type: int
   stability: development
   brief: The batch_id value recorded by OTAP Dataflow internal telemetry.
 - key: batch_max_duration_ms
-  type: any
+  type: int
   stability: development
   brief: The batch_max_duration_ms value recorded by OTAP Dataflow internal telemetry.
 - key: batch_max_size
-  type: any
+  type: int
   stability: development
   brief: The batch_max_size value recorded by OTAP Dataflow internal telemetry.
 - key: batch_size_avg_bytes
-  type: any
+  type: double
   stability: development
   brief: The batch_size_avg_bytes value recorded by OTAP Dataflow internal telemetry.
 - key: batch_size_count
-  type: any
+  type: int
   stability: development
   brief: The batch_size_count value recorded by OTAP Dataflow internal telemetry.
 - key: batch_size_max_bytes
-  type: any
+  type: double
   stability: development
   brief: The batch_size_max_bytes value recorded by OTAP Dataflow internal telemetry.
 - key: batch_size_min_bytes
-  type: any
+  type: double
   stability: development
   brief: The batch_size_min_bytes value recorded by OTAP Dataflow internal telemetry.
 - key: bind_address
-  type: any
+  type: string
   stability: development
   brief: The bind_address value recorded by OTAP Dataflow internal telemetry.
 - key: blocked_ms
-  type: any
+  type: int
   stability: development
   brief: The blocked_ms value recorded by OTAP Dataflow internal telemetry.
 - key: blocking
@@ -124,7 +124,7 @@ attributes:
   stability: development
   brief: The blocking value recorded by OTAP Dataflow internal telemetry.
 - key: bound_nodes
-  type: any
+  type: string
   stability: development
   brief: The bound_nodes value recorded by OTAP Dataflow internal telemetry.
 - key: brokers
@@ -132,27 +132,27 @@ attributes:
   stability: development
   brief: The brokers value recorded by OTAP Dataflow internal telemetry.
 - key: budget_cap
-  type: any
+  type: int
   stability: development
   brief: The budget_cap value recorded by OTAP Dataflow internal telemetry.
 - key: budget_ms
-  type: any
+  type: int
   stability: development
   brief: The budget_ms value recorded by OTAP Dataflow internal telemetry.
 - key: bundle_index
-  type: any
+  type: int
   stability: development
   brief: The bundle_index value recorded by OTAP Dataflow internal telemetry.
 - key: bundles_drained
-  type: any
+  type: int
   stability: development
   brief: The bundles_drained value recorded by OTAP Dataflow internal telemetry.
 - key: bundles_processed
-  type: any
+  type: int
   stability: development
   brief: The bundles_processed value recorded by OTAP Dataflow internal telemetry.
 - key: bytes_written
-  type: any
+  type: int
   stability: development
   brief: The bytes_written value recorded by OTAP Dataflow internal telemetry.
 - key: ca_file
@@ -176,7 +176,7 @@ attributes:
   stability: development
   brief: The cert_path value recorded by OTAP Dataflow internal telemetry.
 - key: changes
-  type: any
+  type: int
   stability: development
   brief: The changes value recorded by OTAP Dataflow internal telemetry.
 - key: channel.id
@@ -240,19 +240,19 @@ attributes:
   stability: development
   brief: Channel type ("mpsc", "mpmc", "spsc", "spmc").
 - key: client_success_latency_avg_ms
-  type: any
+  type: double
   stability: development
   brief: The client_success_latency_avg_ms value recorded by OTAP Dataflow internal telemetry.
 - key: client_success_latency_count
-  type: any
+  type: int
   stability: development
   brief: The client_success_latency_count value recorded by OTAP Dataflow internal telemetry.
 - key: client_success_latency_max_ms
-  type: any
+  type: double
   stability: development
   brief: The client_success_latency_max_ms value recorded by OTAP Dataflow internal telemetry.
 - key: client_success_latency_min_ms
-  type: any
+  type: double
   stability: development
   brief: The client_success_latency_min_ms value recorded by OTAP Dataflow internal telemetry.
 - key: code
@@ -260,7 +260,7 @@ attributes:
   stability: development
   brief: The code value recorded by OTAP Dataflow internal telemetry.
 - key: columns
-  type: any
+  type: int
   stability: development
   brief: The columns value recorded by OTAP Dataflow internal telemetry.
 - key: command
@@ -272,11 +272,11 @@ attributes:
   stability: development
   brief: The command_type value recorded by OTAP Dataflow internal telemetry.
 - key: completeness
-  type: any
+  type: string
   stability: development
   brief: The completeness value recorded by OTAP Dataflow internal telemetry.
 - key: condensed_items
-  type: any
+  type: int
   stability: development
   brief: The condensed_items value recorded by OTAP Dataflow internal telemetry.
 - key: config
@@ -284,7 +284,7 @@ attributes:
   stability: development
   brief: The config value recorded by OTAP Dataflow internal telemetry.
 - key: config_path
-  type: any
+  type: string
   stability: development
   brief: The config_path value recorded by OTAP Dataflow internal telemetry.
 - key: confirmed
@@ -292,15 +292,15 @@ attributes:
   stability: development
   brief: The confirmed value recorded by OTAP Dataflow internal telemetry.
 - key: consecutive_failures
-  type: any
+  type: int
   stability: development
   brief: The consecutive_failures value recorded by OTAP Dataflow internal telemetry.
 - key: context
-  type: any
+  type: string
   stability: development
   brief: The context value recorded by OTAP Dataflow internal telemetry.
 - key: core
-  type: any
+  type: int
   stability: development
   brief: The core value recorded by OTAP Dataflow internal telemetry.
 - key: core.id
@@ -308,39 +308,39 @@ attributes:
   stability: development
   brief: Core identifier.
 - key: core_allocation
-  type: any
+  type: string
   stability: development
   brief: The core_allocation value recorded by OTAP Dataflow internal telemetry.
 - key: core_id
-  type: any
+  type: int
   stability: development
   brief: The core_id value recorded by OTAP Dataflow internal telemetry.
 - key: count
-  type: any
+  type: int
   stability: development
   brief: The count value recorded by OTAP Dataflow internal telemetry.
 - key: create_directories
-  type: any
+  type: boolean
   stability: development
   brief: The create_directories value recorded by OTAP Dataflow internal telemetry.
 - key: cumulative_segment_bytes
-  type: any
+  type: int
   stability: development
   brief: The cumulative_segment_bytes value recorded by OTAP Dataflow internal telemetry.
 - key: current
-  type: any
+  type: string
   stability: development
   brief: The current value recorded by OTAP Dataflow internal telemetry.
 - key: current_identity
-  type: any
+  type: int
   stability: development
   brief: The current_identity value recorded by OTAP Dataflow internal telemetry.
 - key: cursor
-  type: any
+  type: string
   stability: development
   brief: The cursor value recorded by OTAP Dataflow internal telemetry.
 - key: cursor_position
-  type: any
+  type: int
   stability: development
   brief: The cursor_position value recorded by OTAP Dataflow internal telemetry.
 - key: custom
@@ -348,11 +348,11 @@ attributes:
   stability: development
   brief: Custom user-defined attributes
 - key: database
-  type: any
+  type: string
   stability: development
   brief: The database value recorded by OTAP Dataflow internal telemetry.
 - key: dcr
-  type: any
+  type: string
   stability: development
   brief: The dcr value recorded by OTAP Dataflow internal telemetry.
 - key: deadline
@@ -360,31 +360,31 @@ attributes:
   stability: development
   brief: The deadline value recorded by OTAP Dataflow internal telemetry.
 - key: default_ms
-  type: any
+  type: int
   stability: development
   brief: The default_ms value recorded by OTAP Dataflow internal telemetry.
 - key: definition
-  type: any
+  type: string
   stability: development
   brief: The definition value recorded by OTAP Dataflow internal telemetry.
 - key: delay_ms
-  type: any
+  type: int
   stability: development
   brief: The delay_ms value recorded by OTAP Dataflow internal telemetry.
 - key: delete_missing
-  type: any
+  type: boolean
   stability: development
   brief: The delete_missing value recorded by OTAP Dataflow internal telemetry.
 - key: deleted
-  type: any
+  type: int
   stability: development
   brief: The deleted value recorded by OTAP Dataflow internal telemetry.
 - key: deleted_count
-  type: any
+  type: int
   stability: development
   brief: The deleted_count value recorded by OTAP Dataflow internal telemetry.
 - key: denominator
-  type: any
+  type: int
   stability: development
   brief: The denominator value recorded by OTAP Dataflow internal telemetry.
 - key: deployment.generation
@@ -392,7 +392,7 @@ attributes:
   stability: development
   brief: Deployment generation for this runtime instance.
 - key: deployment_generation
-  type: any
+  type: int
   stability: development
   brief: The deployment_generation value recorded by OTAP Dataflow internal telemetry.
 - key: destination
@@ -404,7 +404,7 @@ attributes:
   stability: development
   brief: The detail value recorded by OTAP Dataflow internal telemetry.
 - key: details
-  type: any
+  type: string
   stability: development
   brief: The details value recorded by OTAP Dataflow internal telemetry.
 - key: dimension
@@ -435,27 +435,27 @@ attributes:
   stability: development
   brief: The domain value recorded by OTAP Dataflow internal telemetry.
 - key: dropped_events
-  type: any
+  type: int
   stability: development
   brief: The dropped_events value recorded by OTAP Dataflow internal telemetry.
 - key: dropped_existing_destination_items
-  type: any
+  type: int
   stability: development
   brief: The dropped_existing_destination_items value recorded by OTAP Dataflow internal telemetry.
 - key: dropped_items
-  type: any
+  type: int
   stability: development
   brief: The dropped_items value recorded by OTAP Dataflow internal telemetry.
 - key: durability
-  type: any
+  type: string
   stability: development
   brief: The durability value recorded by OTAP Dataflow internal telemetry.
 - key: duration_ms
-  type: any
+  type: int
   stability: development
   brief: The duration_ms value recorded by OTAP Dataflow internal telemetry.
 - key: elapsed_ms
-  type: any
+  type: int
   stability: development
   brief: The elapsed_ms value recorded by OTAP Dataflow internal telemetry.
 - key: encoding
@@ -463,7 +463,7 @@ attributes:
   stability: development
   brief: The encoding value recorded by OTAP Dataflow internal telemetry.
 - key: endpoint
-  type: any
+  type: string
   stability: development
   brief: The endpoint value recorded by OTAP Dataflow internal telemetry.
 - key: endpoint_source
@@ -471,11 +471,11 @@ attributes:
   stability: development
   brief: The endpoint_source value recorded by OTAP Dataflow internal telemetry.
 - key: entry_count
-  type: any
+  type: int
   stability: development
   brief: The entry_count value recorded by OTAP Dataflow internal telemetry.
 - key: error
-  type: any
+  type: string
   stability: development
   brief: The error value recorded by OTAP Dataflow internal telemetry.
 - key: error.type
@@ -656,11 +656,11 @@ attributes:
   stability: development
   brief: Bounded Kafka export failure category.
 - key: error_kind
-  type: any
+  type: string
   stability: development
   brief: The error_kind value recorded by OTAP Dataflow internal telemetry.
 - key: error_msg
-  type: any
+  type: string
   stability: development
   brief: The error_msg value recorded by OTAP Dataflow internal telemetry.
 - key: error_type
@@ -676,7 +676,7 @@ attributes:
   stability: development
   brief: The event value recorded by OTAP Dataflow internal telemetry.
 - key: event_name
-  type: any
+  type: string
   stability: development
   brief: The event_name value recorded by OTAP Dataflow internal telemetry.
 - key: event_paths
@@ -684,7 +684,7 @@ attributes:
   stability: development
   brief: The event_paths value recorded by OTAP Dataflow internal telemetry.
 - key: event_type
-  type: any
+  type: string
   stability: development
   brief: The event_type value recorded by OTAP Dataflow internal telemetry.
 - key: expected
@@ -692,23 +692,23 @@ attributes:
   stability: development
   brief: The expected value recorded by OTAP Dataflow internal telemetry.
 - key: expected_key
-  type: any
+  type: string
   stability: development
   brief: The expected_key value recorded by OTAP Dataflow internal telemetry.
 - key: expired
-  type: any
+  type: int
   stability: development
   brief: The expired value recorded by OTAP Dataflow internal telemetry.
 - key: explicitly_opted_out_nodes
-  type: any
+  type: string
   stability: development
   brief: The explicitly_opted_out_nodes value recorded by OTAP Dataflow internal telemetry.
 - key: exporter_refs
-  type: any
+  type: int
   stability: development
   brief: The exporter_refs value recorded by OTAP Dataflow internal telemetry.
 - key: extension
-  type: any
+  type: string
   stability: development
   brief: The extension value recorded by OTAP Dataflow internal telemetry.
 - key: extension.id
@@ -720,27 +720,27 @@ attributes:
   stability: development
   brief: Physical variant of the extension (`"local"` or `"shared"`).
 - key: extension_id
-  type: any
+  type: string
   stability: development
   brief: The extension_id value recorded by OTAP Dataflow internal telemetry.
 - key: extension_type
-  type: any
+  type: string
   stability: development
   brief: The extension_type value recorded by OTAP Dataflow internal telemetry.
 - key: failed_batches
-  type: any
+  type: int
   stability: development
   brief: The failed_batches value recorded by OTAP Dataflow internal telemetry.
 - key: failed_generation
-  type: any
+  type: int
   stability: development
   brief: The failed_generation value recorded by OTAP Dataflow internal telemetry.
 - key: failed_items
-  type: any
+  type: int
   stability: development
   brief: The failed_items value recorded by OTAP Dataflow internal telemetry.
 - key: failed_messages
-  type: any
+  type: int
   stability: development
   brief: The failed_messages value recorded by OTAP Dataflow internal telemetry.
 - key: failure
@@ -759,7 +759,7 @@ attributes:
   stability: development
   brief: The failure_reason value recorded by OTAP Dataflow internal telemetry.
 - key: field
-  type: any
+  type: string
   stability: development
   brief: The field value recorded by OTAP Dataflow internal telemetry.
 - key: file
@@ -767,7 +767,7 @@ attributes:
   stability: development
   brief: The file value recorded by OTAP Dataflow internal telemetry.
 - key: file_size
-  type: any
+  type: int
   stability: development
   brief: The file_size value recorded by OTAP Dataflow internal telemetry.
 - key: file_type
@@ -779,7 +779,7 @@ attributes:
   stability: development
   brief: The first value recorded by OTAP Dataflow internal telemetry.
 - key: first_cursor
-  type: any
+  type: string
   stability: development
   brief: The first_cursor value recorded by OTAP Dataflow internal telemetry.
 - key: flow.id
@@ -812,15 +812,15 @@ attributes:
     scope attribute; carries an empty value when the flow declares no purpose. Lets OTel View selectors
     target distinct flavors of processor work while all flows share the single `flow` scope.
 - key: flushed
-  type: any
+  type: int
   stability: development
   brief: The flushed value recorded by OTAP Dataflow internal telemetry.
 - key: force_dropped_bundles
-  type: any
+  type: int
   stability: development
   brief: The force_dropped_bundles value recorded by OTAP Dataflow internal telemetry.
 - key: force_dropped_segments
-  type: any
+  type: int
   stability: development
   brief: The force_dropped_segments value recorded by OTAP Dataflow internal telemetry.
 - key: format
@@ -841,59 +841,59 @@ attributes:
   stability: development
   brief: The found value recorded by OTAP Dataflow internal telemetry.
 - key: frequency_ms
-  type: any
+  type: int
   stability: development
   brief: The frequency_ms value recorded by OTAP Dataflow internal telemetry.
 - key: from_generation
-  type: any
+  type: int
   stability: development
   brief: The from_generation value recorded by OTAP Dataflow internal telemetry.
 - key: grace_secs
-  type: any
+  type: int
   stability: development
   brief: The grace_secs value recorded by OTAP Dataflow internal telemetry.
 - key: grpc_endpoint
-  type: any
+  type: string
   stability: development
   brief: The grpc_endpoint value recorded by OTAP Dataflow internal telemetry.
 - key: gzip_compression_level
-  type: any
+  type: int
   stability: development
   brief: The gzip_compression_level value recorded by OTAP Dataflow internal telemetry.
 - key: handle
-  type: any
+  type: int
   stability: development
   brief: The handle value recorded by OTAP Dataflow internal telemetry.
 - key: hard_limit_bytes
-  type: any
+  type: int
   stability: development
   brief: The hard_limit_bytes value recorded by OTAP Dataflow internal telemetry.
 - key: has_auth
-  type: any
+  type: boolean
   stability: development
   brief: The has_auth value recorded by OTAP Dataflow internal telemetry.
 - key: has_broadcast_receivers
-  type: any
+  type: boolean
   stability: development
   brief: The has_broadcast_receivers value recorded by OTAP Dataflow internal telemetry.
 - key: has_unknown_receiver_mode
-  type: any
+  type: boolean
   stability: development
   brief: The has_unknown_receiver_mode value recorded by OTAP Dataflow internal telemetry.
 - key: header
-  type: any
+  type: int
   stability: development
   brief: The header value recorded by OTAP Dataflow internal telemetry.
 - key: header_key
-  type: any
+  type: string
   stability: development
   brief: The header_key value recorded by OTAP Dataflow internal telemetry.
 - key: header_name
-  type: any
+  type: string
   stability: development
   brief: The header_name value recorded by OTAP Dataflow internal telemetry.
 - key: header_names
-  type: any
+  type: string
   stability: development
   brief: The header_names value recorded by OTAP Dataflow internal telemetry.
 - key: header_topic
@@ -901,19 +901,19 @@ attributes:
   stability: development
   brief: The header_topic value recorded by OTAP Dataflow internal telemetry.
 - key: host
-  type: any
+  type: string
   stability: development
   brief: The host value recorded by OTAP Dataflow internal telemetry.
 - key: ignored
-  type: any
+  type: int
   stability: development
   brief: The ignored value recorded by OTAP Dataflow internal telemetry.
 - key: in_flight
-  type: any
+  type: int
   stability: development
   brief: The in_flight value recorded by OTAP Dataflow internal telemetry.
 - key: input_items
-  type: any
+  type: int
   stability: development
   brief: The input_items value recorded by OTAP Dataflow internal telemetry.
 - key: interval
@@ -921,19 +921,19 @@ attributes:
   stability: development
   brief: The interval value recorded by OTAP Dataflow internal telemetry.
 - key: is_canceled
-  type: any
+  type: boolean
   stability: development
   brief: The is_canceled value recorded by OTAP Dataflow internal telemetry.
 - key: is_new_file
-  type: any
+  type: boolean
   stability: development
   brief: The is_new_file value recorded by OTAP Dataflow internal telemetry.
 - key: is_panic
-  type: any
+  type: boolean
   stability: development
   brief: The is_panic value recorded by OTAP Dataflow internal telemetry.
 - key: journal_root_path
-  type: any
+  type: string
   stability: development
   brief: The journal_root_path value recorded by OTAP Dataflow internal telemetry.
 - key: key
@@ -970,15 +970,15 @@ attributes:
   stability: development
   brief: The language value recorded by OTAP Dataflow internal telemetry.
 - key: last_cursor
-  type: any
+  type: string
   stability: development
   brief: The last_cursor value recorded by OTAP Dataflow internal telemetry.
 - key: lifecycle
-  type: any
+  type: string
   stability: development
   brief: The lifecycle value recorded by OTAP Dataflow internal telemetry.
 - key: listed_count
-  type: any
+  type: int
   stability: development
   brief: The listed_count value recorded by OTAP Dataflow internal telemetry.
 - key: listening_addr
@@ -986,15 +986,15 @@ attributes:
   stability: development
   brief: The listening_addr value recorded by OTAP Dataflow internal telemetry.
 - key: live_pipelines
-  type: any
+  type: int
   stability: development
   brief: The live_pipelines value recorded by OTAP Dataflow internal telemetry.
 - key: logs
-  type: any
+  type: string
   stability: development
   brief: The logs value recorded by OTAP Dataflow internal telemetry.
 - key: logs_endpoint
-  type: any
+  type: string
   stability: development
   brief: The logs_endpoint value recorded by OTAP Dataflow internal telemetry.
 - key: mapping
@@ -1016,31 +1016,31 @@ attributes:
   stability: development
   brief: The max_age value recorded by OTAP Dataflow internal telemetry.
 - key: max_age_secs
-  type: any
+  type: int
   stability: development
   brief: The max_age_secs value recorded by OTAP Dataflow internal telemetry.
 - key: max_concurrent
-  type: any
+  type: int
   stability: development
   brief: The max_concurrent value recorded by OTAP Dataflow internal telemetry.
 - key: max_frame_bytes
-  type: any
+  type: int
   stability: development
   brief: The max_frame_bytes value recorded by OTAP Dataflow internal telemetry.
 - key: max_in_flight
-  type: any
+  type: int
   stability: development
   brief: The max_in_flight value recorded by OTAP Dataflow internal telemetry.
 - key: max_len
-  type: any
+  type: int
   stability: development
   brief: The max_len value recorded by OTAP Dataflow internal telemetry.
 - key: max_restarts
-  type: any
+  type: int
   stability: development
   brief: The max_restarts value recorded by OTAP Dataflow internal telemetry.
 - key: max_rotated_files
-  type: any
+  type: int
   stability: development
   brief: The max_rotated_files value recorded by OTAP Dataflow internal telemetry.
 - key: max_segment_open_duration
@@ -1048,39 +1048,39 @@ attributes:
   stability: development
   brief: The max_segment_open_duration value recorded by OTAP Dataflow internal telemetry.
 - key: max_wal_size
-  type: any
+  type: int
   stability: development
   brief: The max_wal_size value recorded by OTAP Dataflow internal telemetry.
 - key: message_id
-  type: any
+  type: int
   stability: development
   brief: The message_id value recorded by OTAP Dataflow internal telemetry.
 - key: metrics_endpoint
-  type: any
+  type: string
   stability: development
   brief: The metrics_endpoint value recorded by OTAP Dataflow internal telemetry.
 - key: min_budget
-  type: any
+  type: int
   stability: development
   brief: The min_budget value recorded by OTAP Dataflow internal telemetry.
 - key: min_header_size
-  type: any
+  type: int
   stability: development
   brief: The min_header_size value recorded by OTAP Dataflow internal telemetry.
 - key: missed
-  type: any
+  type: int
   stability: development
   brief: The missed value recorded by OTAP Dataflow internal telemetry.
 - key: msg_id
-  type: any
+  type: int
   stability: development
   brief: The msg_id value recorded by OTAP Dataflow internal telemetry.
 - key: name
-  type: any
+  type: string
   stability: development
   brief: The name value recorded by OTAP Dataflow internal telemetry.
 - key: namespace
-  type: any
+  type: string
   stability: development
   brief: The namespace value recorded by OTAP Dataflow internal telemetry.
 - key: new_instance_id
@@ -1088,15 +1088,15 @@ attributes:
   stability: development
   brief: The new_instance_id value recorded by OTAP Dataflow internal telemetry.
 - key: next_segment_seq
-  type: any
+  type: int
   stability: development
   brief: The next_segment_seq value recorded by OTAP Dataflow internal telemetry.
 - key: next_sequence
-  type: any
+  type: int
   stability: development
   brief: The next_sequence value recorded by OTAP Dataflow internal telemetry.
 - key: node
-  type: any
+  type: string
   stability: development
   brief: The node value recorded by OTAP Dataflow internal telemetry.
 - key: node.id
@@ -1121,27 +1121,27 @@ attributes:
   stability: development
   brief: The node_id value recorded by OTAP Dataflow internal telemetry.
 - key: node_kind
-  type: any
+  type: string
   stability: development
   brief: The node_kind value recorded by OTAP Dataflow internal telemetry.
 - key: num_connections
-  type: any
+  type: int
   stability: development
   brief: The num_connections value recorded by OTAP Dataflow internal telemetry.
 - key: num_cores
-  type: any
+  type: int
   stability: development
   brief: The num_cores value recorded by OTAP Dataflow internal telemetry.
 - key: num_pipeline_groups
-  type: any
+  type: int
   stability: development
   brief: The num_pipeline_groups value recorded by OTAP Dataflow internal telemetry.
 - key: num_pipelines
-  type: any
+  type: int
   stability: development
   brief: The num_pipelines value recorded by OTAP Dataflow internal telemetry.
 - key: num_rows
-  type: any
+  type: int
   stability: development
   brief: The num_rows value recorded by OTAP Dataflow internal telemetry.
 - key: numa.node.id
@@ -1149,19 +1149,19 @@ attributes:
   stability: development
   brief: NUMA node identifier.
 - key: numerator
-  type: any
+  type: int
   stability: development
   brief: The numerator value recorded by OTAP Dataflow internal telemetry.
 - key: observed_pipelines
-  type: any
+  type: int
   stability: development
   brief: The observed_pipelines value recorded by OTAP Dataflow internal telemetry.
 - key: offset
-  type: any
+  type: int
   stability: development
   brief: The offset value recorded by OTAP Dataflow internal telemetry.
 - key: open_mode
-  type: any
+  type: string
   stability: development
   brief: The open_mode value recorded by OTAP Dataflow internal telemetry.
 - key: operation
@@ -1194,11 +1194,11 @@ attributes:
   stability: development
   brief: Timed exporter phase.
 - key: operation_id
-  type: any
+  type: string
   stability: development
   brief: The operation_id value recorded by OTAP Dataflow internal telemetry.
 - key: operation_kind
-  type: any
+  type: string
   stability: development
   brief: The operation_kind value recorded by OTAP Dataflow internal telemetry.
 - key: original_key_type
@@ -1232,11 +1232,11 @@ attributes:
   stability: development
   brief: Terminal outcome of the phase.
 - key: output_items
-  type: any
+  type: int
   stability: development
   brief: The output_items value recorded by OTAP Dataflow internal telemetry.
 - key: partition
-  type: any
+  type: int
   stability: development
   brief: The partition value recorded by OTAP Dataflow internal telemetry.
 - key: partitions
@@ -1248,39 +1248,39 @@ attributes:
   stability: development
   brief: The path value recorded by OTAP Dataflow internal telemetry.
 - key: pattern
-  type: any
+  type: string
   stability: development
   brief: The pattern value recorded by OTAP Dataflow internal telemetry.
 - key: payload_len
-  type: any
+  type: int
   stability: development
   brief: The payload_len value recorded by OTAP Dataflow internal telemetry.
 - key: peer
-  type: any
+  type: string
   stability: development
   brief: The peer value recorded by OTAP Dataflow internal telemetry.
 - key: pending_batches
-  type: any
+  type: int
   stability: development
   brief: The pending_batches value recorded by OTAP Dataflow internal telemetry.
 - key: pending_deletes_cleared
-  type: any
+  type: int
   stability: development
   brief: The pending_deletes_cleared value recorded by OTAP Dataflow internal telemetry.
 - key: pending_tracked
-  type: any
+  type: int
   stability: development
   brief: The pending_tracked value recorded by OTAP Dataflow internal telemetry.
 - key: per_core_size_cap
-  type: any
+  type: int
   stability: development
   brief: The per_core_size_cap value recorded by OTAP Dataflow internal telemetry.
 - key: permanent
-  type: any
+  type: boolean
   stability: development
   brief: The permanent value recorded by OTAP Dataflow internal telemetry.
 - key: phase
-  type: any
+  type: string
   stability: development
   brief: The phase value recorded by OTAP Dataflow internal telemetry.
 - key: pipeline.group.id
@@ -1292,15 +1292,15 @@ attributes:
   stability: development
   brief: Pipeline identifier as defined in the configuration.
 - key: pipeline_core
-  type: any
+  type: int
   stability: development
   brief: The pipeline_core value recorded by OTAP Dataflow internal telemetry.
 - key: pipeline_group_id
-  type: any
+  type: string
   stability: development
   brief: The pipeline_group_id value recorded by OTAP Dataflow internal telemetry.
 - key: pipeline_id
-  type: any
+  type: string
   stability: development
   brief: The pipeline_id value recorded by OTAP Dataflow internal telemetry.
 - key: platform
@@ -1320,23 +1320,23 @@ attributes:
   stability: development
   brief: The port value recorded by OTAP Dataflow internal telemetry.
 - key: post_purge_usage_bytes
-  type: any
+  type: int
   stability: development
   brief: The post_purge_usage_bytes value recorded by OTAP Dataflow internal telemetry.
 - key: pre_purge_usage_bytes
-  type: any
+  type: int
   stability: development
   brief: The pre_purge_usage_bytes value recorded by OTAP Dataflow internal telemetry.
 - key: prev_identity
-  type: any
+  type: int
   stability: development
   brief: The prev_identity value recorded by OTAP Dataflow internal telemetry.
 - key: previous
-  type: any
+  type: string
   stability: development
   brief: The previous value recorded by OTAP Dataflow internal telemetry.
 - key: projected_bytes
-  type: any
+  type: int
   stability: development
   brief: The projected_bytes value recorded by OTAP Dataflow internal telemetry.
 - key: protocol
@@ -1353,47 +1353,47 @@ attributes:
   stability: development
   brief: The protocol value recorded by OTAP Dataflow internal telemetry.
 - key: provider_count
-  type: any
+  type: int
   stability: development
   brief: The provider_count value recorded by OTAP Dataflow internal telemetry.
 - key: provider_name
-  type: any
+  type: string
   stability: development
   brief: The provider_name value recorded by OTAP Dataflow internal telemetry.
 - key: proxy
-  type: any
+  type: string
   stability: development
   brief: The proxy value recorded by OTAP Dataflow internal telemetry.
 - key: purge_duration_ms
-  type: any
+  type: int
   stability: development
   brief: The purge_duration_ms value recorded by OTAP Dataflow internal telemetry.
 - key: purged_bytes
-  type: any
+  type: int
   stability: development
   brief: The purged_bytes value recorded by OTAP Dataflow internal telemetry.
 - key: query_column_number
-  type: any
+  type: int
   stability: development
   brief: The query_column_number value recorded by OTAP Dataflow internal telemetry.
 - key: query_line_number
-  type: any
+  type: int
   stability: development
   brief: The query_line_number value recorded by OTAP Dataflow internal telemetry.
 - key: queue_on_full
-  type: any
+  type: string
   stability: development
   brief: The queue_on_full value recorded by OTAP Dataflow internal telemetry.
 - key: raw_os_error
-  type: any
+  type: string
   stability: development
   brief: The raw_os_error value recorded by OTAP Dataflow internal telemetry.
 - key: raw_value
-  type: any
+  type: string
   stability: development
   brief: The raw_value value recorded by OTAP Dataflow internal telemetry.
 - key: ready_pipelines
-  type: any
+  type: int
   stability: development
   brief: The ready_pipelines value recorded by OTAP Dataflow internal telemetry.
 - key: reason
@@ -1508,23 +1508,23 @@ attributes:
   stability: development
   brief: The received value recorded by OTAP Dataflow internal telemetry.
 - key: receiver_refs
-  type: any
+  type: int
   stability: development
   brief: The receiver_refs value recorded by OTAP Dataflow internal telemetry.
 - key: receiver_urn
-  type: any
+  type: string
   stability: development
   brief: The receiver_urn value recorded by OTAP Dataflow internal telemetry.
 - key: receiver_was_inner
-  type: any
+  type: boolean
   stability: development
   brief: The receiver_was_inner value recorded by OTAP Dataflow internal telemetry.
 - key: records
-  type: any
+  type: int
   stability: development
   brief: The records value recorded by OTAP Dataflow internal telemetry.
 - key: recovered_bytes
-  type: any
+  type: int
   stability: development
   brief: The recovered_bytes value recorded by OTAP Dataflow internal telemetry.
 - key: refusal
@@ -1545,39 +1545,39 @@ attributes:
   stability: development
   brief: Why the request was declined.
 - key: remaining
-  type: any
+  type: int
   stability: development
   brief: The remaining value recorded by OTAP Dataflow internal telemetry.
 - key: remaining_items
-  type: any
+  type: int
   stability: development
   brief: The remaining_items value recorded by OTAP Dataflow internal telemetry.
 - key: remaining_rotated_files
-  type: any
+  type: int
   stability: development
   brief: The remaining_rotated_files value recorded by OTAP Dataflow internal telemetry.
 - key: removed_count
-  type: any
+  type: int
   stability: development
   brief: The removed_count value recorded by OTAP Dataflow internal telemetry.
 - key: replayed
-  type: any
+  type: int
   stability: development
   brief: The replayed value recorded by OTAP Dataflow internal telemetry.
 - key: replayed_count
-  type: any
+  type: int
   stability: development
   brief: The replayed_count value recorded by OTAP Dataflow internal telemetry.
 - key: replayed_so_far
-  type: any
+  type: int
   stability: development
   brief: The replayed_so_far value recorded by OTAP Dataflow internal telemetry.
 - key: resolved_cores
-  type: any
+  type: string
   stability: development
   brief: The resolved_cores value recorded by OTAP Dataflow internal telemetry.
 - key: resolved_numa_nodes
-  type: any
+  type: string
   stability: development
   brief: The resolved_numa_nodes value recorded by OTAP Dataflow internal telemetry.
 - key: response
@@ -1626,11 +1626,11 @@ attributes:
   stability: development
   brief: Result category for the recorded HTTP request attempt.
 - key: restart_count
-  type: any
+  type: int
   stability: development
   brief: The restart_count value recorded by OTAP Dataflow internal telemetry.
 - key: retry_count
-  type: any
+  type: int
   stability: development
   brief: The retry_count value recorded by OTAP Dataflow internal telemetry.
 - key: retry_in
@@ -1638,59 +1638,59 @@ attributes:
   stability: development
   brief: The retry_in value recorded by OTAP Dataflow internal telemetry.
 - key: retry_scheduled
-  type: any
+  type: int
   stability: development
   brief: The retry_scheduled value recorded by OTAP Dataflow internal telemetry.
 - key: retryable
-  type: any
+  type: boolean
   stability: development
   brief: The retryable value recorded by OTAP Dataflow internal telemetry.
 - key: role_instance
-  type: any
+  type: string
   stability: development
   brief: The role_instance value recorded by OTAP Dataflow internal telemetry.
 - key: role_name
-  type: any
+  type: string
   stability: development
   brief: The role_name value recorded by OTAP Dataflow internal telemetry.
 - key: rollback_error
-  type: any
+  type: string
   stability: development
   brief: The rollback_error value recorded by OTAP Dataflow internal telemetry.
 - key: rollout_id
-  type: any
+  type: string
   stability: development
   brief: The rollout_id value recorded by OTAP Dataflow internal telemetry.
 - key: rotated_file_bytes
-  type: any
+  type: int
   stability: development
   brief: The rotated_file_bytes value recorded by OTAP Dataflow internal telemetry.
 - key: rotated_file_count
-  type: any
+  type: int
   stability: development
   brief: The rotated_file_count value recorded by OTAP Dataflow internal telemetry.
 - key: rotation_id
-  type: any
+  type: int
   stability: development
   brief: The rotation_id value recorded by OTAP Dataflow internal telemetry.
 - key: rotation_target_bytes
-  type: any
+  type: int
   stability: development
   brief: The rotation_target_bytes value recorded by OTAP Dataflow internal telemetry.
 - key: row_count
-  type: any
+  type: int
   stability: development
   brief: The row_count value recorded by OTAP Dataflow internal telemetry.
 - key: rows
-  type: any
+  type: int
   stability: development
   brief: The rows value recorded by OTAP Dataflow internal telemetry.
 - key: schema
-  type: any
+  type: string
   stability: development
   brief: The schema value recorded by OTAP Dataflow internal telemetry.
 - key: schema_source
-  type: any
+  type: string
   stability: development
   brief: The schema_source value recorded by OTAP Dataflow internal telemetry.
 - key: scope
@@ -1702,39 +1702,39 @@ attributes:
   stability: development
   brief: Scope kind discriminator. Always paired with the populated payload field that matches it.
 - key: segment
-  type: any
+  type: int
   stability: development
   brief: The segment value recorded by OTAP Dataflow internal telemetry.
 - key: segment_count
-  type: any
+  type: int
   stability: development
   brief: The segment_count value recorded by OTAP Dataflow internal telemetry.
 - key: segment_seq
-  type: any
+  type: int
   stability: development
   brief: The segment_seq value recorded by OTAP Dataflow internal telemetry.
 - key: segment_size
-  type: any
+  type: int
   stability: development
   brief: The segment_size value recorded by OTAP Dataflow internal telemetry.
 - key: selected_mode
-  type: any
+  type: string
   stability: development
   brief: The selected_mode value recorded by OTAP Dataflow internal telemetry.
 - key: selection_policy
-  type: any
+  type: string
   stability: development
   brief: The selection_policy value recorded by OTAP Dataflow internal telemetry.
 - key: sender_was_inner
-  type: any
+  type: boolean
   stability: development
   brief: The sender_was_inner value recorded by OTAP Dataflow internal telemetry.
 - key: sequence
-  type: any
+  type: int
   stability: development
   brief: The sequence value recorded by OTAP Dataflow internal telemetry.
 - key: session_name
-  type: any
+  type: string
   stability: development
   brief: The session_name value recorded by OTAP Dataflow internal telemetry.
 - key: set_permissions_supported
@@ -1764,43 +1764,43 @@ attributes:
   stability: development
   brief: The signal value recorded by OTAP Dataflow internal telemetry.
 - key: signal_type
-  type: any
+  type: string
   stability: development
   brief: The signal_type value recorded by OTAP Dataflow internal telemetry.
 - key: size_bytes
-  type: any
+  type: int
   stability: development
   brief: The size_bytes value recorded by OTAP Dataflow internal telemetry.
 - key: size_hint
-  type: any
+  type: int
   stability: development
   brief: The size_hint value recorded by OTAP Dataflow internal telemetry.
 - key: skipped_expired
-  type: any
+  type: int
   stability: development
   brief: The skipped_expired value recorded by OTAP Dataflow internal telemetry.
 - key: slot_count
-  type: any
+  type: int
   stability: development
   brief: The slot_count value recorded by OTAP Dataflow internal telemetry.
 - key: slot_id
-  type: any
+  type: int
   stability: development
   brief: The slot_id value recorded by OTAP Dataflow internal telemetry.
 - key: soft_limit_bytes
-  type: any
+  type: int
   stability: development
   brief: The soft_limit_bytes value recorded by OTAP Dataflow internal telemetry.
 - key: source
-  type: any
+  type: string
   stability: development
   brief: The source value recorded by OTAP Dataflow internal telemetry.
 - key: source_id
-  type: any
+  type: string
   stability: development
   brief: The source_id value recorded by OTAP Dataflow internal telemetry.
 - key: spans
-  type: any
+  type: string
   stability: development
   brief: The spans value recorded by OTAP Dataflow internal telemetry.
 - key: state
@@ -1816,23 +1816,23 @@ attributes:
   stability: development
   brief: The status value recorded by OTAP Dataflow internal telemetry.
 - key: status_code
-  type: any
+  type: int
   stability: development
   brief: The status_code value recorded by OTAP Dataflow internal telemetry.
 - key: status_line
-  type: any
+  type: string
   stability: development
   brief: The status_line value recorded by OTAP Dataflow internal telemetry.
 - key: status_message
-  type: any
+  type: string
   stability: development
   brief: The status_message value recorded by OTAP Dataflow internal telemetry.
 - key: stopped_at_corruption
-  type: any
+  type: boolean
   stability: development
   brief: The stopped_at_corruption value recorded by OTAP Dataflow internal telemetry.
 - key: stream
-  type: any
+  type: string
   stability: development
   brief: The stream value recorded by OTAP Dataflow internal telemetry.
 - key: subject
@@ -1844,51 +1844,51 @@ attributes:
   stability: development
   brief: The subscriber_id value recorded by OTAP Dataflow internal telemetry.
 - key: subscription
-  type: any
+  type: string
   stability: development
   brief: The subscription value recorded by OTAP Dataflow internal telemetry.
 - key: subscriptions
-  type: any
+  type: int
   stability: development
   brief: The subscriptions value recorded by OTAP Dataflow internal telemetry.
 - key: successful_batches
-  type: any
+  type: int
   stability: development
   brief: The successful_batches value recorded by OTAP Dataflow internal telemetry.
 - key: successful_items
-  type: any
+  type: int
   stability: development
   brief: The successful_items value recorded by OTAP Dataflow internal telemetry.
 - key: successful_messages
-  type: any
+  type: int
   stability: development
   brief: The successful_messages value recorded by OTAP Dataflow internal telemetry.
 - key: table
-  type: any
+  type: string
   stability: development
   brief: The table value recorded by OTAP Dataflow internal telemetry.
 - key: tail_recovery
-  type: any
+  type: string
   stability: development
   brief: The tail_recovery value recorded by OTAP Dataflow internal telemetry.
 - key: target
-  type: any
+  type: string
   stability: development
   brief: The target value recorded by OTAP Dataflow internal telemetry.
 - key: target_generation
-  type: any
+  type: int
   stability: development
   brief: The target_generation value recorded by OTAP Dataflow internal telemetry.
 - key: task_id
-  type: any
+  type: string
   stability: development
   brief: The task_id value recorded by OTAP Dataflow internal telemetry.
 - key: telemetry_entities
-  type: any
+  type: int
   stability: development
   brief: The telemetry_entities value recorded by OTAP Dataflow internal telemetry.
 - key: telemetry_metric_sets
-  type: any
+  type: int
   stability: development
   brief: The telemetry_metric_sets value recorded by OTAP Dataflow internal telemetry.
 - key: timeout
@@ -1896,19 +1896,19 @@ attributes:
   stability: development
   brief: The timeout value recorded by OTAP Dataflow internal telemetry.
 - key: timeout_ms
-  type: any
+  type: int
   stability: development
   brief: The timeout_ms value recorded by OTAP Dataflow internal telemetry.
 - key: timeout_secs
-  type: any
+  type: int
   stability: development
   brief: The timeout_secs value recorded by OTAP Dataflow internal telemetry.
 - key: timestamp_nanos
-  type: any
+  type: int
   stability: development
   brief: The timestamp_nanos value recorded by OTAP Dataflow internal telemetry.
 - key: token_url
-  type: any
+  type: string
   stability: development
   brief: The token_url value recorded by OTAP Dataflow internal telemetry.
 - key: topic
@@ -1929,35 +1929,35 @@ attributes:
   stability: development
   brief: Bounded source of the resolved topic.
 - key: topology_mode
-  type: any
+  type: string
   stability: development
   brief: The topology_mode value recorded by OTAP Dataflow internal telemetry.
 - key: total_errors
-  type: any
+  type: int
   stability: development
   brief: The total_errors value recorded by OTAP Dataflow internal telemetry.
 - key: total_size_cap
-  type: any
+  type: int
   stability: development
   brief: The total_size_cap value recorded by OTAP Dataflow internal telemetry.
 - key: total_values
-  type: any
+  type: int
   stability: development
   brief: The total_values value recorded by OTAP Dataflow internal telemetry.
 - key: tracepoint
-  type: any
+  type: string
   stability: development
   brief: The tracepoint value recorded by OTAP Dataflow internal telemetry.
 - key: traces_endpoint
-  type: any
+  type: string
   stability: development
   brief: The traces_endpoint value recorded by OTAP Dataflow internal telemetry.
 - key: tracked
-  type: any
+  type: boolean
   stability: development
   brief: The tracked value recorded by OTAP Dataflow internal telemetry.
 - key: truncated
-  type: any
+  type: boolean
   stability: development
   brief: The truncated value recorded by OTAP Dataflow internal telemetry.
 - key: type
@@ -1965,39 +1965,39 @@ attributes:
   stability: development
   brief: The type value recorded by OTAP Dataflow internal telemetry.
 - key: usage_bytes
-  type: any
+  type: int
   stability: development
   brief: The usage_bytes value recorded by OTAP Dataflow internal telemetry.
 - key: username
-  type: any
+  type: string
   stability: development
   brief: The username value recorded by OTAP Dataflow internal telemetry.
 - key: variant
-  type: any
+  type: string
   stability: development
   brief: The variant value recorded by OTAP Dataflow internal telemetry.
 - key: visible_cpu_count
-  type: any
+  type: int
   stability: development
   brief: The visible_cpu_count value recorded by OTAP Dataflow internal telemetry.
 - key: visible_node_count
-  type: any
+  type: int
   stability: development
   brief: The visible_node_count value recorded by OTAP Dataflow internal telemetry.
 - key: wait
-  type: any
+  type: boolean
   stability: development
   brief: The wait value recorded by OTAP Dataflow internal telemetry.
 - key: wakeup_revision
-  type: any
+  type: int
   stability: development
   brief: The wakeup_revision value recorded by OTAP Dataflow internal telemetry.
 - key: wakeup_slot
-  type: any
+  type: string
   stability: development
   brief: The wakeup_slot value recorded by OTAP Dataflow internal telemetry.
 - key: wal_end
-  type: any
+  type: int
   stability: development
   brief: The wal_end value recorded by OTAP Dataflow internal telemetry.
 - key: watched_path
@@ -2013,6 +2013,6 @@ attributes:
   stability: development
   brief: The widened_key_type value recorded by OTAP Dataflow internal telemetry.
 - key: will_retry
-  type: any
+  type: boolean
   stability: development
   brief: The will_retry value recorded by OTAP Dataflow internal telemetry.

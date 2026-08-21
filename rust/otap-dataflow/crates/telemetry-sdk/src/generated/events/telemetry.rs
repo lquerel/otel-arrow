@@ -267,9 +267,9 @@ impl ObservedChannelTimeout {
 #[derive(Debug, Clone)]
 pub struct RegistryDefineEntity {
     /// The definition value recorded by OTAP Dataflow internal telemetry.
-    pub definition: otap_df_telemetry::attributes::AttributeValue,
+    pub definition: String,
     /// The schema value recorded by OTAP Dataflow internal telemetry.
-    pub schema: otap_df_telemetry::attributes::AttributeValue,
+    pub schema: String,
 }
 
 /// Marker implemented only by entity types allowed by `registry.define_entity`.
@@ -293,14 +293,14 @@ static REGISTRY_DEFINE_ENTITY_DESCRIPTOR: EventDescriptor = EventDescriptor {
             key: "definition",
             wire_key: "definition",
             brief: "The definition value recorded by OTAP Dataflow internal telemetry.",
-            value_type: otap_df_telemetry::descriptor::AttributeValueType::Any,
+            value_type: otap_df_telemetry::descriptor::AttributeValueType::String,
             requirement_level: EventRequirementLevel::Required,
         },
         EventAttributeDescriptor {
             key: "schema",
             wire_key: "schema",
             brief: "The schema value recorded by OTAP Dataflow internal telemetry.",
-            value_type: otap_df_telemetry::descriptor::AttributeValueType::Any,
+            value_type: otap_df_telemetry::descriptor::AttributeValueType::String,
             requirement_level: EventRequirementLevel::Required,
         },
     ],
@@ -314,11 +314,11 @@ impl EventAttributes for RegistryDefineEntity {
     ) {
         visitor(
             &REGISTRY_DEFINE_ENTITY_DESCRIPTOR.attributes[0],
-            EventAttributeValueRef::Any(&self.definition),
+            EventAttributeValueRef::String(self.definition.as_str()),
         );
         visitor(
             &REGISTRY_DEFINE_ENTITY_DESCRIPTOR.attributes[1],
-            EventAttributeValueRef::Any(&self.schema),
+            EventAttributeValueRef::String(self.schema.as_str()),
         );
     }
 }
@@ -345,7 +345,7 @@ impl RegistryDefineEntity {
 #[derive(Debug, Clone)]
 pub struct TracingSubscriberInit {
     /// The error value recorded by OTAP Dataflow internal telemetry.
-    pub error: otap_df_telemetry::attributes::AttributeValue,
+    pub error: String,
 }
 
 /// Marker implemented only by entity types allowed by `tracing.subscriber.init`.
@@ -368,7 +368,7 @@ static TRACING_SUBSCRIBER_INIT_DESCRIPTOR: EventDescriptor = EventDescriptor {
         key: "error",
         wire_key: "error",
         brief: "The error value recorded by OTAP Dataflow internal telemetry.",
-        value_type: otap_df_telemetry::descriptor::AttributeValueType::Any,
+        value_type: otap_df_telemetry::descriptor::AttributeValueType::String,
         requirement_level: EventRequirementLevel::Required,
     }],
 };
@@ -381,7 +381,7 @@ impl EventAttributes for TracingSubscriberInit {
     ) {
         visitor(
             &TRACING_SUBSCRIBER_INIT_DESCRIPTOR.attributes[0],
-            EventAttributeValueRef::Any(&self.error),
+            EventAttributeValueRef::String(self.error.as_str()),
         );
     }
 }

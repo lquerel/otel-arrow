@@ -67,7 +67,7 @@ impl FlowMetricsOverlap {
 #[derive(Debug, Clone)]
 pub struct GrpcClientStaticHeaderCollision {
     /// The header_name value recorded by OTAP Dataflow internal telemetry.
-    pub header_name: otap_df_telemetry::attributes::AttributeValue,
+    pub header_name: String,
     /// The reason value recorded by OTAP Dataflow internal telemetry.
     pub reason: String,
 }
@@ -95,7 +95,7 @@ static GRPC_CLIENT_STATIC_HEADER_COLLISION_DESCRIPTOR: EventDescriptor = EventDe
             key: "header_name",
             wire_key: "header_name",
             brief: "The header_name value recorded by OTAP Dataflow internal telemetry.",
-            value_type: otap_df_telemetry::descriptor::AttributeValueType::Any,
+            value_type: otap_df_telemetry::descriptor::AttributeValueType::String,
             requirement_level: EventRequirementLevel::Required,
         },
         EventAttributeDescriptor {
@@ -116,7 +116,7 @@ impl EventAttributes for GrpcClientStaticHeaderCollision {
     ) {
         visitor(
             &GRPC_CLIENT_STATIC_HEADER_COLLISION_DESCRIPTOR.attributes[0],
-            EventAttributeValueRef::Any(&self.header_name),
+            EventAttributeValueRef::String(self.header_name.as_str()),
         );
         visitor(
             &GRPC_CLIENT_STATIC_HEADER_COLLISION_DESCRIPTOR.attributes[1],
@@ -148,7 +148,7 @@ impl GrpcClientStaticHeaderCollision {
 #[derive(Debug, Clone)]
 pub struct GrpcClientStaticHeaderSkip {
     /// The header_name value recorded by OTAP Dataflow internal telemetry.
-    pub header_name: otap_df_telemetry::attributes::AttributeValue,
+    pub header_name: String,
     /// The reason value recorded by OTAP Dataflow internal telemetry.
     pub reason: String,
 }
@@ -176,7 +176,7 @@ static GRPC_CLIENT_STATIC_HEADER_SKIP_DESCRIPTOR: EventDescriptor = EventDescrip
             key: "header_name",
             wire_key: "header_name",
             brief: "The header_name value recorded by OTAP Dataflow internal telemetry.",
-            value_type: otap_df_telemetry::descriptor::AttributeValueType::Any,
+            value_type: otap_df_telemetry::descriptor::AttributeValueType::String,
             requirement_level: EventRequirementLevel::Required,
         },
         EventAttributeDescriptor {
@@ -197,7 +197,7 @@ impl EventAttributes for GrpcClientStaticHeaderSkip {
     ) {
         visitor(
             &GRPC_CLIENT_STATIC_HEADER_SKIP_DESCRIPTOR.attributes[0],
-            EventAttributeValueRef::Any(&self.header_name),
+            EventAttributeValueRef::String(self.header_name.as_str()),
         );
         visitor(
             &GRPC_CLIENT_STATIC_HEADER_SKIP_DESCRIPTOR.attributes[1],
@@ -228,7 +228,7 @@ impl GrpcClientStaticHeaderSkip {
 #[derive(Debug, Clone)]
 pub struct OtapBatchDecodeFailed {
     /// The error value recorded by OTAP Dataflow internal telemetry.
-    pub error: otap_df_telemetry::attributes::AttributeValue,
+    pub error: String,
 }
 
 /// Marker implemented only by entity types allowed by `otap.batch.decode_failed`.
@@ -253,7 +253,7 @@ static OTAP_BATCH_DECODE_FAILED_DESCRIPTOR: EventDescriptor = EventDescriptor {
         key: "error",
         wire_key: "error",
         brief: "The error value recorded by OTAP Dataflow internal telemetry.",
-        value_type: otap_df_telemetry::descriptor::AttributeValueType::Any,
+        value_type: otap_df_telemetry::descriptor::AttributeValueType::String,
         requirement_level: EventRequirementLevel::Required,
     }],
 };
@@ -266,7 +266,7 @@ impl EventAttributes for OtapBatchDecodeFailed {
     ) {
         visitor(
             &OTAP_BATCH_DECODE_FAILED_DESCRIPTOR.attributes[0],
-            EventAttributeValueRef::Any(&self.error),
+            EventAttributeValueRef::String(self.error.as_str()),
         );
     }
 }
@@ -293,7 +293,7 @@ impl OtapBatchDecodeFailed {
 #[derive(Debug, Clone)]
 pub struct OtapBatchValidationFailed {
     /// The error value recorded by OTAP Dataflow internal telemetry.
-    pub error: otap_df_telemetry::attributes::AttributeValue,
+    pub error: String,
 }
 
 /// Marker implemented only by entity types allowed by `otap.batch.validation_failed`.
@@ -318,7 +318,7 @@ static OTAP_BATCH_VALIDATION_FAILED_DESCRIPTOR: EventDescriptor = EventDescripto
         key: "error",
         wire_key: "error",
         brief: "The error value recorded by OTAP Dataflow internal telemetry.",
-        value_type: otap_df_telemetry::descriptor::AttributeValueType::Any,
+        value_type: otap_df_telemetry::descriptor::AttributeValueType::String,
         requirement_level: EventRequirementLevel::Required,
     }],
 };
@@ -331,7 +331,7 @@ impl EventAttributes for OtapBatchValidationFailed {
     ) {
         visitor(
             &OTAP_BATCH_VALIDATION_FAILED_DESCRIPTOR.attributes[0],
-            EventAttributeValueRef::Any(&self.error),
+            EventAttributeValueRef::String(self.error.as_str()),
         );
     }
 }
@@ -410,7 +410,7 @@ impl OtapMutexPoisoned {
 #[derive(Debug, Clone)]
 pub struct OtapPipelineSendFailed {
     /// The error value recorded by OTAP Dataflow internal telemetry.
-    pub error: otap_df_telemetry::attributes::AttributeValue,
+    pub error: String,
 }
 
 /// Marker implemented only by entity types allowed by `otap.pipeline.send_failed`.
@@ -435,7 +435,7 @@ static OTAP_PIPELINE_SEND_FAILED_DESCRIPTOR: EventDescriptor = EventDescriptor {
         key: "error",
         wire_key: "error",
         brief: "The error value recorded by OTAP Dataflow internal telemetry.",
-        value_type: otap_df_telemetry::descriptor::AttributeValueType::Any,
+        value_type: otap_df_telemetry::descriptor::AttributeValueType::String,
         requirement_level: EventRequirementLevel::Required,
     }],
 };
@@ -448,7 +448,7 @@ impl EventAttributes for OtapPipelineSendFailed {
     ) {
         visitor(
             &OTAP_PIPELINE_SEND_FAILED_DESCRIPTOR.attributes[0],
-            EventAttributeValueRef::Any(&self.error),
+            EventAttributeValueRef::String(self.error.as_str()),
         );
     }
 }
@@ -579,7 +579,7 @@ impl OtapRequestMemoryPressure {
 #[derive(Debug, Clone)]
 pub struct OtapResponseChannelClosed {
     /// The batch_id value recorded by OTAP Dataflow internal telemetry.
-    pub batch_id: otap_df_telemetry::attributes::AttributeValue,
+    pub batch_id: i64,
 }
 
 /// Marker implemented only by entity types allowed by `otap.response.channel_closed`.
@@ -604,7 +604,7 @@ static OTAP_RESPONSE_CHANNEL_CLOSED_DESCRIPTOR: EventDescriptor = EventDescripto
         key: "batch_id",
         wire_key: "batch_id",
         brief: "The batch_id value recorded by OTAP Dataflow internal telemetry.",
-        value_type: otap_df_telemetry::descriptor::AttributeValueType::Any,
+        value_type: otap_df_telemetry::descriptor::AttributeValueType::Int,
         requirement_level: EventRequirementLevel::Required,
     }],
 };
@@ -617,7 +617,7 @@ impl EventAttributes for OtapResponseChannelClosed {
     ) {
         visitor(
             &OTAP_RESPONSE_CHANNEL_CLOSED_DESCRIPTOR.attributes[0],
-            EventAttributeValueRef::Any(&self.batch_id),
+            EventAttributeValueRef::Int(self.batch_id),
         );
     }
 }
@@ -644,7 +644,7 @@ impl OtapResponseChannelClosed {
 #[derive(Debug, Clone)]
 pub struct OtapResponseSendFailed {
     /// The error value recorded by OTAP Dataflow internal telemetry.
-    pub error: otap_df_telemetry::attributes::AttributeValue,
+    pub error: String,
 }
 
 /// Marker implemented only by entity types allowed by `otap.response.send_failed`.
@@ -669,7 +669,7 @@ static OTAP_RESPONSE_SEND_FAILED_DESCRIPTOR: EventDescriptor = EventDescriptor {
         key: "error",
         wire_key: "error",
         brief: "The error value recorded by OTAP Dataflow internal telemetry.",
-        value_type: otap_df_telemetry::descriptor::AttributeValueType::Any,
+        value_type: otap_df_telemetry::descriptor::AttributeValueType::String,
         requirement_level: EventRequirementLevel::Required,
     }],
 };
@@ -682,7 +682,7 @@ impl EventAttributes for OtapResponseSendFailed {
     ) {
         visitor(
             &OTAP_RESPONSE_SEND_FAILED_DESCRIPTOR.attributes[0],
-            EventAttributeValueRef::Any(&self.error),
+            EventAttributeValueRef::String(self.error.as_str()),
         );
     }
 }
@@ -827,7 +827,7 @@ impl OtapStreamMemoryPressure {
 #[derive(Debug, Clone)]
 pub struct OtapGrpcExporterProxyBypass {
     /// The host value recorded by OTAP Dataflow internal telemetry.
-    pub host: otap_df_telemetry::attributes::AttributeValue,
+    pub host: String,
     /// The port value recorded by OTAP Dataflow internal telemetry.
     pub port: otap_df_telemetry::attributes::AttributeValue,
 }
@@ -855,7 +855,7 @@ static OTAP_GRPC_EXPORTER_PROXY_BYPASS_DESCRIPTOR: EventDescriptor = EventDescri
             key: "host",
             wire_key: "host",
             brief: "The host value recorded by OTAP Dataflow internal telemetry.",
-            value_type: otap_df_telemetry::descriptor::AttributeValueType::Any,
+            value_type: otap_df_telemetry::descriptor::AttributeValueType::String,
             requirement_level: EventRequirementLevel::Required,
         },
         EventAttributeDescriptor {
@@ -876,7 +876,7 @@ impl EventAttributes for OtapGrpcExporterProxyBypass {
     ) {
         visitor(
             &OTAP_GRPC_EXPORTER_PROXY_BYPASS_DESCRIPTOR.attributes[0],
-            EventAttributeValueRef::Any(&self.host),
+            EventAttributeValueRef::String(self.host.as_str()),
         );
         visitor(
             &OTAP_GRPC_EXPORTER_PROXY_BYPASS_DESCRIPTOR.attributes[1],
@@ -907,9 +907,9 @@ impl OtapGrpcExporterProxyBypass {
 #[derive(Debug, Clone)]
 pub struct OtapGrpcExporterProxyConfigured {
     /// The endpoint value recorded by OTAP Dataflow internal telemetry.
-    pub endpoint: otap_df_telemetry::attributes::AttributeValue,
+    pub endpoint: String,
     /// The proxy value recorded by OTAP Dataflow internal telemetry.
-    pub proxy: otap_df_telemetry::attributes::AttributeValue,
+    pub proxy: String,
 }
 
 /// Marker implemented only by entity types allowed by `otap_grpc_exporter.proxy.configured`.
@@ -935,14 +935,14 @@ static OTAP_GRPC_EXPORTER_PROXY_CONFIGURED_DESCRIPTOR: EventDescriptor = EventDe
             key: "endpoint",
             wire_key: "endpoint",
             brief: "The endpoint value recorded by OTAP Dataflow internal telemetry.",
-            value_type: otap_df_telemetry::descriptor::AttributeValueType::Any,
+            value_type: otap_df_telemetry::descriptor::AttributeValueType::String,
             requirement_level: EventRequirementLevel::Required,
         },
         EventAttributeDescriptor {
             key: "proxy",
             wire_key: "proxy",
             brief: "The proxy value recorded by OTAP Dataflow internal telemetry.",
-            value_type: otap_df_telemetry::descriptor::AttributeValueType::Any,
+            value_type: otap_df_telemetry::descriptor::AttributeValueType::String,
             requirement_level: EventRequirementLevel::Required,
         },
     ],
@@ -956,11 +956,11 @@ impl EventAttributes for OtapGrpcExporterProxyConfigured {
     ) {
         visitor(
             &OTAP_GRPC_EXPORTER_PROXY_CONFIGURED_DESCRIPTOR.attributes[0],
-            EventAttributeValueRef::Any(&self.endpoint),
+            EventAttributeValueRef::String(self.endpoint.as_str()),
         );
         visitor(
             &OTAP_GRPC_EXPORTER_PROXY_CONFIGURED_DESCRIPTOR.attributes[1],
-            EventAttributeValueRef::Any(&self.proxy),
+            EventAttributeValueRef::String(self.proxy.as_str()),
         );
     }
 }
@@ -988,13 +988,13 @@ impl OtapGrpcExporterProxyConfigured {
 #[derive(Debug, Clone)]
 pub struct OtapGrpcExporterProxyConnectFailed {
     /// The error_kind value recorded by OTAP Dataflow internal telemetry.
-    pub error_kind: otap_df_telemetry::attributes::AttributeValue,
+    pub error_kind: String,
     /// The host value recorded by OTAP Dataflow internal telemetry.
-    pub host: otap_df_telemetry::attributes::AttributeValue,
+    pub host: String,
     /// The port value recorded by OTAP Dataflow internal telemetry.
     pub port: otap_df_telemetry::attributes::AttributeValue,
     /// The raw_os_error value recorded by OTAP Dataflow internal telemetry.
-    pub raw_os_error: otap_df_telemetry::attributes::AttributeValue,
+    pub raw_os_error: String,
 }
 
 /// Marker implemented only by entity types allowed by `otap_grpc_exporter.proxy.connect_failed`.
@@ -1020,14 +1020,14 @@ static OTAP_GRPC_EXPORTER_PROXY_CONNECT_FAILED_DESCRIPTOR: EventDescriptor = Eve
             key: "error_kind",
             wire_key: "error_kind",
             brief: "The error_kind value recorded by OTAP Dataflow internal telemetry.",
-            value_type: otap_df_telemetry::descriptor::AttributeValueType::Any,
+            value_type: otap_df_telemetry::descriptor::AttributeValueType::String,
             requirement_level: EventRequirementLevel::Required,
         },
         EventAttributeDescriptor {
             key: "host",
             wire_key: "host",
             brief: "The host value recorded by OTAP Dataflow internal telemetry.",
-            value_type: otap_df_telemetry::descriptor::AttributeValueType::Any,
+            value_type: otap_df_telemetry::descriptor::AttributeValueType::String,
             requirement_level: EventRequirementLevel::Required,
         },
         EventAttributeDescriptor {
@@ -1041,7 +1041,7 @@ static OTAP_GRPC_EXPORTER_PROXY_CONNECT_FAILED_DESCRIPTOR: EventDescriptor = Eve
             key: "raw_os_error",
             wire_key: "raw_os_error",
             brief: "The raw_os_error value recorded by OTAP Dataflow internal telemetry.",
-            value_type: otap_df_telemetry::descriptor::AttributeValueType::Any,
+            value_type: otap_df_telemetry::descriptor::AttributeValueType::String,
             requirement_level: EventRequirementLevel::Required,
         },
     ],
@@ -1055,11 +1055,11 @@ impl EventAttributes for OtapGrpcExporterProxyConnectFailed {
     ) {
         visitor(
             &OTAP_GRPC_EXPORTER_PROXY_CONNECT_FAILED_DESCRIPTOR.attributes[0],
-            EventAttributeValueRef::Any(&self.error_kind),
+            EventAttributeValueRef::String(self.error_kind.as_str()),
         );
         visitor(
             &OTAP_GRPC_EXPORTER_PROXY_CONNECT_FAILED_DESCRIPTOR.attributes[1],
-            EventAttributeValueRef::Any(&self.host),
+            EventAttributeValueRef::String(self.host.as_str()),
         );
         visitor(
             &OTAP_GRPC_EXPORTER_PROXY_CONNECT_FAILED_DESCRIPTOR.attributes[2],
@@ -1067,7 +1067,7 @@ impl EventAttributes for OtapGrpcExporterProxyConnectFailed {
         );
         visitor(
             &OTAP_GRPC_EXPORTER_PROXY_CONNECT_FAILED_DESCRIPTOR.attributes[3],
-            EventAttributeValueRef::Any(&self.raw_os_error),
+            EventAttributeValueRef::String(self.raw_os_error.as_str()),
         );
     }
 }
@@ -1096,9 +1096,9 @@ impl OtapGrpcExporterProxyConnectFailed {
 #[derive(Debug, Clone)]
 pub struct OtapGrpcExporterProxyConnectRequest {
     /// The has_auth value recorded by OTAP Dataflow internal telemetry.
-    pub has_auth: otap_df_telemetry::attributes::AttributeValue,
+    pub has_auth: bool,
     /// The target value recorded by OTAP Dataflow internal telemetry.
-    pub target: otap_df_telemetry::attributes::AttributeValue,
+    pub target: String,
 }
 
 /// Marker implemented only by entity types allowed by `otap_grpc_exporter.proxy.connect_request`.
@@ -1124,14 +1124,14 @@ static OTAP_GRPC_EXPORTER_PROXY_CONNECT_REQUEST_DESCRIPTOR: EventDescriptor = Ev
             key: "has_auth",
             wire_key: "has_auth",
             brief: "The has_auth value recorded by OTAP Dataflow internal telemetry.",
-            value_type: otap_df_telemetry::descriptor::AttributeValueType::Any,
+            value_type: otap_df_telemetry::descriptor::AttributeValueType::Boolean,
             requirement_level: EventRequirementLevel::Required,
         },
         EventAttributeDescriptor {
             key: "target",
             wire_key: "target",
             brief: "The target value recorded by OTAP Dataflow internal telemetry.",
-            value_type: otap_df_telemetry::descriptor::AttributeValueType::Any,
+            value_type: otap_df_telemetry::descriptor::AttributeValueType::String,
             requirement_level: EventRequirementLevel::Required,
         },
     ],
@@ -1145,11 +1145,11 @@ impl EventAttributes for OtapGrpcExporterProxyConnectRequest {
     ) {
         visitor(
             &OTAP_GRPC_EXPORTER_PROXY_CONNECT_REQUEST_DESCRIPTOR.attributes[0],
-            EventAttributeValueRef::Any(&self.has_auth),
+            EventAttributeValueRef::Boolean(self.has_auth),
         );
         visitor(
             &OTAP_GRPC_EXPORTER_PROXY_CONNECT_REQUEST_DESCRIPTOR.attributes[1],
-            EventAttributeValueRef::Any(&self.target),
+            EventAttributeValueRef::String(self.target.as_str()),
         );
     }
 }
@@ -1178,7 +1178,7 @@ impl OtapGrpcExporterProxyConnectRequest {
 #[derive(Debug, Clone)]
 pub struct OtapGrpcExporterProxyConnectResponse {
     /// The status_line value recorded by OTAP Dataflow internal telemetry.
-    pub status_line: otap_df_telemetry::attributes::AttributeValue,
+    pub status_line: String,
 }
 
 /// Marker implemented only by entity types allowed by `otap_grpc_exporter.proxy.connect_response`.
@@ -1203,7 +1203,7 @@ static OTAP_GRPC_EXPORTER_PROXY_CONNECT_RESPONSE_DESCRIPTOR: EventDescriptor = E
         key: "status_line",
         wire_key: "status_line",
         brief: "The status_line value recorded by OTAP Dataflow internal telemetry.",
-        value_type: otap_df_telemetry::descriptor::AttributeValueType::Any,
+        value_type: otap_df_telemetry::descriptor::AttributeValueType::String,
         requirement_level: EventRequirementLevel::Required,
     }],
 };
@@ -1216,7 +1216,7 @@ impl EventAttributes for OtapGrpcExporterProxyConnectResponse {
     ) {
         visitor(
             &OTAP_GRPC_EXPORTER_PROXY_CONNECT_RESPONSE_DESCRIPTOR.attributes[0],
-            EventAttributeValueRef::Any(&self.status_line),
+            EventAttributeValueRef::String(self.status_line.as_str()),
         );
     }
 }
@@ -1245,7 +1245,7 @@ impl OtapGrpcExporterProxyConnectResponse {
 #[derive(Debug, Clone)]
 pub struct OtapGrpcExporterProxyConnected {
     /// The host value recorded by OTAP Dataflow internal telemetry.
-    pub host: otap_df_telemetry::attributes::AttributeValue,
+    pub host: String,
     /// The port value recorded by OTAP Dataflow internal telemetry.
     pub port: otap_df_telemetry::attributes::AttributeValue,
 }
@@ -1273,7 +1273,7 @@ static OTAP_GRPC_EXPORTER_PROXY_CONNECTED_DESCRIPTOR: EventDescriptor = EventDes
             key: "host",
             wire_key: "host",
             brief: "The host value recorded by OTAP Dataflow internal telemetry.",
-            value_type: otap_df_telemetry::descriptor::AttributeValueType::Any,
+            value_type: otap_df_telemetry::descriptor::AttributeValueType::String,
             requirement_level: EventRequirementLevel::Required,
         },
         EventAttributeDescriptor {
@@ -1294,7 +1294,7 @@ impl EventAttributes for OtapGrpcExporterProxyConnected {
     ) {
         visitor(
             &OTAP_GRPC_EXPORTER_PROXY_CONNECTED_DESCRIPTOR.attributes[0],
-            EventAttributeValueRef::Any(&self.host),
+            EventAttributeValueRef::String(self.host.as_str()),
         );
         visitor(
             &OTAP_GRPC_EXPORTER_PROXY_CONNECTED_DESCRIPTOR.attributes[1],
@@ -1325,7 +1325,7 @@ impl OtapGrpcExporterProxyConnected {
 #[derive(Debug, Clone)]
 pub struct OtapGrpcExporterProxyConnecting {
     /// The host value recorded by OTAP Dataflow internal telemetry.
-    pub host: otap_df_telemetry::attributes::AttributeValue,
+    pub host: String,
     /// The port value recorded by OTAP Dataflow internal telemetry.
     pub port: otap_df_telemetry::attributes::AttributeValue,
 }
@@ -1353,7 +1353,7 @@ static OTAP_GRPC_EXPORTER_PROXY_CONNECTING_DESCRIPTOR: EventDescriptor = EventDe
             key: "host",
             wire_key: "host",
             brief: "The host value recorded by OTAP Dataflow internal telemetry.",
-            value_type: otap_df_telemetry::descriptor::AttributeValueType::Any,
+            value_type: otap_df_telemetry::descriptor::AttributeValueType::String,
             requirement_level: EventRequirementLevel::Required,
         },
         EventAttributeDescriptor {
@@ -1374,7 +1374,7 @@ impl EventAttributes for OtapGrpcExporterProxyConnecting {
     ) {
         visitor(
             &OTAP_GRPC_EXPORTER_PROXY_CONNECTING_DESCRIPTOR.attributes[0],
-            EventAttributeValueRef::Any(&self.host),
+            EventAttributeValueRef::String(self.host.as_str()),
         );
         visitor(
             &OTAP_GRPC_EXPORTER_PROXY_CONNECTING_DESCRIPTOR.attributes[1],
@@ -1406,7 +1406,7 @@ impl OtapGrpcExporterProxyConnecting {
 #[derive(Debug, Clone)]
 pub struct OtapGrpcExporterProxyInvalidCidr {
     /// The pattern value recorded by OTAP Dataflow internal telemetry.
-    pub pattern: otap_df_telemetry::attributes::AttributeValue,
+    pub pattern: String,
 }
 
 /// Marker implemented only by entity types allowed by `otap_grpc_exporter.proxy.invalid_cidr`.
@@ -1431,7 +1431,7 @@ static OTAP_GRPC_EXPORTER_PROXY_INVALID_CIDR_DESCRIPTOR: EventDescriptor = Event
         key: "pattern",
         wire_key: "pattern",
         brief: "The pattern value recorded by OTAP Dataflow internal telemetry.",
-        value_type: otap_df_telemetry::descriptor::AttributeValueType::Any,
+        value_type: otap_df_telemetry::descriptor::AttributeValueType::String,
         requirement_level: EventRequirementLevel::Required,
     }],
 };
@@ -1444,7 +1444,7 @@ impl EventAttributes for OtapGrpcExporterProxyInvalidCidr {
     ) {
         visitor(
             &OTAP_GRPC_EXPORTER_PROXY_INVALID_CIDR_DESCRIPTOR.attributes[0],
-            EventAttributeValueRef::Any(&self.pattern),
+            EventAttributeValueRef::String(self.pattern.as_str()),
         );
     }
 }
@@ -1472,7 +1472,7 @@ impl OtapGrpcExporterProxyInvalidCidr {
 #[derive(Debug, Clone)]
 pub struct OtapGrpcExporterProxyNone {
     /// The target value recorded by OTAP Dataflow internal telemetry.
-    pub target: otap_df_telemetry::attributes::AttributeValue,
+    pub target: String,
 }
 
 /// Marker implemented only by entity types allowed by `otap_grpc_exporter.proxy.none`.
@@ -1497,7 +1497,7 @@ static OTAP_GRPC_EXPORTER_PROXY_NONE_DESCRIPTOR: EventDescriptor = EventDescript
         key: "target",
         wire_key: "target",
         brief: "The target value recorded by OTAP Dataflow internal telemetry.",
-        value_type: otap_df_telemetry::descriptor::AttributeValueType::Any,
+        value_type: otap_df_telemetry::descriptor::AttributeValueType::String,
         requirement_level: EventRequirementLevel::Required,
     }],
 };
@@ -1510,7 +1510,7 @@ impl EventAttributes for OtapGrpcExporterProxyNone {
     ) {
         visitor(
             &OTAP_GRPC_EXPORTER_PROXY_NONE_DESCRIPTOR.attributes[0],
-            EventAttributeValueRef::Any(&self.target),
+            EventAttributeValueRef::String(self.target.as_str()),
         );
     }
 }
@@ -1537,7 +1537,7 @@ impl OtapGrpcExporterProxyNone {
 #[derive(Debug, Clone)]
 pub struct OtapGrpcExporterProxyTlsNativeCertAddError {
     /// The error value recorded by OTAP Dataflow internal telemetry.
-    pub error: otap_df_telemetry::attributes::AttributeValue,
+    pub error: String,
 }
 
 /// Marker implemented only by entity types allowed by `otap_grpc_exporter.proxy.tls.native_cert.add_error`.
@@ -1569,7 +1569,7 @@ static OTAP_GRPC_EXPORTER_PROXY_TLS_NATIVE_CERT_ADD_ERROR_DESCRIPTOR: EventDescr
             key: "error",
             wire_key: "error",
             brief: "The error value recorded by OTAP Dataflow internal telemetry.",
-            value_type: otap_df_telemetry::descriptor::AttributeValueType::Any,
+            value_type: otap_df_telemetry::descriptor::AttributeValueType::String,
             requirement_level: EventRequirementLevel::Required,
         }],
     };
@@ -1582,7 +1582,7 @@ impl EventAttributes for OtapGrpcExporterProxyTlsNativeCertAddError {
     ) {
         visitor(
             &OTAP_GRPC_EXPORTER_PROXY_TLS_NATIVE_CERT_ADD_ERROR_DESCRIPTOR.attributes[0],
-            EventAttributeValueRef::Any(&self.error),
+            EventAttributeValueRef::String(self.error.as_str()),
         );
     }
 }
@@ -1611,7 +1611,7 @@ impl OtapGrpcExporterProxyTlsNativeCertAddError {
 #[derive(Debug, Clone)]
 pub struct OtapGrpcExporterProxyTlsNativeCertLoadError {
     /// The error value recorded by OTAP Dataflow internal telemetry.
-    pub error: otap_df_telemetry::attributes::AttributeValue,
+    pub error: String,
 }
 
 /// Marker implemented only by entity types allowed by `otap_grpc_exporter.proxy.tls.native_cert.load_error`.
@@ -1643,7 +1643,7 @@ static OTAP_GRPC_EXPORTER_PROXY_TLS_NATIVE_CERT_LOAD_ERROR_DESCRIPTOR: EventDesc
             key: "error",
             wire_key: "error",
             brief: "The error value recorded by OTAP Dataflow internal telemetry.",
-            value_type: otap_df_telemetry::descriptor::AttributeValueType::Any,
+            value_type: otap_df_telemetry::descriptor::AttributeValueType::String,
             requirement_level: EventRequirementLevel::Required,
         }],
     };
@@ -1656,7 +1656,7 @@ impl EventAttributes for OtapGrpcExporterProxyTlsNativeCertLoadError {
     ) {
         visitor(
             &OTAP_GRPC_EXPORTER_PROXY_TLS_NATIVE_CERT_LOAD_ERROR_DESCRIPTOR.attributes[0],
-            EventAttributeValueRef::Any(&self.error),
+            EventAttributeValueRef::String(self.error.as_str()),
         );
     }
 }
@@ -1685,7 +1685,7 @@ impl OtapGrpcExporterProxyTlsNativeCertLoadError {
 #[derive(Debug, Clone)]
 pub struct OtapGrpcExporterProxyTlsProviderInstall {
     /// The error value recorded by OTAP Dataflow internal telemetry.
-    pub error: otap_df_telemetry::attributes::AttributeValue,
+    pub error: String,
 }
 
 /// Marker implemented only by entity types allowed by `otap_grpc_exporter.proxy.tls.provider.install`.
@@ -1717,7 +1717,7 @@ static OTAP_GRPC_EXPORTER_PROXY_TLS_PROVIDER_INSTALL_DESCRIPTOR: EventDescriptor
             key: "error",
             wire_key: "error",
             brief: "The error value recorded by OTAP Dataflow internal telemetry.",
-            value_type: otap_df_telemetry::descriptor::AttributeValueType::Any,
+            value_type: otap_df_telemetry::descriptor::AttributeValueType::String,
             requirement_level: EventRequirementLevel::Required,
         }],
     };
@@ -1730,7 +1730,7 @@ impl EventAttributes for OtapGrpcExporterProxyTlsProviderInstall {
     ) {
         visitor(
             &OTAP_GRPC_EXPORTER_PROXY_TLS_PROVIDER_INSTALL_DESCRIPTOR.attributes[0],
-            EventAttributeValueRef::Any(&self.error),
+            EventAttributeValueRef::String(self.error.as_str()),
         );
     }
 }
@@ -1759,9 +1759,9 @@ impl OtapGrpcExporterProxyTlsProviderInstall {
 #[derive(Debug, Clone)]
 pub struct OtapGrpcExporterProxyUsing {
     /// The proxy value recorded by OTAP Dataflow internal telemetry.
-    pub proxy: otap_df_telemetry::attributes::AttributeValue,
+    pub proxy: String,
     /// The target value recorded by OTAP Dataflow internal telemetry.
-    pub target: otap_df_telemetry::attributes::AttributeValue,
+    pub target: String,
 }
 
 /// Marker implemented only by entity types allowed by `otap_grpc_exporter.proxy.using`.
@@ -1787,14 +1787,14 @@ static OTAP_GRPC_EXPORTER_PROXY_USING_DESCRIPTOR: EventDescriptor = EventDescrip
             key: "proxy",
             wire_key: "proxy",
             brief: "The proxy value recorded by OTAP Dataflow internal telemetry.",
-            value_type: otap_df_telemetry::descriptor::AttributeValueType::Any,
+            value_type: otap_df_telemetry::descriptor::AttributeValueType::String,
             requirement_level: EventRequirementLevel::Required,
         },
         EventAttributeDescriptor {
             key: "target",
             wire_key: "target",
             brief: "The target value recorded by OTAP Dataflow internal telemetry.",
-            value_type: otap_df_telemetry::descriptor::AttributeValueType::Any,
+            value_type: otap_df_telemetry::descriptor::AttributeValueType::String,
             requirement_level: EventRequirementLevel::Required,
         },
     ],
@@ -1808,11 +1808,11 @@ impl EventAttributes for OtapGrpcExporterProxyUsing {
     ) {
         visitor(
             &OTAP_GRPC_EXPORTER_PROXY_USING_DESCRIPTOR.attributes[0],
-            EventAttributeValueRef::Any(&self.proxy),
+            EventAttributeValueRef::String(self.proxy.as_str()),
         );
         visitor(
             &OTAP_GRPC_EXPORTER_PROXY_USING_DESCRIPTOR.attributes[1],
-            EventAttributeValueRef::Any(&self.target),
+            EventAttributeValueRef::String(self.target.as_str()),
         );
     }
 }
@@ -1839,7 +1839,7 @@ impl OtapGrpcExporterProxyUsing {
 #[derive(Debug, Clone)]
 pub struct OtlpHttpReceiverBodyCollectionFailed {
     /// The error value recorded by OTAP Dataflow internal telemetry.
-    pub error: otap_df_telemetry::attributes::AttributeValue,
+    pub error: String,
 }
 
 /// Marker implemented only by entity types allowed by `otlp_http_receiver.body_collection_failed`.
@@ -1864,7 +1864,7 @@ static OTLP_HTTP_RECEIVER_BODY_COLLECTION_FAILED_DESCRIPTOR: EventDescriptor = E
         key: "error",
         wire_key: "error",
         brief: "The error value recorded by OTAP Dataflow internal telemetry.",
-        value_type: otap_df_telemetry::descriptor::AttributeValueType::Any,
+        value_type: otap_df_telemetry::descriptor::AttributeValueType::String,
         requirement_level: EventRequirementLevel::Required,
     }],
 };
@@ -1877,7 +1877,7 @@ impl EventAttributes for OtlpHttpReceiverBodyCollectionFailed {
     ) {
         visitor(
             &OTLP_HTTP_RECEIVER_BODY_COLLECTION_FAILED_DESCRIPTOR.attributes[0],
-            EventAttributeValueRef::Any(&self.error),
+            EventAttributeValueRef::String(self.error.as_str()),
         );
     }
 }
@@ -1906,7 +1906,7 @@ impl OtlpHttpReceiverBodyCollectionFailed {
 #[derive(Debug, Clone)]
 pub struct OtlpHttpReceiverConnectionError {
     /// The error value recorded by OTAP Dataflow internal telemetry.
-    pub error: otap_df_telemetry::attributes::AttributeValue,
+    pub error: String,
 }
 
 /// Marker implemented only by entity types allowed by `otlp_http_receiver.connection_error`.
@@ -1931,7 +1931,7 @@ static OTLP_HTTP_RECEIVER_CONNECTION_ERROR_DESCRIPTOR: EventDescriptor = EventDe
         key: "error",
         wire_key: "error",
         brief: "The error value recorded by OTAP Dataflow internal telemetry.",
-        value_type: otap_df_telemetry::descriptor::AttributeValueType::Any,
+        value_type: otap_df_telemetry::descriptor::AttributeValueType::String,
         requirement_level: EventRequirementLevel::Required,
     }],
 };
@@ -1944,7 +1944,7 @@ impl EventAttributes for OtlpHttpReceiverConnectionError {
     ) {
         visitor(
             &OTLP_HTTP_RECEIVER_CONNECTION_ERROR_DESCRIPTOR.attributes[0],
-            EventAttributeValueRef::Any(&self.error),
+            EventAttributeValueRef::String(self.error.as_str()),
         );
     }
 }
@@ -2136,19 +2136,19 @@ pub struct OtlpHttpReceiverRequestRejected {
     /// The encoding value recorded by OTAP Dataflow internal telemetry.
     pub encoding: Option<String>,
     /// The error value recorded by OTAP Dataflow internal telemetry.
-    pub error: Option<otap_df_telemetry::attributes::AttributeValue>,
+    pub error: Option<String>,
     /// The max_concurrent value recorded by OTAP Dataflow internal telemetry.
-    pub max_concurrent: Option<otap_df_telemetry::attributes::AttributeValue>,
+    pub max_concurrent: Option<i64>,
     /// The max_len value recorded by OTAP Dataflow internal telemetry.
-    pub max_len: Option<otap_df_telemetry::attributes::AttributeValue>,
+    pub max_len: Option<i64>,
     /// The path value recorded by OTAP Dataflow internal telemetry.
     pub path: Option<String>,
     /// The reason value recorded by OTAP Dataflow internal telemetry.
     pub reason: String,
     /// The size_hint value recorded by OTAP Dataflow internal telemetry.
-    pub size_hint: Option<otap_df_telemetry::attributes::AttributeValue>,
+    pub size_hint: Option<i64>,
     /// The timeout_ms value recorded by OTAP Dataflow internal telemetry.
-    pub timeout_ms: Option<otap_df_telemetry::attributes::AttributeValue>,
+    pub timeout_ms: Option<i64>,
 }
 
 /// Marker implemented only by entity types allowed by `otlp_http_receiver.request_rejected`.
@@ -2181,21 +2181,21 @@ static OTLP_HTTP_RECEIVER_REQUEST_REJECTED_DESCRIPTOR: EventDescriptor = EventDe
             key: "error",
             wire_key: "error",
             brief: "The error value recorded by OTAP Dataflow internal telemetry.",
-            value_type: otap_df_telemetry::descriptor::AttributeValueType::Any,
+            value_type: otap_df_telemetry::descriptor::AttributeValueType::String,
             requirement_level: EventRequirementLevel::Recommended,
         },
         EventAttributeDescriptor {
             key: "max_concurrent",
             wire_key: "max_concurrent",
             brief: "The max_concurrent value recorded by OTAP Dataflow internal telemetry.",
-            value_type: otap_df_telemetry::descriptor::AttributeValueType::Any,
+            value_type: otap_df_telemetry::descriptor::AttributeValueType::Int,
             requirement_level: EventRequirementLevel::Recommended,
         },
         EventAttributeDescriptor {
             key: "max_len",
             wire_key: "max_len",
             brief: "The max_len value recorded by OTAP Dataflow internal telemetry.",
-            value_type: otap_df_telemetry::descriptor::AttributeValueType::Any,
+            value_type: otap_df_telemetry::descriptor::AttributeValueType::Int,
             requirement_level: EventRequirementLevel::Recommended,
         },
         EventAttributeDescriptor {
@@ -2216,14 +2216,14 @@ static OTLP_HTTP_RECEIVER_REQUEST_REJECTED_DESCRIPTOR: EventDescriptor = EventDe
             key: "size_hint",
             wire_key: "size_hint",
             brief: "The size_hint value recorded by OTAP Dataflow internal telemetry.",
-            value_type: otap_df_telemetry::descriptor::AttributeValueType::Any,
+            value_type: otap_df_telemetry::descriptor::AttributeValueType::Int,
             requirement_level: EventRequirementLevel::Recommended,
         },
         EventAttributeDescriptor {
             key: "timeout_ms",
             wire_key: "timeout_ms",
             brief: "The timeout_ms value recorded by OTAP Dataflow internal telemetry.",
-            value_type: otap_df_telemetry::descriptor::AttributeValueType::Any,
+            value_type: otap_df_telemetry::descriptor::AttributeValueType::Int,
             requirement_level: EventRequirementLevel::Recommended,
         },
     ],
@@ -2244,19 +2244,19 @@ impl EventAttributes for OtlpHttpReceiverRequestRejected {
         if let Some(value) = &self.error {
             visitor(
                 &OTLP_HTTP_RECEIVER_REQUEST_REJECTED_DESCRIPTOR.attributes[1],
-                EventAttributeValueRef::Any(value),
+                EventAttributeValueRef::String(value.as_str()),
             );
         }
         if let Some(value) = &self.max_concurrent {
             visitor(
                 &OTLP_HTTP_RECEIVER_REQUEST_REJECTED_DESCRIPTOR.attributes[2],
-                EventAttributeValueRef::Any(value),
+                EventAttributeValueRef::Int(*value),
             );
         }
         if let Some(value) = &self.max_len {
             visitor(
                 &OTLP_HTTP_RECEIVER_REQUEST_REJECTED_DESCRIPTOR.attributes[3],
-                EventAttributeValueRef::Any(value),
+                EventAttributeValueRef::Int(*value),
             );
         }
         if let Some(value) = &self.path {
@@ -2272,13 +2272,13 @@ impl EventAttributes for OtlpHttpReceiverRequestRejected {
         if let Some(value) = &self.size_hint {
             visitor(
                 &OTLP_HTTP_RECEIVER_REQUEST_REJECTED_DESCRIPTOR.attributes[6],
-                EventAttributeValueRef::Any(value),
+                EventAttributeValueRef::Int(*value),
             );
         }
         if let Some(value) = &self.timeout_ms {
             visitor(
                 &OTLP_HTTP_RECEIVER_REQUEST_REJECTED_DESCRIPTOR.attributes[7],
-                EventAttributeValueRef::Any(value),
+                EventAttributeValueRef::Int(*value),
             );
         }
     }
@@ -2319,7 +2319,7 @@ pub struct OtlpHttpReceiverRequestTimeout {
     /// The signal value recorded by OTAP Dataflow internal telemetry.
     pub signal: String,
     /// The timeout_ms value recorded by OTAP Dataflow internal telemetry.
-    pub timeout_ms: otap_df_telemetry::attributes::AttributeValue,
+    pub timeout_ms: i64,
 }
 
 /// Marker implemented only by entity types allowed by `otlp_http_receiver.request_timeout`.
@@ -2359,7 +2359,7 @@ static OTLP_HTTP_RECEIVER_REQUEST_TIMEOUT_DESCRIPTOR: EventDescriptor = EventDes
             key: "timeout_ms",
             wire_key: "timeout_ms",
             brief: "The timeout_ms value recorded by OTAP Dataflow internal telemetry.",
-            value_type: otap_df_telemetry::descriptor::AttributeValueType::Any,
+            value_type: otap_df_telemetry::descriptor::AttributeValueType::Int,
             requirement_level: EventRequirementLevel::Required,
         },
     ],
@@ -2381,7 +2381,7 @@ impl EventAttributes for OtlpHttpReceiverRequestTimeout {
         );
         visitor(
             &OTLP_HTTP_RECEIVER_REQUEST_TIMEOUT_DESCRIPTOR.attributes[2],
-            EventAttributeValueRef::Any(&self.timeout_ms),
+            EventAttributeValueRef::Int(self.timeout_ms),
         );
     }
 }
@@ -2489,7 +2489,7 @@ impl OtlpHttpReceiverSemaphoreClosed {
 #[derive(Debug, Clone)]
 pub struct OtlpHttpReceiverShutdownTimeout {
     /// The timeout_ms value recorded by OTAP Dataflow internal telemetry.
-    pub timeout_ms: otap_df_telemetry::attributes::AttributeValue,
+    pub timeout_ms: i64,
 }
 
 /// Marker implemented only by entity types allowed by `otlp_http_receiver.shutdown_timeout`.
@@ -2514,7 +2514,7 @@ static OTLP_HTTP_RECEIVER_SHUTDOWN_TIMEOUT_DESCRIPTOR: EventDescriptor = EventDe
         key: "timeout_ms",
         wire_key: "timeout_ms",
         brief: "The timeout_ms value recorded by OTAP Dataflow internal telemetry.",
-        value_type: otap_df_telemetry::descriptor::AttributeValueType::Any,
+        value_type: otap_df_telemetry::descriptor::AttributeValueType::Int,
         requirement_level: EventRequirementLevel::Required,
     }],
 };
@@ -2527,7 +2527,7 @@ impl EventAttributes for OtlpHttpReceiverShutdownTimeout {
     ) {
         visitor(
             &OTLP_HTTP_RECEIVER_SHUTDOWN_TIMEOUT_DESCRIPTOR.attributes[0],
-            EventAttributeValueRef::Any(&self.timeout_ms),
+            EventAttributeValueRef::Int(self.timeout_ms),
         );
     }
 }
@@ -2555,9 +2555,9 @@ impl OtlpHttpReceiverShutdownTimeout {
 #[derive(Debug, Clone)]
 pub struct OtlpHttpReceiverSocketOptionsFailed {
     /// The error value recorded by OTAP Dataflow internal telemetry.
-    pub error: otap_df_telemetry::attributes::AttributeValue,
+    pub error: String,
     /// The peer value recorded by OTAP Dataflow internal telemetry.
-    pub peer: otap_df_telemetry::attributes::AttributeValue,
+    pub peer: String,
 }
 
 /// Marker implemented only by entity types allowed by `otlp_http_receiver.socket_options_failed`.
@@ -2583,14 +2583,14 @@ static OTLP_HTTP_RECEIVER_SOCKET_OPTIONS_FAILED_DESCRIPTOR: EventDescriptor = Ev
             key: "error",
             wire_key: "error",
             brief: "The error value recorded by OTAP Dataflow internal telemetry.",
-            value_type: otap_df_telemetry::descriptor::AttributeValueType::Any,
+            value_type: otap_df_telemetry::descriptor::AttributeValueType::String,
             requirement_level: EventRequirementLevel::Required,
         },
         EventAttributeDescriptor {
             key: "peer",
             wire_key: "peer",
             brief: "The peer value recorded by OTAP Dataflow internal telemetry.",
-            value_type: otap_df_telemetry::descriptor::AttributeValueType::Any,
+            value_type: otap_df_telemetry::descriptor::AttributeValueType::String,
             requirement_level: EventRequirementLevel::Required,
         },
     ],
@@ -2604,11 +2604,11 @@ impl EventAttributes for OtlpHttpReceiverSocketOptionsFailed {
     ) {
         visitor(
             &OTLP_HTTP_RECEIVER_SOCKET_OPTIONS_FAILED_DESCRIPTOR.attributes[0],
-            EventAttributeValueRef::Any(&self.error),
+            EventAttributeValueRef::String(self.error.as_str()),
         );
         visitor(
             &OTLP_HTTP_RECEIVER_SOCKET_OPTIONS_FAILED_DESCRIPTOR.attributes[1],
-            EventAttributeValueRef::Any(&self.peer),
+            EventAttributeValueRef::String(self.peer.as_str()),
         );
     }
 }
@@ -2637,7 +2637,7 @@ impl OtlpHttpReceiverSocketOptionsFailed {
 #[derive(Debug, Clone)]
 pub struct TlsCaInitialLoad {
     /// The size_bytes value recorded by OTAP Dataflow internal telemetry.
-    pub size_bytes: otap_df_telemetry::attributes::AttributeValue,
+    pub size_bytes: i64,
 }
 
 /// Marker implemented only by entity types allowed by `tls.ca.initial_load`.
@@ -2662,7 +2662,7 @@ static TLS_CA_INITIAL_LOAD_DESCRIPTOR: EventDescriptor = EventDescriptor {
         key: "size_bytes",
         wire_key: "size_bytes",
         brief: "The size_bytes value recorded by OTAP Dataflow internal telemetry.",
-        value_type: otap_df_telemetry::descriptor::AttributeValueType::Any,
+        value_type: otap_df_telemetry::descriptor::AttributeValueType::Int,
         requirement_level: EventRequirementLevel::Required,
     }],
 };
@@ -2675,7 +2675,7 @@ impl EventAttributes for TlsCaInitialLoad {
     ) {
         visitor(
             &TLS_CA_INITIAL_LOAD_DESCRIPTOR.attributes[0],
-            EventAttributeValueRef::Any(&self.size_bytes),
+            EventAttributeValueRef::Int(self.size_bytes),
         );
     }
 }
@@ -2702,7 +2702,7 @@ impl TlsCaInitialLoad {
 #[derive(Debug, Clone)]
 pub struct TlsCaReloaded {
     /// The size_bytes value recorded by OTAP Dataflow internal telemetry.
-    pub size_bytes: otap_df_telemetry::attributes::AttributeValue,
+    pub size_bytes: i64,
 }
 
 /// Marker implemented only by entity types allowed by `tls.ca.reloaded`.
@@ -2727,7 +2727,7 @@ static TLS_CA_RELOADED_DESCRIPTOR: EventDescriptor = EventDescriptor {
         key: "size_bytes",
         wire_key: "size_bytes",
         brief: "The size_bytes value recorded by OTAP Dataflow internal telemetry.",
-        value_type: otap_df_telemetry::descriptor::AttributeValueType::Any,
+        value_type: otap_df_telemetry::descriptor::AttributeValueType::Int,
         requirement_level: EventRequirementLevel::Required,
     }],
 };
@@ -2740,7 +2740,7 @@ impl EventAttributes for TlsCaReloaded {
     ) {
         visitor(
             &TLS_CA_RELOADED_DESCRIPTOR.attributes[0],
-            EventAttributeValueRef::Any(&self.size_bytes),
+            EventAttributeValueRef::Int(self.size_bytes),
         );
     }
 }
@@ -2767,7 +2767,7 @@ impl TlsCaReloaded {
 #[derive(Debug, Clone)]
 pub struct TlsCaVerifierBuilt {
     /// The count value recorded by OTAP Dataflow internal telemetry.
-    pub count: otap_df_telemetry::attributes::AttributeValue,
+    pub count: i64,
 }
 
 /// Marker implemented only by entity types allowed by `tls.ca.verifier_built`.
@@ -2792,7 +2792,7 @@ static TLS_CA_VERIFIER_BUILT_DESCRIPTOR: EventDescriptor = EventDescriptor {
         key: "count",
         wire_key: "count",
         brief: "The count value recorded by OTAP Dataflow internal telemetry.",
-        value_type: otap_df_telemetry::descriptor::AttributeValueType::Any,
+        value_type: otap_df_telemetry::descriptor::AttributeValueType::Int,
         requirement_level: EventRequirementLevel::Required,
     }],
 };
@@ -2805,7 +2805,7 @@ impl EventAttributes for TlsCaVerifierBuilt {
     ) {
         visitor(
             &TLS_CA_VERIFIER_BUILT_DESCRIPTOR.attributes[0],
-            EventAttributeValueRef::Any(&self.count),
+            EventAttributeValueRef::Int(self.count),
         );
     }
 }
@@ -2834,7 +2834,7 @@ pub struct TlsCaFileReadError {
     /// The ca_file value recorded by OTAP Dataflow internal telemetry.
     pub ca_file: String,
     /// The error value recorded by OTAP Dataflow internal telemetry.
-    pub error: otap_df_telemetry::attributes::AttributeValue,
+    pub error: String,
 }
 
 /// Marker implemented only by entity types allowed by `tls.ca_file.read_error`.
@@ -2870,7 +2870,7 @@ static TLS_CA_FILE_READ_ERROR_DESCRIPTOR: EventDescriptor = EventDescriptor {
             key: "error",
             wire_key: "error",
             brief: "The error value recorded by OTAP Dataflow internal telemetry.",
-            value_type: otap_df_telemetry::descriptor::AttributeValueType::Any,
+            value_type: otap_df_telemetry::descriptor::AttributeValueType::String,
             requirement_level: EventRequirementLevel::Required,
         },
     ],
@@ -2888,7 +2888,7 @@ impl EventAttributes for TlsCaFileReadError {
         );
         visitor(
             &TLS_CA_FILE_READ_ERROR_DESCRIPTOR.attributes[1],
-            EventAttributeValueRef::Any(&self.error),
+            EventAttributeValueRef::String(self.error.as_str()),
         );
     }
 }
@@ -2915,7 +2915,7 @@ impl TlsCaFileReadError {
 #[derive(Debug, Clone)]
 pub struct TlsCertMtimeCheckFailed {
     /// The error value recorded by OTAP Dataflow internal telemetry.
-    pub error: otap_df_telemetry::attributes::AttributeValue,
+    pub error: String,
 }
 
 /// Marker implemented only by entity types allowed by `tls.cert.mtime_check_failed`.
@@ -2940,7 +2940,7 @@ static TLS_CERT_MTIME_CHECK_FAILED_DESCRIPTOR: EventDescriptor = EventDescriptor
         key: "error",
         wire_key: "error",
         brief: "The error value recorded by OTAP Dataflow internal telemetry.",
-        value_type: otap_df_telemetry::descriptor::AttributeValueType::Any,
+        value_type: otap_df_telemetry::descriptor::AttributeValueType::String,
         requirement_level: EventRequirementLevel::Required,
     }],
 };
@@ -2953,7 +2953,7 @@ impl EventAttributes for TlsCertMtimeCheckFailed {
     ) {
         visitor(
             &TLS_CERT_MTIME_CHECK_FAILED_DESCRIPTOR.attributes[0],
-            EventAttributeValueRef::Any(&self.error),
+            EventAttributeValueRef::String(self.error.as_str()),
         );
     }
 }
@@ -2982,7 +2982,7 @@ pub struct TlsCertFileReadError {
     /// The cert_file value recorded by OTAP Dataflow internal telemetry.
     pub cert_file: String,
     /// The error value recorded by OTAP Dataflow internal telemetry.
-    pub error: otap_df_telemetry::attributes::AttributeValue,
+    pub error: String,
 }
 
 /// Marker implemented only by entity types allowed by `tls.cert_file.read_error`.
@@ -3018,7 +3018,7 @@ static TLS_CERT_FILE_READ_ERROR_DESCRIPTOR: EventDescriptor = EventDescriptor {
             key: "error",
             wire_key: "error",
             brief: "The error value recorded by OTAP Dataflow internal telemetry.",
-            value_type: otap_df_telemetry::descriptor::AttributeValueType::Any,
+            value_type: otap_df_telemetry::descriptor::AttributeValueType::String,
             requirement_level: EventRequirementLevel::Required,
         },
     ],
@@ -3036,7 +3036,7 @@ impl EventAttributes for TlsCertFileReadError {
         );
         visitor(
             &TLS_CERT_FILE_READ_ERROR_DESCRIPTOR.attributes[1],
-            EventAttributeValueRef::Any(&self.error),
+            EventAttributeValueRef::String(self.error.as_str()),
         );
     }
 }
@@ -3063,7 +3063,7 @@ impl TlsCertFileReadError {
 #[derive(Debug, Clone)]
 pub struct TlsCertReloadFailed {
     /// The error value recorded by OTAP Dataflow internal telemetry.
-    pub error: otap_df_telemetry::attributes::AttributeValue,
+    pub error: String,
 }
 
 /// Marker implemented only by entity types allowed by `tls.cert_reload_failed`.
@@ -3088,7 +3088,7 @@ static TLS_CERT_RELOAD_FAILED_DESCRIPTOR: EventDescriptor = EventDescriptor {
         key: "error",
         wire_key: "error",
         brief: "The error value recorded by OTAP Dataflow internal telemetry.",
-        value_type: otap_df_telemetry::descriptor::AttributeValueType::Any,
+        value_type: otap_df_telemetry::descriptor::AttributeValueType::String,
         requirement_level: EventRequirementLevel::Required,
     }],
 };
@@ -3101,7 +3101,7 @@ impl EventAttributes for TlsCertReloadFailed {
     ) {
         visitor(
             &TLS_CERT_RELOAD_FAILED_DESCRIPTOR.attributes[0],
-            EventAttributeValueRef::Any(&self.error),
+            EventAttributeValueRef::String(self.error.as_str()),
         );
     }
 }
@@ -3210,7 +3210,7 @@ pub struct TlsClientCertFileReadError {
     /// The cert_path value recorded by OTAP Dataflow internal telemetry.
     pub cert_path: String,
     /// The error value recorded by OTAP Dataflow internal telemetry.
-    pub error: otap_df_telemetry::attributes::AttributeValue,
+    pub error: String,
 }
 
 /// Marker implemented only by entity types allowed by `tls.client_cert_file.read_error`.
@@ -3243,7 +3243,7 @@ static TLS_CLIENT_CERT_FILE_READ_ERROR_DESCRIPTOR: EventDescriptor = EventDescri
             key: "error",
             wire_key: "error",
             brief: "The error value recorded by OTAP Dataflow internal telemetry.",
-            value_type: otap_df_telemetry::descriptor::AttributeValueType::Any,
+            value_type: otap_df_telemetry::descriptor::AttributeValueType::String,
             requirement_level: EventRequirementLevel::Required,
         },
     ],
@@ -3261,7 +3261,7 @@ impl EventAttributes for TlsClientCertFileReadError {
         );
         visitor(
             &TLS_CLIENT_CERT_FILE_READ_ERROR_DESCRIPTOR.attributes[1],
-            EventAttributeValueRef::Any(&self.error),
+            EventAttributeValueRef::String(self.error.as_str()),
         );
     }
 }
@@ -3288,7 +3288,7 @@ impl TlsClientCertFileReadError {
 #[derive(Debug, Clone)]
 pub struct TlsClientKeyFileReadError {
     /// The error value recorded by OTAP Dataflow internal telemetry.
-    pub error: otap_df_telemetry::attributes::AttributeValue,
+    pub error: String,
     /// The key_path value recorded by OTAP Dataflow internal telemetry.
     pub key_path: String,
 }
@@ -3316,7 +3316,7 @@ static TLS_CLIENT_KEY_FILE_READ_ERROR_DESCRIPTOR: EventDescriptor = EventDescrip
             key: "error",
             wire_key: "error",
             brief: "The error value recorded by OTAP Dataflow internal telemetry.",
-            value_type: otap_df_telemetry::descriptor::AttributeValueType::Any,
+            value_type: otap_df_telemetry::descriptor::AttributeValueType::String,
             requirement_level: EventRequirementLevel::Required,
         },
         EventAttributeDescriptor {
@@ -3337,7 +3337,7 @@ impl EventAttributes for TlsClientKeyFileReadError {
     ) {
         visitor(
             &TLS_CLIENT_KEY_FILE_READ_ERROR_DESCRIPTOR.attributes[0],
-            EventAttributeValueRef::Any(&self.error),
+            EventAttributeValueRef::String(self.error.as_str()),
         );
         visitor(
             &TLS_CLIENT_KEY_FILE_READ_ERROR_DESCRIPTOR.attributes[1],
@@ -3420,7 +3420,7 @@ impl TlsFileWatcherDebounce {
 #[derive(Debug, Clone)]
 pub struct TlsFileWatcherError {
     /// The error value recorded by OTAP Dataflow internal telemetry.
-    pub error: otap_df_telemetry::attributes::AttributeValue,
+    pub error: String,
 }
 
 /// Marker implemented only by entity types allowed by `tls.file_watcher.error`.
@@ -3445,7 +3445,7 @@ static TLS_FILE_WATCHER_ERROR_DESCRIPTOR: EventDescriptor = EventDescriptor {
         key: "error",
         wire_key: "error",
         brief: "The error value recorded by OTAP Dataflow internal telemetry.",
-        value_type: otap_df_telemetry::descriptor::AttributeValueType::Any,
+        value_type: otap_df_telemetry::descriptor::AttributeValueType::String,
         requirement_level: EventRequirementLevel::Required,
     }],
 };
@@ -3458,7 +3458,7 @@ impl EventAttributes for TlsFileWatcherError {
     ) {
         visitor(
             &TLS_FILE_WATCHER_ERROR_DESCRIPTOR.attributes[0],
-            EventAttributeValueRef::Any(&self.error),
+            EventAttributeValueRef::String(self.error.as_str()),
         );
     }
 }
@@ -3550,9 +3550,9 @@ impl TlsFileWatcherEvent {
 #[derive(Debug, Clone)]
 pub struct TlsFileWatcherIdentityChanged {
     /// The current_identity value recorded by OTAP Dataflow internal telemetry.
-    pub current_identity: otap_df_telemetry::attributes::AttributeValue,
+    pub current_identity: i64,
     /// The prev_identity value recorded by OTAP Dataflow internal telemetry.
-    pub prev_identity: otap_df_telemetry::attributes::AttributeValue,
+    pub prev_identity: i64,
 }
 
 /// Marker implemented only by entity types allowed by `tls.file_watcher.identity_changed`.
@@ -3578,14 +3578,14 @@ static TLS_FILE_WATCHER_IDENTITY_CHANGED_DESCRIPTOR: EventDescriptor = EventDesc
             key: "current_identity",
             wire_key: "current_identity",
             brief: "The current_identity value recorded by OTAP Dataflow internal telemetry.",
-            value_type: otap_df_telemetry::descriptor::AttributeValueType::Any,
+            value_type: otap_df_telemetry::descriptor::AttributeValueType::Int,
             requirement_level: EventRequirementLevel::Required,
         },
         EventAttributeDescriptor {
             key: "prev_identity",
             wire_key: "prev_identity",
             brief: "The prev_identity value recorded by OTAP Dataflow internal telemetry.",
-            value_type: otap_df_telemetry::descriptor::AttributeValueType::Any,
+            value_type: otap_df_telemetry::descriptor::AttributeValueType::Int,
             requirement_level: EventRequirementLevel::Required,
         },
     ],
@@ -3599,11 +3599,11 @@ impl EventAttributes for TlsFileWatcherIdentityChanged {
     ) {
         visitor(
             &TLS_FILE_WATCHER_IDENTITY_CHANGED_DESCRIPTOR.attributes[0],
-            EventAttributeValueRef::Any(&self.current_identity),
+            EventAttributeValueRef::Int(self.current_identity),
         );
         visitor(
             &TLS_FILE_WATCHER_IDENTITY_CHANGED_DESCRIPTOR.attributes[1],
-            EventAttributeValueRef::Any(&self.prev_identity),
+            EventAttributeValueRef::Int(self.prev_identity),
         );
     }
 }
@@ -3630,7 +3630,7 @@ impl TlsFileWatcherIdentityChanged {
 #[derive(Debug, Clone)]
 pub struct TlsFileWatcherIdentityError {
     /// The error value recorded by OTAP Dataflow internal telemetry.
-    pub error: otap_df_telemetry::attributes::AttributeValue,
+    pub error: String,
 }
 
 /// Marker implemented only by entity types allowed by `tls.file_watcher.identity_error`.
@@ -3655,7 +3655,7 @@ static TLS_FILE_WATCHER_IDENTITY_ERROR_DESCRIPTOR: EventDescriptor = EventDescri
         key: "error",
         wire_key: "error",
         brief: "The error value recorded by OTAP Dataflow internal telemetry.",
-        value_type: otap_df_telemetry::descriptor::AttributeValueType::Any,
+        value_type: otap_df_telemetry::descriptor::AttributeValueType::String,
         requirement_level: EventRequirementLevel::Required,
     }],
 };
@@ -3668,7 +3668,7 @@ impl EventAttributes for TlsFileWatcherIdentityError {
     ) {
         visitor(
             &TLS_FILE_WATCHER_IDENTITY_ERROR_DESCRIPTOR.attributes[0],
-            EventAttributeValueRef::Any(&self.error),
+            EventAttributeValueRef::String(self.error.as_str()),
         );
     }
 }
@@ -3880,7 +3880,7 @@ impl TlsFileWatcherNoMatch {
 #[derive(Debug, Clone)]
 pub struct TlsFileWatcherReloadFailed {
     /// The error value recorded by OTAP Dataflow internal telemetry.
-    pub error: otap_df_telemetry::attributes::AttributeValue,
+    pub error: String,
 }
 
 /// Marker implemented only by entity types allowed by `tls.file_watcher.reload_failed`.
@@ -3905,7 +3905,7 @@ static TLS_FILE_WATCHER_RELOAD_FAILED_DESCRIPTOR: EventDescriptor = EventDescrip
         key: "error",
         wire_key: "error",
         brief: "The error value recorded by OTAP Dataflow internal telemetry.",
-        value_type: otap_df_telemetry::descriptor::AttributeValueType::Any,
+        value_type: otap_df_telemetry::descriptor::AttributeValueType::String,
         requirement_level: EventRequirementLevel::Required,
     }],
 };
@@ -3918,7 +3918,7 @@ impl EventAttributes for TlsFileWatcherReloadFailed {
     ) {
         visitor(
             &TLS_FILE_WATCHER_RELOAD_FAILED_DESCRIPTOR.attributes[0],
-            EventAttributeValueRef::Any(&self.error),
+            EventAttributeValueRef::String(self.error.as_str()),
         );
     }
 }
@@ -4197,7 +4197,7 @@ impl TlsFileWatcherSetup {
 #[derive(Debug, Clone)]
 pub struct TlsHandshakeFailed {
     /// The error value recorded by OTAP Dataflow internal telemetry.
-    pub error: otap_df_telemetry::attributes::AttributeValue,
+    pub error: String,
 }
 
 /// Marker implemented only by entity types allowed by `tls.handshake.failed`.
@@ -4222,7 +4222,7 @@ static TLS_HANDSHAKE_FAILED_DESCRIPTOR: EventDescriptor = EventDescriptor {
         key: "error",
         wire_key: "error",
         brief: "The error value recorded by OTAP Dataflow internal telemetry.",
-        value_type: otap_df_telemetry::descriptor::AttributeValueType::Any,
+        value_type: otap_df_telemetry::descriptor::AttributeValueType::String,
         requirement_level: EventRequirementLevel::Required,
     }],
 };
@@ -4235,7 +4235,7 @@ impl EventAttributes for TlsHandshakeFailed {
     ) {
         visitor(
             &TLS_HANDSHAKE_FAILED_DESCRIPTOR.attributes[0],
-            EventAttributeValueRef::Any(&self.error),
+            EventAttributeValueRef::String(self.error.as_str()),
         );
     }
 }
@@ -4314,7 +4314,7 @@ impl TlsHandshakeTimeout {
 #[derive(Debug, Clone)]
 pub struct TlsKeyMtimeCheckFailed {
     /// The error value recorded by OTAP Dataflow internal telemetry.
-    pub error: otap_df_telemetry::attributes::AttributeValue,
+    pub error: String,
 }
 
 /// Marker implemented only by entity types allowed by `tls.key.mtime_check_failed`.
@@ -4339,7 +4339,7 @@ static TLS_KEY_MTIME_CHECK_FAILED_DESCRIPTOR: EventDescriptor = EventDescriptor 
         key: "error",
         wire_key: "error",
         brief: "The error value recorded by OTAP Dataflow internal telemetry.",
-        value_type: otap_df_telemetry::descriptor::AttributeValueType::Any,
+        value_type: otap_df_telemetry::descriptor::AttributeValueType::String,
         requirement_level: EventRequirementLevel::Required,
     }],
 };
@@ -4352,7 +4352,7 @@ impl EventAttributes for TlsKeyMtimeCheckFailed {
     ) {
         visitor(
             &TLS_KEY_MTIME_CHECK_FAILED_DESCRIPTOR.attributes[0],
-            EventAttributeValueRef::Any(&self.error),
+            EventAttributeValueRef::String(self.error.as_str()),
         );
     }
 }
@@ -4379,7 +4379,7 @@ impl TlsKeyMtimeCheckFailed {
 #[derive(Debug, Clone)]
 pub struct TlsKeyFileReadError {
     /// The error value recorded by OTAP Dataflow internal telemetry.
-    pub error: otap_df_telemetry::attributes::AttributeValue,
+    pub error: String,
     /// The key_file value recorded by OTAP Dataflow internal telemetry.
     pub key_file: String,
 }
@@ -4410,7 +4410,7 @@ static TLS_KEY_FILE_READ_ERROR_DESCRIPTOR: EventDescriptor = EventDescriptor {
             key: "error",
             wire_key: "error",
             brief: "The error value recorded by OTAP Dataflow internal telemetry.",
-            value_type: otap_df_telemetry::descriptor::AttributeValueType::Any,
+            value_type: otap_df_telemetry::descriptor::AttributeValueType::String,
             requirement_level: EventRequirementLevel::Required,
         },
         EventAttributeDescriptor {
@@ -4431,7 +4431,7 @@ impl EventAttributes for TlsKeyFileReadError {
     ) {
         visitor(
             &TLS_KEY_FILE_READ_ERROR_DESCRIPTOR.attributes[0],
-            EventAttributeValueRef::Any(&self.error),
+            EventAttributeValueRef::String(self.error.as_str()),
         );
         visitor(
             &TLS_KEY_FILE_READ_ERROR_DESCRIPTOR.attributes[1],
@@ -4618,7 +4618,7 @@ impl TlsMtlsDisabled {
 #[derive(Debug, Clone)]
 pub struct TlsNativeCertAddError {
     /// The error value recorded by OTAP Dataflow internal telemetry.
-    pub error: otap_df_telemetry::attributes::AttributeValue,
+    pub error: String,
 }
 
 /// Marker implemented only by entity types allowed by `tls.native_cert.add_error`.
@@ -4643,7 +4643,7 @@ static TLS_NATIVE_CERT_ADD_ERROR_DESCRIPTOR: EventDescriptor = EventDescriptor {
         key: "error",
         wire_key: "error",
         brief: "The error value recorded by OTAP Dataflow internal telemetry.",
-        value_type: otap_df_telemetry::descriptor::AttributeValueType::Any,
+        value_type: otap_df_telemetry::descriptor::AttributeValueType::String,
         requirement_level: EventRequirementLevel::Required,
     }],
 };
@@ -4656,7 +4656,7 @@ impl EventAttributes for TlsNativeCertAddError {
     ) {
         visitor(
             &TLS_NATIVE_CERT_ADD_ERROR_DESCRIPTOR.attributes[0],
-            EventAttributeValueRef::Any(&self.error),
+            EventAttributeValueRef::String(self.error.as_str()),
         );
     }
 }
@@ -4683,7 +4683,7 @@ impl TlsNativeCertAddError {
 #[derive(Debug, Clone)]
 pub struct TlsNativeCertLoadError {
     /// The error value recorded by OTAP Dataflow internal telemetry.
-    pub error: otap_df_telemetry::attributes::AttributeValue,
+    pub error: String,
 }
 
 /// Marker implemented only by entity types allowed by `tls.native_cert.load_error`.
@@ -4708,7 +4708,7 @@ static TLS_NATIVE_CERT_LOAD_ERROR_DESCRIPTOR: EventDescriptor = EventDescriptor 
         key: "error",
         wire_key: "error",
         brief: "The error value recorded by OTAP Dataflow internal telemetry.",
-        value_type: otap_df_telemetry::descriptor::AttributeValueType::Any,
+        value_type: otap_df_telemetry::descriptor::AttributeValueType::String,
         requirement_level: EventRequirementLevel::Required,
     }],
 };
@@ -4721,7 +4721,7 @@ impl EventAttributes for TlsNativeCertLoadError {
     ) {
         visitor(
             &TLS_NATIVE_CERT_LOAD_ERROR_DESCRIPTOR.attributes[0],
-            EventAttributeValueRef::Any(&self.error),
+            EventAttributeValueRef::String(self.error.as_str()),
         );
     }
 }
@@ -4748,7 +4748,7 @@ impl TlsNativeCertLoadError {
 #[derive(Debug, Clone)]
 pub struct TlsNativeCertLoadErrors {
     /// The count value recorded by OTAP Dataflow internal telemetry.
-    pub count: otap_df_telemetry::attributes::AttributeValue,
+    pub count: i64,
     /// The first value recorded by OTAP Dataflow internal telemetry.
     pub first: String,
 }
@@ -4776,7 +4776,7 @@ static TLS_NATIVE_CERT_LOAD_ERRORS_DESCRIPTOR: EventDescriptor = EventDescriptor
             key: "count",
             wire_key: "count",
             brief: "The count value recorded by OTAP Dataflow internal telemetry.",
-            value_type: otap_df_telemetry::descriptor::AttributeValueType::Any,
+            value_type: otap_df_telemetry::descriptor::AttributeValueType::Int,
             requirement_level: EventRequirementLevel::Required,
         },
         EventAttributeDescriptor {
@@ -4797,7 +4797,7 @@ impl EventAttributes for TlsNativeCertLoadErrors {
     ) {
         visitor(
             &TLS_NATIVE_CERT_LOAD_ERRORS_DESCRIPTOR.attributes[0],
-            EventAttributeValueRef::Any(&self.count),
+            EventAttributeValueRef::Int(self.count),
         );
         visitor(
             &TLS_NATIVE_CERT_LOAD_ERRORS_DESCRIPTOR.attributes[1],
@@ -4828,9 +4828,9 @@ impl TlsNativeCertLoadErrors {
 #[derive(Debug, Clone)]
 pub struct TlsNativeCertLoaded {
     /// The added value recorded by OTAP Dataflow internal telemetry.
-    pub added: otap_df_telemetry::attributes::AttributeValue,
+    pub added: i64,
     /// The ignored value recorded by OTAP Dataflow internal telemetry.
-    pub ignored: otap_df_telemetry::attributes::AttributeValue,
+    pub ignored: i64,
 }
 
 /// Marker implemented only by entity types allowed by `tls.native_cert.loaded`.
@@ -4856,14 +4856,14 @@ static TLS_NATIVE_CERT_LOADED_DESCRIPTOR: EventDescriptor = EventDescriptor {
             key: "added",
             wire_key: "added",
             brief: "The added value recorded by OTAP Dataflow internal telemetry.",
-            value_type: otap_df_telemetry::descriptor::AttributeValueType::Any,
+            value_type: otap_df_telemetry::descriptor::AttributeValueType::Int,
             requirement_level: EventRequirementLevel::Required,
         },
         EventAttributeDescriptor {
             key: "ignored",
             wire_key: "ignored",
             brief: "The ignored value recorded by OTAP Dataflow internal telemetry.",
-            value_type: otap_df_telemetry::descriptor::AttributeValueType::Any,
+            value_type: otap_df_telemetry::descriptor::AttributeValueType::Int,
             requirement_level: EventRequirementLevel::Required,
         },
     ],
@@ -4877,11 +4877,11 @@ impl EventAttributes for TlsNativeCertLoaded {
     ) {
         visitor(
             &TLS_NATIVE_CERT_LOADED_DESCRIPTOR.attributes[0],
-            EventAttributeValueRef::Any(&self.added),
+            EventAttributeValueRef::Int(self.added),
         );
         visitor(
             &TLS_NATIVE_CERT_LOADED_DESCRIPTOR.attributes[1],
-            EventAttributeValueRef::Any(&self.ignored),
+            EventAttributeValueRef::Int(self.ignored),
         );
     }
 }
@@ -4908,7 +4908,7 @@ impl TlsNativeCertLoaded {
 #[derive(Debug, Clone)]
 pub struct TlsPollWatcherError {
     /// The error value recorded by OTAP Dataflow internal telemetry.
-    pub error: otap_df_telemetry::attributes::AttributeValue,
+    pub error: String,
 }
 
 /// Marker implemented only by entity types allowed by `tls.poll_watcher.error`.
@@ -4933,7 +4933,7 @@ static TLS_POLL_WATCHER_ERROR_DESCRIPTOR: EventDescriptor = EventDescriptor {
         key: "error",
         wire_key: "error",
         brief: "The error value recorded by OTAP Dataflow internal telemetry.",
-        value_type: otap_df_telemetry::descriptor::AttributeValueType::Any,
+        value_type: otap_df_telemetry::descriptor::AttributeValueType::String,
         requirement_level: EventRequirementLevel::Required,
     }],
 };
@@ -4946,7 +4946,7 @@ impl EventAttributes for TlsPollWatcherError {
     ) {
         visitor(
             &TLS_POLL_WATCHER_ERROR_DESCRIPTOR.attributes[0],
-            EventAttributeValueRef::Any(&self.error),
+            EventAttributeValueRef::String(self.error.as_str()),
         );
     }
 }
@@ -5038,7 +5038,7 @@ impl TlsPollWatcherEvent {
 #[derive(Debug, Clone)]
 pub struct TlsPollWatcherReloadFailed {
     /// The error value recorded by OTAP Dataflow internal telemetry.
-    pub error: otap_df_telemetry::attributes::AttributeValue,
+    pub error: String,
 }
 
 /// Marker implemented only by entity types allowed by `tls.poll_watcher.reload_failed`.
@@ -5063,7 +5063,7 @@ static TLS_POLL_WATCHER_RELOAD_FAILED_DESCRIPTOR: EventDescriptor = EventDescrip
         key: "error",
         wire_key: "error",
         brief: "The error value recorded by OTAP Dataflow internal telemetry.",
-        value_type: otap_df_telemetry::descriptor::AttributeValueType::Any,
+        value_type: otap_df_telemetry::descriptor::AttributeValueType::String,
         requirement_level: EventRequirementLevel::Required,
     }],
 };
@@ -5076,7 +5076,7 @@ impl EventAttributes for TlsPollWatcherReloadFailed {
     ) {
         visitor(
             &TLS_POLL_WATCHER_RELOAD_FAILED_DESCRIPTOR.attributes[0],
-            EventAttributeValueRef::Any(&self.error),
+            EventAttributeValueRef::String(self.error.as_str()),
         );
     }
 }

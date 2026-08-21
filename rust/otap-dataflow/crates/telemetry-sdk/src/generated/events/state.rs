@@ -78,23 +78,23 @@ impl StateMutexPoisoned {
 #[derive(Debug, Clone)]
 pub struct StateObservedError {
     /// The core_id value recorded by OTAP Dataflow internal telemetry.
-    pub core_id: otap_df_telemetry::attributes::AttributeValue,
+    pub core_id: i64,
     /// The error value recorded by OTAP Dataflow internal telemetry.
-    pub error: otap_df_telemetry::attributes::AttributeValue,
+    pub error: String,
     /// The error_kind value recorded by OTAP Dataflow internal telemetry.
-    pub error_kind: otap_df_telemetry::attributes::AttributeValue,
+    pub error_kind: String,
     /// The event_type value recorded by OTAP Dataflow internal telemetry.
-    pub event_type: otap_df_telemetry::attributes::AttributeValue,
+    pub event_type: String,
     /// The node value recorded by OTAP Dataflow internal telemetry.
-    pub node: otap_df_telemetry::attributes::AttributeValue,
+    pub node: String,
     /// The node_kind value recorded by OTAP Dataflow internal telemetry.
-    pub node_kind: otap_df_telemetry::attributes::AttributeValue,
+    pub node_kind: String,
     /// The pipeline_group_id value recorded by OTAP Dataflow internal telemetry.
-    pub pipeline_group_id: otap_df_telemetry::attributes::AttributeValue,
+    pub pipeline_group_id: String,
     /// The pipeline_id value recorded by OTAP Dataflow internal telemetry.
-    pub pipeline_id: otap_df_telemetry::attributes::AttributeValue,
+    pub pipeline_id: String,
     /// The source value recorded by OTAP Dataflow internal telemetry.
-    pub source: otap_df_telemetry::attributes::AttributeValue,
+    pub source: String,
 }
 
 /// Marker implemented only by entity types allowed by `state.observed_error`.
@@ -118,63 +118,63 @@ static STATE_OBSERVED_ERROR_DESCRIPTOR: EventDescriptor = EventDescriptor {
             key: "core_id",
             wire_key: "core_id",
             brief: "The core_id value recorded by OTAP Dataflow internal telemetry.",
-            value_type: otap_df_telemetry::descriptor::AttributeValueType::Any,
+            value_type: otap_df_telemetry::descriptor::AttributeValueType::Int,
             requirement_level: EventRequirementLevel::Required,
         },
         EventAttributeDescriptor {
             key: "error",
             wire_key: "error",
             brief: "The error value recorded by OTAP Dataflow internal telemetry.",
-            value_type: otap_df_telemetry::descriptor::AttributeValueType::Any,
+            value_type: otap_df_telemetry::descriptor::AttributeValueType::String,
             requirement_level: EventRequirementLevel::Required,
         },
         EventAttributeDescriptor {
             key: "error_kind",
             wire_key: "error_kind",
             brief: "The error_kind value recorded by OTAP Dataflow internal telemetry.",
-            value_type: otap_df_telemetry::descriptor::AttributeValueType::Any,
+            value_type: otap_df_telemetry::descriptor::AttributeValueType::String,
             requirement_level: EventRequirementLevel::Required,
         },
         EventAttributeDescriptor {
             key: "event_type",
             wire_key: "event_type",
             brief: "The event_type value recorded by OTAP Dataflow internal telemetry.",
-            value_type: otap_df_telemetry::descriptor::AttributeValueType::Any,
+            value_type: otap_df_telemetry::descriptor::AttributeValueType::String,
             requirement_level: EventRequirementLevel::Required,
         },
         EventAttributeDescriptor {
             key: "node",
             wire_key: "node",
             brief: "The node value recorded by OTAP Dataflow internal telemetry.",
-            value_type: otap_df_telemetry::descriptor::AttributeValueType::Any,
+            value_type: otap_df_telemetry::descriptor::AttributeValueType::String,
             requirement_level: EventRequirementLevel::Required,
         },
         EventAttributeDescriptor {
             key: "node_kind",
             wire_key: "node_kind",
             brief: "The node_kind value recorded by OTAP Dataflow internal telemetry.",
-            value_type: otap_df_telemetry::descriptor::AttributeValueType::Any,
+            value_type: otap_df_telemetry::descriptor::AttributeValueType::String,
             requirement_level: EventRequirementLevel::Required,
         },
         EventAttributeDescriptor {
             key: "pipeline_group_id",
             wire_key: "pipeline_group_id",
             brief: "The pipeline_group_id value recorded by OTAP Dataflow internal telemetry.",
-            value_type: otap_df_telemetry::descriptor::AttributeValueType::Any,
+            value_type: otap_df_telemetry::descriptor::AttributeValueType::String,
             requirement_level: EventRequirementLevel::Required,
         },
         EventAttributeDescriptor {
             key: "pipeline_id",
             wire_key: "pipeline_id",
             brief: "The pipeline_id value recorded by OTAP Dataflow internal telemetry.",
-            value_type: otap_df_telemetry::descriptor::AttributeValueType::Any,
+            value_type: otap_df_telemetry::descriptor::AttributeValueType::String,
             requirement_level: EventRequirementLevel::Required,
         },
         EventAttributeDescriptor {
             key: "source",
             wire_key: "source",
             brief: "The source value recorded by OTAP Dataflow internal telemetry.",
-            value_type: otap_df_telemetry::descriptor::AttributeValueType::Any,
+            value_type: otap_df_telemetry::descriptor::AttributeValueType::String,
             requirement_level: EventRequirementLevel::Required,
         },
     ],
@@ -188,39 +188,39 @@ impl EventAttributes for StateObservedError {
     ) {
         visitor(
             &STATE_OBSERVED_ERROR_DESCRIPTOR.attributes[0],
-            EventAttributeValueRef::Any(&self.core_id),
+            EventAttributeValueRef::Int(self.core_id),
         );
         visitor(
             &STATE_OBSERVED_ERROR_DESCRIPTOR.attributes[1],
-            EventAttributeValueRef::Any(&self.error),
+            EventAttributeValueRef::String(self.error.as_str()),
         );
         visitor(
             &STATE_OBSERVED_ERROR_DESCRIPTOR.attributes[2],
-            EventAttributeValueRef::Any(&self.error_kind),
+            EventAttributeValueRef::String(self.error_kind.as_str()),
         );
         visitor(
             &STATE_OBSERVED_ERROR_DESCRIPTOR.attributes[3],
-            EventAttributeValueRef::Any(&self.event_type),
+            EventAttributeValueRef::String(self.event_type.as_str()),
         );
         visitor(
             &STATE_OBSERVED_ERROR_DESCRIPTOR.attributes[4],
-            EventAttributeValueRef::Any(&self.node),
+            EventAttributeValueRef::String(self.node.as_str()),
         );
         visitor(
             &STATE_OBSERVED_ERROR_DESCRIPTOR.attributes[5],
-            EventAttributeValueRef::Any(&self.node_kind),
+            EventAttributeValueRef::String(self.node_kind.as_str()),
         );
         visitor(
             &STATE_OBSERVED_ERROR_DESCRIPTOR.attributes[6],
-            EventAttributeValueRef::Any(&self.pipeline_group_id),
+            EventAttributeValueRef::String(self.pipeline_group_id.as_str()),
         );
         visitor(
             &STATE_OBSERVED_ERROR_DESCRIPTOR.attributes[7],
-            EventAttributeValueRef::Any(&self.pipeline_id),
+            EventAttributeValueRef::String(self.pipeline_id.as_str()),
         );
         visitor(
             &STATE_OBSERVED_ERROR_DESCRIPTOR.attributes[8],
-            EventAttributeValueRef::Any(&self.source),
+            EventAttributeValueRef::String(self.source.as_str()),
         );
     }
 }
@@ -247,13 +247,13 @@ impl StateObservedError {
 #[derive(Debug, Clone)]
 pub struct StateObservedEvent {
     /// The core_id value recorded by OTAP Dataflow internal telemetry.
-    pub core_id: otap_df_telemetry::attributes::AttributeValue,
+    pub core_id: i64,
     /// The event_type value recorded by OTAP Dataflow internal telemetry.
-    pub event_type: otap_df_telemetry::attributes::AttributeValue,
+    pub event_type: String,
     /// The pipeline_group_id value recorded by OTAP Dataflow internal telemetry.
-    pub pipeline_group_id: otap_df_telemetry::attributes::AttributeValue,
+    pub pipeline_group_id: String,
     /// The pipeline_id value recorded by OTAP Dataflow internal telemetry.
-    pub pipeline_id: otap_df_telemetry::attributes::AttributeValue,
+    pub pipeline_id: String,
 }
 
 /// Marker implemented only by entity types allowed by `state.observed_event`.
@@ -277,28 +277,28 @@ static STATE_OBSERVED_EVENT_DESCRIPTOR: EventDescriptor = EventDescriptor {
             key: "core_id",
             wire_key: "core_id",
             brief: "The core_id value recorded by OTAP Dataflow internal telemetry.",
-            value_type: otap_df_telemetry::descriptor::AttributeValueType::Any,
+            value_type: otap_df_telemetry::descriptor::AttributeValueType::Int,
             requirement_level: EventRequirementLevel::Required,
         },
         EventAttributeDescriptor {
             key: "event_type",
             wire_key: "event_type",
             brief: "The event_type value recorded by OTAP Dataflow internal telemetry.",
-            value_type: otap_df_telemetry::descriptor::AttributeValueType::Any,
+            value_type: otap_df_telemetry::descriptor::AttributeValueType::String,
             requirement_level: EventRequirementLevel::Required,
         },
         EventAttributeDescriptor {
             key: "pipeline_group_id",
             wire_key: "pipeline_group_id",
             brief: "The pipeline_group_id value recorded by OTAP Dataflow internal telemetry.",
-            value_type: otap_df_telemetry::descriptor::AttributeValueType::Any,
+            value_type: otap_df_telemetry::descriptor::AttributeValueType::String,
             requirement_level: EventRequirementLevel::Required,
         },
         EventAttributeDescriptor {
             key: "pipeline_id",
             wire_key: "pipeline_id",
             brief: "The pipeline_id value recorded by OTAP Dataflow internal telemetry.",
-            value_type: otap_df_telemetry::descriptor::AttributeValueType::Any,
+            value_type: otap_df_telemetry::descriptor::AttributeValueType::String,
             requirement_level: EventRequirementLevel::Required,
         },
     ],
@@ -312,19 +312,19 @@ impl EventAttributes for StateObservedEvent {
     ) {
         visitor(
             &STATE_OBSERVED_EVENT_DESCRIPTOR.attributes[0],
-            EventAttributeValueRef::Any(&self.core_id),
+            EventAttributeValueRef::Int(self.core_id),
         );
         visitor(
             &STATE_OBSERVED_EVENT_DESCRIPTOR.attributes[1],
-            EventAttributeValueRef::Any(&self.event_type),
+            EventAttributeValueRef::String(self.event_type.as_str()),
         );
         visitor(
             &STATE_OBSERVED_EVENT_DESCRIPTOR.attributes[2],
-            EventAttributeValueRef::Any(&self.pipeline_group_id),
+            EventAttributeValueRef::String(self.pipeline_group_id.as_str()),
         );
         visitor(
             &STATE_OBSERVED_EVENT_DESCRIPTOR.attributes[3],
-            EventAttributeValueRef::Any(&self.pipeline_id),
+            EventAttributeValueRef::String(self.pipeline_id.as_str()),
         );
     }
 }
@@ -351,7 +351,7 @@ impl StateObservedEvent {
 #[derive(Debug, Clone)]
 pub struct StateReportFailed {
     /// The error value recorded by OTAP Dataflow internal telemetry.
-    pub error: otap_df_telemetry::attributes::AttributeValue,
+    pub error: String,
 }
 
 /// Marker implemented only by entity types allowed by `state.report_failed`.
@@ -374,7 +374,7 @@ static STATE_REPORT_FAILED_DESCRIPTOR: EventDescriptor = EventDescriptor {
         key: "error",
         wire_key: "error",
         brief: "The error value recorded by OTAP Dataflow internal telemetry.",
-        value_type: otap_df_telemetry::descriptor::AttributeValueType::Any,
+        value_type: otap_df_telemetry::descriptor::AttributeValueType::String,
         requirement_level: EventRequirementLevel::Required,
     }],
 };
@@ -387,7 +387,7 @@ impl EventAttributes for StateReportFailed {
     ) {
         visitor(
             &STATE_REPORT_FAILED_DESCRIPTOR.attributes[0],
-            EventAttributeValueRef::Any(&self.error),
+            EventAttributeValueRef::String(self.error.as_str()),
         );
     }
 }

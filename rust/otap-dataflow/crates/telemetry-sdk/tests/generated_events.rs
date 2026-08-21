@@ -154,8 +154,8 @@ fn generated_event_omits_absent_optional_attributes() {
 #[test]
 fn generated_dynamic_event_accepts_a_concrete_level() {
     let event = RecordsetKqlProcessorQueryOutput {
-        query_column_number: AttributeValue::UInt(8),
-        query_line_number: AttributeValue::UInt(21),
+        query_column_number: 8,
+        query_line_number: 21,
     };
     let mut client = EventClient::new(RecordingSink::default());
 

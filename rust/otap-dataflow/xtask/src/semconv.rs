@@ -141,6 +141,10 @@ impl AttributeType {
         Self::Primitive("any".to_owned())
     }
 
+    fn is_any(&self) -> bool {
+        matches!(self, Self::Primitive(value) if value == "any")
+    }
+
     fn merge(&mut self, incoming: &Self) {
         if self == incoming {
             return;
@@ -2227,7 +2231,7 @@ impl Registry {
                 None,
                 errors,
             );
-            check_equal(
+            check_attribute_type(
                 &format!("attribute {wire_key} type"),
                 &attribute.r#type,
                 &expected_type,
@@ -2509,9 +2513,17 @@ impl Registry {
                     .attributes
                     .keys()
                     .filter_map(|key| {
-                        global_attributes
-                            .get(key)
-                            .map(|value_type| (key.clone(), value_type.wire_type().to_owned()))
+                        global_attributes.get(key).map(|value_type| {
+                            let value_type = if value_type.is_any() {
+                                actual_attributes
+                                    .get(key)
+                                    .cloned()
+                                    .unwrap_or_else(|| "any".to_owned())
+                            } else {
+                                value_type.wire_type().to_owned()
+                            };
+                            (key.clone(), value_type)
+                        })
                     })
                     .collect::<BTreeMap<_, _>>(),
                 errors,
@@ -3123,6 +3135,17 @@ where
     }
 }
 
+fn check_attribute_type(
+    label: &str,
+    actual: &AttributeType,
+    expected: &AttributeType,
+    errors: &mut Vec<String>,
+) {
+    if !expected.is_any() {
+        check_equal(label, actual, expected, errors);
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -3231,6 +3254,28 @@ mod tests {
 
         r#type.merge(&AttributeType::Primitive("int".to_owned()));
         assert_eq!(r#type, AttributeType::any());
+    }
+
+    /// Scenario: syntax-only source discovery cannot determine an event expression's type.
+    /// Guarantees: a concrete audited registry type refines `any`, while known source types remain strict.
+    #[test]
+    fn registry_type_may_refine_unknown_source_type() {
+        let mut errors = Vec::new();
+        check_attribute_type(
+            "unknown source",
+            &AttributeType::Primitive("int".to_owned()),
+            &AttributeType::any(),
+            &mut errors,
+        );
+        assert!(errors.is_empty());
+
+        check_attribute_type(
+            "known source",
+            &AttributeType::Primitive("int".to_owned()),
+            &AttributeType::Primitive("string".to_owned()),
+            &mut errors,
+        );
+        assert_eq!(errors.len(), 1);
     }
 
     /// Scenario: registry attributes and events omit redundant wire identifier annotations.

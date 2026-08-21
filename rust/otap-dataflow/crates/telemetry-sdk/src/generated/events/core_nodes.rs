@@ -15,7 +15,7 @@ use crate::event::{
 #[derive(Debug, Clone)]
 pub struct ConsoleFormatFailed {
     /// The error value recorded by OTAP Dataflow internal telemetry.
-    pub error: otap_df_telemetry::attributes::AttributeValue,
+    pub error: String,
 }
 
 /// Marker implemented only by entity types allowed by `console.format_failed`.
@@ -40,7 +40,7 @@ static CONSOLE_FORMAT_FAILED_DESCRIPTOR: EventDescriptor = EventDescriptor {
         key: "error",
         wire_key: "error",
         brief: "The error value recorded by OTAP Dataflow internal telemetry.",
-        value_type: otap_df_telemetry::descriptor::AttributeValueType::Any,
+        value_type: otap_df_telemetry::descriptor::AttributeValueType::String,
         requirement_level: EventRequirementLevel::Required,
     }],
 };
@@ -53,7 +53,7 @@ impl EventAttributes for ConsoleFormatFailed {
     ) {
         visitor(
             &CONSOLE_FORMAT_FAILED_DESCRIPTOR.attributes[0],
-            EventAttributeValueRef::Any(&self.error),
+            EventAttributeValueRef::String(self.error.as_str()),
         );
     }
 }
@@ -80,7 +80,7 @@ impl ConsoleFormatFailed {
 #[derive(Debug, Clone)]
 pub struct ConsoleLogsViewOtapCreateFailed {
     /// The error value recorded by OTAP Dataflow internal telemetry.
-    pub error: otap_df_telemetry::attributes::AttributeValue,
+    pub error: String,
 }
 
 /// Marker implemented only by entity types allowed by `console.logs_view.otap_create_failed`.
@@ -105,7 +105,7 @@ static CONSOLE_LOGS_VIEW_OTAP_CREATE_FAILED_DESCRIPTOR: EventDescriptor = EventD
         key: "error",
         wire_key: "error",
         brief: "The error value recorded by OTAP Dataflow internal telemetry.",
-        value_type: otap_df_telemetry::descriptor::AttributeValueType::Any,
+        value_type: otap_df_telemetry::descriptor::AttributeValueType::String,
         requirement_level: EventRequirementLevel::Required,
     }],
 };
@@ -118,7 +118,7 @@ impl EventAttributes for ConsoleLogsViewOtapCreateFailed {
     ) {
         visitor(
             &CONSOLE_LOGS_VIEW_OTAP_CREATE_FAILED_DESCRIPTOR.attributes[0],
-            EventAttributeValueRef::Any(&self.error),
+            EventAttributeValueRef::String(self.error.as_str()),
         );
     }
 }
@@ -146,7 +146,7 @@ impl ConsoleLogsViewOtapCreateFailed {
 #[derive(Debug, Clone)]
 pub struct ConsoleLogsViewOtlpCreateFailed {
     /// The error value recorded by OTAP Dataflow internal telemetry.
-    pub error: otap_df_telemetry::attributes::AttributeValue,
+    pub error: String,
 }
 
 /// Marker implemented only by entity types allowed by `console.logs_view.otlp_create_failed`.
@@ -171,7 +171,7 @@ static CONSOLE_LOGS_VIEW_OTLP_CREATE_FAILED_DESCRIPTOR: EventDescriptor = EventD
         key: "error",
         wire_key: "error",
         brief: "The error value recorded by OTAP Dataflow internal telemetry.",
-        value_type: otap_df_telemetry::descriptor::AttributeValueType::Any,
+        value_type: otap_df_telemetry::descriptor::AttributeValueType::String,
         requirement_level: EventRequirementLevel::Required,
     }],
 };
@@ -184,7 +184,7 @@ impl EventAttributes for ConsoleLogsViewOtlpCreateFailed {
     ) {
         visitor(
             &CONSOLE_LOGS_VIEW_OTLP_CREATE_FAILED_DESCRIPTOR.attributes[0],
-            EventAttributeValueRef::Any(&self.error),
+            EventAttributeValueRef::String(self.error.as_str()),
         );
     }
 }
@@ -277,7 +277,7 @@ impl ConsoleMessageUnsupportedSignal {
 #[derive(Debug, Clone)]
 pub struct ConsoleWriteFailed {
     /// The error value recorded by OTAP Dataflow internal telemetry.
-    pub error: otap_df_telemetry::attributes::AttributeValue,
+    pub error: String,
 }
 
 /// Marker implemented only by entity types allowed by `console.write_failed`.
@@ -302,7 +302,7 @@ static CONSOLE_WRITE_FAILED_DESCRIPTOR: EventDescriptor = EventDescriptor {
         key: "error",
         wire_key: "error",
         brief: "The error value recorded by OTAP Dataflow internal telemetry.",
-        value_type: otap_df_telemetry::descriptor::AttributeValueType::Any,
+        value_type: otap_df_telemetry::descriptor::AttributeValueType::String,
         requirement_level: EventRequirementLevel::Required,
     }],
 };
@@ -315,7 +315,7 @@ impl EventAttributes for ConsoleWriteFailed {
     ) {
         visitor(
             &CONSOLE_WRITE_FAILED_DESCRIPTOR.attributes[0],
-            EventAttributeValueRef::Any(&self.error),
+            EventAttributeValueRef::String(self.error.as_str()),
         );
     }
 }
@@ -342,9 +342,9 @@ impl ConsoleWriteFailed {
 #[derive(Debug, Clone)]
 pub struct DurableBufferAckUnknownBundle {
     /// The bundle_index value recorded by OTAP Dataflow internal telemetry.
-    pub bundle_index: otap_df_telemetry::attributes::AttributeValue,
+    pub bundle_index: i64,
     /// The segment_seq value recorded by OTAP Dataflow internal telemetry.
-    pub segment_seq: otap_df_telemetry::attributes::AttributeValue,
+    pub segment_seq: i64,
 }
 
 /// Marker implemented only by entity types allowed by `durable_buffer.ack.unknown_bundle`.
@@ -370,14 +370,14 @@ static DURABLE_BUFFER_ACK_UNKNOWN_BUNDLE_DESCRIPTOR: EventDescriptor = EventDesc
             key: "bundle_index",
             wire_key: "bundle_index",
             brief: "The bundle_index value recorded by OTAP Dataflow internal telemetry.",
-            value_type: otap_df_telemetry::descriptor::AttributeValueType::Any,
+            value_type: otap_df_telemetry::descriptor::AttributeValueType::Int,
             requirement_level: EventRequirementLevel::Required,
         },
         EventAttributeDescriptor {
             key: "segment_seq",
             wire_key: "segment_seq",
             brief: "The segment_seq value recorded by OTAP Dataflow internal telemetry.",
-            value_type: otap_df_telemetry::descriptor::AttributeValueType::Any,
+            value_type: otap_df_telemetry::descriptor::AttributeValueType::Int,
             requirement_level: EventRequirementLevel::Required,
         },
     ],
@@ -391,11 +391,11 @@ impl EventAttributes for DurableBufferAckUnknownBundle {
     ) {
         visitor(
             &DURABLE_BUFFER_ACK_UNKNOWN_BUNDLE_DESCRIPTOR.attributes[0],
-            EventAttributeValueRef::Any(&self.bundle_index),
+            EventAttributeValueRef::Int(self.bundle_index),
         );
         visitor(
             &DURABLE_BUFFER_ACK_UNKNOWN_BUNDLE_DESCRIPTOR.attributes[1],
-            EventAttributeValueRef::Any(&self.segment_seq),
+            EventAttributeValueRef::Int(self.segment_seq),
         );
     }
 }
@@ -422,9 +422,9 @@ impl DurableBufferAckUnknownBundle {
 #[derive(Debug, Clone)]
 pub struct DurableBufferBundleAcked {
     /// The bundle_index value recorded by OTAP Dataflow internal telemetry.
-    pub bundle_index: otap_df_telemetry::attributes::AttributeValue,
+    pub bundle_index: i64,
     /// The segment_seq value recorded by OTAP Dataflow internal telemetry.
-    pub segment_seq: otap_df_telemetry::attributes::AttributeValue,
+    pub segment_seq: i64,
 }
 
 /// Marker implemented only by entity types allowed by `durable_buffer.bundle.acked`.
@@ -450,14 +450,14 @@ static DURABLE_BUFFER_BUNDLE_ACKED_DESCRIPTOR: EventDescriptor = EventDescriptor
             key: "bundle_index",
             wire_key: "bundle_index",
             brief: "The bundle_index value recorded by OTAP Dataflow internal telemetry.",
-            value_type: otap_df_telemetry::descriptor::AttributeValueType::Any,
+            value_type: otap_df_telemetry::descriptor::AttributeValueType::Int,
             requirement_level: EventRequirementLevel::Required,
         },
         EventAttributeDescriptor {
             key: "segment_seq",
             wire_key: "segment_seq",
             brief: "The segment_seq value recorded by OTAP Dataflow internal telemetry.",
-            value_type: otap_df_telemetry::descriptor::AttributeValueType::Any,
+            value_type: otap_df_telemetry::descriptor::AttributeValueType::Int,
             requirement_level: EventRequirementLevel::Required,
         },
     ],
@@ -471,11 +471,11 @@ impl EventAttributes for DurableBufferBundleAcked {
     ) {
         visitor(
             &DURABLE_BUFFER_BUNDLE_ACKED_DESCRIPTOR.attributes[0],
-            EventAttributeValueRef::Any(&self.bundle_index),
+            EventAttributeValueRef::Int(self.bundle_index),
         );
         visitor(
             &DURABLE_BUFFER_BUNDLE_ACKED_DESCRIPTOR.attributes[1],
-            EventAttributeValueRef::Any(&self.segment_seq),
+            EventAttributeValueRef::Int(self.segment_seq),
         );
     }
 }
@@ -502,7 +502,7 @@ impl DurableBufferBundleAcked {
 #[derive(Debug, Clone)]
 pub struct DurableBufferBundleConversionFailed {
     /// The error value recorded by OTAP Dataflow internal telemetry.
-    pub error: otap_df_telemetry::attributes::AttributeValue,
+    pub error: String,
 }
 
 /// Marker implemented only by entity types allowed by `durable_buffer.bundle.conversion_failed`.
@@ -527,7 +527,7 @@ static DURABLE_BUFFER_BUNDLE_CONVERSION_FAILED_DESCRIPTOR: EventDescriptor = Eve
         key: "error",
         wire_key: "error",
         brief: "The error value recorded by OTAP Dataflow internal telemetry.",
-        value_type: otap_df_telemetry::descriptor::AttributeValueType::Any,
+        value_type: otap_df_telemetry::descriptor::AttributeValueType::String,
         requirement_level: EventRequirementLevel::Required,
     }],
 };
@@ -540,7 +540,7 @@ impl EventAttributes for DurableBufferBundleConversionFailed {
     ) {
         visitor(
             &DURABLE_BUFFER_BUNDLE_CONVERSION_FAILED_DESCRIPTOR.attributes[0],
-            EventAttributeValueRef::Any(&self.error),
+            EventAttributeValueRef::String(self.error.as_str()),
         );
     }
 }
@@ -569,9 +569,9 @@ impl DurableBufferBundleConversionFailed {
 #[derive(Debug, Clone)]
 pub struct DurableBufferBundleDuplicate {
     /// The bundle_index value recorded by OTAP Dataflow internal telemetry.
-    pub bundle_index: otap_df_telemetry::attributes::AttributeValue,
+    pub bundle_index: i64,
     /// The segment_seq value recorded by OTAP Dataflow internal telemetry.
-    pub segment_seq: otap_df_telemetry::attributes::AttributeValue,
+    pub segment_seq: i64,
 }
 
 /// Marker implemented only by entity types allowed by `durable_buffer.bundle.duplicate`.
@@ -597,14 +597,14 @@ static DURABLE_BUFFER_BUNDLE_DUPLICATE_DESCRIPTOR: EventDescriptor = EventDescri
             key: "bundle_index",
             wire_key: "bundle_index",
             brief: "The bundle_index value recorded by OTAP Dataflow internal telemetry.",
-            value_type: otap_df_telemetry::descriptor::AttributeValueType::Any,
+            value_type: otap_df_telemetry::descriptor::AttributeValueType::Int,
             requirement_level: EventRequirementLevel::Required,
         },
         EventAttributeDescriptor {
             key: "segment_seq",
             wire_key: "segment_seq",
             brief: "The segment_seq value recorded by OTAP Dataflow internal telemetry.",
-            value_type: otap_df_telemetry::descriptor::AttributeValueType::Any,
+            value_type: otap_df_telemetry::descriptor::AttributeValueType::Int,
             requirement_level: EventRequirementLevel::Required,
         },
     ],
@@ -618,11 +618,11 @@ impl EventAttributes for DurableBufferBundleDuplicate {
     ) {
         visitor(
             &DURABLE_BUFFER_BUNDLE_DUPLICATE_DESCRIPTOR.attributes[0],
-            EventAttributeValueRef::Any(&self.bundle_index),
+            EventAttributeValueRef::Int(self.bundle_index),
         );
         visitor(
             &DURABLE_BUFFER_BUNDLE_DUPLICATE_DESCRIPTOR.attributes[1],
-            EventAttributeValueRef::Any(&self.segment_seq),
+            EventAttributeValueRef::Int(self.segment_seq),
         );
     }
 }
@@ -649,11 +649,11 @@ impl DurableBufferBundleDuplicate {
 #[derive(Debug, Clone)]
 pub struct DurableBufferBundleForwarded {
     /// The bundle_index value recorded by OTAP Dataflow internal telemetry.
-    pub bundle_index: otap_df_telemetry::attributes::AttributeValue,
+    pub bundle_index: i64,
     /// The retry_count value recorded by OTAP Dataflow internal telemetry.
-    pub retry_count: otap_df_telemetry::attributes::AttributeValue,
+    pub retry_count: i64,
     /// The segment_seq value recorded by OTAP Dataflow internal telemetry.
-    pub segment_seq: otap_df_telemetry::attributes::AttributeValue,
+    pub segment_seq: i64,
 }
 
 /// Marker implemented only by entity types allowed by `durable_buffer.bundle.forwarded`.
@@ -679,21 +679,21 @@ static DURABLE_BUFFER_BUNDLE_FORWARDED_DESCRIPTOR: EventDescriptor = EventDescri
             key: "bundle_index",
             wire_key: "bundle_index",
             brief: "The bundle_index value recorded by OTAP Dataflow internal telemetry.",
-            value_type: otap_df_telemetry::descriptor::AttributeValueType::Any,
+            value_type: otap_df_telemetry::descriptor::AttributeValueType::Int,
             requirement_level: EventRequirementLevel::Required,
         },
         EventAttributeDescriptor {
             key: "retry_count",
             wire_key: "retry_count",
             brief: "The retry_count value recorded by OTAP Dataflow internal telemetry.",
-            value_type: otap_df_telemetry::descriptor::AttributeValueType::Any,
+            value_type: otap_df_telemetry::descriptor::AttributeValueType::Int,
             requirement_level: EventRequirementLevel::Required,
         },
         EventAttributeDescriptor {
             key: "segment_seq",
             wire_key: "segment_seq",
             brief: "The segment_seq value recorded by OTAP Dataflow internal telemetry.",
-            value_type: otap_df_telemetry::descriptor::AttributeValueType::Any,
+            value_type: otap_df_telemetry::descriptor::AttributeValueType::Int,
             requirement_level: EventRequirementLevel::Required,
         },
     ],
@@ -707,15 +707,15 @@ impl EventAttributes for DurableBufferBundleForwarded {
     ) {
         visitor(
             &DURABLE_BUFFER_BUNDLE_FORWARDED_DESCRIPTOR.attributes[0],
-            EventAttributeValueRef::Any(&self.bundle_index),
+            EventAttributeValueRef::Int(self.bundle_index),
         );
         visitor(
             &DURABLE_BUFFER_BUNDLE_FORWARDED_DESCRIPTOR.attributes[1],
-            EventAttributeValueRef::Any(&self.retry_count),
+            EventAttributeValueRef::Int(self.retry_count),
         );
         visitor(
             &DURABLE_BUFFER_BUNDLE_FORWARDED_DESCRIPTOR.attributes[2],
-            EventAttributeValueRef::Any(&self.segment_seq),
+            EventAttributeValueRef::Int(self.segment_seq),
         );
     }
 }
@@ -742,15 +742,15 @@ impl DurableBufferBundleForwarded {
 #[derive(Debug, Clone)]
 pub struct DurableBufferBundleNacked {
     /// The backoff_ms value recorded by OTAP Dataflow internal telemetry.
-    pub backoff_ms: otap_df_telemetry::attributes::AttributeValue,
+    pub backoff_ms: i64,
     /// The bundle_index value recorded by OTAP Dataflow internal telemetry.
-    pub bundle_index: otap_df_telemetry::attributes::AttributeValue,
+    pub bundle_index: i64,
     /// The reason value recorded by OTAP Dataflow internal telemetry.
     pub reason: String,
     /// The retry_count value recorded by OTAP Dataflow internal telemetry.
-    pub retry_count: otap_df_telemetry::attributes::AttributeValue,
+    pub retry_count: i64,
     /// The segment_seq value recorded by OTAP Dataflow internal telemetry.
-    pub segment_seq: otap_df_telemetry::attributes::AttributeValue,
+    pub segment_seq: i64,
 }
 
 /// Marker implemented only by entity types allowed by `durable_buffer.bundle.nacked`.
@@ -776,14 +776,14 @@ static DURABLE_BUFFER_BUNDLE_NACKED_DESCRIPTOR: EventDescriptor = EventDescripto
             key: "backoff_ms",
             wire_key: "backoff_ms",
             brief: "The backoff_ms value recorded by OTAP Dataflow internal telemetry.",
-            value_type: otap_df_telemetry::descriptor::AttributeValueType::Any,
+            value_type: otap_df_telemetry::descriptor::AttributeValueType::Int,
             requirement_level: EventRequirementLevel::Required,
         },
         EventAttributeDescriptor {
             key: "bundle_index",
             wire_key: "bundle_index",
             brief: "The bundle_index value recorded by OTAP Dataflow internal telemetry.",
-            value_type: otap_df_telemetry::descriptor::AttributeValueType::Any,
+            value_type: otap_df_telemetry::descriptor::AttributeValueType::Int,
             requirement_level: EventRequirementLevel::Required,
         },
         EventAttributeDescriptor {
@@ -797,14 +797,14 @@ static DURABLE_BUFFER_BUNDLE_NACKED_DESCRIPTOR: EventDescriptor = EventDescripto
             key: "retry_count",
             wire_key: "retry_count",
             brief: "The retry_count value recorded by OTAP Dataflow internal telemetry.",
-            value_type: otap_df_telemetry::descriptor::AttributeValueType::Any,
+            value_type: otap_df_telemetry::descriptor::AttributeValueType::Int,
             requirement_level: EventRequirementLevel::Required,
         },
         EventAttributeDescriptor {
             key: "segment_seq",
             wire_key: "segment_seq",
             brief: "The segment_seq value recorded by OTAP Dataflow internal telemetry.",
-            value_type: otap_df_telemetry::descriptor::AttributeValueType::Any,
+            value_type: otap_df_telemetry::descriptor::AttributeValueType::Int,
             requirement_level: EventRequirementLevel::Required,
         },
     ],
@@ -818,11 +818,11 @@ impl EventAttributes for DurableBufferBundleNacked {
     ) {
         visitor(
             &DURABLE_BUFFER_BUNDLE_NACKED_DESCRIPTOR.attributes[0],
-            EventAttributeValueRef::Any(&self.backoff_ms),
+            EventAttributeValueRef::Int(self.backoff_ms),
         );
         visitor(
             &DURABLE_BUFFER_BUNDLE_NACKED_DESCRIPTOR.attributes[1],
-            EventAttributeValueRef::Any(&self.bundle_index),
+            EventAttributeValueRef::Int(self.bundle_index),
         );
         visitor(
             &DURABLE_BUFFER_BUNDLE_NACKED_DESCRIPTOR.attributes[2],
@@ -830,11 +830,11 @@ impl EventAttributes for DurableBufferBundleNacked {
         );
         visitor(
             &DURABLE_BUFFER_BUNDLE_NACKED_DESCRIPTOR.attributes[3],
-            EventAttributeValueRef::Any(&self.retry_count),
+            EventAttributeValueRef::Int(self.retry_count),
         );
         visitor(
             &DURABLE_BUFFER_BUNDLE_NACKED_DESCRIPTOR.attributes[4],
-            EventAttributeValueRef::Any(&self.segment_seq),
+            EventAttributeValueRef::Int(self.segment_seq),
         );
     }
 }
@@ -861,11 +861,11 @@ impl DurableBufferBundleNacked {
 #[derive(Debug, Clone)]
 pub struct DurableBufferBundleRejectedPermanent {
     /// The bundle_index value recorded by OTAP Dataflow internal telemetry.
-    pub bundle_index: otap_df_telemetry::attributes::AttributeValue,
+    pub bundle_index: i64,
     /// The reason value recorded by OTAP Dataflow internal telemetry.
     pub reason: String,
     /// The segment_seq value recorded by OTAP Dataflow internal telemetry.
-    pub segment_seq: otap_df_telemetry::attributes::AttributeValue,
+    pub segment_seq: i64,
 }
 
 /// Marker implemented only by entity types allowed by `durable_buffer.bundle.rejected_permanent`.
@@ -891,7 +891,7 @@ static DURABLE_BUFFER_BUNDLE_REJECTED_PERMANENT_DESCRIPTOR: EventDescriptor = Ev
             key: "bundle_index",
             wire_key: "bundle_index",
             brief: "The bundle_index value recorded by OTAP Dataflow internal telemetry.",
-            value_type: otap_df_telemetry::descriptor::AttributeValueType::Any,
+            value_type: otap_df_telemetry::descriptor::AttributeValueType::Int,
             requirement_level: EventRequirementLevel::Required,
         },
         EventAttributeDescriptor {
@@ -905,7 +905,7 @@ static DURABLE_BUFFER_BUNDLE_REJECTED_PERMANENT_DESCRIPTOR: EventDescriptor = Ev
             key: "segment_seq",
             wire_key: "segment_seq",
             brief: "The segment_seq value recorded by OTAP Dataflow internal telemetry.",
-            value_type: otap_df_telemetry::descriptor::AttributeValueType::Any,
+            value_type: otap_df_telemetry::descriptor::AttributeValueType::Int,
             requirement_level: EventRequirementLevel::Required,
         },
     ],
@@ -919,7 +919,7 @@ impl EventAttributes for DurableBufferBundleRejectedPermanent {
     ) {
         visitor(
             &DURABLE_BUFFER_BUNDLE_REJECTED_PERMANENT_DESCRIPTOR.attributes[0],
-            EventAttributeValueRef::Any(&self.bundle_index),
+            EventAttributeValueRef::Int(self.bundle_index),
         );
         visitor(
             &DURABLE_BUFFER_BUNDLE_REJECTED_PERMANENT_DESCRIPTOR.attributes[1],
@@ -927,7 +927,7 @@ impl EventAttributes for DurableBufferBundleRejectedPermanent {
         );
         visitor(
             &DURABLE_BUFFER_BUNDLE_REJECTED_PERMANENT_DESCRIPTOR.attributes[2],
-            EventAttributeValueRef::Any(&self.segment_seq),
+            EventAttributeValueRef::Int(self.segment_seq),
         );
     }
 }
@@ -1074,11 +1074,11 @@ impl DurableBufferDelayedDataUnexpected {
 #[derive(Debug, Clone)]
 pub struct DurableBufferDrainAllBlocked {
     /// The bundles_processed value recorded by OTAP Dataflow internal telemetry.
-    pub bundles_processed: otap_df_telemetry::attributes::AttributeValue,
+    pub bundles_processed: i64,
     /// The in_flight value recorded by OTAP Dataflow internal telemetry.
-    pub in_flight: otap_df_telemetry::attributes::AttributeValue,
+    pub in_flight: i64,
     /// The retry_scheduled value recorded by OTAP Dataflow internal telemetry.
-    pub retry_scheduled: otap_df_telemetry::attributes::AttributeValue,
+    pub retry_scheduled: i64,
 }
 
 /// Marker implemented only by entity types allowed by `durable_buffer.drain.all_blocked`.
@@ -1104,21 +1104,21 @@ static DURABLE_BUFFER_DRAIN_ALL_BLOCKED_DESCRIPTOR: EventDescriptor = EventDescr
             key: "bundles_processed",
             wire_key: "bundles_processed",
             brief: "The bundles_processed value recorded by OTAP Dataflow internal telemetry.",
-            value_type: otap_df_telemetry::descriptor::AttributeValueType::Any,
+            value_type: otap_df_telemetry::descriptor::AttributeValueType::Int,
             requirement_level: EventRequirementLevel::Required,
         },
         EventAttributeDescriptor {
             key: "in_flight",
             wire_key: "in_flight",
             brief: "The in_flight value recorded by OTAP Dataflow internal telemetry.",
-            value_type: otap_df_telemetry::descriptor::AttributeValueType::Any,
+            value_type: otap_df_telemetry::descriptor::AttributeValueType::Int,
             requirement_level: EventRequirementLevel::Required,
         },
         EventAttributeDescriptor {
             key: "retry_scheduled",
             wire_key: "retry_scheduled",
             brief: "The retry_scheduled value recorded by OTAP Dataflow internal telemetry.",
-            value_type: otap_df_telemetry::descriptor::AttributeValueType::Any,
+            value_type: otap_df_telemetry::descriptor::AttributeValueType::Int,
             requirement_level: EventRequirementLevel::Required,
         },
     ],
@@ -1132,15 +1132,15 @@ impl EventAttributes for DurableBufferDrainAllBlocked {
     ) {
         visitor(
             &DURABLE_BUFFER_DRAIN_ALL_BLOCKED_DESCRIPTOR.attributes[0],
-            EventAttributeValueRef::Any(&self.bundles_processed),
+            EventAttributeValueRef::Int(self.bundles_processed),
         );
         visitor(
             &DURABLE_BUFFER_DRAIN_ALL_BLOCKED_DESCRIPTOR.attributes[1],
-            EventAttributeValueRef::Any(&self.in_flight),
+            EventAttributeValueRef::Int(self.in_flight),
         );
         visitor(
             &DURABLE_BUFFER_DRAIN_ALL_BLOCKED_DESCRIPTOR.attributes[2],
-            EventAttributeValueRef::Any(&self.retry_scheduled),
+            EventAttributeValueRef::Int(self.retry_scheduled),
         );
     }
 }
@@ -1167,11 +1167,11 @@ impl DurableBufferDrainAllBlocked {
 #[derive(Debug, Clone)]
 pub struct DurableBufferDrainAtCapacity {
     /// The bundles_processed value recorded by OTAP Dataflow internal telemetry.
-    pub bundles_processed: otap_df_telemetry::attributes::AttributeValue,
+    pub bundles_processed: i64,
     /// The in_flight value recorded by OTAP Dataflow internal telemetry.
-    pub in_flight: otap_df_telemetry::attributes::AttributeValue,
+    pub in_flight: i64,
     /// The max_in_flight value recorded by OTAP Dataflow internal telemetry.
-    pub max_in_flight: otap_df_telemetry::attributes::AttributeValue,
+    pub max_in_flight: i64,
 }
 
 /// Marker implemented only by entity types allowed by `durable_buffer.drain.at_capacity`.
@@ -1197,21 +1197,21 @@ static DURABLE_BUFFER_DRAIN_AT_CAPACITY_DESCRIPTOR: EventDescriptor = EventDescr
             key: "bundles_processed",
             wire_key: "bundles_processed",
             brief: "The bundles_processed value recorded by OTAP Dataflow internal telemetry.",
-            value_type: otap_df_telemetry::descriptor::AttributeValueType::Any,
+            value_type: otap_df_telemetry::descriptor::AttributeValueType::Int,
             requirement_level: EventRequirementLevel::Required,
         },
         EventAttributeDescriptor {
             key: "in_flight",
             wire_key: "in_flight",
             brief: "The in_flight value recorded by OTAP Dataflow internal telemetry.",
-            value_type: otap_df_telemetry::descriptor::AttributeValueType::Any,
+            value_type: otap_df_telemetry::descriptor::AttributeValueType::Int,
             requirement_level: EventRequirementLevel::Required,
         },
         EventAttributeDescriptor {
             key: "max_in_flight",
             wire_key: "max_in_flight",
             brief: "The max_in_flight value recorded by OTAP Dataflow internal telemetry.",
-            value_type: otap_df_telemetry::descriptor::AttributeValueType::Any,
+            value_type: otap_df_telemetry::descriptor::AttributeValueType::Int,
             requirement_level: EventRequirementLevel::Required,
         },
     ],
@@ -1225,15 +1225,15 @@ impl EventAttributes for DurableBufferDrainAtCapacity {
     ) {
         visitor(
             &DURABLE_BUFFER_DRAIN_AT_CAPACITY_DESCRIPTOR.attributes[0],
-            EventAttributeValueRef::Any(&self.bundles_processed),
+            EventAttributeValueRef::Int(self.bundles_processed),
         );
         visitor(
             &DURABLE_BUFFER_DRAIN_AT_CAPACITY_DESCRIPTOR.attributes[1],
-            EventAttributeValueRef::Any(&self.in_flight),
+            EventAttributeValueRef::Int(self.in_flight),
         );
         visitor(
             &DURABLE_BUFFER_DRAIN_AT_CAPACITY_DESCRIPTOR.attributes[2],
-            EventAttributeValueRef::Any(&self.max_in_flight),
+            EventAttributeValueRef::Int(self.max_in_flight),
         );
     }
 }
@@ -1260,7 +1260,7 @@ impl DurableBufferDrainAtCapacity {
 #[derive(Debug, Clone)]
 pub struct DurableBufferDrainBackpressure {
     /// The bundles_processed value recorded by OTAP Dataflow internal telemetry.
-    pub bundles_processed: otap_df_telemetry::attributes::AttributeValue,
+    pub bundles_processed: i64,
 }
 
 /// Marker implemented only by entity types allowed by `durable_buffer.drain.backpressure`.
@@ -1285,7 +1285,7 @@ static DURABLE_BUFFER_DRAIN_BACKPRESSURE_DESCRIPTOR: EventDescriptor = EventDesc
         key: "bundles_processed",
         wire_key: "bundles_processed",
         brief: "The bundles_processed value recorded by OTAP Dataflow internal telemetry.",
-        value_type: otap_df_telemetry::descriptor::AttributeValueType::Any,
+        value_type: otap_df_telemetry::descriptor::AttributeValueType::Int,
         requirement_level: EventRequirementLevel::Required,
     }],
 };
@@ -1298,7 +1298,7 @@ impl EventAttributes for DurableBufferDrainBackpressure {
     ) {
         visitor(
             &DURABLE_BUFFER_DRAIN_BACKPRESSURE_DESCRIPTOR.attributes[0],
-            EventAttributeValueRef::Any(&self.bundles_processed),
+            EventAttributeValueRef::Int(self.bundles_processed),
         );
     }
 }
@@ -1325,9 +1325,9 @@ impl DurableBufferDrainBackpressure {
 #[derive(Debug, Clone)]
 pub struct DurableBufferDrainBudgetExhausted {
     /// The budget_ms value recorded by OTAP Dataflow internal telemetry.
-    pub budget_ms: otap_df_telemetry::attributes::AttributeValue,
+    pub budget_ms: i64,
     /// The bundles_processed value recorded by OTAP Dataflow internal telemetry.
-    pub bundles_processed: otap_df_telemetry::attributes::AttributeValue,
+    pub bundles_processed: i64,
 }
 
 /// Marker implemented only by entity types allowed by `durable_buffer.drain.budget_exhausted`.
@@ -1353,14 +1353,14 @@ static DURABLE_BUFFER_DRAIN_BUDGET_EXHAUSTED_DESCRIPTOR: EventDescriptor = Event
             key: "budget_ms",
             wire_key: "budget_ms",
             brief: "The budget_ms value recorded by OTAP Dataflow internal telemetry.",
-            value_type: otap_df_telemetry::descriptor::AttributeValueType::Any,
+            value_type: otap_df_telemetry::descriptor::AttributeValueType::Int,
             requirement_level: EventRequirementLevel::Required,
         },
         EventAttributeDescriptor {
             key: "bundles_processed",
             wire_key: "bundles_processed",
             brief: "The bundles_processed value recorded by OTAP Dataflow internal telemetry.",
-            value_type: otap_df_telemetry::descriptor::AttributeValueType::Any,
+            value_type: otap_df_telemetry::descriptor::AttributeValueType::Int,
             requirement_level: EventRequirementLevel::Required,
         },
     ],
@@ -1374,11 +1374,11 @@ impl EventAttributes for DurableBufferDrainBudgetExhausted {
     ) {
         visitor(
             &DURABLE_BUFFER_DRAIN_BUDGET_EXHAUSTED_DESCRIPTOR.attributes[0],
-            EventAttributeValueRef::Any(&self.budget_ms),
+            EventAttributeValueRef::Int(self.budget_ms),
         );
         visitor(
             &DURABLE_BUFFER_DRAIN_BUDGET_EXHAUSTED_DESCRIPTOR.attributes[1],
-            EventAttributeValueRef::Any(&self.bundles_processed),
+            EventAttributeValueRef::Int(self.bundles_processed),
         );
     }
 }
@@ -1412,11 +1412,11 @@ pub struct DurableBufferEngineInit {
     /// The path value recorded by OTAP Dataflow internal telemetry.
     pub path: String,
     /// The per_core_size_cap value recorded by OTAP Dataflow internal telemetry.
-    pub per_core_size_cap: otap_df_telemetry::attributes::AttributeValue,
+    pub per_core_size_cap: i64,
     /// The policy value recorded by OTAP Dataflow internal telemetry.
     pub policy: String,
     /// The total_size_cap value recorded by OTAP Dataflow internal telemetry.
-    pub total_size_cap: otap_df_telemetry::attributes::AttributeValue,
+    pub total_size_cap: i64,
 }
 
 /// Marker implemented only by entity types allowed by `durable_buffer.engine.init`.
@@ -1463,7 +1463,7 @@ static DURABLE_BUFFER_ENGINE_INIT_DESCRIPTOR: EventDescriptor = EventDescriptor 
             key: "per_core_size_cap",
             wire_key: "per_core_size_cap",
             brief: "The per_core_size_cap value recorded by OTAP Dataflow internal telemetry.",
-            value_type: otap_df_telemetry::descriptor::AttributeValueType::Any,
+            value_type: otap_df_telemetry::descriptor::AttributeValueType::Int,
             requirement_level: EventRequirementLevel::Required,
         },
         EventAttributeDescriptor {
@@ -1477,7 +1477,7 @@ static DURABLE_BUFFER_ENGINE_INIT_DESCRIPTOR: EventDescriptor = EventDescriptor 
             key: "total_size_cap",
             wire_key: "total_size_cap",
             brief: "The total_size_cap value recorded by OTAP Dataflow internal telemetry.",
-            value_type: otap_df_telemetry::descriptor::AttributeValueType::Any,
+            value_type: otap_df_telemetry::descriptor::AttributeValueType::Int,
             requirement_level: EventRequirementLevel::Required,
         },
     ],
@@ -1503,7 +1503,7 @@ impl EventAttributes for DurableBufferEngineInit {
         );
         visitor(
             &DURABLE_BUFFER_ENGINE_INIT_DESCRIPTOR.attributes[3],
-            EventAttributeValueRef::Any(&self.per_core_size_cap),
+            EventAttributeValueRef::Int(self.per_core_size_cap),
         );
         visitor(
             &DURABLE_BUFFER_ENGINE_INIT_DESCRIPTOR.attributes[4],
@@ -1511,7 +1511,7 @@ impl EventAttributes for DurableBufferEngineInit {
         );
         visitor(
             &DURABLE_BUFFER_ENGINE_INIT_DESCRIPTOR.attributes[5],
-            EventAttributeValueRef::Any(&self.total_size_cap),
+            EventAttributeValueRef::Int(self.total_size_cap),
         );
     }
 }
@@ -1618,7 +1618,7 @@ impl DurableBufferEngineReady {
 #[derive(Debug, Clone)]
 pub struct DurableBufferEngineUnavailable {
     /// The error value recorded by OTAP Dataflow internal telemetry.
-    pub error: otap_df_telemetry::attributes::AttributeValue,
+    pub error: String,
 }
 
 /// Marker implemented only by entity types allowed by `durable_buffer.engine.unavailable`.
@@ -1643,7 +1643,7 @@ static DURABLE_BUFFER_ENGINE_UNAVAILABLE_DESCRIPTOR: EventDescriptor = EventDesc
         key: "error",
         wire_key: "error",
         brief: "The error value recorded by OTAP Dataflow internal telemetry.",
-        value_type: otap_df_telemetry::descriptor::AttributeValueType::Any,
+        value_type: otap_df_telemetry::descriptor::AttributeValueType::String,
         requirement_level: EventRequirementLevel::Required,
     }],
 };
@@ -1656,7 +1656,7 @@ impl EventAttributes for DurableBufferEngineUnavailable {
     ) {
         visitor(
             &DURABLE_BUFFER_ENGINE_UNAVAILABLE_DESCRIPTOR.attributes[0],
-            EventAttributeValueRef::Any(&self.error),
+            EventAttributeValueRef::String(self.error.as_str()),
         );
     }
 }
@@ -1683,7 +1683,7 @@ impl DurableBufferEngineUnavailable {
 #[derive(Debug, Clone)]
 pub struct DurableBufferFlushFailed {
     /// The error value recorded by OTAP Dataflow internal telemetry.
-    pub error: otap_df_telemetry::attributes::AttributeValue,
+    pub error: String,
 }
 
 /// Marker implemented only by entity types allowed by `durable_buffer.flush.failed`.
@@ -1708,7 +1708,7 @@ static DURABLE_BUFFER_FLUSH_FAILED_DESCRIPTOR: EventDescriptor = EventDescriptor
         key: "error",
         wire_key: "error",
         brief: "The error value recorded by OTAP Dataflow internal telemetry.",
-        value_type: otap_df_telemetry::descriptor::AttributeValueType::Any,
+        value_type: otap_df_telemetry::descriptor::AttributeValueType::String,
         requirement_level: EventRequirementLevel::Required,
     }],
 };
@@ -1721,7 +1721,7 @@ impl EventAttributes for DurableBufferFlushFailed {
     ) {
         visitor(
             &DURABLE_BUFFER_FLUSH_FAILED_DESCRIPTOR.attributes[0],
-            EventAttributeValueRef::Any(&self.error),
+            EventAttributeValueRef::String(self.error.as_str()),
         );
     }
 }
@@ -1748,7 +1748,7 @@ impl DurableBufferFlushFailed {
 #[derive(Debug, Clone)]
 pub struct DurableBufferIngestBackpressure {
     /// The error value recorded by OTAP Dataflow internal telemetry.
-    pub error: otap_df_telemetry::attributes::AttributeValue,
+    pub error: String,
 }
 
 /// Marker implemented only by entity types allowed by `durable_buffer.ingest.backpressure`.
@@ -1773,7 +1773,7 @@ static DURABLE_BUFFER_INGEST_BACKPRESSURE_DESCRIPTOR: EventDescriptor = EventDes
         key: "error",
         wire_key: "error",
         brief: "The error value recorded by OTAP Dataflow internal telemetry.",
-        value_type: otap_df_telemetry::descriptor::AttributeValueType::Any,
+        value_type: otap_df_telemetry::descriptor::AttributeValueType::String,
         requirement_level: EventRequirementLevel::Required,
     }],
 };
@@ -1786,7 +1786,7 @@ impl EventAttributes for DurableBufferIngestBackpressure {
     ) {
         visitor(
             &DURABLE_BUFFER_INGEST_BACKPRESSURE_DESCRIPTOR.attributes[0],
-            EventAttributeValueRef::Any(&self.error),
+            EventAttributeValueRef::String(self.error.as_str()),
         );
     }
 }
@@ -1813,7 +1813,7 @@ impl DurableBufferIngestBackpressure {
 #[derive(Debug, Clone)]
 pub struct DurableBufferIngestFailed {
     /// The error value recorded by OTAP Dataflow internal telemetry.
-    pub error: otap_df_telemetry::attributes::AttributeValue,
+    pub error: String,
 }
 
 /// Marker implemented only by entity types allowed by `durable_buffer.ingest.failed`.
@@ -1838,7 +1838,7 @@ static DURABLE_BUFFER_INGEST_FAILED_DESCRIPTOR: EventDescriptor = EventDescripto
         key: "error",
         wire_key: "error",
         brief: "The error value recorded by OTAP Dataflow internal telemetry.",
-        value_type: otap_df_telemetry::descriptor::AttributeValueType::Any,
+        value_type: otap_df_telemetry::descriptor::AttributeValueType::String,
         requirement_level: EventRequirementLevel::Required,
     }],
 };
@@ -1851,7 +1851,7 @@ impl EventAttributes for DurableBufferIngestFailed {
     ) {
         visitor(
             &DURABLE_BUFFER_INGEST_FAILED_DESCRIPTOR.attributes[0],
-            EventAttributeValueRef::Any(&self.error),
+            EventAttributeValueRef::String(self.error.as_str()),
         );
     }
 }
@@ -1878,7 +1878,7 @@ impl DurableBufferIngestFailed {
 #[derive(Debug, Clone)]
 pub struct DurableBufferMaintenanceFailed {
     /// The error value recorded by OTAP Dataflow internal telemetry.
-    pub error: otap_df_telemetry::attributes::AttributeValue,
+    pub error: String,
 }
 
 /// Marker implemented only by entity types allowed by `durable_buffer.maintenance.failed`.
@@ -1903,7 +1903,7 @@ static DURABLE_BUFFER_MAINTENANCE_FAILED_DESCRIPTOR: EventDescriptor = EventDesc
         key: "error",
         wire_key: "error",
         brief: "The error value recorded by OTAP Dataflow internal telemetry.",
-        value_type: otap_df_telemetry::descriptor::AttributeValueType::Any,
+        value_type: otap_df_telemetry::descriptor::AttributeValueType::String,
         requirement_level: EventRequirementLevel::Required,
     }],
 };
@@ -1916,7 +1916,7 @@ impl EventAttributes for DurableBufferMaintenanceFailed {
     ) {
         visitor(
             &DURABLE_BUFFER_MAINTENANCE_FAILED_DESCRIPTOR.attributes[0],
-            EventAttributeValueRef::Any(&self.error),
+            EventAttributeValueRef::String(self.error.as_str()),
         );
     }
 }
@@ -1943,9 +1943,9 @@ impl DurableBufferMaintenanceFailed {
 #[derive(Debug, Clone)]
 pub struct DurableBufferNackUnknownBundle {
     /// The bundle_index value recorded by OTAP Dataflow internal telemetry.
-    pub bundle_index: otap_df_telemetry::attributes::AttributeValue,
+    pub bundle_index: i64,
     /// The segment_seq value recorded by OTAP Dataflow internal telemetry.
-    pub segment_seq: otap_df_telemetry::attributes::AttributeValue,
+    pub segment_seq: i64,
 }
 
 /// Marker implemented only by entity types allowed by `durable_buffer.nack.unknown_bundle`.
@@ -1971,14 +1971,14 @@ static DURABLE_BUFFER_NACK_UNKNOWN_BUNDLE_DESCRIPTOR: EventDescriptor = EventDes
             key: "bundle_index",
             wire_key: "bundle_index",
             brief: "The bundle_index value recorded by OTAP Dataflow internal telemetry.",
-            value_type: otap_df_telemetry::descriptor::AttributeValueType::Any,
+            value_type: otap_df_telemetry::descriptor::AttributeValueType::Int,
             requirement_level: EventRequirementLevel::Required,
         },
         EventAttributeDescriptor {
             key: "segment_seq",
             wire_key: "segment_seq",
             brief: "The segment_seq value recorded by OTAP Dataflow internal telemetry.",
-            value_type: otap_df_telemetry::descriptor::AttributeValueType::Any,
+            value_type: otap_df_telemetry::descriptor::AttributeValueType::Int,
             requirement_level: EventRequirementLevel::Required,
         },
     ],
@@ -1992,11 +1992,11 @@ impl EventAttributes for DurableBufferNackUnknownBundle {
     ) {
         visitor(
             &DURABLE_BUFFER_NACK_UNKNOWN_BUNDLE_DESCRIPTOR.attributes[0],
-            EventAttributeValueRef::Any(&self.bundle_index),
+            EventAttributeValueRef::Int(self.bundle_index),
         );
         visitor(
             &DURABLE_BUFFER_NACK_UNKNOWN_BUNDLE_DESCRIPTOR.attributes[1],
-            EventAttributeValueRef::Any(&self.segment_seq),
+            EventAttributeValueRef::Int(self.segment_seq),
         );
     }
 }
@@ -2023,7 +2023,7 @@ impl DurableBufferNackUnknownBundle {
 #[derive(Debug, Clone)]
 pub struct DurableBufferOtlpAdapterFailed {
     /// The error value recorded by OTAP Dataflow internal telemetry.
-    pub error: otap_df_telemetry::attributes::AttributeValue,
+    pub error: String,
 }
 
 /// Marker implemented only by entity types allowed by `durable_buffer.otlp.adapter_failed`.
@@ -2048,7 +2048,7 @@ static DURABLE_BUFFER_OTLP_ADAPTER_FAILED_DESCRIPTOR: EventDescriptor = EventDes
         key: "error",
         wire_key: "error",
         brief: "The error value recorded by OTAP Dataflow internal telemetry.",
-        value_type: otap_df_telemetry::descriptor::AttributeValueType::Any,
+        value_type: otap_df_telemetry::descriptor::AttributeValueType::String,
         requirement_level: EventRequirementLevel::Required,
     }],
 };
@@ -2061,7 +2061,7 @@ impl EventAttributes for DurableBufferOtlpAdapterFailed {
     ) {
         visitor(
             &DURABLE_BUFFER_OTLP_ADAPTER_FAILED_DESCRIPTOR.attributes[0],
-            EventAttributeValueRef::Any(&self.error),
+            EventAttributeValueRef::String(self.error.as_str()),
         );
     }
 }
@@ -2088,7 +2088,7 @@ impl DurableBufferOtlpAdapterFailed {
 #[derive(Debug, Clone)]
 pub struct DurableBufferOtlpConversionFailed {
     /// The error value recorded by OTAP Dataflow internal telemetry.
-    pub error: otap_df_telemetry::attributes::AttributeValue,
+    pub error: String,
 }
 
 /// Marker implemented only by entity types allowed by `durable_buffer.otlp.conversion_failed`.
@@ -2113,7 +2113,7 @@ static DURABLE_BUFFER_OTLP_CONVERSION_FAILED_DESCRIPTOR: EventDescriptor = Event
         key: "error",
         wire_key: "error",
         brief: "The error value recorded by OTAP Dataflow internal telemetry.",
-        value_type: otap_df_telemetry::descriptor::AttributeValueType::Any,
+        value_type: otap_df_telemetry::descriptor::AttributeValueType::String,
         requirement_level: EventRequirementLevel::Required,
     }],
 };
@@ -2126,7 +2126,7 @@ impl EventAttributes for DurableBufferOtlpConversionFailed {
     ) {
         visitor(
             &DURABLE_BUFFER_OTLP_CONVERSION_FAILED_DESCRIPTOR.attributes[0],
-            EventAttributeValueRef::Any(&self.error),
+            EventAttributeValueRef::String(self.error.as_str()),
         );
     }
 }
@@ -2154,7 +2154,7 @@ impl DurableBufferOtlpConversionFailed {
 #[derive(Debug, Clone)]
 pub struct DurableBufferPollFailed {
     /// The error value recorded by OTAP Dataflow internal telemetry.
-    pub error: otap_df_telemetry::attributes::AttributeValue,
+    pub error: String,
 }
 
 /// Marker implemented only by entity types allowed by `durable_buffer.poll.failed`.
@@ -2179,7 +2179,7 @@ static DURABLE_BUFFER_POLL_FAILED_DESCRIPTOR: EventDescriptor = EventDescriptor 
         key: "error",
         wire_key: "error",
         brief: "The error value recorded by OTAP Dataflow internal telemetry.",
-        value_type: otap_df_telemetry::descriptor::AttributeValueType::Any,
+        value_type: otap_df_telemetry::descriptor::AttributeValueType::String,
         requirement_level: EventRequirementLevel::Required,
     }],
 };
@@ -2192,7 +2192,7 @@ impl EventAttributes for DurableBufferPollFailed {
     ) {
         visitor(
             &DURABLE_BUFFER_POLL_FAILED_DESCRIPTOR.attributes[0],
-            EventAttributeValueRef::Any(&self.error),
+            EventAttributeValueRef::String(self.error.as_str()),
         );
     }
 }
@@ -2219,11 +2219,11 @@ impl DurableBufferPollFailed {
 #[derive(Debug, Clone)]
 pub struct DurableBufferQueuedBundleIndexOverflow {
     /// The bundle_index value recorded by OTAP Dataflow internal telemetry.
-    pub bundle_index: otap_df_telemetry::attributes::AttributeValue,
+    pub bundle_index: i64,
     /// The reason value recorded by OTAP Dataflow internal telemetry.
     pub reason: String,
     /// The segment value recorded by OTAP Dataflow internal telemetry.
-    pub segment: otap_df_telemetry::attributes::AttributeValue,
+    pub segment: i64,
 }
 
 /// Marker implemented only by entity types allowed by `durable_buffer.queued.bundle_index_overflow`.
@@ -2252,7 +2252,7 @@ static DURABLE_BUFFER_QUEUED_BUNDLE_INDEX_OVERFLOW_DESCRIPTOR: EventDescriptor =
             key: "bundle_index",
             wire_key: "bundle_index",
             brief: "The bundle_index value recorded by OTAP Dataflow internal telemetry.",
-            value_type: otap_df_telemetry::descriptor::AttributeValueType::Any,
+            value_type: otap_df_telemetry::descriptor::AttributeValueType::Int,
             requirement_level: EventRequirementLevel::Required,
         },
         EventAttributeDescriptor {
@@ -2266,7 +2266,7 @@ static DURABLE_BUFFER_QUEUED_BUNDLE_INDEX_OVERFLOW_DESCRIPTOR: EventDescriptor =
             key: "segment",
             wire_key: "segment",
             brief: "The segment value recorded by OTAP Dataflow internal telemetry.",
-            value_type: otap_df_telemetry::descriptor::AttributeValueType::Any,
+            value_type: otap_df_telemetry::descriptor::AttributeValueType::Int,
             requirement_level: EventRequirementLevel::Required,
         },
     ],
@@ -2280,7 +2280,7 @@ impl EventAttributes for DurableBufferQueuedBundleIndexOverflow {
     ) {
         visitor(
             &DURABLE_BUFFER_QUEUED_BUNDLE_INDEX_OVERFLOW_DESCRIPTOR.attributes[0],
-            EventAttributeValueRef::Any(&self.bundle_index),
+            EventAttributeValueRef::Int(self.bundle_index),
         );
         visitor(
             &DURABLE_BUFFER_QUEUED_BUNDLE_INDEX_OVERFLOW_DESCRIPTOR.attributes[1],
@@ -2288,7 +2288,7 @@ impl EventAttributes for DurableBufferQueuedBundleIndexOverflow {
         );
         visitor(
             &DURABLE_BUFFER_QUEUED_BUNDLE_INDEX_OVERFLOW_DESCRIPTOR.attributes[2],
-            EventAttributeValueRef::Any(&self.segment),
+            EventAttributeValueRef::Int(self.segment),
         );
     }
 }
@@ -2317,11 +2317,11 @@ impl DurableBufferQueuedBundleIndexOverflow {
 #[derive(Debug, Clone)]
 pub struct DurableBufferQueuedMetadataSkip {
     /// The error value recorded by OTAP Dataflow internal telemetry.
-    pub error: otap_df_telemetry::attributes::AttributeValue,
+    pub error: String,
     /// The reason value recorded by OTAP Dataflow internal telemetry.
     pub reason: String,
     /// The segment value recorded by OTAP Dataflow internal telemetry.
-    pub segment: otap_df_telemetry::attributes::AttributeValue,
+    pub segment: i64,
 }
 
 /// Marker implemented only by entity types allowed by `durable_buffer.queued.metadata_skip`.
@@ -2347,7 +2347,7 @@ static DURABLE_BUFFER_QUEUED_METADATA_SKIP_DESCRIPTOR: EventDescriptor = EventDe
             key: "error",
             wire_key: "error",
             brief: "The error value recorded by OTAP Dataflow internal telemetry.",
-            value_type: otap_df_telemetry::descriptor::AttributeValueType::Any,
+            value_type: otap_df_telemetry::descriptor::AttributeValueType::String,
             requirement_level: EventRequirementLevel::Required,
         },
         EventAttributeDescriptor {
@@ -2361,7 +2361,7 @@ static DURABLE_BUFFER_QUEUED_METADATA_SKIP_DESCRIPTOR: EventDescriptor = EventDe
             key: "segment",
             wire_key: "segment",
             brief: "The segment value recorded by OTAP Dataflow internal telemetry.",
-            value_type: otap_df_telemetry::descriptor::AttributeValueType::Any,
+            value_type: otap_df_telemetry::descriptor::AttributeValueType::Int,
             requirement_level: EventRequirementLevel::Required,
         },
     ],
@@ -2375,7 +2375,7 @@ impl EventAttributes for DurableBufferQueuedMetadataSkip {
     ) {
         visitor(
             &DURABLE_BUFFER_QUEUED_METADATA_SKIP_DESCRIPTOR.attributes[0],
-            EventAttributeValueRef::Any(&self.error),
+            EventAttributeValueRef::String(self.error.as_str()),
         );
         visitor(
             &DURABLE_BUFFER_QUEUED_METADATA_SKIP_DESCRIPTOR.attributes[1],
@@ -2383,7 +2383,7 @@ impl EventAttributes for DurableBufferQueuedMetadataSkip {
         );
         visitor(
             &DURABLE_BUFFER_QUEUED_METADATA_SKIP_DESCRIPTOR.attributes[2],
-            EventAttributeValueRef::Any(&self.segment),
+            EventAttributeValueRef::Int(self.segment),
         );
     }
 }
@@ -2411,7 +2411,7 @@ impl DurableBufferQueuedMetadataSkip {
 #[derive(Debug, Clone)]
 pub struct DurableBufferQueuedRecomputeError {
     /// The error value recorded by OTAP Dataflow internal telemetry.
-    pub error: otap_df_telemetry::attributes::AttributeValue,
+    pub error: String,
     /// The reason value recorded by OTAP Dataflow internal telemetry.
     pub reason: String,
 }
@@ -2439,7 +2439,7 @@ static DURABLE_BUFFER_QUEUED_RECOMPUTE_ERROR_DESCRIPTOR: EventDescriptor = Event
             key: "error",
             wire_key: "error",
             brief: "The error value recorded by OTAP Dataflow internal telemetry.",
-            value_type: otap_df_telemetry::descriptor::AttributeValueType::Any,
+            value_type: otap_df_telemetry::descriptor::AttributeValueType::String,
             requirement_level: EventRequirementLevel::Required,
         },
         EventAttributeDescriptor {
@@ -2460,7 +2460,7 @@ impl EventAttributes for DurableBufferQueuedRecomputeError {
     ) {
         visitor(
             &DURABLE_BUFFER_QUEUED_RECOMPUTE_ERROR_DESCRIPTOR.attributes[0],
-            EventAttributeValueRef::Any(&self.error),
+            EventAttributeValueRef::String(self.error.as_str()),
         );
         visitor(
             &DURABLE_BUFFER_QUEUED_RECOMPUTE_ERROR_DESCRIPTOR.attributes[1],
@@ -2492,9 +2492,9 @@ impl DurableBufferQueuedRecomputeError {
 #[derive(Debug, Clone)]
 pub struct DurableBufferRetryBackpressure {
     /// The bundle_index value recorded by OTAP Dataflow internal telemetry.
-    pub bundle_index: otap_df_telemetry::attributes::AttributeValue,
+    pub bundle_index: i64,
     /// The segment_seq value recorded by OTAP Dataflow internal telemetry.
-    pub segment_seq: otap_df_telemetry::attributes::AttributeValue,
+    pub segment_seq: i64,
 }
 
 /// Marker implemented only by entity types allowed by `durable_buffer.retry.backpressure`.
@@ -2520,14 +2520,14 @@ static DURABLE_BUFFER_RETRY_BACKPRESSURE_DESCRIPTOR: EventDescriptor = EventDesc
             key: "bundle_index",
             wire_key: "bundle_index",
             brief: "The bundle_index value recorded by OTAP Dataflow internal telemetry.",
-            value_type: otap_df_telemetry::descriptor::AttributeValueType::Any,
+            value_type: otap_df_telemetry::descriptor::AttributeValueType::Int,
             requirement_level: EventRequirementLevel::Required,
         },
         EventAttributeDescriptor {
             key: "segment_seq",
             wire_key: "segment_seq",
             brief: "The segment_seq value recorded by OTAP Dataflow internal telemetry.",
-            value_type: otap_df_telemetry::descriptor::AttributeValueType::Any,
+            value_type: otap_df_telemetry::descriptor::AttributeValueType::Int,
             requirement_level: EventRequirementLevel::Required,
         },
     ],
@@ -2541,11 +2541,11 @@ impl EventAttributes for DurableBufferRetryBackpressure {
     ) {
         visitor(
             &DURABLE_BUFFER_RETRY_BACKPRESSURE_DESCRIPTOR.attributes[0],
-            EventAttributeValueRef::Any(&self.bundle_index),
+            EventAttributeValueRef::Int(self.bundle_index),
         );
         visitor(
             &DURABLE_BUFFER_RETRY_BACKPRESSURE_DESCRIPTOR.attributes[1],
-            EventAttributeValueRef::Any(&self.segment_seq),
+            EventAttributeValueRef::Int(self.segment_seq),
         );
     }
 }
@@ -2572,11 +2572,11 @@ impl DurableBufferRetryBackpressure {
 #[derive(Debug, Clone)]
 pub struct DurableBufferRetryClaimFailed {
     /// The bundle_index value recorded by OTAP Dataflow internal telemetry.
-    pub bundle_index: otap_df_telemetry::attributes::AttributeValue,
+    pub bundle_index: i64,
     /// The error value recorded by OTAP Dataflow internal telemetry.
-    pub error: otap_df_telemetry::attributes::AttributeValue,
+    pub error: String,
     /// The segment_seq value recorded by OTAP Dataflow internal telemetry.
-    pub segment_seq: otap_df_telemetry::attributes::AttributeValue,
+    pub segment_seq: i64,
 }
 
 /// Marker implemented only by entity types allowed by `durable_buffer.retry.claim_failed`.
@@ -2602,21 +2602,21 @@ static DURABLE_BUFFER_RETRY_CLAIM_FAILED_DESCRIPTOR: EventDescriptor = EventDesc
             key: "bundle_index",
             wire_key: "bundle_index",
             brief: "The bundle_index value recorded by OTAP Dataflow internal telemetry.",
-            value_type: otap_df_telemetry::descriptor::AttributeValueType::Any,
+            value_type: otap_df_telemetry::descriptor::AttributeValueType::Int,
             requirement_level: EventRequirementLevel::Required,
         },
         EventAttributeDescriptor {
             key: "error",
             wire_key: "error",
             brief: "The error value recorded by OTAP Dataflow internal telemetry.",
-            value_type: otap_df_telemetry::descriptor::AttributeValueType::Any,
+            value_type: otap_df_telemetry::descriptor::AttributeValueType::String,
             requirement_level: EventRequirementLevel::Required,
         },
         EventAttributeDescriptor {
             key: "segment_seq",
             wire_key: "segment_seq",
             brief: "The segment_seq value recorded by OTAP Dataflow internal telemetry.",
-            value_type: otap_df_telemetry::descriptor::AttributeValueType::Any,
+            value_type: otap_df_telemetry::descriptor::AttributeValueType::Int,
             requirement_level: EventRequirementLevel::Required,
         },
     ],
@@ -2630,15 +2630,15 @@ impl EventAttributes for DurableBufferRetryClaimFailed {
     ) {
         visitor(
             &DURABLE_BUFFER_RETRY_CLAIM_FAILED_DESCRIPTOR.attributes[0],
-            EventAttributeValueRef::Any(&self.bundle_index),
+            EventAttributeValueRef::Int(self.bundle_index),
         );
         visitor(
             &DURABLE_BUFFER_RETRY_CLAIM_FAILED_DESCRIPTOR.attributes[1],
-            EventAttributeValueRef::Any(&self.error),
+            EventAttributeValueRef::String(self.error.as_str()),
         );
         visitor(
             &DURABLE_BUFFER_RETRY_CLAIM_FAILED_DESCRIPTOR.attributes[2],
-            EventAttributeValueRef::Any(&self.segment_seq),
+            EventAttributeValueRef::Int(self.segment_seq),
         );
     }
 }
@@ -2665,13 +2665,13 @@ impl DurableBufferRetryClaimFailed {
 #[derive(Debug, Clone)]
 pub struct DurableBufferRetryDeferred {
     /// The bundle_index value recorded by OTAP Dataflow internal telemetry.
-    pub bundle_index: otap_df_telemetry::attributes::AttributeValue,
+    pub bundle_index: i64,
     /// The in_flight value recorded by OTAP Dataflow internal telemetry.
-    pub in_flight: otap_df_telemetry::attributes::AttributeValue,
+    pub in_flight: i64,
     /// The max_in_flight value recorded by OTAP Dataflow internal telemetry.
-    pub max_in_flight: otap_df_telemetry::attributes::AttributeValue,
+    pub max_in_flight: i64,
     /// The segment_seq value recorded by OTAP Dataflow internal telemetry.
-    pub segment_seq: otap_df_telemetry::attributes::AttributeValue,
+    pub segment_seq: i64,
 }
 
 /// Marker implemented only by entity types allowed by `durable_buffer.retry.deferred`.
@@ -2697,28 +2697,28 @@ static DURABLE_BUFFER_RETRY_DEFERRED_DESCRIPTOR: EventDescriptor = EventDescript
             key: "bundle_index",
             wire_key: "bundle_index",
             brief: "The bundle_index value recorded by OTAP Dataflow internal telemetry.",
-            value_type: otap_df_telemetry::descriptor::AttributeValueType::Any,
+            value_type: otap_df_telemetry::descriptor::AttributeValueType::Int,
             requirement_level: EventRequirementLevel::Required,
         },
         EventAttributeDescriptor {
             key: "in_flight",
             wire_key: "in_flight",
             brief: "The in_flight value recorded by OTAP Dataflow internal telemetry.",
-            value_type: otap_df_telemetry::descriptor::AttributeValueType::Any,
+            value_type: otap_df_telemetry::descriptor::AttributeValueType::Int,
             requirement_level: EventRequirementLevel::Required,
         },
         EventAttributeDescriptor {
             key: "max_in_flight",
             wire_key: "max_in_flight",
             brief: "The max_in_flight value recorded by OTAP Dataflow internal telemetry.",
-            value_type: otap_df_telemetry::descriptor::AttributeValueType::Any,
+            value_type: otap_df_telemetry::descriptor::AttributeValueType::Int,
             requirement_level: EventRequirementLevel::Required,
         },
         EventAttributeDescriptor {
             key: "segment_seq",
             wire_key: "segment_seq",
             brief: "The segment_seq value recorded by OTAP Dataflow internal telemetry.",
-            value_type: otap_df_telemetry::descriptor::AttributeValueType::Any,
+            value_type: otap_df_telemetry::descriptor::AttributeValueType::Int,
             requirement_level: EventRequirementLevel::Required,
         },
     ],
@@ -2732,19 +2732,19 @@ impl EventAttributes for DurableBufferRetryDeferred {
     ) {
         visitor(
             &DURABLE_BUFFER_RETRY_DEFERRED_DESCRIPTOR.attributes[0],
-            EventAttributeValueRef::Any(&self.bundle_index),
+            EventAttributeValueRef::Int(self.bundle_index),
         );
         visitor(
             &DURABLE_BUFFER_RETRY_DEFERRED_DESCRIPTOR.attributes[1],
-            EventAttributeValueRef::Any(&self.in_flight),
+            EventAttributeValueRef::Int(self.in_flight),
         );
         visitor(
             &DURABLE_BUFFER_RETRY_DEFERRED_DESCRIPTOR.attributes[2],
-            EventAttributeValueRef::Any(&self.max_in_flight),
+            EventAttributeValueRef::Int(self.max_in_flight),
         );
         visitor(
             &DURABLE_BUFFER_RETRY_DEFERRED_DESCRIPTOR.attributes[3],
-            EventAttributeValueRef::Any(&self.segment_seq),
+            EventAttributeValueRef::Int(self.segment_seq),
         );
     }
 }
@@ -2876,9 +2876,9 @@ impl DurableBufferRetryRescheduleFailed {
 #[derive(Debug, Clone)]
 pub struct DurableBufferRetryScheduleFailed {
     /// The bundle_index value recorded by OTAP Dataflow internal telemetry.
-    pub bundle_index: otap_df_telemetry::attributes::AttributeValue,
+    pub bundle_index: i64,
     /// The segment_seq value recorded by OTAP Dataflow internal telemetry.
-    pub segment_seq: otap_df_telemetry::attributes::AttributeValue,
+    pub segment_seq: i64,
 }
 
 /// Marker implemented only by entity types allowed by `durable_buffer.retry.schedule_failed`.
@@ -2904,14 +2904,14 @@ static DURABLE_BUFFER_RETRY_SCHEDULE_FAILED_DESCRIPTOR: EventDescriptor = EventD
             key: "bundle_index",
             wire_key: "bundle_index",
             brief: "The bundle_index value recorded by OTAP Dataflow internal telemetry.",
-            value_type: otap_df_telemetry::descriptor::AttributeValueType::Any,
+            value_type: otap_df_telemetry::descriptor::AttributeValueType::Int,
             requirement_level: EventRequirementLevel::Required,
         },
         EventAttributeDescriptor {
             key: "segment_seq",
             wire_key: "segment_seq",
             brief: "The segment_seq value recorded by OTAP Dataflow internal telemetry.",
-            value_type: otap_df_telemetry::descriptor::AttributeValueType::Any,
+            value_type: otap_df_telemetry::descriptor::AttributeValueType::Int,
             requirement_level: EventRequirementLevel::Required,
         },
     ],
@@ -2925,11 +2925,11 @@ impl EventAttributes for DurableBufferRetryScheduleFailed {
     ) {
         visitor(
             &DURABLE_BUFFER_RETRY_SCHEDULE_FAILED_DESCRIPTOR.attributes[0],
-            EventAttributeValueRef::Any(&self.bundle_index),
+            EventAttributeValueRef::Int(self.bundle_index),
         );
         visitor(
             &DURABLE_BUFFER_RETRY_SCHEDULE_FAILED_DESCRIPTOR.attributes[1],
-            EventAttributeValueRef::Any(&self.segment_seq),
+            EventAttributeValueRef::Int(self.segment_seq),
         );
     }
 }
@@ -2957,11 +2957,11 @@ impl DurableBufferRetryScheduleFailed {
 #[derive(Debug, Clone)]
 pub struct DurableBufferRetrySent {
     /// The bundle_index value recorded by OTAP Dataflow internal telemetry.
-    pub bundle_index: otap_df_telemetry::attributes::AttributeValue,
+    pub bundle_index: i64,
     /// The retry_count value recorded by OTAP Dataflow internal telemetry.
-    pub retry_count: otap_df_telemetry::attributes::AttributeValue,
+    pub retry_count: i64,
     /// The segment_seq value recorded by OTAP Dataflow internal telemetry.
-    pub segment_seq: otap_df_telemetry::attributes::AttributeValue,
+    pub segment_seq: i64,
 }
 
 /// Marker implemented only by entity types allowed by `durable_buffer.retry.sent`.
@@ -2987,21 +2987,21 @@ static DURABLE_BUFFER_RETRY_SENT_DESCRIPTOR: EventDescriptor = EventDescriptor {
             key: "bundle_index",
             wire_key: "bundle_index",
             brief: "The bundle_index value recorded by OTAP Dataflow internal telemetry.",
-            value_type: otap_df_telemetry::descriptor::AttributeValueType::Any,
+            value_type: otap_df_telemetry::descriptor::AttributeValueType::Int,
             requirement_level: EventRequirementLevel::Required,
         },
         EventAttributeDescriptor {
             key: "retry_count",
             wire_key: "retry_count",
             brief: "The retry_count value recorded by OTAP Dataflow internal telemetry.",
-            value_type: otap_df_telemetry::descriptor::AttributeValueType::Any,
+            value_type: otap_df_telemetry::descriptor::AttributeValueType::Int,
             requirement_level: EventRequirementLevel::Required,
         },
         EventAttributeDescriptor {
             key: "segment_seq",
             wire_key: "segment_seq",
             brief: "The segment_seq value recorded by OTAP Dataflow internal telemetry.",
-            value_type: otap_df_telemetry::descriptor::AttributeValueType::Any,
+            value_type: otap_df_telemetry::descriptor::AttributeValueType::Int,
             requirement_level: EventRequirementLevel::Required,
         },
     ],
@@ -3015,15 +3015,15 @@ impl EventAttributes for DurableBufferRetrySent {
     ) {
         visitor(
             &DURABLE_BUFFER_RETRY_SENT_DESCRIPTOR.attributes[0],
-            EventAttributeValueRef::Any(&self.bundle_index),
+            EventAttributeValueRef::Int(self.bundle_index),
         );
         visitor(
             &DURABLE_BUFFER_RETRY_SENT_DESCRIPTOR.attributes[1],
-            EventAttributeValueRef::Any(&self.retry_count),
+            EventAttributeValueRef::Int(self.retry_count),
         );
         visitor(
             &DURABLE_BUFFER_RETRY_SENT_DESCRIPTOR.attributes[2],
-            EventAttributeValueRef::Any(&self.segment_seq),
+            EventAttributeValueRef::Int(self.segment_seq),
         );
     }
 }
@@ -3050,9 +3050,9 @@ impl DurableBufferRetrySent {
 #[derive(Debug, Clone)]
 pub struct DurableBufferRetrySkipped {
     /// The bundle_index value recorded by OTAP Dataflow internal telemetry.
-    pub bundle_index: otap_df_telemetry::attributes::AttributeValue,
+    pub bundle_index: i64,
     /// The segment_seq value recorded by OTAP Dataflow internal telemetry.
-    pub segment_seq: otap_df_telemetry::attributes::AttributeValue,
+    pub segment_seq: i64,
 }
 
 /// Marker implemented only by entity types allowed by `durable_buffer.retry.skipped`.
@@ -3078,14 +3078,14 @@ static DURABLE_BUFFER_RETRY_SKIPPED_DESCRIPTOR: EventDescriptor = EventDescripto
             key: "bundle_index",
             wire_key: "bundle_index",
             brief: "The bundle_index value recorded by OTAP Dataflow internal telemetry.",
-            value_type: otap_df_telemetry::descriptor::AttributeValueType::Any,
+            value_type: otap_df_telemetry::descriptor::AttributeValueType::Int,
             requirement_level: EventRequirementLevel::Required,
         },
         EventAttributeDescriptor {
             key: "segment_seq",
             wire_key: "segment_seq",
             brief: "The segment_seq value recorded by OTAP Dataflow internal telemetry.",
-            value_type: otap_df_telemetry::descriptor::AttributeValueType::Any,
+            value_type: otap_df_telemetry::descriptor::AttributeValueType::Int,
             requirement_level: EventRequirementLevel::Required,
         },
     ],
@@ -3099,11 +3099,11 @@ impl EventAttributes for DurableBufferRetrySkipped {
     ) {
         visitor(
             &DURABLE_BUFFER_RETRY_SKIPPED_DESCRIPTOR.attributes[0],
-            EventAttributeValueRef::Any(&self.bundle_index),
+            EventAttributeValueRef::Int(self.bundle_index),
         );
         visitor(
             &DURABLE_BUFFER_RETRY_SKIPPED_DESCRIPTOR.attributes[1],
-            EventAttributeValueRef::Any(&self.segment_seq),
+            EventAttributeValueRef::Int(self.segment_seq),
         );
     }
 }
@@ -3130,9 +3130,9 @@ impl DurableBufferRetrySkipped {
 #[derive(Debug, Clone)]
 pub struct DurableBufferRetryUnknownWakeup {
     /// The wakeup_revision value recorded by OTAP Dataflow internal telemetry.
-    pub wakeup_revision: otap_df_telemetry::attributes::AttributeValue,
+    pub wakeup_revision: i64,
     /// The wakeup_slot value recorded by OTAP Dataflow internal telemetry.
-    pub wakeup_slot: otap_df_telemetry::attributes::AttributeValue,
+    pub wakeup_slot: String,
 }
 
 /// Marker implemented only by entity types allowed by `durable_buffer.retry.unknown_wakeup`.
@@ -3158,14 +3158,14 @@ static DURABLE_BUFFER_RETRY_UNKNOWN_WAKEUP_DESCRIPTOR: EventDescriptor = EventDe
             key: "wakeup_revision",
             wire_key: "wakeup_revision",
             brief: "The wakeup_revision value recorded by OTAP Dataflow internal telemetry.",
-            value_type: otap_df_telemetry::descriptor::AttributeValueType::Any,
+            value_type: otap_df_telemetry::descriptor::AttributeValueType::Int,
             requirement_level: EventRequirementLevel::Required,
         },
         EventAttributeDescriptor {
             key: "wakeup_slot",
             wire_key: "wakeup_slot",
             brief: "The wakeup_slot value recorded by OTAP Dataflow internal telemetry.",
-            value_type: otap_df_telemetry::descriptor::AttributeValueType::Any,
+            value_type: otap_df_telemetry::descriptor::AttributeValueType::String,
             requirement_level: EventRequirementLevel::Required,
         },
     ],
@@ -3179,11 +3179,11 @@ impl EventAttributes for DurableBufferRetryUnknownWakeup {
     ) {
         visitor(
             &DURABLE_BUFFER_RETRY_UNKNOWN_WAKEUP_DESCRIPTOR.attributes[0],
-            EventAttributeValueRef::Any(&self.wakeup_revision),
+            EventAttributeValueRef::Int(self.wakeup_revision),
         );
         visitor(
             &DURABLE_BUFFER_RETRY_UNKNOWN_WAKEUP_DESCRIPTOR.attributes[1],
-            EventAttributeValueRef::Any(&self.wakeup_slot),
+            EventAttributeValueRef::String(self.wakeup_slot.as_str()),
         );
     }
 }
@@ -3264,7 +3264,7 @@ impl DurableBufferShutdownBackpressure {
 #[derive(Debug, Clone)]
 pub struct DurableBufferShutdownBundleError {
     /// The error value recorded by OTAP Dataflow internal telemetry.
-    pub error: otap_df_telemetry::attributes::AttributeValue,
+    pub error: String,
 }
 
 /// Marker implemented only by entity types allowed by `durable_buffer.shutdown.bundle_error`.
@@ -3289,7 +3289,7 @@ static DURABLE_BUFFER_SHUTDOWN_BUNDLE_ERROR_DESCRIPTOR: EventDescriptor = EventD
         key: "error",
         wire_key: "error",
         brief: "The error value recorded by OTAP Dataflow internal telemetry.",
-        value_type: otap_df_telemetry::descriptor::AttributeValueType::Any,
+        value_type: otap_df_telemetry::descriptor::AttributeValueType::String,
         requirement_level: EventRequirementLevel::Required,
     }],
 };
@@ -3302,7 +3302,7 @@ impl EventAttributes for DurableBufferShutdownBundleError {
     ) {
         visitor(
             &DURABLE_BUFFER_SHUTDOWN_BUNDLE_ERROR_DESCRIPTOR.attributes[0],
-            EventAttributeValueRef::Any(&self.error),
+            EventAttributeValueRef::String(self.error.as_str()),
         );
     }
 }
@@ -3439,7 +3439,7 @@ impl DurableBufferShutdownDeadlineExceeded {
 #[derive(Debug, Clone)]
 pub struct DurableBufferShutdownDrainDeadline {
     /// The bundles_drained value recorded by OTAP Dataflow internal telemetry.
-    pub bundles_drained: otap_df_telemetry::attributes::AttributeValue,
+    pub bundles_drained: i64,
 }
 
 /// Marker implemented only by entity types allowed by `durable_buffer.shutdown.drain_deadline`.
@@ -3464,7 +3464,7 @@ static DURABLE_BUFFER_SHUTDOWN_DRAIN_DEADLINE_DESCRIPTOR: EventDescriptor = Even
         key: "bundles_drained",
         wire_key: "bundles_drained",
         brief: "The bundles_drained value recorded by OTAP Dataflow internal telemetry.",
-        value_type: otap_df_telemetry::descriptor::AttributeValueType::Any,
+        value_type: otap_df_telemetry::descriptor::AttributeValueType::Int,
         requirement_level: EventRequirementLevel::Required,
     }],
 };
@@ -3477,7 +3477,7 @@ impl EventAttributes for DurableBufferShutdownDrainDeadline {
     ) {
         visitor(
             &DURABLE_BUFFER_SHUTDOWN_DRAIN_DEADLINE_DESCRIPTOR.attributes[0],
-            EventAttributeValueRef::Any(&self.bundles_drained),
+            EventAttributeValueRef::Int(self.bundles_drained),
         );
     }
 }
@@ -3505,7 +3505,7 @@ impl DurableBufferShutdownDrainDeadline {
 #[derive(Debug, Clone)]
 pub struct DurableBufferShutdownDrained {
     /// The bundles_drained value recorded by OTAP Dataflow internal telemetry.
-    pub bundles_drained: otap_df_telemetry::attributes::AttributeValue,
+    pub bundles_drained: i64,
 }
 
 /// Marker implemented only by entity types allowed by `durable_buffer.shutdown.drained`.
@@ -3530,7 +3530,7 @@ static DURABLE_BUFFER_SHUTDOWN_DRAINED_DESCRIPTOR: EventDescriptor = EventDescri
         key: "bundles_drained",
         wire_key: "bundles_drained",
         brief: "The bundles_drained value recorded by OTAP Dataflow internal telemetry.",
-        value_type: otap_df_telemetry::descriptor::AttributeValueType::Any,
+        value_type: otap_df_telemetry::descriptor::AttributeValueType::Int,
         requirement_level: EventRequirementLevel::Required,
     }],
 };
@@ -3543,7 +3543,7 @@ impl EventAttributes for DurableBufferShutdownDrained {
     ) {
         visitor(
             &DURABLE_BUFFER_SHUTDOWN_DRAINED_DESCRIPTOR.attributes[0],
-            EventAttributeValueRef::Any(&self.bundles_drained),
+            EventAttributeValueRef::Int(self.bundles_drained),
         );
     }
 }
@@ -3570,7 +3570,7 @@ impl DurableBufferShutdownDrained {
 #[derive(Debug, Clone)]
 pub struct DurableBufferShutdownEngineFailed {
     /// The error value recorded by OTAP Dataflow internal telemetry.
-    pub error: otap_df_telemetry::attributes::AttributeValue,
+    pub error: String,
 }
 
 /// Marker implemented only by entity types allowed by `durable_buffer.shutdown.engine_failed`.
@@ -3595,7 +3595,7 @@ static DURABLE_BUFFER_SHUTDOWN_ENGINE_FAILED_DESCRIPTOR: EventDescriptor = Event
         key: "error",
         wire_key: "error",
         brief: "The error value recorded by OTAP Dataflow internal telemetry.",
-        value_type: otap_df_telemetry::descriptor::AttributeValueType::Any,
+        value_type: otap_df_telemetry::descriptor::AttributeValueType::String,
         requirement_level: EventRequirementLevel::Required,
     }],
 };
@@ -3608,7 +3608,7 @@ impl EventAttributes for DurableBufferShutdownEngineFailed {
     ) {
         visitor(
             &DURABLE_BUFFER_SHUTDOWN_ENGINE_FAILED_DESCRIPTOR.attributes[0],
-            EventAttributeValueRef::Any(&self.error),
+            EventAttributeValueRef::String(self.error.as_str()),
         );
     }
 }
@@ -3636,7 +3636,7 @@ impl DurableBufferShutdownEngineFailed {
 #[derive(Debug, Clone)]
 pub struct DurableBufferShutdownFlushFailed {
     /// The error value recorded by OTAP Dataflow internal telemetry.
-    pub error: otap_df_telemetry::attributes::AttributeValue,
+    pub error: String,
 }
 
 /// Marker implemented only by entity types allowed by `durable_buffer.shutdown.flush_failed`.
@@ -3661,7 +3661,7 @@ static DURABLE_BUFFER_SHUTDOWN_FLUSH_FAILED_DESCRIPTOR: EventDescriptor = EventD
         key: "error",
         wire_key: "error",
         brief: "The error value recorded by OTAP Dataflow internal telemetry.",
-        value_type: otap_df_telemetry::descriptor::AttributeValueType::Any,
+        value_type: otap_df_telemetry::descriptor::AttributeValueType::String,
         requirement_level: EventRequirementLevel::Required,
     }],
 };
@@ -3674,7 +3674,7 @@ impl EventAttributes for DurableBufferShutdownFlushFailed {
     ) {
         visitor(
             &DURABLE_BUFFER_SHUTDOWN_FLUSH_FAILED_DESCRIPTOR.attributes[0],
-            EventAttributeValueRef::Any(&self.error),
+            EventAttributeValueRef::String(self.error.as_str()),
         );
     }
 }
@@ -3754,7 +3754,7 @@ impl DurableBufferShutdownFlushing {
 #[derive(Debug, Clone)]
 pub struct DurableBufferShutdownPollError {
     /// The error value recorded by OTAP Dataflow internal telemetry.
-    pub error: otap_df_telemetry::attributes::AttributeValue,
+    pub error: String,
 }
 
 /// Marker implemented only by entity types allowed by `durable_buffer.shutdown.poll_error`.
@@ -3779,7 +3779,7 @@ static DURABLE_BUFFER_SHUTDOWN_POLL_ERROR_DESCRIPTOR: EventDescriptor = EventDes
         key: "error",
         wire_key: "error",
         brief: "The error value recorded by OTAP Dataflow internal telemetry.",
-        value_type: otap_df_telemetry::descriptor::AttributeValueType::Any,
+        value_type: otap_df_telemetry::descriptor::AttributeValueType::String,
         requirement_level: EventRequirementLevel::Required,
     }],
 };
@@ -3792,7 +3792,7 @@ impl EventAttributes for DurableBufferShutdownPollError {
     ) {
         visitor(
             &DURABLE_BUFFER_SHUTDOWN_POLL_ERROR_DESCRIPTOR.attributes[0],
-            EventAttributeValueRef::Any(&self.error),
+            EventAttributeValueRef::String(self.error.as_str()),
         );
     }
 }
@@ -4001,7 +4001,7 @@ impl HostMetricsDroppedBackpressure {
 #[derive(Debug, Clone)]
 pub struct HostMetricsScrapeFailed {
     /// The error value recorded by OTAP Dataflow internal telemetry.
-    pub error: otap_df_telemetry::attributes::AttributeValue,
+    pub error: String,
 }
 
 /// Marker implemented only by entity types allowed by `host_metrics.scrape_failed`.
@@ -4026,7 +4026,7 @@ static HOST_METRICS_SCRAPE_FAILED_DESCRIPTOR: EventDescriptor = EventDescriptor 
         key: "error",
         wire_key: "error",
         brief: "The error value recorded by OTAP Dataflow internal telemetry.",
-        value_type: otap_df_telemetry::descriptor::AttributeValueType::Any,
+        value_type: otap_df_telemetry::descriptor::AttributeValueType::String,
         requirement_level: EventRequirementLevel::Required,
     }],
 };
@@ -4039,7 +4039,7 @@ impl EventAttributes for HostMetricsScrapeFailed {
     ) {
         visitor(
             &HOST_METRICS_SCRAPE_FAILED_DESCRIPTOR.attributes[0],
-            EventAttributeValueRef::Any(&self.error),
+            EventAttributeValueRef::String(self.error.as_str()),
         );
     }
 }
@@ -4327,15 +4327,15 @@ impl HostMetricsReceiverShutdown {
 #[derive(Debug, Clone)]
 pub struct JournaldReceiverBatchSent {
     /// The batch_id value recorded by OTAP Dataflow internal telemetry.
-    pub batch_id: otap_df_telemetry::attributes::AttributeValue,
+    pub batch_id: i64,
     /// The first_cursor value recorded by OTAP Dataflow internal telemetry.
-    pub first_cursor: otap_df_telemetry::attributes::AttributeValue,
+    pub first_cursor: String,
     /// The last_cursor value recorded by OTAP Dataflow internal telemetry.
-    pub last_cursor: otap_df_telemetry::attributes::AttributeValue,
+    pub last_cursor: String,
     /// The records value recorded by OTAP Dataflow internal telemetry.
-    pub records: otap_df_telemetry::attributes::AttributeValue,
+    pub records: i64,
     /// The source_id value recorded by OTAP Dataflow internal telemetry.
-    pub source_id: otap_df_telemetry::attributes::AttributeValue,
+    pub source_id: String,
 }
 
 /// Marker implemented only by entity types allowed by `journald_receiver.batch_sent`.
@@ -4361,35 +4361,35 @@ static JOURNALD_RECEIVER_BATCH_SENT_DESCRIPTOR: EventDescriptor = EventDescripto
             key: "batch_id",
             wire_key: "batch_id",
             brief: "The batch_id value recorded by OTAP Dataflow internal telemetry.",
-            value_type: otap_df_telemetry::descriptor::AttributeValueType::Any,
+            value_type: otap_df_telemetry::descriptor::AttributeValueType::Int,
             requirement_level: EventRequirementLevel::Required,
         },
         EventAttributeDescriptor {
             key: "first_cursor",
             wire_key: "first_cursor",
             brief: "The first_cursor value recorded by OTAP Dataflow internal telemetry.",
-            value_type: otap_df_telemetry::descriptor::AttributeValueType::Any,
+            value_type: otap_df_telemetry::descriptor::AttributeValueType::String,
             requirement_level: EventRequirementLevel::Required,
         },
         EventAttributeDescriptor {
             key: "last_cursor",
             wire_key: "last_cursor",
             brief: "The last_cursor value recorded by OTAP Dataflow internal telemetry.",
-            value_type: otap_df_telemetry::descriptor::AttributeValueType::Any,
+            value_type: otap_df_telemetry::descriptor::AttributeValueType::String,
             requirement_level: EventRequirementLevel::Required,
         },
         EventAttributeDescriptor {
             key: "records",
             wire_key: "records",
             brief: "The records value recorded by OTAP Dataflow internal telemetry.",
-            value_type: otap_df_telemetry::descriptor::AttributeValueType::Any,
+            value_type: otap_df_telemetry::descriptor::AttributeValueType::Int,
             requirement_level: EventRequirementLevel::Required,
         },
         EventAttributeDescriptor {
             key: "source_id",
             wire_key: "source_id",
             brief: "The source_id value recorded by OTAP Dataflow internal telemetry.",
-            value_type: otap_df_telemetry::descriptor::AttributeValueType::Any,
+            value_type: otap_df_telemetry::descriptor::AttributeValueType::String,
             requirement_level: EventRequirementLevel::Required,
         },
     ],
@@ -4403,23 +4403,23 @@ impl EventAttributes for JournaldReceiverBatchSent {
     ) {
         visitor(
             &JOURNALD_RECEIVER_BATCH_SENT_DESCRIPTOR.attributes[0],
-            EventAttributeValueRef::Any(&self.batch_id),
+            EventAttributeValueRef::Int(self.batch_id),
         );
         visitor(
             &JOURNALD_RECEIVER_BATCH_SENT_DESCRIPTOR.attributes[1],
-            EventAttributeValueRef::Any(&self.first_cursor),
+            EventAttributeValueRef::String(self.first_cursor.as_str()),
         );
         visitor(
             &JOURNALD_RECEIVER_BATCH_SENT_DESCRIPTOR.attributes[2],
-            EventAttributeValueRef::Any(&self.last_cursor),
+            EventAttributeValueRef::String(self.last_cursor.as_str()),
         );
         visitor(
             &JOURNALD_RECEIVER_BATCH_SENT_DESCRIPTOR.attributes[3],
-            EventAttributeValueRef::Any(&self.records),
+            EventAttributeValueRef::Int(self.records),
         );
         visitor(
             &JOURNALD_RECEIVER_BATCH_SENT_DESCRIPTOR.attributes[4],
-            EventAttributeValueRef::Any(&self.source_id),
+            EventAttributeValueRef::String(self.source_id.as_str()),
         );
     }
 }
@@ -4446,11 +4446,11 @@ impl JournaldReceiverBatchSent {
 #[derive(Debug, Clone)]
 pub struct JournaldReceiverCheckpointFailed {
     /// The batch_id value recorded by OTAP Dataflow internal telemetry.
-    pub batch_id: otap_df_telemetry::attributes::AttributeValue,
+    pub batch_id: i64,
     /// The error value recorded by OTAP Dataflow internal telemetry.
-    pub error: otap_df_telemetry::attributes::AttributeValue,
+    pub error: String,
     /// The source_id value recorded by OTAP Dataflow internal telemetry.
-    pub source_id: otap_df_telemetry::attributes::AttributeValue,
+    pub source_id: String,
 }
 
 /// Marker implemented only by entity types allowed by `journald_receiver.checkpoint_failed`.
@@ -4476,21 +4476,21 @@ static JOURNALD_RECEIVER_CHECKPOINT_FAILED_DESCRIPTOR: EventDescriptor = EventDe
             key: "batch_id",
             wire_key: "batch_id",
             brief: "The batch_id value recorded by OTAP Dataflow internal telemetry.",
-            value_type: otap_df_telemetry::descriptor::AttributeValueType::Any,
+            value_type: otap_df_telemetry::descriptor::AttributeValueType::Int,
             requirement_level: EventRequirementLevel::Required,
         },
         EventAttributeDescriptor {
             key: "error",
             wire_key: "error",
             brief: "The error value recorded by OTAP Dataflow internal telemetry.",
-            value_type: otap_df_telemetry::descriptor::AttributeValueType::Any,
+            value_type: otap_df_telemetry::descriptor::AttributeValueType::String,
             requirement_level: EventRequirementLevel::Required,
         },
         EventAttributeDescriptor {
             key: "source_id",
             wire_key: "source_id",
             brief: "The source_id value recorded by OTAP Dataflow internal telemetry.",
-            value_type: otap_df_telemetry::descriptor::AttributeValueType::Any,
+            value_type: otap_df_telemetry::descriptor::AttributeValueType::String,
             requirement_level: EventRequirementLevel::Required,
         },
     ],
@@ -4504,15 +4504,15 @@ impl EventAttributes for JournaldReceiverCheckpointFailed {
     ) {
         visitor(
             &JOURNALD_RECEIVER_CHECKPOINT_FAILED_DESCRIPTOR.attributes[0],
-            EventAttributeValueRef::Any(&self.batch_id),
+            EventAttributeValueRef::Int(self.batch_id),
         );
         visitor(
             &JOURNALD_RECEIVER_CHECKPOINT_FAILED_DESCRIPTOR.attributes[1],
-            EventAttributeValueRef::Any(&self.error),
+            EventAttributeValueRef::String(self.error.as_str()),
         );
         visitor(
             &JOURNALD_RECEIVER_CHECKPOINT_FAILED_DESCRIPTOR.attributes[2],
-            EventAttributeValueRef::Any(&self.source_id),
+            EventAttributeValueRef::String(self.source_id.as_str()),
         );
     }
 }
@@ -4540,11 +4540,11 @@ impl JournaldReceiverCheckpointFailed {
 #[derive(Debug, Clone)]
 pub struct JournaldReceiverCursorCommitted {
     /// The batch_id value recorded by OTAP Dataflow internal telemetry.
-    pub batch_id: otap_df_telemetry::attributes::AttributeValue,
+    pub batch_id: i64,
     /// The cursor value recorded by OTAP Dataflow internal telemetry.
-    pub cursor: otap_df_telemetry::attributes::AttributeValue,
+    pub cursor: String,
     /// The source_id value recorded by OTAP Dataflow internal telemetry.
-    pub source_id: otap_df_telemetry::attributes::AttributeValue,
+    pub source_id: String,
 }
 
 /// Marker implemented only by entity types allowed by `journald_receiver.cursor_committed`.
@@ -4570,21 +4570,21 @@ static JOURNALD_RECEIVER_CURSOR_COMMITTED_DESCRIPTOR: EventDescriptor = EventDes
             key: "batch_id",
             wire_key: "batch_id",
             brief: "The batch_id value recorded by OTAP Dataflow internal telemetry.",
-            value_type: otap_df_telemetry::descriptor::AttributeValueType::Any,
+            value_type: otap_df_telemetry::descriptor::AttributeValueType::Int,
             requirement_level: EventRequirementLevel::Required,
         },
         EventAttributeDescriptor {
             key: "cursor",
             wire_key: "cursor",
             brief: "The cursor value recorded by OTAP Dataflow internal telemetry.",
-            value_type: otap_df_telemetry::descriptor::AttributeValueType::Any,
+            value_type: otap_df_telemetry::descriptor::AttributeValueType::String,
             requirement_level: EventRequirementLevel::Required,
         },
         EventAttributeDescriptor {
             key: "source_id",
             wire_key: "source_id",
             brief: "The source_id value recorded by OTAP Dataflow internal telemetry.",
-            value_type: otap_df_telemetry::descriptor::AttributeValueType::Any,
+            value_type: otap_df_telemetry::descriptor::AttributeValueType::String,
             requirement_level: EventRequirementLevel::Required,
         },
     ],
@@ -4598,15 +4598,15 @@ impl EventAttributes for JournaldReceiverCursorCommitted {
     ) {
         visitor(
             &JOURNALD_RECEIVER_CURSOR_COMMITTED_DESCRIPTOR.attributes[0],
-            EventAttributeValueRef::Any(&self.batch_id),
+            EventAttributeValueRef::Int(self.batch_id),
         );
         visitor(
             &JOURNALD_RECEIVER_CURSOR_COMMITTED_DESCRIPTOR.attributes[1],
-            EventAttributeValueRef::Any(&self.cursor),
+            EventAttributeValueRef::String(self.cursor.as_str()),
         );
         visitor(
             &JOURNALD_RECEIVER_CURSOR_COMMITTED_DESCRIPTOR.attributes[2],
-            EventAttributeValueRef::Any(&self.source_id),
+            EventAttributeValueRef::String(self.source_id.as_str()),
         );
     }
 }
@@ -4633,7 +4633,7 @@ impl JournaldReceiverCursorCommitted {
 #[derive(Debug, Clone)]
 pub struct JournaldReceiverDrainIngress {
     /// The source_id value recorded by OTAP Dataflow internal telemetry.
-    pub source_id: otap_df_telemetry::attributes::AttributeValue,
+    pub source_id: String,
 }
 
 /// Marker implemented only by entity types allowed by `journald_receiver.drain_ingress`.
@@ -4658,7 +4658,7 @@ static JOURNALD_RECEIVER_DRAIN_INGRESS_DESCRIPTOR: EventDescriptor = EventDescri
         key: "source_id",
         wire_key: "source_id",
         brief: "The source_id value recorded by OTAP Dataflow internal telemetry.",
-        value_type: otap_df_telemetry::descriptor::AttributeValueType::Any,
+        value_type: otap_df_telemetry::descriptor::AttributeValueType::String,
         requirement_level: EventRequirementLevel::Required,
     }],
 };
@@ -4671,7 +4671,7 @@ impl EventAttributes for JournaldReceiverDrainIngress {
     ) {
         visitor(
             &JOURNALD_RECEIVER_DRAIN_INGRESS_DESCRIPTOR.attributes[0],
-            EventAttributeValueRef::Any(&self.source_id),
+            EventAttributeValueRef::String(self.source_id.as_str()),
         );
     }
 }
@@ -4698,11 +4698,11 @@ impl JournaldReceiverDrainIngress {
 #[derive(Debug, Clone)]
 pub struct JournaldReceiverDrainTimeout {
     /// The batch_id value recorded by OTAP Dataflow internal telemetry.
-    pub batch_id: Option<otap_df_telemetry::attributes::AttributeValue>,
+    pub batch_id: Option<i64>,
     /// The pending_batches value recorded by OTAP Dataflow internal telemetry.
-    pub pending_batches: Option<otap_df_telemetry::attributes::AttributeValue>,
+    pub pending_batches: Option<i64>,
     /// The source_id value recorded by OTAP Dataflow internal telemetry.
-    pub source_id: otap_df_telemetry::attributes::AttributeValue,
+    pub source_id: String,
 }
 
 /// Marker implemented only by entity types allowed by `journald_receiver.drain_timeout`.
@@ -4728,21 +4728,21 @@ static JOURNALD_RECEIVER_DRAIN_TIMEOUT_DESCRIPTOR: EventDescriptor = EventDescri
             key: "batch_id",
             wire_key: "batch_id",
             brief: "The batch_id value recorded by OTAP Dataflow internal telemetry.",
-            value_type: otap_df_telemetry::descriptor::AttributeValueType::Any,
+            value_type: otap_df_telemetry::descriptor::AttributeValueType::Int,
             requirement_level: EventRequirementLevel::Recommended,
         },
         EventAttributeDescriptor {
             key: "pending_batches",
             wire_key: "pending_batches",
             brief: "The pending_batches value recorded by OTAP Dataflow internal telemetry.",
-            value_type: otap_df_telemetry::descriptor::AttributeValueType::Any,
+            value_type: otap_df_telemetry::descriptor::AttributeValueType::Int,
             requirement_level: EventRequirementLevel::Recommended,
         },
         EventAttributeDescriptor {
             key: "source_id",
             wire_key: "source_id",
             brief: "The source_id value recorded by OTAP Dataflow internal telemetry.",
-            value_type: otap_df_telemetry::descriptor::AttributeValueType::Any,
+            value_type: otap_df_telemetry::descriptor::AttributeValueType::String,
             requirement_level: EventRequirementLevel::Required,
         },
     ],
@@ -4757,18 +4757,18 @@ impl EventAttributes for JournaldReceiverDrainTimeout {
         if let Some(value) = &self.batch_id {
             visitor(
                 &JOURNALD_RECEIVER_DRAIN_TIMEOUT_DESCRIPTOR.attributes[0],
-                EventAttributeValueRef::Any(value),
+                EventAttributeValueRef::Int(*value),
             );
         }
         if let Some(value) = &self.pending_batches {
             visitor(
                 &JOURNALD_RECEIVER_DRAIN_TIMEOUT_DESCRIPTOR.attributes[1],
-                EventAttributeValueRef::Any(value),
+                EventAttributeValueRef::Int(*value),
             );
         }
         visitor(
             &JOURNALD_RECEIVER_DRAIN_TIMEOUT_DESCRIPTOR.attributes[2],
-            EventAttributeValueRef::Any(&self.source_id),
+            EventAttributeValueRef::String(self.source_id.as_str()),
         );
     }
 }
@@ -4795,7 +4795,7 @@ impl JournaldReceiverDrainTimeout {
 #[derive(Debug, Clone)]
 pub struct JournaldReceiverShutdown {
     /// The source_id value recorded by OTAP Dataflow internal telemetry.
-    pub source_id: otap_df_telemetry::attributes::AttributeValue,
+    pub source_id: String,
 }
 
 /// Marker implemented only by entity types allowed by `journald_receiver.shutdown`.
@@ -4820,7 +4820,7 @@ static JOURNALD_RECEIVER_SHUTDOWN_DESCRIPTOR: EventDescriptor = EventDescriptor 
         key: "source_id",
         wire_key: "source_id",
         brief: "The source_id value recorded by OTAP Dataflow internal telemetry.",
-        value_type: otap_df_telemetry::descriptor::AttributeValueType::Any,
+        value_type: otap_df_telemetry::descriptor::AttributeValueType::String,
         requirement_level: EventRequirementLevel::Required,
     }],
 };
@@ -4833,7 +4833,7 @@ impl EventAttributes for JournaldReceiverShutdown {
     ) {
         visitor(
             &JOURNALD_RECEIVER_SHUTDOWN_DESCRIPTOR.attributes[0],
-            EventAttributeValueRef::Any(&self.source_id),
+            EventAttributeValueRef::String(self.source_id.as_str()),
         );
     }
 }
@@ -4860,9 +4860,9 @@ impl JournaldReceiverShutdown {
 #[derive(Debug, Clone)]
 pub struct JournaldReceiverSourceFailed {
     /// The error value recorded by OTAP Dataflow internal telemetry.
-    pub error: otap_df_telemetry::attributes::AttributeValue,
+    pub error: String,
     /// The source_id value recorded by OTAP Dataflow internal telemetry.
-    pub source_id: otap_df_telemetry::attributes::AttributeValue,
+    pub source_id: String,
 }
 
 /// Marker implemented only by entity types allowed by `journald_receiver.source_failed`.
@@ -4888,14 +4888,14 @@ static JOURNALD_RECEIVER_SOURCE_FAILED_DESCRIPTOR: EventDescriptor = EventDescri
             key: "error",
             wire_key: "error",
             brief: "The error value recorded by OTAP Dataflow internal telemetry.",
-            value_type: otap_df_telemetry::descriptor::AttributeValueType::Any,
+            value_type: otap_df_telemetry::descriptor::AttributeValueType::String,
             requirement_level: EventRequirementLevel::Required,
         },
         EventAttributeDescriptor {
             key: "source_id",
             wire_key: "source_id",
             brief: "The source_id value recorded by OTAP Dataflow internal telemetry.",
-            value_type: otap_df_telemetry::descriptor::AttributeValueType::Any,
+            value_type: otap_df_telemetry::descriptor::AttributeValueType::String,
             requirement_level: EventRequirementLevel::Required,
         },
     ],
@@ -4909,11 +4909,11 @@ impl EventAttributes for JournaldReceiverSourceFailed {
     ) {
         visitor(
             &JOURNALD_RECEIVER_SOURCE_FAILED_DESCRIPTOR.attributes[0],
-            EventAttributeValueRef::Any(&self.error),
+            EventAttributeValueRef::String(self.error.as_str()),
         );
         visitor(
             &JOURNALD_RECEIVER_SOURCE_FAILED_DESCRIPTOR.attributes[1],
-            EventAttributeValueRef::Any(&self.source_id),
+            EventAttributeValueRef::String(self.source_id.as_str()),
         );
     }
 }
@@ -4940,9 +4940,9 @@ impl JournaldReceiverSourceFailed {
 #[derive(Debug, Clone)]
 pub struct JournaldReceiverStart {
     /// The journal_root_path value recorded by OTAP Dataflow internal telemetry.
-    pub journal_root_path: otap_df_telemetry::attributes::AttributeValue,
+    pub journal_root_path: String,
     /// The source_id value recorded by OTAP Dataflow internal telemetry.
-    pub source_id: otap_df_telemetry::attributes::AttributeValue,
+    pub source_id: String,
 }
 
 /// Marker implemented only by entity types allowed by `journald_receiver.start`.
@@ -4968,14 +4968,14 @@ static JOURNALD_RECEIVER_START_DESCRIPTOR: EventDescriptor = EventDescriptor {
             key: "journal_root_path",
             wire_key: "journal_root_path",
             brief: "The journal_root_path value recorded by OTAP Dataflow internal telemetry.",
-            value_type: otap_df_telemetry::descriptor::AttributeValueType::Any,
+            value_type: otap_df_telemetry::descriptor::AttributeValueType::String,
             requirement_level: EventRequirementLevel::Required,
         },
         EventAttributeDescriptor {
             key: "source_id",
             wire_key: "source_id",
             brief: "The source_id value recorded by OTAP Dataflow internal telemetry.",
-            value_type: otap_df_telemetry::descriptor::AttributeValueType::Any,
+            value_type: otap_df_telemetry::descriptor::AttributeValueType::String,
             requirement_level: EventRequirementLevel::Required,
         },
     ],
@@ -4989,11 +4989,11 @@ impl EventAttributes for JournaldReceiverStart {
     ) {
         visitor(
             &JOURNALD_RECEIVER_START_DESCRIPTOR.attributes[0],
-            EventAttributeValueRef::Any(&self.journal_root_path),
+            EventAttributeValueRef::String(self.journal_root_path.as_str()),
         );
         visitor(
             &JOURNALD_RECEIVER_START_DESCRIPTOR.attributes[1],
-            EventAttributeValueRef::Any(&self.source_id),
+            EventAttributeValueRef::String(self.source_id.as_str()),
         );
     }
 }
@@ -5020,9 +5020,9 @@ impl JournaldReceiverStart {
 #[derive(Debug, Clone)]
 pub struct JournaldReceiverStartAtEndHeadRecovery {
     /// The journal_root_path value recorded by OTAP Dataflow internal telemetry.
-    pub journal_root_path: otap_df_telemetry::attributes::AttributeValue,
+    pub journal_root_path: String,
     /// The source_id value recorded by OTAP Dataflow internal telemetry.
-    pub source_id: otap_df_telemetry::attributes::AttributeValue,
+    pub source_id: String,
 }
 
 /// Marker implemented only by entity types allowed by `journald_receiver.start_at_end_head_recovery`.
@@ -5051,14 +5051,14 @@ static JOURNALD_RECEIVER_START_AT_END_HEAD_RECOVERY_DESCRIPTOR: EventDescriptor 
             key: "journal_root_path",
             wire_key: "journal_root_path",
             brief: "The journal_root_path value recorded by OTAP Dataflow internal telemetry.",
-            value_type: otap_df_telemetry::descriptor::AttributeValueType::Any,
+            value_type: otap_df_telemetry::descriptor::AttributeValueType::String,
             requirement_level: EventRequirementLevel::Required,
         },
         EventAttributeDescriptor {
             key: "source_id",
             wire_key: "source_id",
             brief: "The source_id value recorded by OTAP Dataflow internal telemetry.",
-            value_type: otap_df_telemetry::descriptor::AttributeValueType::Any,
+            value_type: otap_df_telemetry::descriptor::AttributeValueType::String,
             requirement_level: EventRequirementLevel::Required,
         },
     ],
@@ -5072,11 +5072,11 @@ impl EventAttributes for JournaldReceiverStartAtEndHeadRecovery {
     ) {
         visitor(
             &JOURNALD_RECEIVER_START_AT_END_HEAD_RECOVERY_DESCRIPTOR.attributes[0],
-            EventAttributeValueRef::Any(&self.journal_root_path),
+            EventAttributeValueRef::String(self.journal_root_path.as_str()),
         );
         visitor(
             &JOURNALD_RECEIVER_START_AT_END_HEAD_RECOVERY_DESCRIPTOR.attributes[1],
-            EventAttributeValueRef::Any(&self.source_id),
+            EventAttributeValueRef::String(self.source_id.as_str()),
         );
     }
 }
@@ -5105,11 +5105,11 @@ impl JournaldReceiverStartAtEndHeadRecovery {
 #[derive(Debug, Clone)]
 pub struct OtapExporterBatchStatusFailed {
     /// The batch_id value recorded by OTAP Dataflow internal telemetry.
-    pub batch_id: otap_df_telemetry::attributes::AttributeValue,
+    pub batch_id: i64,
     /// The status_code value recorded by OTAP Dataflow internal telemetry.
-    pub status_code: otap_df_telemetry::attributes::AttributeValue,
+    pub status_code: i64,
     /// The status_message value recorded by OTAP Dataflow internal telemetry.
-    pub status_message: otap_df_telemetry::attributes::AttributeValue,
+    pub status_message: String,
 }
 
 /// Marker implemented only by entity types allowed by `otap_exporter.batch_status_failed`.
@@ -5135,21 +5135,21 @@ static OTAP_EXPORTER_BATCH_STATUS_FAILED_DESCRIPTOR: EventDescriptor = EventDesc
             key: "batch_id",
             wire_key: "batch_id",
             brief: "The batch_id value recorded by OTAP Dataflow internal telemetry.",
-            value_type: otap_df_telemetry::descriptor::AttributeValueType::Any,
+            value_type: otap_df_telemetry::descriptor::AttributeValueType::Int,
             requirement_level: EventRequirementLevel::Required,
         },
         EventAttributeDescriptor {
             key: "status_code",
             wire_key: "status_code",
             brief: "The status_code value recorded by OTAP Dataflow internal telemetry.",
-            value_type: otap_df_telemetry::descriptor::AttributeValueType::Any,
+            value_type: otap_df_telemetry::descriptor::AttributeValueType::Int,
             requirement_level: EventRequirementLevel::Required,
         },
         EventAttributeDescriptor {
             key: "status_message",
             wire_key: "status_message",
             brief: "The status_message value recorded by OTAP Dataflow internal telemetry.",
-            value_type: otap_df_telemetry::descriptor::AttributeValueType::Any,
+            value_type: otap_df_telemetry::descriptor::AttributeValueType::String,
             requirement_level: EventRequirementLevel::Required,
         },
     ],
@@ -5163,15 +5163,15 @@ impl EventAttributes for OtapExporterBatchStatusFailed {
     ) {
         visitor(
             &OTAP_EXPORTER_BATCH_STATUS_FAILED_DESCRIPTOR.attributes[0],
-            EventAttributeValueRef::Any(&self.batch_id),
+            EventAttributeValueRef::Int(self.batch_id),
         );
         visitor(
             &OTAP_EXPORTER_BATCH_STATUS_FAILED_DESCRIPTOR.attributes[1],
-            EventAttributeValueRef::Any(&self.status_code),
+            EventAttributeValueRef::Int(self.status_code),
         );
         visitor(
             &OTAP_EXPORTER_BATCH_STATUS_FAILED_DESCRIPTOR.attributes[2],
-            EventAttributeValueRef::Any(&self.status_message),
+            EventAttributeValueRef::String(self.status_message.as_str()),
         );
     }
 }
@@ -5198,11 +5198,11 @@ impl OtapExporterBatchStatusFailed {
 #[derive(Debug, Clone)]
 pub struct OtapExporterBatchStatusUnmatched {
     /// The batch_id value recorded by OTAP Dataflow internal telemetry.
-    pub batch_id: otap_df_telemetry::attributes::AttributeValue,
+    pub batch_id: i64,
     /// The status_code value recorded by OTAP Dataflow internal telemetry.
-    pub status_code: otap_df_telemetry::attributes::AttributeValue,
+    pub status_code: i64,
     /// The status_message value recorded by OTAP Dataflow internal telemetry.
-    pub status_message: otap_df_telemetry::attributes::AttributeValue,
+    pub status_message: String,
 }
 
 /// Marker implemented only by entity types allowed by `otap_exporter.batch_status_unmatched`.
@@ -5228,21 +5228,21 @@ static OTAP_EXPORTER_BATCH_STATUS_UNMATCHED_DESCRIPTOR: EventDescriptor = EventD
             key: "batch_id",
             wire_key: "batch_id",
             brief: "The batch_id value recorded by OTAP Dataflow internal telemetry.",
-            value_type: otap_df_telemetry::descriptor::AttributeValueType::Any,
+            value_type: otap_df_telemetry::descriptor::AttributeValueType::Int,
             requirement_level: EventRequirementLevel::Required,
         },
         EventAttributeDescriptor {
             key: "status_code",
             wire_key: "status_code",
             brief: "The status_code value recorded by OTAP Dataflow internal telemetry.",
-            value_type: otap_df_telemetry::descriptor::AttributeValueType::Any,
+            value_type: otap_df_telemetry::descriptor::AttributeValueType::Int,
             requirement_level: EventRequirementLevel::Required,
         },
         EventAttributeDescriptor {
             key: "status_message",
             wire_key: "status_message",
             brief: "The status_message value recorded by OTAP Dataflow internal telemetry.",
-            value_type: otap_df_telemetry::descriptor::AttributeValueType::Any,
+            value_type: otap_df_telemetry::descriptor::AttributeValueType::String,
             requirement_level: EventRequirementLevel::Required,
         },
     ],
@@ -5256,15 +5256,15 @@ impl EventAttributes for OtapExporterBatchStatusUnmatched {
     ) {
         visitor(
             &OTAP_EXPORTER_BATCH_STATUS_UNMATCHED_DESCRIPTOR.attributes[0],
-            EventAttributeValueRef::Any(&self.batch_id),
+            EventAttributeValueRef::Int(self.batch_id),
         );
         visitor(
             &OTAP_EXPORTER_BATCH_STATUS_UNMATCHED_DESCRIPTOR.attributes[1],
-            EventAttributeValueRef::Any(&self.status_code),
+            EventAttributeValueRef::Int(self.status_code),
         );
         visitor(
             &OTAP_EXPORTER_BATCH_STATUS_UNMATCHED_DESCRIPTOR.attributes[2],
-            EventAttributeValueRef::Any(&self.status_message),
+            EventAttributeValueRef::String(self.status_message.as_str()),
         );
     }
 }
@@ -5294,7 +5294,7 @@ pub struct OtapExporterRequestFailed {
     /// The backoff value recorded by OTAP Dataflow internal telemetry.
     pub backoff: String,
     /// The error value recorded by OTAP Dataflow internal telemetry.
-    pub error: otap_df_telemetry::attributes::AttributeValue,
+    pub error: String,
 }
 
 /// Marker implemented only by entity types allowed by `otap_exporter.request_failed`.
@@ -5327,7 +5327,7 @@ static OTAP_EXPORTER_REQUEST_FAILED_DESCRIPTOR: EventDescriptor = EventDescripto
             key: "error",
             wire_key: "error",
             brief: "The error value recorded by OTAP Dataflow internal telemetry.",
-            value_type: otap_df_telemetry::descriptor::AttributeValueType::Any,
+            value_type: otap_df_telemetry::descriptor::AttributeValueType::String,
             requirement_level: EventRequirementLevel::Required,
         },
     ],
@@ -5345,7 +5345,7 @@ impl EventAttributes for OtapExporterRequestFailed {
         );
         visitor(
             &OTAP_EXPORTER_REQUEST_FAILED_DESCRIPTOR.attributes[1],
-            EventAttributeValueRef::Any(&self.error),
+            EventAttributeValueRef::String(self.error.as_str()),
         );
     }
 }
@@ -5490,7 +5490,7 @@ impl OtapExporterShutdown {
 #[derive(Debug, Clone)]
 pub struct OtapExporterStart {
     /// The grpc_endpoint value recorded by OTAP Dataflow internal telemetry.
-    pub grpc_endpoint: otap_df_telemetry::attributes::AttributeValue,
+    pub grpc_endpoint: String,
 }
 
 /// Marker implemented only by entity types allowed by `otap_exporter.start`.
@@ -5515,7 +5515,7 @@ static OTAP_EXPORTER_START_DESCRIPTOR: EventDescriptor = EventDescriptor {
         key: "grpc_endpoint",
         wire_key: "grpc_endpoint",
         brief: "The grpc_endpoint value recorded by OTAP Dataflow internal telemetry.",
-        value_type: otap_df_telemetry::descriptor::AttributeValueType::Any,
+        value_type: otap_df_telemetry::descriptor::AttributeValueType::String,
         requirement_level: EventRequirementLevel::Required,
     }],
 };
@@ -5528,7 +5528,7 @@ impl EventAttributes for OtapExporterStart {
     ) {
         visitor(
             &OTAP_EXPORTER_START_DESCRIPTOR.attributes[0],
-            EventAttributeValueRef::Any(&self.grpc_endpoint),
+            EventAttributeValueRef::String(self.grpc_endpoint.as_str()),
         );
     }
 }
@@ -5555,9 +5555,9 @@ impl OtapExporterStart {
 #[derive(Debug, Clone)]
 pub struct OtapExporterStaticHeaders {
     /// The count value recorded by OTAP Dataflow internal telemetry.
-    pub count: otap_df_telemetry::attributes::AttributeValue,
+    pub count: i64,
     /// The header_names value recorded by OTAP Dataflow internal telemetry.
-    pub header_names: otap_df_telemetry::attributes::AttributeValue,
+    pub header_names: String,
 }
 
 /// Marker implemented only by entity types allowed by `otap_exporter.static_headers`.
@@ -5583,14 +5583,14 @@ static OTAP_EXPORTER_STATIC_HEADERS_DESCRIPTOR: EventDescriptor = EventDescripto
             key: "count",
             wire_key: "count",
             brief: "The count value recorded by OTAP Dataflow internal telemetry.",
-            value_type: otap_df_telemetry::descriptor::AttributeValueType::Any,
+            value_type: otap_df_telemetry::descriptor::AttributeValueType::Int,
             requirement_level: EventRequirementLevel::Required,
         },
         EventAttributeDescriptor {
             key: "header_names",
             wire_key: "header_names",
             brief: "The header_names value recorded by OTAP Dataflow internal telemetry.",
-            value_type: otap_df_telemetry::descriptor::AttributeValueType::Any,
+            value_type: otap_df_telemetry::descriptor::AttributeValueType::String,
             requirement_level: EventRequirementLevel::Required,
         },
     ],
@@ -5604,11 +5604,11 @@ impl EventAttributes for OtapExporterStaticHeaders {
     ) {
         visitor(
             &OTAP_EXPORTER_STATIC_HEADERS_DESCRIPTOR.attributes[0],
-            EventAttributeValueRef::Any(&self.count),
+            EventAttributeValueRef::Int(self.count),
         );
         visitor(
             &OTAP_EXPORTER_STATIC_HEADERS_DESCRIPTOR.attributes[1],
-            EventAttributeValueRef::Any(&self.header_names),
+            EventAttributeValueRef::String(self.header_names.as_str()),
         );
     }
 }
@@ -5804,7 +5804,7 @@ impl OtapReceiverStart {
 #[derive(Debug, Clone)]
 pub struct OtelcolNodeFileOperationFail {
     /// The error value recorded by OTAP Dataflow internal telemetry.
-    pub error: otap_df_telemetry::attributes::AttributeValue,
+    pub error: String,
     /// Timed exporter phase.
     pub operation: String,
     /// The signal value recorded by OTAP Dataflow internal telemetry.
@@ -5834,7 +5834,7 @@ static OTELCOL_NODE_FILE_OPERATION_FAIL_DESCRIPTOR: EventDescriptor = EventDescr
             key: "error",
             wire_key: "error",
             brief: "The error value recorded by OTAP Dataflow internal telemetry.",
-            value_type: otap_df_telemetry::descriptor::AttributeValueType::Any,
+            value_type: otap_df_telemetry::descriptor::AttributeValueType::String,
             requirement_level: EventRequirementLevel::Required,
         },
         EventAttributeDescriptor {
@@ -5862,7 +5862,7 @@ impl EventAttributes for OtelcolNodeFileOperationFail {
     ) {
         visitor(
             &OTELCOL_NODE_FILE_OPERATION_FAIL_DESCRIPTOR.attributes[0],
-            EventAttributeValueRef::Any(&self.error),
+            EventAttributeValueRef::String(self.error.as_str()),
         );
         visitor(
             &OTELCOL_NODE_FILE_OPERATION_FAIL_DESCRIPTOR.attributes[1],
@@ -5897,11 +5897,11 @@ impl OtelcolNodeFileOperationFail {
 #[derive(Debug, Clone)]
 pub struct OtelcolNodeFileRollbackFail {
     /// The error value recorded by OTAP Dataflow internal telemetry.
-    pub error: otap_df_telemetry::attributes::AttributeValue,
+    pub error: String,
     /// Timed exporter phase.
     pub operation: String,
     /// The rollback_error value recorded by OTAP Dataflow internal telemetry.
-    pub rollback_error: otap_df_telemetry::attributes::AttributeValue,
+    pub rollback_error: String,
     /// The signal value recorded by OTAP Dataflow internal telemetry.
     pub signal: String,
 }
@@ -5929,7 +5929,7 @@ static OTELCOL_NODE_FILE_ROLLBACK_FAIL_DESCRIPTOR: EventDescriptor = EventDescri
             key: "error",
             wire_key: "error",
             brief: "The error value recorded by OTAP Dataflow internal telemetry.",
-            value_type: otap_df_telemetry::descriptor::AttributeValueType::Any,
+            value_type: otap_df_telemetry::descriptor::AttributeValueType::String,
             requirement_level: EventRequirementLevel::Required,
         },
         EventAttributeDescriptor {
@@ -5943,7 +5943,7 @@ static OTELCOL_NODE_FILE_ROLLBACK_FAIL_DESCRIPTOR: EventDescriptor = EventDescri
             key: "rollback_error",
             wire_key: "rollback_error",
             brief: "The rollback_error value recorded by OTAP Dataflow internal telemetry.",
-            value_type: otap_df_telemetry::descriptor::AttributeValueType::Any,
+            value_type: otap_df_telemetry::descriptor::AttributeValueType::String,
             requirement_level: EventRequirementLevel::Required,
         },
         EventAttributeDescriptor {
@@ -5964,7 +5964,7 @@ impl EventAttributes for OtelcolNodeFileRollbackFail {
     ) {
         visitor(
             &OTELCOL_NODE_FILE_ROLLBACK_FAIL_DESCRIPTOR.attributes[0],
-            EventAttributeValueRef::Any(&self.error),
+            EventAttributeValueRef::String(self.error.as_str()),
         );
         visitor(
             &OTELCOL_NODE_FILE_ROLLBACK_FAIL_DESCRIPTOR.attributes[1],
@@ -5972,7 +5972,7 @@ impl EventAttributes for OtelcolNodeFileRollbackFail {
         );
         visitor(
             &OTELCOL_NODE_FILE_ROLLBACK_FAIL_DESCRIPTOR.attributes[2],
-            EventAttributeValueRef::Any(&self.rollback_error),
+            EventAttributeValueRef::String(self.rollback_error.as_str()),
         );
         visitor(
             &OTELCOL_NODE_FILE_ROLLBACK_FAIL_DESCRIPTOR.attributes[3],
@@ -6003,17 +6003,17 @@ impl OtelcolNodeFileRollbackFail {
 #[derive(Debug, Clone)]
 pub struct OtelcolNodeFileStart {
     /// The create_directories value recorded by OTAP Dataflow internal telemetry.
-    pub create_directories: otap_df_telemetry::attributes::AttributeValue,
+    pub create_directories: bool,
     /// The durability value recorded by OTAP Dataflow internal telemetry.
-    pub durability: otap_df_telemetry::attributes::AttributeValue,
+    pub durability: String,
     /// The format value recorded by OTAP Dataflow internal telemetry.
     pub format: String,
     /// The max_frame_bytes value recorded by OTAP Dataflow internal telemetry.
-    pub max_frame_bytes: otap_df_telemetry::attributes::AttributeValue,
+    pub max_frame_bytes: i64,
     /// The open_mode value recorded by OTAP Dataflow internal telemetry.
-    pub open_mode: otap_df_telemetry::attributes::AttributeValue,
+    pub open_mode: String,
     /// The tail_recovery value recorded by OTAP Dataflow internal telemetry.
-    pub tail_recovery: otap_df_telemetry::attributes::AttributeValue,
+    pub tail_recovery: String,
 }
 
 /// Marker implemented only by entity types allowed by `otelcol.node.file.start`.
@@ -6039,14 +6039,14 @@ static OTELCOL_NODE_FILE_START_DESCRIPTOR: EventDescriptor = EventDescriptor {
             key: "create_directories",
             wire_key: "create_directories",
             brief: "The create_directories value recorded by OTAP Dataflow internal telemetry.",
-            value_type: otap_df_telemetry::descriptor::AttributeValueType::Any,
+            value_type: otap_df_telemetry::descriptor::AttributeValueType::Boolean,
             requirement_level: EventRequirementLevel::Required,
         },
         EventAttributeDescriptor {
             key: "durability",
             wire_key: "durability",
             brief: "The durability value recorded by OTAP Dataflow internal telemetry.",
-            value_type: otap_df_telemetry::descriptor::AttributeValueType::Any,
+            value_type: otap_df_telemetry::descriptor::AttributeValueType::String,
             requirement_level: EventRequirementLevel::Required,
         },
         EventAttributeDescriptor {
@@ -6060,21 +6060,21 @@ static OTELCOL_NODE_FILE_START_DESCRIPTOR: EventDescriptor = EventDescriptor {
             key: "max_frame_bytes",
             wire_key: "max_frame_bytes",
             brief: "The max_frame_bytes value recorded by OTAP Dataflow internal telemetry.",
-            value_type: otap_df_telemetry::descriptor::AttributeValueType::Any,
+            value_type: otap_df_telemetry::descriptor::AttributeValueType::Int,
             requirement_level: EventRequirementLevel::Required,
         },
         EventAttributeDescriptor {
             key: "open_mode",
             wire_key: "open_mode",
             brief: "The open_mode value recorded by OTAP Dataflow internal telemetry.",
-            value_type: otap_df_telemetry::descriptor::AttributeValueType::Any,
+            value_type: otap_df_telemetry::descriptor::AttributeValueType::String,
             requirement_level: EventRequirementLevel::Required,
         },
         EventAttributeDescriptor {
             key: "tail_recovery",
             wire_key: "tail_recovery",
             brief: "The tail_recovery value recorded by OTAP Dataflow internal telemetry.",
-            value_type: otap_df_telemetry::descriptor::AttributeValueType::Any,
+            value_type: otap_df_telemetry::descriptor::AttributeValueType::String,
             requirement_level: EventRequirementLevel::Required,
         },
     ],
@@ -6088,11 +6088,11 @@ impl EventAttributes for OtelcolNodeFileStart {
     ) {
         visitor(
             &OTELCOL_NODE_FILE_START_DESCRIPTOR.attributes[0],
-            EventAttributeValueRef::Any(&self.create_directories),
+            EventAttributeValueRef::Boolean(self.create_directories),
         );
         visitor(
             &OTELCOL_NODE_FILE_START_DESCRIPTOR.attributes[1],
-            EventAttributeValueRef::Any(&self.durability),
+            EventAttributeValueRef::String(self.durability.as_str()),
         );
         visitor(
             &OTELCOL_NODE_FILE_START_DESCRIPTOR.attributes[2],
@@ -6100,15 +6100,15 @@ impl EventAttributes for OtelcolNodeFileStart {
         );
         visitor(
             &OTELCOL_NODE_FILE_START_DESCRIPTOR.attributes[3],
-            EventAttributeValueRef::Any(&self.max_frame_bytes),
+            EventAttributeValueRef::Int(self.max_frame_bytes),
         );
         visitor(
             &OTELCOL_NODE_FILE_START_DESCRIPTOR.attributes[4],
-            EventAttributeValueRef::Any(&self.open_mode),
+            EventAttributeValueRef::String(self.open_mode.as_str()),
         );
         visitor(
             &OTELCOL_NODE_FILE_START_DESCRIPTOR.attributes[5],
-            EventAttributeValueRef::Any(&self.tail_recovery),
+            EventAttributeValueRef::String(self.tail_recovery.as_str()),
         );
     }
 }
@@ -6200,7 +6200,7 @@ impl OtelcolNodeFileStop {
 #[derive(Debug, Clone)]
 pub struct OtelcolNodeFileTailRecover {
     /// The recovered_bytes value recorded by OTAP Dataflow internal telemetry.
-    pub recovered_bytes: otap_df_telemetry::attributes::AttributeValue,
+    pub recovered_bytes: i64,
     /// The signal value recorded by OTAP Dataflow internal telemetry.
     pub signal: String,
 }
@@ -6228,7 +6228,7 @@ static OTELCOL_NODE_FILE_TAIL_RECOVER_DESCRIPTOR: EventDescriptor = EventDescrip
             key: "recovered_bytes",
             wire_key: "recovered_bytes",
             brief: "The recovered_bytes value recorded by OTAP Dataflow internal telemetry.",
-            value_type: otap_df_telemetry::descriptor::AttributeValueType::Any,
+            value_type: otap_df_telemetry::descriptor::AttributeValueType::Int,
             requirement_level: EventRequirementLevel::Required,
         },
         EventAttributeDescriptor {
@@ -6249,7 +6249,7 @@ impl EventAttributes for OtelcolNodeFileTailRecover {
     ) {
         visitor(
             &OTELCOL_NODE_FILE_TAIL_RECOVER_DESCRIPTOR.attributes[0],
-            EventAttributeValueRef::Any(&self.recovered_bytes),
+            EventAttributeValueRef::Int(self.recovered_bytes),
         );
         visitor(
             &OTELCOL_NODE_FILE_TAIL_RECOVER_DESCRIPTOR.attributes[1],
@@ -6345,9 +6345,9 @@ impl OtelcolNodeFileWriterStart {
 #[derive(Debug, Clone)]
 pub struct OtlpExporterGrpcChannels {
     /// The endpoint value recorded by OTAP Dataflow internal telemetry.
-    pub endpoint: otap_df_telemetry::attributes::AttributeValue,
+    pub endpoint: String,
     /// The num_connections value recorded by OTAP Dataflow internal telemetry.
-    pub num_connections: otap_df_telemetry::attributes::AttributeValue,
+    pub num_connections: i64,
 }
 
 /// Marker implemented only by entity types allowed by `otlp.exporter.grpc.channels`.
@@ -6373,14 +6373,14 @@ static OTLP_EXPORTER_GRPC_CHANNELS_DESCRIPTOR: EventDescriptor = EventDescriptor
             key: "endpoint",
             wire_key: "endpoint",
             brief: "The endpoint value recorded by OTAP Dataflow internal telemetry.",
-            value_type: otap_df_telemetry::descriptor::AttributeValueType::Any,
+            value_type: otap_df_telemetry::descriptor::AttributeValueType::String,
             requirement_level: EventRequirementLevel::Required,
         },
         EventAttributeDescriptor {
             key: "num_connections",
             wire_key: "num_connections",
             brief: "The num_connections value recorded by OTAP Dataflow internal telemetry.",
-            value_type: otap_df_telemetry::descriptor::AttributeValueType::Any,
+            value_type: otap_df_telemetry::descriptor::AttributeValueType::Int,
             requirement_level: EventRequirementLevel::Required,
         },
     ],
@@ -6394,11 +6394,11 @@ impl EventAttributes for OtlpExporterGrpcChannels {
     ) {
         visitor(
             &OTLP_EXPORTER_GRPC_CHANNELS_DESCRIPTOR.attributes[0],
-            EventAttributeValueRef::Any(&self.endpoint),
+            EventAttributeValueRef::String(self.endpoint.as_str()),
         );
         visitor(
             &OTLP_EXPORTER_GRPC_CHANNELS_DESCRIPTOR.attributes[1],
-            EventAttributeValueRef::Any(&self.num_connections),
+            EventAttributeValueRef::Int(self.num_connections),
         );
     }
 }
@@ -6427,11 +6427,11 @@ pub struct OtlpExporterGrpcExportError {
     /// The code value recorded by OTAP Dataflow internal telemetry.
     pub code: Option<String>,
     /// The error value recorded by OTAP Dataflow internal telemetry.
-    pub error: Option<otap_df_telemetry::attributes::AttributeValue>,
+    pub error: Option<String>,
     /// The error_msg value recorded by OTAP Dataflow internal telemetry.
-    pub error_msg: Option<otap_df_telemetry::attributes::AttributeValue>,
+    pub error_msg: Option<String>,
     /// The source value recorded by OTAP Dataflow internal telemetry.
-    pub source: Option<otap_df_telemetry::attributes::AttributeValue>,
+    pub source: Option<String>,
 }
 
 /// Marker implemented only by entity types allowed by `otlp.exporter.grpc.export_error`.
@@ -6464,21 +6464,21 @@ static OTLP_EXPORTER_GRPC_EXPORT_ERROR_DESCRIPTOR: EventDescriptor = EventDescri
             key: "error",
             wire_key: "error",
             brief: "The error value recorded by OTAP Dataflow internal telemetry.",
-            value_type: otap_df_telemetry::descriptor::AttributeValueType::Any,
+            value_type: otap_df_telemetry::descriptor::AttributeValueType::String,
             requirement_level: EventRequirementLevel::Recommended,
         },
         EventAttributeDescriptor {
             key: "error_msg",
             wire_key: "error_msg",
             brief: "The error_msg value recorded by OTAP Dataflow internal telemetry.",
-            value_type: otap_df_telemetry::descriptor::AttributeValueType::Any,
+            value_type: otap_df_telemetry::descriptor::AttributeValueType::String,
             requirement_level: EventRequirementLevel::Recommended,
         },
         EventAttributeDescriptor {
             key: "source",
             wire_key: "source",
             brief: "The source value recorded by OTAP Dataflow internal telemetry.",
-            value_type: otap_df_telemetry::descriptor::AttributeValueType::Any,
+            value_type: otap_df_telemetry::descriptor::AttributeValueType::String,
             requirement_level: EventRequirementLevel::Recommended,
         },
     ],
@@ -6499,19 +6499,19 @@ impl EventAttributes for OtlpExporterGrpcExportError {
         if let Some(value) = &self.error {
             visitor(
                 &OTLP_EXPORTER_GRPC_EXPORT_ERROR_DESCRIPTOR.attributes[1],
-                EventAttributeValueRef::Any(value),
+                EventAttributeValueRef::String(value.as_str()),
             );
         }
         if let Some(value) = &self.error_msg {
             visitor(
                 &OTLP_EXPORTER_GRPC_EXPORT_ERROR_DESCRIPTOR.attributes[2],
-                EventAttributeValueRef::Any(value),
+                EventAttributeValueRef::String(value.as_str()),
             );
         }
         if let Some(value) = &self.source {
             visitor(
                 &OTLP_EXPORTER_GRPC_EXPORT_ERROR_DESCRIPTOR.attributes[3],
-                EventAttributeValueRef::Any(value),
+                EventAttributeValueRef::String(value.as_str()),
             );
         }
     }
@@ -6539,7 +6539,7 @@ impl OtlpExporterGrpcExportError {
 #[derive(Debug, Clone)]
 pub struct OtlpExporterGrpcHeaderSkip {
     /// The header_name value recorded by OTAP Dataflow internal telemetry.
-    pub header_name: otap_df_telemetry::attributes::AttributeValue,
+    pub header_name: String,
     /// The reason value recorded by OTAP Dataflow internal telemetry.
     pub reason: String,
 }
@@ -6567,7 +6567,7 @@ static OTLP_EXPORTER_GRPC_HEADER_SKIP_DESCRIPTOR: EventDescriptor = EventDescrip
             key: "header_name",
             wire_key: "header_name",
             brief: "The header_name value recorded by OTAP Dataflow internal telemetry.",
-            value_type: otap_df_telemetry::descriptor::AttributeValueType::Any,
+            value_type: otap_df_telemetry::descriptor::AttributeValueType::String,
             requirement_level: EventRequirementLevel::Required,
         },
         EventAttributeDescriptor {
@@ -6588,7 +6588,7 @@ impl EventAttributes for OtlpExporterGrpcHeaderSkip {
     ) {
         visitor(
             &OTLP_EXPORTER_GRPC_HEADER_SKIP_DESCRIPTOR.attributes[0],
-            EventAttributeValueRef::Any(&self.header_name),
+            EventAttributeValueRef::String(self.header_name.as_str()),
         );
         visitor(
             &OTLP_EXPORTER_GRPC_HEADER_SKIP_DESCRIPTOR.attributes[1],
@@ -6619,7 +6619,7 @@ impl OtlpExporterGrpcHeaderSkip {
 #[derive(Debug, Clone)]
 pub struct OtlpExporterGrpcInvalidBearerToken {
     /// The error value recorded by OTAP Dataflow internal telemetry.
-    pub error: otap_df_telemetry::attributes::AttributeValue,
+    pub error: String,
 }
 
 /// Marker implemented only by entity types allowed by `otlp.exporter.grpc.invalid_bearer_token`.
@@ -6644,7 +6644,7 @@ static OTLP_EXPORTER_GRPC_INVALID_BEARER_TOKEN_DESCRIPTOR: EventDescriptor = Eve
         key: "error",
         wire_key: "error",
         brief: "The error value recorded by OTAP Dataflow internal telemetry.",
-        value_type: otap_df_telemetry::descriptor::AttributeValueType::Any,
+        value_type: otap_df_telemetry::descriptor::AttributeValueType::String,
         requirement_level: EventRequirementLevel::Required,
     }],
 };
@@ -6657,7 +6657,7 @@ impl EventAttributes for OtlpExporterGrpcInvalidBearerToken {
     ) {
         visitor(
             &OTLP_EXPORTER_GRPC_INVALID_BEARER_TOKEN_DESCRIPTOR.attributes[0],
-            EventAttributeValueRef::Any(&self.error),
+            EventAttributeValueRef::String(self.error.as_str()),
         );
     }
 }
@@ -6790,7 +6790,7 @@ impl OtlpExporterGrpcShutdown {
 #[derive(Debug, Clone)]
 pub struct OtlpExporterGrpcStart {
     /// The grpc_endpoint value recorded by OTAP Dataflow internal telemetry.
-    pub grpc_endpoint: otap_df_telemetry::attributes::AttributeValue,
+    pub grpc_endpoint: String,
 }
 
 /// Marker implemented only by entity types allowed by `otlp.exporter.grpc.start`.
@@ -6815,7 +6815,7 @@ static OTLP_EXPORTER_GRPC_START_DESCRIPTOR: EventDescriptor = EventDescriptor {
         key: "grpc_endpoint",
         wire_key: "grpc_endpoint",
         brief: "The grpc_endpoint value recorded by OTAP Dataflow internal telemetry.",
-        value_type: otap_df_telemetry::descriptor::AttributeValueType::Any,
+        value_type: otap_df_telemetry::descriptor::AttributeValueType::String,
         requirement_level: EventRequirementLevel::Required,
     }],
 };
@@ -6828,7 +6828,7 @@ impl EventAttributes for OtlpExporterGrpcStart {
     ) {
         visitor(
             &OTLP_EXPORTER_GRPC_START_DESCRIPTOR.attributes[0],
-            EventAttributeValueRef::Any(&self.grpc_endpoint),
+            EventAttributeValueRef::String(self.grpc_endpoint.as_str()),
         );
     }
 }
@@ -6908,7 +6908,7 @@ impl OtlpExporterGrpcTokenStreamClosed {
 #[derive(Debug, Clone)]
 pub struct OtlpExporterHttpExportError {
     /// The retryable value recorded by OTAP Dataflow internal telemetry.
-    pub retryable: otap_df_telemetry::attributes::AttributeValue,
+    pub retryable: bool,
 }
 
 /// Marker implemented only by entity types allowed by `otlp.exporter.http.export_error`.
@@ -6933,7 +6933,7 @@ static OTLP_EXPORTER_HTTP_EXPORT_ERROR_DESCRIPTOR: EventDescriptor = EventDescri
         key: "retryable",
         wire_key: "retryable",
         brief: "The retryable value recorded by OTAP Dataflow internal telemetry.",
-        value_type: otap_df_telemetry::descriptor::AttributeValueType::Any,
+        value_type: otap_df_telemetry::descriptor::AttributeValueType::Boolean,
         requirement_level: EventRequirementLevel::Required,
     }],
 };
@@ -6946,7 +6946,7 @@ impl EventAttributes for OtlpExporterHttpExportError {
     ) {
         visitor(
             &OTLP_EXPORTER_HTTP_EXPORT_ERROR_DESCRIPTOR.attributes[0],
-            EventAttributeValueRef::Any(&self.retryable),
+            EventAttributeValueRef::Boolean(self.retryable),
         );
     }
 }
@@ -6973,7 +6973,7 @@ impl OtlpExporterHttpExportError {
 #[derive(Debug, Clone)]
 pub struct OtlpExporterHttpInvalidBearerToken {
     /// The error value recorded by OTAP Dataflow internal telemetry.
-    pub error: otap_df_telemetry::attributes::AttributeValue,
+    pub error: String,
 }
 
 /// Marker implemented only by entity types allowed by `otlp.exporter.http.invalid_bearer_token`.
@@ -6998,7 +6998,7 @@ static OTLP_EXPORTER_HTTP_INVALID_BEARER_TOKEN_DESCRIPTOR: EventDescriptor = Eve
         key: "error",
         wire_key: "error",
         brief: "The error value recorded by OTAP Dataflow internal telemetry.",
-        value_type: otap_df_telemetry::descriptor::AttributeValueType::Any,
+        value_type: otap_df_telemetry::descriptor::AttributeValueType::String,
         requirement_level: EventRequirementLevel::Required,
     }],
 };
@@ -7011,7 +7011,7 @@ impl EventAttributes for OtlpExporterHttpInvalidBearerToken {
     ) {
         visitor(
             &OTLP_EXPORTER_HTTP_INVALID_BEARER_TOKEN_DESCRIPTOR.attributes[0],
-            EventAttributeValueRef::Any(&self.error),
+            EventAttributeValueRef::String(self.error.as_str()),
         );
     }
 }
@@ -7040,7 +7040,7 @@ impl OtlpExporterHttpInvalidBearerToken {
 #[derive(Debug, Clone)]
 pub struct OtlpExporterHttpNotificationError {
     /// The error value recorded by OTAP Dataflow internal telemetry.
-    pub error: otap_df_telemetry::attributes::AttributeValue,
+    pub error: String,
 }
 
 /// Marker implemented only by entity types allowed by `otlp.exporter.http.notification_error`.
@@ -7065,7 +7065,7 @@ static OTLP_EXPORTER_HTTP_NOTIFICATION_ERROR_DESCRIPTOR: EventDescriptor = Event
         key: "error",
         wire_key: "error",
         brief: "The error value recorded by OTAP Dataflow internal telemetry.",
-        value_type: otap_df_telemetry::descriptor::AttributeValueType::Any,
+        value_type: otap_df_telemetry::descriptor::AttributeValueType::String,
         requirement_level: EventRequirementLevel::Required,
     }],
 };
@@ -7078,7 +7078,7 @@ impl EventAttributes for OtlpExporterHttpNotificationError {
     ) {
         visitor(
             &OTLP_EXPORTER_HTTP_NOTIFICATION_ERROR_DESCRIPTOR.attributes[0],
-            EventAttributeValueRef::Any(&self.error),
+            EventAttributeValueRef::String(self.error.as_str()),
         );
     }
 }
@@ -7223,11 +7223,11 @@ impl OtlpExporterHttpShutdown {
 #[derive(Debug, Clone)]
 pub struct OtlpExporterHttpStart {
     /// The logs_endpoint value recorded by OTAP Dataflow internal telemetry.
-    pub logs_endpoint: otap_df_telemetry::attributes::AttributeValue,
+    pub logs_endpoint: String,
     /// The metrics_endpoint value recorded by OTAP Dataflow internal telemetry.
-    pub metrics_endpoint: otap_df_telemetry::attributes::AttributeValue,
+    pub metrics_endpoint: String,
     /// The traces_endpoint value recorded by OTAP Dataflow internal telemetry.
-    pub traces_endpoint: otap_df_telemetry::attributes::AttributeValue,
+    pub traces_endpoint: String,
 }
 
 /// Marker implemented only by entity types allowed by `otlp.exporter.http.start`.
@@ -7253,21 +7253,21 @@ static OTLP_EXPORTER_HTTP_START_DESCRIPTOR: EventDescriptor = EventDescriptor {
             key: "logs_endpoint",
             wire_key: "logs_endpoint",
             brief: "The logs_endpoint value recorded by OTAP Dataflow internal telemetry.",
-            value_type: otap_df_telemetry::descriptor::AttributeValueType::Any,
+            value_type: otap_df_telemetry::descriptor::AttributeValueType::String,
             requirement_level: EventRequirementLevel::Required,
         },
         EventAttributeDescriptor {
             key: "metrics_endpoint",
             wire_key: "metrics_endpoint",
             brief: "The metrics_endpoint value recorded by OTAP Dataflow internal telemetry.",
-            value_type: otap_df_telemetry::descriptor::AttributeValueType::Any,
+            value_type: otap_df_telemetry::descriptor::AttributeValueType::String,
             requirement_level: EventRequirementLevel::Required,
         },
         EventAttributeDescriptor {
             key: "traces_endpoint",
             wire_key: "traces_endpoint",
             brief: "The traces_endpoint value recorded by OTAP Dataflow internal telemetry.",
-            value_type: otap_df_telemetry::descriptor::AttributeValueType::Any,
+            value_type: otap_df_telemetry::descriptor::AttributeValueType::String,
             requirement_level: EventRequirementLevel::Required,
         },
     ],
@@ -7281,15 +7281,15 @@ impl EventAttributes for OtlpExporterHttpStart {
     ) {
         visitor(
             &OTLP_EXPORTER_HTTP_START_DESCRIPTOR.attributes[0],
-            EventAttributeValueRef::Any(&self.logs_endpoint),
+            EventAttributeValueRef::String(self.logs_endpoint.as_str()),
         );
         visitor(
             &OTLP_EXPORTER_HTTP_START_DESCRIPTOR.attributes[1],
-            EventAttributeValueRef::Any(&self.metrics_endpoint),
+            EventAttributeValueRef::String(self.metrics_endpoint.as_str()),
         );
         visitor(
             &OTLP_EXPORTER_HTTP_START_DESCRIPTOR.attributes[2],
-            EventAttributeValueRef::Any(&self.traces_endpoint),
+            EventAttributeValueRef::String(self.traces_endpoint.as_str()),
         );
     }
 }
@@ -7423,7 +7423,7 @@ impl OtlpExporterHttpValidateInsecureFlag {
 #[derive(Debug, Clone)]
 pub struct OtlpExporterHttpZeroPartialRejected {
     /// The details value recorded by OTAP Dataflow internal telemetry.
-    pub details: otap_df_telemetry::attributes::AttributeValue,
+    pub details: String,
 }
 
 /// Marker implemented only by entity types allowed by `otlp.exporter.http.zero_partial_rejected`.
@@ -7448,7 +7448,7 @@ static OTLP_EXPORTER_HTTP_ZERO_PARTIAL_REJECTED_DESCRIPTOR: EventDescriptor = Ev
         key: "details",
         wire_key: "details",
         brief: "The details value recorded by OTAP Dataflow internal telemetry.",
-        value_type: otap_df_telemetry::descriptor::AttributeValueType::Any,
+        value_type: otap_df_telemetry::descriptor::AttributeValueType::String,
         requirement_level: EventRequirementLevel::Required,
     }],
 };
@@ -7461,7 +7461,7 @@ impl EventAttributes for OtlpExporterHttpZeroPartialRejected {
     ) {
         visitor(
             &OTLP_EXPORTER_HTTP_ZERO_PARTIAL_REJECTED_DESCRIPTOR.attributes[0],
-            EventAttributeValueRef::Any(&self.details),
+            EventAttributeValueRef::String(self.details.as_str()),
         );
     }
 }
@@ -7542,7 +7542,7 @@ impl OtlpReceiverDrainIngress {
 #[derive(Debug, Clone)]
 pub struct OtlpReceiverGrpcStart {
     /// The endpoint value recorded by OTAP Dataflow internal telemetry.
-    pub endpoint: otap_df_telemetry::attributes::AttributeValue,
+    pub endpoint: String,
 }
 
 /// Marker implemented only by entity types allowed by `otlp.receiver.grpc.start`.
@@ -7567,7 +7567,7 @@ static OTLP_RECEIVER_GRPC_START_DESCRIPTOR: EventDescriptor = EventDescriptor {
         key: "endpoint",
         wire_key: "endpoint",
         brief: "The endpoint value recorded by OTAP Dataflow internal telemetry.",
-        value_type: otap_df_telemetry::descriptor::AttributeValueType::Any,
+        value_type: otap_df_telemetry::descriptor::AttributeValueType::String,
         requirement_level: EventRequirementLevel::Required,
     }],
 };
@@ -7580,7 +7580,7 @@ impl EventAttributes for OtlpReceiverGrpcStart {
     ) {
         visitor(
             &OTLP_RECEIVER_GRPC_START_DESCRIPTOR.attributes[0],
-            EventAttributeValueRef::Any(&self.endpoint),
+            EventAttributeValueRef::String(self.endpoint.as_str()),
         );
     }
 }
@@ -7607,7 +7607,7 @@ impl OtlpReceiverGrpcStart {
 #[derive(Debug, Clone)]
 pub struct OtlpReceiverHttpStart {
     /// The endpoint value recorded by OTAP Dataflow internal telemetry.
-    pub endpoint: otap_df_telemetry::attributes::AttributeValue,
+    pub endpoint: String,
 }
 
 /// Marker implemented only by entity types allowed by `otlp.receiver.http.start`.
@@ -7632,7 +7632,7 @@ static OTLP_RECEIVER_HTTP_START_DESCRIPTOR: EventDescriptor = EventDescriptor {
         key: "endpoint",
         wire_key: "endpoint",
         brief: "The endpoint value recorded by OTAP Dataflow internal telemetry.",
-        value_type: otap_df_telemetry::descriptor::AttributeValueType::Any,
+        value_type: otap_df_telemetry::descriptor::AttributeValueType::String,
         requirement_level: EventRequirementLevel::Required,
     }],
 };
@@ -7645,7 +7645,7 @@ impl EventAttributes for OtlpReceiverHttpStart {
     ) {
         visitor(
             &OTLP_RECEIVER_HTTP_START_DESCRIPTOR.attributes[0],
-            EventAttributeValueRef::Any(&self.endpoint),
+            EventAttributeValueRef::String(self.endpoint.as_str()),
         );
     }
 }
@@ -7785,7 +7785,7 @@ impl ParquetExporterRetryIgnoredForFileStorage {
 #[derive(Debug, Clone)]
 pub struct PerfExporterStart {
     /// The frequency_ms value recorded by OTAP Dataflow internal telemetry.
-    pub frequency_ms: otap_df_telemetry::attributes::AttributeValue,
+    pub frequency_ms: i64,
 }
 
 /// Marker implemented only by entity types allowed by `perf_exporter.start`.
@@ -7810,7 +7810,7 @@ static PERF_EXPORTER_START_DESCRIPTOR: EventDescriptor = EventDescriptor {
         key: "frequency_ms",
         wire_key: "frequency_ms",
         brief: "The frequency_ms value recorded by OTAP Dataflow internal telemetry.",
-        value_type: otap_df_telemetry::descriptor::AttributeValueType::Any,
+        value_type: otap_df_telemetry::descriptor::AttributeValueType::Int,
         requirement_level: EventRequirementLevel::Required,
     }],
 };
@@ -7823,7 +7823,7 @@ impl EventAttributes for PerfExporterStart {
     ) {
         visitor(
             &PERF_EXPORTER_START_DESCRIPTOR.attributes[0],
-            EventAttributeValueRef::Any(&self.frequency_ms),
+            EventAttributeValueRef::Int(self.frequency_ms),
         );
     }
 }
@@ -7850,7 +7850,7 @@ impl PerfExporterStart {
 #[derive(Debug, Clone)]
 pub struct SyslogCefReceiverArrowRecordsBuildFailed {
     /// The error value recorded by OTAP Dataflow internal telemetry.
-    pub error: otap_df_telemetry::attributes::AttributeValue,
+    pub error: String,
 }
 
 /// Marker implemented only by entity types allowed by `syslog_cef_receiver.arrow_records.build_failed`.
@@ -7882,7 +7882,7 @@ static SYSLOG_CEF_RECEIVER_ARROW_RECORDS_BUILD_FAILED_DESCRIPTOR: EventDescripto
             key: "error",
             wire_key: "error",
             brief: "The error value recorded by OTAP Dataflow internal telemetry.",
-            value_type: otap_df_telemetry::descriptor::AttributeValueType::Any,
+            value_type: otap_df_telemetry::descriptor::AttributeValueType::String,
             requirement_level: EventRequirementLevel::Required,
         }],
     };
@@ -7895,7 +7895,7 @@ impl EventAttributes for SyslogCefReceiverArrowRecordsBuildFailed {
     ) {
         visitor(
             &SYSLOG_CEF_RECEIVER_ARROW_RECORDS_BUILD_FAILED_DESCRIPTOR.attributes[0],
-            EventAttributeValueRef::Any(&self.error),
+            EventAttributeValueRef::String(self.error.as_str()),
         );
     }
 }
@@ -7924,7 +7924,7 @@ impl SyslogCefReceiverArrowRecordsBuildFailed {
 #[derive(Debug, Clone)]
 pub struct SyslogCefReceiverDrainIngressTimeout {
     /// The active_tasks value recorded by OTAP Dataflow internal telemetry.
-    pub active_tasks: otap_df_telemetry::attributes::AttributeValue,
+    pub active_tasks: i64,
 }
 
 /// Marker implemented only by entity types allowed by `syslog_cef_receiver.drain_ingress.timeout`.
@@ -7949,7 +7949,7 @@ static SYSLOG_CEF_RECEIVER_DRAIN_INGRESS_TIMEOUT_DESCRIPTOR: EventDescriptor = E
         key: "active_tasks",
         wire_key: "active_tasks",
         brief: "The active_tasks value recorded by OTAP Dataflow internal telemetry.",
-        value_type: otap_df_telemetry::descriptor::AttributeValueType::Any,
+        value_type: otap_df_telemetry::descriptor::AttributeValueType::Int,
         requirement_level: EventRequirementLevel::Required,
     }],
 };
@@ -7962,7 +7962,7 @@ impl EventAttributes for SyslogCefReceiverDrainIngressTimeout {
     ) {
         visitor(
             &SYSLOG_CEF_RECEIVER_DRAIN_INGRESS_TIMEOUT_DESCRIPTOR.attributes[0],
-            EventAttributeValueRef::Any(&self.active_tasks),
+            EventAttributeValueRef::Int(self.active_tasks),
         );
     }
 }
@@ -7991,7 +7991,7 @@ impl SyslogCefReceiverDrainIngressTimeout {
 #[derive(Debug, Clone)]
 pub struct SyslogCefReceiverMemoryPressureDisconnect {
     /// The peer value recorded by OTAP Dataflow internal telemetry.
-    pub peer: otap_df_telemetry::attributes::AttributeValue,
+    pub peer: String,
 }
 
 /// Marker implemented only by entity types allowed by `syslog_cef_receiver.memory_pressure.disconnect`.
@@ -8023,7 +8023,7 @@ static SYSLOG_CEF_RECEIVER_MEMORY_PRESSURE_DISCONNECT_DESCRIPTOR: EventDescripto
             key: "peer",
             wire_key: "peer",
             brief: "The peer value recorded by OTAP Dataflow internal telemetry.",
-            value_type: otap_df_telemetry::descriptor::AttributeValueType::Any,
+            value_type: otap_df_telemetry::descriptor::AttributeValueType::String,
             requirement_level: EventRequirementLevel::Required,
         }],
     };
@@ -8036,7 +8036,7 @@ impl EventAttributes for SyslogCefReceiverMemoryPressureDisconnect {
     ) {
         visitor(
             &SYSLOG_CEF_RECEIVER_MEMORY_PRESSURE_DISCONNECT_DESCRIPTOR.attributes[0],
-            EventAttributeValueRef::Any(&self.peer),
+            EventAttributeValueRef::String(self.peer.as_str()),
         );
     }
 }
@@ -8065,7 +8065,7 @@ impl SyslogCefReceiverMemoryPressureDisconnect {
 #[derive(Debug, Clone)]
 pub struct SyslogCefReceiverRateLimitDrop {
     /// The peer value recorded by OTAP Dataflow internal telemetry.
-    pub peer: otap_df_telemetry::attributes::AttributeValue,
+    pub peer: String,
 }
 
 /// Marker implemented only by entity types allowed by `syslog_cef_receiver.rate_limit.drop`.
@@ -8090,7 +8090,7 @@ static SYSLOG_CEF_RECEIVER_RATE_LIMIT_DROP_DESCRIPTOR: EventDescriptor = EventDe
         key: "peer",
         wire_key: "peer",
         brief: "The peer value recorded by OTAP Dataflow internal telemetry.",
-        value_type: otap_df_telemetry::descriptor::AttributeValueType::Any,
+        value_type: otap_df_telemetry::descriptor::AttributeValueType::String,
         requirement_level: EventRequirementLevel::Required,
     }],
 };
@@ -8103,7 +8103,7 @@ impl EventAttributes for SyslogCefReceiverRateLimitDrop {
     ) {
         visitor(
             &SYSLOG_CEF_RECEIVER_RATE_LIMIT_DROP_DESCRIPTOR.attributes[0],
-            EventAttributeValueRef::Any(&self.peer),
+            EventAttributeValueRef::String(self.peer.as_str()),
         );
     }
 }
@@ -8211,9 +8211,9 @@ impl SyslogCefReceiverStart {
 #[derive(Debug, Clone)]
 pub struct SyslogCefReceiverTlsHandshakeFailed {
     /// The error value recorded by OTAP Dataflow internal telemetry.
-    pub error: otap_df_telemetry::attributes::AttributeValue,
+    pub error: String,
     /// The peer value recorded by OTAP Dataflow internal telemetry.
-    pub peer: otap_df_telemetry::attributes::AttributeValue,
+    pub peer: String,
 }
 
 /// Marker implemented only by entity types allowed by `syslog_cef_receiver.tls.handshake.failed`.
@@ -8239,14 +8239,14 @@ static SYSLOG_CEF_RECEIVER_TLS_HANDSHAKE_FAILED_DESCRIPTOR: EventDescriptor = Ev
             key: "error",
             wire_key: "error",
             brief: "The error value recorded by OTAP Dataflow internal telemetry.",
-            value_type: otap_df_telemetry::descriptor::AttributeValueType::Any,
+            value_type: otap_df_telemetry::descriptor::AttributeValueType::String,
             requirement_level: EventRequirementLevel::Required,
         },
         EventAttributeDescriptor {
             key: "peer",
             wire_key: "peer",
             brief: "The peer value recorded by OTAP Dataflow internal telemetry.",
-            value_type: otap_df_telemetry::descriptor::AttributeValueType::Any,
+            value_type: otap_df_telemetry::descriptor::AttributeValueType::String,
             requirement_level: EventRequirementLevel::Required,
         },
     ],
@@ -8260,11 +8260,11 @@ impl EventAttributes for SyslogCefReceiverTlsHandshakeFailed {
     ) {
         visitor(
             &SYSLOG_CEF_RECEIVER_TLS_HANDSHAKE_FAILED_DESCRIPTOR.attributes[0],
-            EventAttributeValueRef::Any(&self.error),
+            EventAttributeValueRef::String(self.error.as_str()),
         );
         visitor(
             &SYSLOG_CEF_RECEIVER_TLS_HANDSHAKE_FAILED_DESCRIPTOR.attributes[1],
-            EventAttributeValueRef::Any(&self.peer),
+            EventAttributeValueRef::String(self.peer.as_str()),
         );
     }
 }
@@ -8293,7 +8293,7 @@ impl SyslogCefReceiverTlsHandshakeFailed {
 #[derive(Debug, Clone)]
 pub struct SyslogCefReceiverTlsHandshakeSuccess {
     /// The peer value recorded by OTAP Dataflow internal telemetry.
-    pub peer: otap_df_telemetry::attributes::AttributeValue,
+    pub peer: String,
 }
 
 /// Marker implemented only by entity types allowed by `syslog_cef_receiver.tls.handshake.success`.
@@ -8318,7 +8318,7 @@ static SYSLOG_CEF_RECEIVER_TLS_HANDSHAKE_SUCCESS_DESCRIPTOR: EventDescriptor = E
         key: "peer",
         wire_key: "peer",
         brief: "The peer value recorded by OTAP Dataflow internal telemetry.",
-        value_type: otap_df_telemetry::descriptor::AttributeValueType::Any,
+        value_type: otap_df_telemetry::descriptor::AttributeValueType::String,
         requirement_level: EventRequirementLevel::Required,
     }],
 };
@@ -8331,7 +8331,7 @@ impl EventAttributes for SyslogCefReceiverTlsHandshakeSuccess {
     ) {
         visitor(
             &SYSLOG_CEF_RECEIVER_TLS_HANDSHAKE_SUCCESS_DESCRIPTOR.attributes[0],
-            EventAttributeValueRef::Any(&self.peer),
+            EventAttributeValueRef::String(self.peer.as_str()),
         );
     }
 }
@@ -8467,7 +8467,7 @@ pub struct TemporalReaggregationAttributeEncodeFailed {
     /// The errors value recorded by OTAP Dataflow internal telemetry.
     pub errors: String,
     /// The total_errors value recorded by OTAP Dataflow internal telemetry.
-    pub total_errors: otap_df_telemetry::attributes::AttributeValue,
+    pub total_errors: i64,
 }
 
 /// Marker implemented only by entity types allowed by `temporal_reaggregation.attribute.encode_failed`.
@@ -8507,7 +8507,7 @@ static TEMPORAL_REAGGREGATION_ATTRIBUTE_ENCODE_FAILED_DESCRIPTOR: EventDescripto
                 key: "total_errors",
                 wire_key: "total_errors",
                 brief: "The total_errors value recorded by OTAP Dataflow internal telemetry.",
-                value_type: otap_df_telemetry::descriptor::AttributeValueType::Any,
+                value_type: otap_df_telemetry::descriptor::AttributeValueType::Int,
                 requirement_level: EventRequirementLevel::Required,
             },
         ],
@@ -8525,7 +8525,7 @@ impl EventAttributes for TemporalReaggregationAttributeEncodeFailed {
         );
         visitor(
             &TEMPORAL_REAGGREGATION_ATTRIBUTE_ENCODE_FAILED_DESCRIPTOR.attributes[1],
-            EventAttributeValueRef::Any(&self.total_errors),
+            EventAttributeValueRef::Int(self.total_errors),
         );
     }
 }
@@ -8608,7 +8608,7 @@ impl TemporalReaggregationCalldataInvalid {
 #[derive(Debug, Clone)]
 pub struct TemporalReaggregationViewCreationFailed {
     /// The error value recorded by OTAP Dataflow internal telemetry.
-    pub error: otap_df_telemetry::attributes::AttributeValue,
+    pub error: String,
 }
 
 /// Marker implemented only by entity types allowed by `temporal_reaggregation.view.creation_failed`.
@@ -8639,7 +8639,7 @@ static TEMPORAL_REAGGREGATION_VIEW_CREATION_FAILED_DESCRIPTOR: EventDescriptor =
         key: "error",
         wire_key: "error",
         brief: "The error value recorded by OTAP Dataflow internal telemetry.",
-        value_type: otap_df_telemetry::descriptor::AttributeValueType::Any,
+        value_type: otap_df_telemetry::descriptor::AttributeValueType::String,
         requirement_level: EventRequirementLevel::Required,
     }],
 };
@@ -8652,7 +8652,7 @@ impl EventAttributes for TemporalReaggregationViewCreationFailed {
     ) {
         visitor(
             &TEMPORAL_REAGGREGATION_VIEW_CREATION_FAILED_DESCRIPTOR.attributes[0],
-            EventAttributeValueRef::Any(&self.error),
+            EventAttributeValueRef::String(self.error.as_str()),
         );
     }
 }
@@ -8681,7 +8681,7 @@ impl TemporalReaggregationViewCreationFailed {
 #[derive(Debug, Clone)]
 pub struct TopicExporterDropNewest {
     /// The node value recorded by OTAP Dataflow internal telemetry.
-    pub node: otap_df_telemetry::attributes::AttributeValue,
+    pub node: String,
     /// Topic name associated with the node metrics.
     pub topic: String,
 }
@@ -8709,7 +8709,7 @@ static TOPIC_EXPORTER_DROP_NEWEST_DESCRIPTOR: EventDescriptor = EventDescriptor 
             key: "node",
             wire_key: "node",
             brief: "The node value recorded by OTAP Dataflow internal telemetry.",
-            value_type: otap_df_telemetry::descriptor::AttributeValueType::Any,
+            value_type: otap_df_telemetry::descriptor::AttributeValueType::String,
             requirement_level: EventRequirementLevel::Required,
         },
         EventAttributeDescriptor {
@@ -8730,7 +8730,7 @@ impl EventAttributes for TopicExporterDropNewest {
     ) {
         visitor(
             &TOPIC_EXPORTER_DROP_NEWEST_DESCRIPTOR.attributes[0],
-            EventAttributeValueRef::Any(&self.node),
+            EventAttributeValueRef::String(self.node.as_str()),
         );
         visitor(
             &TOPIC_EXPORTER_DROP_NEWEST_DESCRIPTOR.attributes[1],
@@ -8761,7 +8761,7 @@ impl TopicExporterDropNewest {
 #[derive(Debug, Clone)]
 pub struct TopicExporterOutcomeCapacityFull {
     /// The node value recorded by OTAP Dataflow internal telemetry.
-    pub node: otap_df_telemetry::attributes::AttributeValue,
+    pub node: String,
     /// Topic name associated with the node metrics.
     pub topic: String,
 }
@@ -8792,7 +8792,7 @@ static TOPIC_EXPORTER_OUTCOME_CAPACITY_FULL_DESCRIPTOR: EventDescriptor = EventD
             key: "node",
             wire_key: "node",
             brief: "The node value recorded by OTAP Dataflow internal telemetry.",
-            value_type: otap_df_telemetry::descriptor::AttributeValueType::Any,
+            value_type: otap_df_telemetry::descriptor::AttributeValueType::String,
             requirement_level: EventRequirementLevel::Required,
         },
         EventAttributeDescriptor {
@@ -8813,7 +8813,7 @@ impl EventAttributes for TopicExporterOutcomeCapacityFull {
     ) {
         visitor(
             &TOPIC_EXPORTER_OUTCOME_CAPACITY_FULL_DESCRIPTOR.attributes[0],
-            EventAttributeValueRef::Any(&self.node),
+            EventAttributeValueRef::String(self.node.as_str()),
         );
         visitor(
             &TOPIC_EXPORTER_OUTCOME_CAPACITY_FULL_DESCRIPTOR.attributes[1],
@@ -8845,11 +8845,11 @@ impl TopicExporterOutcomeCapacityFull {
 #[derive(Debug, Clone)]
 pub struct TopicExporterStart {
     /// The ack_propagation value recorded by OTAP Dataflow internal telemetry.
-    pub ack_propagation: otap_df_telemetry::attributes::AttributeValue,
+    pub ack_propagation: String,
     /// The node value recorded by OTAP Dataflow internal telemetry.
-    pub node: otap_df_telemetry::attributes::AttributeValue,
+    pub node: String,
     /// The queue_on_full value recorded by OTAP Dataflow internal telemetry.
-    pub queue_on_full: otap_df_telemetry::attributes::AttributeValue,
+    pub queue_on_full: String,
     /// Topic name associated with the node metrics.
     pub topic: String,
 }
@@ -8877,21 +8877,21 @@ static TOPIC_EXPORTER_START_DESCRIPTOR: EventDescriptor = EventDescriptor {
             key: "ack_propagation",
             wire_key: "ack_propagation",
             brief: "The ack_propagation value recorded by OTAP Dataflow internal telemetry.",
-            value_type: otap_df_telemetry::descriptor::AttributeValueType::Any,
+            value_type: otap_df_telemetry::descriptor::AttributeValueType::String,
             requirement_level: EventRequirementLevel::Required,
         },
         EventAttributeDescriptor {
             key: "node",
             wire_key: "node",
             brief: "The node value recorded by OTAP Dataflow internal telemetry.",
-            value_type: otap_df_telemetry::descriptor::AttributeValueType::Any,
+            value_type: otap_df_telemetry::descriptor::AttributeValueType::String,
             requirement_level: EventRequirementLevel::Required,
         },
         EventAttributeDescriptor {
             key: "queue_on_full",
             wire_key: "queue_on_full",
             brief: "The queue_on_full value recorded by OTAP Dataflow internal telemetry.",
-            value_type: otap_df_telemetry::descriptor::AttributeValueType::Any,
+            value_type: otap_df_telemetry::descriptor::AttributeValueType::String,
             requirement_level: EventRequirementLevel::Required,
         },
         EventAttributeDescriptor {
@@ -8912,15 +8912,15 @@ impl EventAttributes for TopicExporterStart {
     ) {
         visitor(
             &TOPIC_EXPORTER_START_DESCRIPTOR.attributes[0],
-            EventAttributeValueRef::Any(&self.ack_propagation),
+            EventAttributeValueRef::String(self.ack_propagation.as_str()),
         );
         visitor(
             &TOPIC_EXPORTER_START_DESCRIPTOR.attributes[1],
-            EventAttributeValueRef::Any(&self.node),
+            EventAttributeValueRef::String(self.node.as_str()),
         );
         visitor(
             &TOPIC_EXPORTER_START_DESCRIPTOR.attributes[2],
-            EventAttributeValueRef::Any(&self.queue_on_full),
+            EventAttributeValueRef::String(self.queue_on_full.as_str()),
         );
         visitor(
             &TOPIC_EXPORTER_START_DESCRIPTOR.attributes[3],
@@ -8951,9 +8951,9 @@ impl TopicExporterStart {
 #[derive(Debug, Clone)]
 pub struct TopicReceiverBridgeAckFailed {
     /// The error value recorded by OTAP Dataflow internal telemetry.
-    pub error: otap_df_telemetry::attributes::AttributeValue,
+    pub error: String,
     /// The node value recorded by OTAP Dataflow internal telemetry.
-    pub node: otap_df_telemetry::attributes::AttributeValue,
+    pub node: String,
     /// Topic name associated with the node metrics.
     pub topic: String,
 }
@@ -8981,14 +8981,14 @@ static TOPIC_RECEIVER_BRIDGE_ACK_FAILED_DESCRIPTOR: EventDescriptor = EventDescr
             key: "error",
             wire_key: "error",
             brief: "The error value recorded by OTAP Dataflow internal telemetry.",
-            value_type: otap_df_telemetry::descriptor::AttributeValueType::Any,
+            value_type: otap_df_telemetry::descriptor::AttributeValueType::String,
             requirement_level: EventRequirementLevel::Required,
         },
         EventAttributeDescriptor {
             key: "node",
             wire_key: "node",
             brief: "The node value recorded by OTAP Dataflow internal telemetry.",
-            value_type: otap_df_telemetry::descriptor::AttributeValueType::Any,
+            value_type: otap_df_telemetry::descriptor::AttributeValueType::String,
             requirement_level: EventRequirementLevel::Required,
         },
         EventAttributeDescriptor {
@@ -9009,11 +9009,11 @@ impl EventAttributes for TopicReceiverBridgeAckFailed {
     ) {
         visitor(
             &TOPIC_RECEIVER_BRIDGE_ACK_FAILED_DESCRIPTOR.attributes[0],
-            EventAttributeValueRef::Any(&self.error),
+            EventAttributeValueRef::String(self.error.as_str()),
         );
         visitor(
             &TOPIC_RECEIVER_BRIDGE_ACK_FAILED_DESCRIPTOR.attributes[1],
-            EventAttributeValueRef::Any(&self.node),
+            EventAttributeValueRef::String(self.node.as_str()),
         );
         visitor(
             &TOPIC_RECEIVER_BRIDGE_ACK_FAILED_DESCRIPTOR.attributes[2],
@@ -9044,7 +9044,7 @@ impl TopicReceiverBridgeAckFailed {
 #[derive(Debug, Clone)]
 pub struct TopicReceiverBridgeAckMissingCalldata {
     /// The node value recorded by OTAP Dataflow internal telemetry.
-    pub node: otap_df_telemetry::attributes::AttributeValue,
+    pub node: String,
     /// Topic name associated with the node metrics.
     pub topic: String,
 }
@@ -9075,7 +9075,7 @@ static TOPIC_RECEIVER_BRIDGE_ACK_MISSING_CALLDATA_DESCRIPTOR: EventDescriptor = 
             key: "node",
             wire_key: "node",
             brief: "The node value recorded by OTAP Dataflow internal telemetry.",
-            value_type: otap_df_telemetry::descriptor::AttributeValueType::Any,
+            value_type: otap_df_telemetry::descriptor::AttributeValueType::String,
             requirement_level: EventRequirementLevel::Required,
         },
         EventAttributeDescriptor {
@@ -9096,7 +9096,7 @@ impl EventAttributes for TopicReceiverBridgeAckMissingCalldata {
     ) {
         visitor(
             &TOPIC_RECEIVER_BRIDGE_ACK_MISSING_CALLDATA_DESCRIPTOR.attributes[0],
-            EventAttributeValueRef::Any(&self.node),
+            EventAttributeValueRef::String(self.node.as_str()),
         );
         visitor(
             &TOPIC_RECEIVER_BRIDGE_ACK_MISSING_CALLDATA_DESCRIPTOR.attributes[1],
@@ -9129,9 +9129,9 @@ impl TopicReceiverBridgeAckMissingCalldata {
 #[derive(Debug, Clone)]
 pub struct TopicReceiverBridgeAckUntrackedOrInvalidId {
     /// The message_id value recorded by OTAP Dataflow internal telemetry.
-    pub message_id: otap_df_telemetry::attributes::AttributeValue,
+    pub message_id: i64,
     /// The node value recorded by OTAP Dataflow internal telemetry.
-    pub node: otap_df_telemetry::attributes::AttributeValue,
+    pub node: String,
     /// Topic name associated with the node metrics.
     pub topic: String,
 }
@@ -9169,14 +9169,14 @@ static TOPIC_RECEIVER_BRIDGE_ACK_UNTRACKED_OR_INVALID_ID_DESCRIPTOR: EventDescri
                 key: "message_id",
                 wire_key: "message_id",
                 brief: "The message_id value recorded by OTAP Dataflow internal telemetry.",
-                value_type: otap_df_telemetry::descriptor::AttributeValueType::Any,
+                value_type: otap_df_telemetry::descriptor::AttributeValueType::Int,
                 requirement_level: EventRequirementLevel::Required,
             },
             EventAttributeDescriptor {
                 key: "node",
                 wire_key: "node",
                 brief: "The node value recorded by OTAP Dataflow internal telemetry.",
-                value_type: otap_df_telemetry::descriptor::AttributeValueType::Any,
+                value_type: otap_df_telemetry::descriptor::AttributeValueType::String,
                 requirement_level: EventRequirementLevel::Required,
             },
             EventAttributeDescriptor {
@@ -9197,11 +9197,11 @@ impl EventAttributes for TopicReceiverBridgeAckUntrackedOrInvalidId {
     ) {
         visitor(
             &TOPIC_RECEIVER_BRIDGE_ACK_UNTRACKED_OR_INVALID_ID_DESCRIPTOR.attributes[0],
-            EventAttributeValueRef::Any(&self.message_id),
+            EventAttributeValueRef::Int(self.message_id),
         );
         visitor(
             &TOPIC_RECEIVER_BRIDGE_ACK_UNTRACKED_OR_INVALID_ID_DESCRIPTOR.attributes[1],
-            EventAttributeValueRef::Any(&self.node),
+            EventAttributeValueRef::String(self.node.as_str()),
         );
         visitor(
             &TOPIC_RECEIVER_BRIDGE_ACK_UNTRACKED_OR_INVALID_ID_DESCRIPTOR.attributes[2],
@@ -9234,9 +9234,9 @@ impl TopicReceiverBridgeAckUntrackedOrInvalidId {
 #[derive(Debug, Clone)]
 pub struct TopicReceiverBridgeNackFailed {
     /// The error value recorded by OTAP Dataflow internal telemetry.
-    pub error: otap_df_telemetry::attributes::AttributeValue,
+    pub error: String,
     /// The node value recorded by OTAP Dataflow internal telemetry.
-    pub node: otap_df_telemetry::attributes::AttributeValue,
+    pub node: String,
     /// Topic name associated with the node metrics.
     pub topic: String,
 }
@@ -9264,14 +9264,14 @@ static TOPIC_RECEIVER_BRIDGE_NACK_FAILED_DESCRIPTOR: EventDescriptor = EventDesc
             key: "error",
             wire_key: "error",
             brief: "The error value recorded by OTAP Dataflow internal telemetry.",
-            value_type: otap_df_telemetry::descriptor::AttributeValueType::Any,
+            value_type: otap_df_telemetry::descriptor::AttributeValueType::String,
             requirement_level: EventRequirementLevel::Required,
         },
         EventAttributeDescriptor {
             key: "node",
             wire_key: "node",
             brief: "The node value recorded by OTAP Dataflow internal telemetry.",
-            value_type: otap_df_telemetry::descriptor::AttributeValueType::Any,
+            value_type: otap_df_telemetry::descriptor::AttributeValueType::String,
             requirement_level: EventRequirementLevel::Required,
         },
         EventAttributeDescriptor {
@@ -9292,11 +9292,11 @@ impl EventAttributes for TopicReceiverBridgeNackFailed {
     ) {
         visitor(
             &TOPIC_RECEIVER_BRIDGE_NACK_FAILED_DESCRIPTOR.attributes[0],
-            EventAttributeValueRef::Any(&self.error),
+            EventAttributeValueRef::String(self.error.as_str()),
         );
         visitor(
             &TOPIC_RECEIVER_BRIDGE_NACK_FAILED_DESCRIPTOR.attributes[1],
-            EventAttributeValueRef::Any(&self.node),
+            EventAttributeValueRef::String(self.node.as_str()),
         );
         visitor(
             &TOPIC_RECEIVER_BRIDGE_NACK_FAILED_DESCRIPTOR.attributes[2],
@@ -9327,7 +9327,7 @@ impl TopicReceiverBridgeNackFailed {
 #[derive(Debug, Clone)]
 pub struct TopicReceiverBridgeNackMissingCalldata {
     /// The node value recorded by OTAP Dataflow internal telemetry.
-    pub node: otap_df_telemetry::attributes::AttributeValue,
+    pub node: String,
     /// Topic name associated with the node metrics.
     pub topic: String,
 }
@@ -9361,7 +9361,7 @@ static TOPIC_RECEIVER_BRIDGE_NACK_MISSING_CALLDATA_DESCRIPTOR: EventDescriptor =
             key: "node",
             wire_key: "node",
             brief: "The node value recorded by OTAP Dataflow internal telemetry.",
-            value_type: otap_df_telemetry::descriptor::AttributeValueType::Any,
+            value_type: otap_df_telemetry::descriptor::AttributeValueType::String,
             requirement_level: EventRequirementLevel::Required,
         },
         EventAttributeDescriptor {
@@ -9382,7 +9382,7 @@ impl EventAttributes for TopicReceiverBridgeNackMissingCalldata {
     ) {
         visitor(
             &TOPIC_RECEIVER_BRIDGE_NACK_MISSING_CALLDATA_DESCRIPTOR.attributes[0],
-            EventAttributeValueRef::Any(&self.node),
+            EventAttributeValueRef::String(self.node.as_str()),
         );
         visitor(
             &TOPIC_RECEIVER_BRIDGE_NACK_MISSING_CALLDATA_DESCRIPTOR.attributes[1],
@@ -9415,9 +9415,9 @@ impl TopicReceiverBridgeNackMissingCalldata {
 #[derive(Debug, Clone)]
 pub struct TopicReceiverBridgeNackUntrackedOrInvalidId {
     /// The message_id value recorded by OTAP Dataflow internal telemetry.
-    pub message_id: otap_df_telemetry::attributes::AttributeValue,
+    pub message_id: i64,
     /// The node value recorded by OTAP Dataflow internal telemetry.
-    pub node: otap_df_telemetry::attributes::AttributeValue,
+    pub node: String,
     /// Topic name associated with the node metrics.
     pub topic: String,
 }
@@ -9455,14 +9455,14 @@ static TOPIC_RECEIVER_BRIDGE_NACK_UNTRACKED_OR_INVALID_ID_DESCRIPTOR: EventDescr
                 key: "message_id",
                 wire_key: "message_id",
                 brief: "The message_id value recorded by OTAP Dataflow internal telemetry.",
-                value_type: otap_df_telemetry::descriptor::AttributeValueType::Any,
+                value_type: otap_df_telemetry::descriptor::AttributeValueType::Int,
                 requirement_level: EventRequirementLevel::Required,
             },
             EventAttributeDescriptor {
                 key: "node",
                 wire_key: "node",
                 brief: "The node value recorded by OTAP Dataflow internal telemetry.",
-                value_type: otap_df_telemetry::descriptor::AttributeValueType::Any,
+                value_type: otap_df_telemetry::descriptor::AttributeValueType::String,
                 requirement_level: EventRequirementLevel::Required,
             },
             EventAttributeDescriptor {
@@ -9483,11 +9483,11 @@ impl EventAttributes for TopicReceiverBridgeNackUntrackedOrInvalidId {
     ) {
         visitor(
             &TOPIC_RECEIVER_BRIDGE_NACK_UNTRACKED_OR_INVALID_ID_DESCRIPTOR.attributes[0],
-            EventAttributeValueRef::Any(&self.message_id),
+            EventAttributeValueRef::Int(self.message_id),
         );
         visitor(
             &TOPIC_RECEIVER_BRIDGE_NACK_UNTRACKED_OR_INVALID_ID_DESCRIPTOR.attributes[1],
-            EventAttributeValueRef::Any(&self.node),
+            EventAttributeValueRef::String(self.node.as_str()),
         );
         visitor(
             &TOPIC_RECEIVER_BRIDGE_NACK_UNTRACKED_OR_INVALID_ID_DESCRIPTOR.attributes[2],
@@ -9520,9 +9520,9 @@ impl TopicReceiverBridgeNackUntrackedOrInvalidId {
 #[derive(Debug, Clone)]
 pub struct TopicReceiverDownstreamBackpressure {
     /// The blocked_ms value recorded by OTAP Dataflow internal telemetry.
-    pub blocked_ms: otap_df_telemetry::attributes::AttributeValue,
+    pub blocked_ms: i64,
     /// The node value recorded by OTAP Dataflow internal telemetry.
-    pub node: otap_df_telemetry::attributes::AttributeValue,
+    pub node: String,
     /// Topic name associated with the node metrics.
     pub topic: String,
 }
@@ -9553,14 +9553,14 @@ static TOPIC_RECEIVER_DOWNSTREAM_BACKPRESSURE_DESCRIPTOR: EventDescriptor = Even
             key: "blocked_ms",
             wire_key: "blocked_ms",
             brief: "The blocked_ms value recorded by OTAP Dataflow internal telemetry.",
-            value_type: otap_df_telemetry::descriptor::AttributeValueType::Any,
+            value_type: otap_df_telemetry::descriptor::AttributeValueType::Int,
             requirement_level: EventRequirementLevel::Required,
         },
         EventAttributeDescriptor {
             key: "node",
             wire_key: "node",
             brief: "The node value recorded by OTAP Dataflow internal telemetry.",
-            value_type: otap_df_telemetry::descriptor::AttributeValueType::Any,
+            value_type: otap_df_telemetry::descriptor::AttributeValueType::String,
             requirement_level: EventRequirementLevel::Required,
         },
         EventAttributeDescriptor {
@@ -9581,11 +9581,11 @@ impl EventAttributes for TopicReceiverDownstreamBackpressure {
     ) {
         visitor(
             &TOPIC_RECEIVER_DOWNSTREAM_BACKPRESSURE_DESCRIPTOR.attributes[0],
-            EventAttributeValueRef::Any(&self.blocked_ms),
+            EventAttributeValueRef::Int(self.blocked_ms),
         );
         visitor(
             &TOPIC_RECEIVER_DOWNSTREAM_BACKPRESSURE_DESCRIPTOR.attributes[1],
-            EventAttributeValueRef::Any(&self.node),
+            EventAttributeValueRef::String(self.node.as_str()),
         );
         visitor(
             &TOPIC_RECEIVER_DOWNSTREAM_BACKPRESSURE_DESCRIPTOR.attributes[2],
@@ -9617,9 +9617,9 @@ impl TopicReceiverDownstreamBackpressure {
 #[derive(Debug, Clone)]
 pub struct TopicReceiverDrainIngressTimeout {
     /// The node value recorded by OTAP Dataflow internal telemetry.
-    pub node: otap_df_telemetry::attributes::AttributeValue,
+    pub node: String,
     /// The pending_tracked value recorded by OTAP Dataflow internal telemetry.
-    pub pending_tracked: otap_df_telemetry::attributes::AttributeValue,
+    pub pending_tracked: i64,
     /// Topic name associated with the node metrics.
     pub topic: String,
 }
@@ -9650,14 +9650,14 @@ static TOPIC_RECEIVER_DRAIN_INGRESS_TIMEOUT_DESCRIPTOR: EventDescriptor = EventD
             key: "node",
             wire_key: "node",
             brief: "The node value recorded by OTAP Dataflow internal telemetry.",
-            value_type: otap_df_telemetry::descriptor::AttributeValueType::Any,
+            value_type: otap_df_telemetry::descriptor::AttributeValueType::String,
             requirement_level: EventRequirementLevel::Required,
         },
         EventAttributeDescriptor {
             key: "pending_tracked",
             wire_key: "pending_tracked",
             brief: "The pending_tracked value recorded by OTAP Dataflow internal telemetry.",
-            value_type: otap_df_telemetry::descriptor::AttributeValueType::Any,
+            value_type: otap_df_telemetry::descriptor::AttributeValueType::Int,
             requirement_level: EventRequirementLevel::Required,
         },
         EventAttributeDescriptor {
@@ -9678,11 +9678,11 @@ impl EventAttributes for TopicReceiverDrainIngressTimeout {
     ) {
         visitor(
             &TOPIC_RECEIVER_DRAIN_INGRESS_TIMEOUT_DESCRIPTOR.attributes[0],
-            EventAttributeValueRef::Any(&self.node),
+            EventAttributeValueRef::String(self.node.as_str()),
         );
         visitor(
             &TOPIC_RECEIVER_DRAIN_INGRESS_TIMEOUT_DESCRIPTOR.attributes[1],
-            EventAttributeValueRef::Any(&self.pending_tracked),
+            EventAttributeValueRef::Int(self.pending_tracked),
         );
         visitor(
             &TOPIC_RECEIVER_DRAIN_INGRESS_TIMEOUT_DESCRIPTOR.attributes[2],
@@ -9714,13 +9714,13 @@ impl TopicReceiverDrainIngressTimeout {
 #[derive(Debug, Clone)]
 pub struct TopicReceiverDrainIngressDropPendingForward {
     /// The blocked_ms value recorded by OTAP Dataflow internal telemetry.
-    pub blocked_ms: otap_df_telemetry::attributes::AttributeValue,
+    pub blocked_ms: i64,
     /// The node value recorded by OTAP Dataflow internal telemetry.
-    pub node: otap_df_telemetry::attributes::AttributeValue,
+    pub node: String,
     /// Topic name associated with the node metrics.
     pub topic: String,
     /// The tracked value recorded by OTAP Dataflow internal telemetry.
-    pub tracked: otap_df_telemetry::attributes::AttributeValue,
+    pub tracked: bool,
 }
 
 /// Marker implemented only by entity types allowed by `topic_receiver.drain_ingress_drop_pending_forward`.
@@ -9756,14 +9756,14 @@ static TOPIC_RECEIVER_DRAIN_INGRESS_DROP_PENDING_FORWARD_DESCRIPTOR: EventDescri
                 key: "blocked_ms",
                 wire_key: "blocked_ms",
                 brief: "The blocked_ms value recorded by OTAP Dataflow internal telemetry.",
-                value_type: otap_df_telemetry::descriptor::AttributeValueType::Any,
+                value_type: otap_df_telemetry::descriptor::AttributeValueType::Int,
                 requirement_level: EventRequirementLevel::Required,
             },
             EventAttributeDescriptor {
                 key: "node",
                 wire_key: "node",
                 brief: "The node value recorded by OTAP Dataflow internal telemetry.",
-                value_type: otap_df_telemetry::descriptor::AttributeValueType::Any,
+                value_type: otap_df_telemetry::descriptor::AttributeValueType::String,
                 requirement_level: EventRequirementLevel::Required,
             },
             EventAttributeDescriptor {
@@ -9777,7 +9777,7 @@ static TOPIC_RECEIVER_DRAIN_INGRESS_DROP_PENDING_FORWARD_DESCRIPTOR: EventDescri
                 key: "tracked",
                 wire_key: "tracked",
                 brief: "The tracked value recorded by OTAP Dataflow internal telemetry.",
-                value_type: otap_df_telemetry::descriptor::AttributeValueType::Any,
+                value_type: otap_df_telemetry::descriptor::AttributeValueType::Boolean,
                 requirement_level: EventRequirementLevel::Required,
             },
         ],
@@ -9791,11 +9791,11 @@ impl EventAttributes for TopicReceiverDrainIngressDropPendingForward {
     ) {
         visitor(
             &TOPIC_RECEIVER_DRAIN_INGRESS_DROP_PENDING_FORWARD_DESCRIPTOR.attributes[0],
-            EventAttributeValueRef::Any(&self.blocked_ms),
+            EventAttributeValueRef::Int(self.blocked_ms),
         );
         visitor(
             &TOPIC_RECEIVER_DRAIN_INGRESS_DROP_PENDING_FORWARD_DESCRIPTOR.attributes[1],
-            EventAttributeValueRef::Any(&self.node),
+            EventAttributeValueRef::String(self.node.as_str()),
         );
         visitor(
             &TOPIC_RECEIVER_DRAIN_INGRESS_DROP_PENDING_FORWARD_DESCRIPTOR.attributes[2],
@@ -9803,7 +9803,7 @@ impl EventAttributes for TopicReceiverDrainIngressDropPendingForward {
         );
         visitor(
             &TOPIC_RECEIVER_DRAIN_INGRESS_DROP_PENDING_FORWARD_DESCRIPTOR.attributes[3],
-            EventAttributeValueRef::Any(&self.tracked),
+            EventAttributeValueRef::Boolean(self.tracked),
         );
     }
 }
@@ -9832,9 +9832,9 @@ impl TopicReceiverDrainIngressDropPendingForward {
 #[derive(Debug, Clone)]
 pub struct TopicReceiverDrainIngressForceNackFailed {
     /// The error value recorded by OTAP Dataflow internal telemetry.
-    pub error: otap_df_telemetry::attributes::AttributeValue,
+    pub error: String,
     /// The node value recorded by OTAP Dataflow internal telemetry.
-    pub node: otap_df_telemetry::attributes::AttributeValue,
+    pub node: String,
     /// Topic name associated with the node metrics.
     pub topic: String,
 }
@@ -9872,14 +9872,14 @@ static TOPIC_RECEIVER_DRAIN_INGRESS_FORCE_NACK_FAILED_DESCRIPTOR: EventDescripto
                 key: "error",
                 wire_key: "error",
                 brief: "The error value recorded by OTAP Dataflow internal telemetry.",
-                value_type: otap_df_telemetry::descriptor::AttributeValueType::Any,
+                value_type: otap_df_telemetry::descriptor::AttributeValueType::String,
                 requirement_level: EventRequirementLevel::Required,
             },
             EventAttributeDescriptor {
                 key: "node",
                 wire_key: "node",
                 brief: "The node value recorded by OTAP Dataflow internal telemetry.",
-                value_type: otap_df_telemetry::descriptor::AttributeValueType::Any,
+                value_type: otap_df_telemetry::descriptor::AttributeValueType::String,
                 requirement_level: EventRequirementLevel::Required,
             },
             EventAttributeDescriptor {
@@ -9900,11 +9900,11 @@ impl EventAttributes for TopicReceiverDrainIngressForceNackFailed {
     ) {
         visitor(
             &TOPIC_RECEIVER_DRAIN_INGRESS_FORCE_NACK_FAILED_DESCRIPTOR.attributes[0],
-            EventAttributeValueRef::Any(&self.error),
+            EventAttributeValueRef::String(self.error.as_str()),
         );
         visitor(
             &TOPIC_RECEIVER_DRAIN_INGRESS_FORCE_NACK_FAILED_DESCRIPTOR.attributes[1],
-            EventAttributeValueRef::Any(&self.node),
+            EventAttributeValueRef::String(self.node.as_str()),
         );
         visitor(
             &TOPIC_RECEIVER_DRAIN_INGRESS_FORCE_NACK_FAILED_DESCRIPTOR.attributes[2],
@@ -9937,9 +9937,9 @@ impl TopicReceiverDrainIngressForceNackFailed {
 #[derive(Debug, Clone)]
 pub struct TopicReceiverDrainIngressPendingForwardNackFailed {
     /// The error value recorded by OTAP Dataflow internal telemetry.
-    pub error: otap_df_telemetry::attributes::AttributeValue,
+    pub error: String,
     /// The node value recorded by OTAP Dataflow internal telemetry.
-    pub node: otap_df_telemetry::attributes::AttributeValue,
+    pub node: String,
     /// Topic name associated with the node metrics.
     pub topic: String,
 }
@@ -9977,14 +9977,14 @@ static TOPIC_RECEIVER_DRAIN_INGRESS_PENDING_FORWARD_NACK_FAILED_DESCRIPTOR: Even
                 key: "error",
                 wire_key: "error",
                 brief: "The error value recorded by OTAP Dataflow internal telemetry.",
-                value_type: otap_df_telemetry::descriptor::AttributeValueType::Any,
+                value_type: otap_df_telemetry::descriptor::AttributeValueType::String,
                 requirement_level: EventRequirementLevel::Required,
             },
             EventAttributeDescriptor {
                 key: "node",
                 wire_key: "node",
                 brief: "The node value recorded by OTAP Dataflow internal telemetry.",
-                value_type: otap_df_telemetry::descriptor::AttributeValueType::Any,
+                value_type: otap_df_telemetry::descriptor::AttributeValueType::String,
                 requirement_level: EventRequirementLevel::Required,
             },
             EventAttributeDescriptor {
@@ -10005,11 +10005,11 @@ impl EventAttributes for TopicReceiverDrainIngressPendingForwardNackFailed {
     ) {
         visitor(
             &TOPIC_RECEIVER_DRAIN_INGRESS_PENDING_FORWARD_NACK_FAILED_DESCRIPTOR.attributes[0],
-            EventAttributeValueRef::Any(&self.error),
+            EventAttributeValueRef::String(self.error.as_str()),
         );
         visitor(
             &TOPIC_RECEIVER_DRAIN_INGRESS_PENDING_FORWARD_NACK_FAILED_DESCRIPTOR.attributes[1],
-            EventAttributeValueRef::Any(&self.node),
+            EventAttributeValueRef::String(self.node.as_str()),
         );
         visitor(
             &TOPIC_RECEIVER_DRAIN_INGRESS_PENDING_FORWARD_NACK_FAILED_DESCRIPTOR.attributes[2],
@@ -10042,9 +10042,9 @@ impl TopicReceiverDrainIngressPendingForwardNackFailed {
 #[derive(Debug, Clone)]
 pub struct TopicReceiverForwardFailed {
     /// The error value recorded by OTAP Dataflow internal telemetry.
-    pub error: otap_df_telemetry::attributes::AttributeValue,
+    pub error: String,
     /// The node value recorded by OTAP Dataflow internal telemetry.
-    pub node: otap_df_telemetry::attributes::AttributeValue,
+    pub node: String,
     /// Topic name associated with the node metrics.
     pub topic: String,
 }
@@ -10072,14 +10072,14 @@ static TOPIC_RECEIVER_FORWARD_FAILED_DESCRIPTOR: EventDescriptor = EventDescript
             key: "error",
             wire_key: "error",
             brief: "The error value recorded by OTAP Dataflow internal telemetry.",
-            value_type: otap_df_telemetry::descriptor::AttributeValueType::Any,
+            value_type: otap_df_telemetry::descriptor::AttributeValueType::String,
             requirement_level: EventRequirementLevel::Required,
         },
         EventAttributeDescriptor {
             key: "node",
             wire_key: "node",
             brief: "The node value recorded by OTAP Dataflow internal telemetry.",
-            value_type: otap_df_telemetry::descriptor::AttributeValueType::Any,
+            value_type: otap_df_telemetry::descriptor::AttributeValueType::String,
             requirement_level: EventRequirementLevel::Required,
         },
         EventAttributeDescriptor {
@@ -10100,11 +10100,11 @@ impl EventAttributes for TopicReceiverForwardFailed {
     ) {
         visitor(
             &TOPIC_RECEIVER_FORWARD_FAILED_DESCRIPTOR.attributes[0],
-            EventAttributeValueRef::Any(&self.error),
+            EventAttributeValueRef::String(self.error.as_str()),
         );
         visitor(
             &TOPIC_RECEIVER_FORWARD_FAILED_DESCRIPTOR.attributes[1],
-            EventAttributeValueRef::Any(&self.node),
+            EventAttributeValueRef::String(self.node.as_str()),
         );
         visitor(
             &TOPIC_RECEIVER_FORWARD_FAILED_DESCRIPTOR.attributes[2],
@@ -10135,7 +10135,7 @@ impl TopicReceiverForwardFailed {
 #[derive(Debug, Clone)]
 pub struct TopicReceiverLagDisconnect {
     /// The missed value recorded by OTAP Dataflow internal telemetry.
-    pub missed: otap_df_telemetry::attributes::AttributeValue,
+    pub missed: i64,
     /// Topic name associated with the node metrics.
     pub topic: String,
 }
@@ -10163,7 +10163,7 @@ static TOPIC_RECEIVER_LAG_DISCONNECT_DESCRIPTOR: EventDescriptor = EventDescript
             key: "missed",
             wire_key: "missed",
             brief: "The missed value recorded by OTAP Dataflow internal telemetry.",
-            value_type: otap_df_telemetry::descriptor::AttributeValueType::Any,
+            value_type: otap_df_telemetry::descriptor::AttributeValueType::Int,
             requirement_level: EventRequirementLevel::Required,
         },
         EventAttributeDescriptor {
@@ -10184,7 +10184,7 @@ impl EventAttributes for TopicReceiverLagDisconnect {
     ) {
         visitor(
             &TOPIC_RECEIVER_LAG_DISCONNECT_DESCRIPTOR.attributes[0],
-            EventAttributeValueRef::Any(&self.missed),
+            EventAttributeValueRef::Int(self.missed),
         );
         visitor(
             &TOPIC_RECEIVER_LAG_DISCONNECT_DESCRIPTOR.attributes[1],
@@ -10215,7 +10215,7 @@ impl TopicReceiverLagDisconnect {
 #[derive(Debug, Clone)]
 pub struct TopicReceiverLagged {
     /// The missed value recorded by OTAP Dataflow internal telemetry.
-    pub missed: otap_df_telemetry::attributes::AttributeValue,
+    pub missed: i64,
     /// Topic name associated with the node metrics.
     pub topic: String,
 }
@@ -10243,7 +10243,7 @@ static TOPIC_RECEIVER_LAGGED_DESCRIPTOR: EventDescriptor = EventDescriptor {
             key: "missed",
             wire_key: "missed",
             brief: "The missed value recorded by OTAP Dataflow internal telemetry.",
-            value_type: otap_df_telemetry::descriptor::AttributeValueType::Any,
+            value_type: otap_df_telemetry::descriptor::AttributeValueType::Int,
             requirement_level: EventRequirementLevel::Required,
         },
         EventAttributeDescriptor {
@@ -10264,7 +10264,7 @@ impl EventAttributes for TopicReceiverLagged {
     ) {
         visitor(
             &TOPIC_RECEIVER_LAGGED_DESCRIPTOR.attributes[0],
-            EventAttributeValueRef::Any(&self.missed),
+            EventAttributeValueRef::Int(self.missed),
         );
         visitor(
             &TOPIC_RECEIVER_LAGGED_DESCRIPTOR.attributes[1],
@@ -10295,11 +10295,11 @@ impl TopicReceiverLagged {
 #[derive(Debug, Clone)]
 pub struct TopicReceiverStart {
     /// The ack_propagation value recorded by OTAP Dataflow internal telemetry.
-    pub ack_propagation: otap_df_telemetry::attributes::AttributeValue,
+    pub ack_propagation: String,
     /// The node value recorded by OTAP Dataflow internal telemetry.
-    pub node: otap_df_telemetry::attributes::AttributeValue,
+    pub node: String,
     /// The subscription value recorded by OTAP Dataflow internal telemetry.
-    pub subscription: otap_df_telemetry::attributes::AttributeValue,
+    pub subscription: String,
     /// Topic name associated with the node metrics.
     pub topic: String,
 }
@@ -10327,21 +10327,21 @@ static TOPIC_RECEIVER_START_DESCRIPTOR: EventDescriptor = EventDescriptor {
             key: "ack_propagation",
             wire_key: "ack_propagation",
             brief: "The ack_propagation value recorded by OTAP Dataflow internal telemetry.",
-            value_type: otap_df_telemetry::descriptor::AttributeValueType::Any,
+            value_type: otap_df_telemetry::descriptor::AttributeValueType::String,
             requirement_level: EventRequirementLevel::Required,
         },
         EventAttributeDescriptor {
             key: "node",
             wire_key: "node",
             brief: "The node value recorded by OTAP Dataflow internal telemetry.",
-            value_type: otap_df_telemetry::descriptor::AttributeValueType::Any,
+            value_type: otap_df_telemetry::descriptor::AttributeValueType::String,
             requirement_level: EventRequirementLevel::Required,
         },
         EventAttributeDescriptor {
             key: "subscription",
             wire_key: "subscription",
             brief: "The subscription value recorded by OTAP Dataflow internal telemetry.",
-            value_type: otap_df_telemetry::descriptor::AttributeValueType::Any,
+            value_type: otap_df_telemetry::descriptor::AttributeValueType::String,
             requirement_level: EventRequirementLevel::Required,
         },
         EventAttributeDescriptor {
@@ -10362,15 +10362,15 @@ impl EventAttributes for TopicReceiverStart {
     ) {
         visitor(
             &TOPIC_RECEIVER_START_DESCRIPTOR.attributes[0],
-            EventAttributeValueRef::Any(&self.ack_propagation),
+            EventAttributeValueRef::String(self.ack_propagation.as_str()),
         );
         visitor(
             &TOPIC_RECEIVER_START_DESCRIPTOR.attributes[1],
-            EventAttributeValueRef::Any(&self.node),
+            EventAttributeValueRef::String(self.node.as_str()),
         );
         visitor(
             &TOPIC_RECEIVER_START_DESCRIPTOR.attributes[2],
-            EventAttributeValueRef::Any(&self.subscription),
+            EventAttributeValueRef::String(self.subscription.as_str()),
         );
         visitor(
             &TOPIC_RECEIVER_START_DESCRIPTOR.attributes[3],
@@ -10453,7 +10453,7 @@ impl TrafficGeneratorDrainIngress {
 #[derive(Debug, Clone)]
 pub struct TrafficGeneratorOpenRunBehind {
     /// The remaining value recorded by OTAP Dataflow internal telemetry.
-    pub remaining: otap_df_telemetry::attributes::AttributeValue,
+    pub remaining: i64,
 }
 
 /// Marker implemented only by entity types allowed by `traffic_generator.open_run_behind`.
@@ -10478,7 +10478,7 @@ static TRAFFIC_GENERATOR_OPEN_RUN_BEHIND_DESCRIPTOR: EventDescriptor = EventDesc
         key: "remaining",
         wire_key: "remaining",
         brief: "The remaining value recorded by OTAP Dataflow internal telemetry.",
-        value_type: otap_df_telemetry::descriptor::AttributeValueType::Any,
+        value_type: otap_df_telemetry::descriptor::AttributeValueType::Int,
         requirement_level: EventRequirementLevel::Required,
     }],
 };
@@ -10491,7 +10491,7 @@ impl EventAttributes for TrafficGeneratorOpenRunBehind {
     ) {
         visitor(
             &TRAFFIC_GENERATOR_OPEN_RUN_BEHIND_DESCRIPTOR.attributes[0],
-            EventAttributeValueRef::Any(&self.remaining),
+            EventAttributeValueRef::Int(self.remaining),
         );
     }
 }
@@ -10636,9 +10636,9 @@ impl TrafficGeneratorSmoothFallbackOpen {
 #[derive(Debug, Clone)]
 pub struct TrafficGeneratorSmoothRunBehind {
     /// The remaining value recorded by OTAP Dataflow internal telemetry.
-    pub remaining: otap_df_telemetry::attributes::AttributeValue,
+    pub remaining: i64,
     /// The remaining_items value recorded by OTAP Dataflow internal telemetry.
-    pub remaining_items: otap_df_telemetry::attributes::AttributeValue,
+    pub remaining_items: i64,
 }
 
 /// Marker implemented only by entity types allowed by `traffic_generator.smooth_run_behind`.
@@ -10664,14 +10664,14 @@ static TRAFFIC_GENERATOR_SMOOTH_RUN_BEHIND_DESCRIPTOR: EventDescriptor = EventDe
             key: "remaining",
             wire_key: "remaining",
             brief: "The remaining value recorded by OTAP Dataflow internal telemetry.",
-            value_type: otap_df_telemetry::descriptor::AttributeValueType::Any,
+            value_type: otap_df_telemetry::descriptor::AttributeValueType::Int,
             requirement_level: EventRequirementLevel::Required,
         },
         EventAttributeDescriptor {
             key: "remaining_items",
             wire_key: "remaining_items",
             brief: "The remaining_items value recorded by OTAP Dataflow internal telemetry.",
-            value_type: otap_df_telemetry::descriptor::AttributeValueType::Any,
+            value_type: otap_df_telemetry::descriptor::AttributeValueType::Int,
             requirement_level: EventRequirementLevel::Required,
         },
     ],
@@ -10685,11 +10685,11 @@ impl EventAttributes for TrafficGeneratorSmoothRunBehind {
     ) {
         visitor(
             &TRAFFIC_GENERATOR_SMOOTH_RUN_BEHIND_DESCRIPTOR.attributes[0],
-            EventAttributeValueRef::Any(&self.remaining),
+            EventAttributeValueRef::Int(self.remaining),
         );
         visitor(
             &TRAFFIC_GENERATOR_SMOOTH_RUN_BEHIND_DESCRIPTOR.attributes[1],
-            EventAttributeValueRef::Any(&self.remaining_items),
+            EventAttributeValueRef::Int(self.remaining_items),
         );
     }
 }
