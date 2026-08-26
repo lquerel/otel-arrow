@@ -1,0 +1,1089 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Telemetry Engine Benchmarks</title>
+  <link rel="stylesheet" href="shared/styles.css">
+</head>
+<body>
+  <div class="wip-banner" role="alert">
+    <span class="wip-icon" aria-hidden="true">&#9888;&#65039;</span>
+   <span class="wip-text">The Dataflow Engine and these benchmarks are a work in progress. Do you have feedback? <a class="wip-link" href="https://github.com/open-telemetry/otel-arrow/issues" target="_blank" rel="noopener">Tell us here!</a></span>
+    <span class="wip-icon" aria-hidden="true">&#9888;&#65039;</span>
+  </div>
+  <div class="controls-bar" id="controls-bar" aria-label="Display controls"></div>
+  <div class="legend-banner" id="legend-banner" aria-label="Glossary"></div>
+  <div class="wrap">
+    <h1>Telemetry Engine Benchmark Dashboard</h1>
+    <div class="sub">Compare telemetry engines across a variety of use-cases and protocols.</div>
+    <div id="app"></div>
+    <div id="comparison-cards"></div>
+  </div>
+
+  <div id="run-detail-modal" class="modal-backdrop" hidden>
+    <div class="modal">
+      <div class="modal-head">
+        <div id="run-detail-title" class="modal-title"></div>
+        <button id="run-detail-close" class="modal-close" type="button">Close</button>
+      </div>
+      <div id="run-detail-body" class="modal-body"></div>
+    </div>
+  </div>
+
+  <script src="https://cdn.jsdelivr.net/npm/chart.js@4.5.1/dist/chart.umd.js"></script>
+  <script src="../comparison_data/suite/dfe_logs_otap_gzip_baseline/data.js"></script>
+  <script src="../comparison_data/suite/dfe_logs_otap_none_attr_insert/data.js"></script>
+  <script src="../comparison_data/suite/dfe_logs_otap_none_attr_insert_multi_batch/data.js"></script>
+  <script src="../comparison_data/suite/dfe_logs_otap_none_attr_insert_multi_transform/data.js"></script>
+  <script src="../comparison_data/suite/dfe_logs_otap_none_attr_rename/data.js"></script>
+  <script src="../comparison_data/suite/dfe_logs_otap_none_attr_rename_multi_batch/data.js"></script>
+  <script src="../comparison_data/suite/dfe_logs_otap_none_attr_rename_multi_transform/data.js"></script>
+  <script src="../comparison_data/suite/dfe_logs_otap_none_baseline/data.js"></script>
+  <script src="../comparison_data/suite/dfe_logs_otap_none_transform_insert/data.js"></script>
+  <script src="../comparison_data/suite/dfe_logs_otap_none_transform_insert_multi_transform/data.js"></script>
+  <script src="../comparison_data/suite/dfe_logs_otap_none_transform_rename/data.js"></script>
+  <script src="../comparison_data/suite/dfe_logs_otap_none_transform_rename_multi_transform/data.js"></script>
+  <script src="../comparison_data/suite/dfe_logs_otap_zstd_baseline/data.js"></script>
+  <script src="../comparison_data/suite/dfe_logs_otlp_gzip_baseline/data.js"></script>
+  <script src="../comparison_data/suite/dfe_logs_otlp_none_attr_insert/data.js"></script>
+  <script src="../comparison_data/suite/dfe_logs_otlp_none_attr_insert_multi_batch/data.js"></script>
+  <script src="../comparison_data/suite/dfe_logs_otlp_none_attr_insert_multi_transform/data.js"></script>
+  <script src="../comparison_data/suite/dfe_logs_otlp_none_attr_rename/data.js"></script>
+  <script src="../comparison_data/suite/dfe_logs_otlp_none_attr_rename_multi_batch/data.js"></script>
+  <script src="../comparison_data/suite/dfe_logs_otlp_none_attr_rename_multi_transform/data.js"></script>
+  <script src="../comparison_data/suite/dfe_logs_otlp_none_baseline/data.js"></script>
+  <script src="../comparison_data/suite/dfe_logs_otlp_none_transform_insert/data.js"></script>
+  <script src="../comparison_data/suite/dfe_logs_otlp_none_transform_insert_multi_transform/data.js"></script>
+  <script src="../comparison_data/suite/dfe_logs_otlp_none_transform_rename/data.js"></script>
+  <script src="../comparison_data/suite/dfe_logs_otlp_none_transform_rename_multi_transform/data.js"></script>
+  <script src="../comparison_data/suite/dfe_logs_otlp_zstd_baseline/data.js"></script>
+  <script src="../comparison_data/suite/dfe_logs_otlphttp_gzip_baseline/data.js"></script>
+  <script src="../comparison_data/suite/dfe_logs_otlphttp_none_baseline/data.js"></script>
+  <script src="../comparison_data/suite/dfe_logs_otlphttp_zstd_baseline/data.js"></script>
+  <script src="../comparison_data/suite/dfe_metrics_otap_gzip_baseline/data.js"></script>
+  <script src="../comparison_data/suite/dfe_metrics_otap_none_baseline/data.js"></script>
+  <script src="../comparison_data/suite/dfe_metrics_otap_zstd_baseline/data.js"></script>
+  <script src="../comparison_data/suite/dfe_metrics_otlp_gzip_baseline/data.js"></script>
+  <script src="../comparison_data/suite/dfe_metrics_otlp_none_baseline/data.js"></script>
+  <script src="../comparison_data/suite/dfe_metrics_otlp_zstd_baseline/data.js"></script>
+  <script src="../comparison_data/suite/dfe_metrics_otlphttp_gzip_baseline/data.js"></script>
+  <script src="../comparison_data/suite/dfe_metrics_otlphttp_none_baseline/data.js"></script>
+  <script src="../comparison_data/suite/dfe_metrics_otlphttp_zstd_baseline/data.js"></script>
+  <script src="../comparison_data/suite/dfe_traces_otap_gzip_baseline/data.js"></script>
+  <script src="../comparison_data/suite/dfe_traces_otap_none_baseline/data.js"></script>
+  <script src="../comparison_data/suite/dfe_traces_otap_zstd_baseline/data.js"></script>
+  <script src="../comparison_data/suite/dfe_traces_otlp_gzip_baseline/data.js"></script>
+  <script src="../comparison_data/suite/dfe_traces_otlp_none_baseline/data.js"></script>
+  <script src="../comparison_data/suite/dfe_traces_otlp_zstd_baseline/data.js"></script>
+  <script src="../comparison_data/suite/dfe_traces_otlphttp_gzip_baseline/data.js"></script>
+  <script src="../comparison_data/suite/dfe_traces_otlphttp_none_baseline/data.js"></script>
+  <script src="../comparison_data/suite/dfe_traces_otlphttp_zstd_baseline/data.js"></script>
+  <script src="../comparison_data/suite/fbit_logs_otlp_none_attr_insert/data.js"></script>
+  <script src="../comparison_data/suite/fbit_logs_otlp_none_attr_insert_multi_batch/data.js"></script>
+  <script src="../comparison_data/suite/fbit_logs_otlp_none_attr_insert_multi_transform/data.js"></script>
+  <script src="../comparison_data/suite/fbit_logs_otlp_none_attr_rename/data.js"></script>
+  <script src="../comparison_data/suite/fbit_logs_otlp_none_attr_rename_multi_batch/data.js"></script>
+  <script src="../comparison_data/suite/fbit_logs_otlp_none_attr_rename_multi_transform/data.js"></script>
+  <script src="../comparison_data/suite/fbit_logs_otlp_none_baseline/data.js"></script>
+  <script src="../comparison_data/suite/fbit_logs_otlphttp_gzip_baseline/data.js"></script>
+  <script src="../comparison_data/suite/fbit_logs_otlphttp_none_baseline/data.js"></script>
+  <script src="../comparison_data/suite/fbit_logs_otlphttp_zstd_baseline/data.js"></script>
+  <script src="../comparison_data/suite/otc_logs_otap_gzip_baseline/data.js"></script>
+  <script src="../comparison_data/suite/otc_logs_otap_none_attr_insert_multi_transform/data.js"></script>
+  <script src="../comparison_data/suite/otc_logs_otap_none_attr_rename_multi_transform/data.js"></script>
+  <script src="../comparison_data/suite/otc_logs_otap_none_baseline/data.js"></script>
+  <script src="../comparison_data/suite/otc_logs_otap_zstd_baseline/data.js"></script>
+  <script src="../comparison_data/suite/otc_logs_otlp_gzip_baseline/data.js"></script>
+  <script src="../comparison_data/suite/otc_logs_otlp_none_attr_insert/data.js"></script>
+  <script src="../comparison_data/suite/otc_logs_otlp_none_attr_insert_multi_batch/data.js"></script>
+  <script src="../comparison_data/suite/otc_logs_otlp_none_attr_insert_multi_transform/data.js"></script>
+  <script src="../comparison_data/suite/otc_logs_otlp_none_attr_rename/data.js"></script>
+  <script src="../comparison_data/suite/otc_logs_otlp_none_attr_rename_multi_batch/data.js"></script>
+  <script src="../comparison_data/suite/otc_logs_otlp_none_attr_rename_multi_transform/data.js"></script>
+  <script src="../comparison_data/suite/otc_logs_otlp_none_baseline/data.js"></script>
+  <script src="../comparison_data/suite/otc_logs_otlp_none_transform_insert/data.js"></script>
+  <script src="../comparison_data/suite/otc_logs_otlp_none_transform_insert_multi_transform/data.js"></script>
+  <script src="../comparison_data/suite/otc_logs_otlp_none_transform_rename/data.js"></script>
+  <script src="../comparison_data/suite/otc_logs_otlp_none_transform_rename_multi_transform/data.js"></script>
+  <script src="../comparison_data/suite/otc_logs_otlp_zstd_baseline/data.js"></script>
+  <script src="../comparison_data/suite/otc_logs_otlphttp_none_baseline/data.js"></script>
+  <script src="../comparison_data/suite/otc_metrics_otap_gzip_baseline/data.js"></script>
+  <script src="../comparison_data/suite/otc_metrics_otap_none_baseline/data.js"></script>
+  <script src="../comparison_data/suite/otc_metrics_otap_zstd_baseline/data.js"></script>
+  <script src="../comparison_data/suite/otc_metrics_otlp_gzip_baseline/data.js"></script>
+  <script src="../comparison_data/suite/otc_metrics_otlp_none_baseline/data.js"></script>
+  <script src="../comparison_data/suite/otc_metrics_otlp_zstd_baseline/data.js"></script>
+  <script src="../comparison_data/suite/otc_metrics_otlphttp_none_baseline/data.js"></script>
+  <script src="../comparison_data/suite/otc_traces_otap_gzip_baseline/data.js"></script>
+  <script src="../comparison_data/suite/otc_traces_otap_none_baseline/data.js"></script>
+  <script src="../comparison_data/suite/otc_traces_otap_zstd_baseline/data.js"></script>
+  <script src="../comparison_data/suite/otc_traces_otlp_gzip_baseline/data.js"></script>
+  <script src="../comparison_data/suite/otc_traces_otlp_none_baseline/data.js"></script>
+  <script src="../comparison_data/suite/otc_traces_otlp_zstd_baseline/data.js"></script>
+  <script src="../comparison_data/suite/otc_traces_otlphttp_none_baseline/data.js"></script>
+  <script src="../comparison_data/suite/rotel_logs_otlp_gzip_baseline/data.js"></script>
+  <script src="../comparison_data/suite/rotel_logs_otlphttp_gzip_baseline/data.js"></script>
+  <script src="../comparison_data/suite/rotel_metrics_otlp_gzip_baseline/data.js"></script>
+  <script src="../comparison_data/suite/rotel_metrics_otlphttp_gzip_baseline/data.js"></script>
+  <script src="../comparison_data/suite/rotel_traces_otlp_gzip_baseline/data.js"></script>
+  <script>window.DATA_PATH = "../comparison_data/suite";</script>
+  <script>window.METRICS_META = {"cpu_percentage_normalized_avg": {"label": "CPU Average"}, "cpu_percentage_normalized_max": {"label": "CPU Max"}, "ram_mib_avg": {"label": "Memory Average"}, "ram_mib_max": {"label": "Memory Max"}, "network_tx_bytes_rate_avg": {"label": "Network TX Rate"}, "network_rx_bytes_rate_avg": {"label": "Network RX Rate"}, "dropped_logs_percentage": {"label": "Dropped Logs"}, "logs_delivery_deviation_percentage": {"label": "Logs Delivery Deviation"}, "logs_produced_rate": {"label": "Offered Load Rate"}, "loadgen_logs_sent_rate": {"label": "Loadgen Sent Rate"}, "logs_received_rate": {"label": "Collector Received Rate"}, "collector_logs_sent_rate": {"label": "Collector Sent Rate"}, "backend_logs_received_rate": {"label": "Backend Received Rate"}, "uncompressed_bytes_per_log": {"label": "Uncompressed Bytes Per Log"}, "egress_bytes_per_log": {"label": "Egress Bytes Per Log"}, "test_duration": {"label": "Test Duration"}};</script>
+  <script>window.META_DESCRIPTIONS = {"binary": {"dfe": "Dataflow Engine - the OTAP-native pipeline engine developed as a part of OTel Arrow.", "otc": "OpenTelemetry Collector (contrib distribution).", "fbit": "Fluent Bit - A lightweight telemetry agent engine under the fluentd project umbrella.", "rotel": "rotel-dev/rotel - Rust-based telemetry collector."}, "protocols": {"otap": "OpenTelemetry Arrow Protocol - columnar gRPC transport using Apache Arrow record batches.", "otlp": "OpenTelemetry Protocol over gRPC (row-oriented protobuf).", "otlphttp": "OpenTelemetry Protocol over HTTP/protobuf."}, "signals": {"logs": "OpenTelemetry Logs signal.", "metrics": "OpenTelemetry Metrics signal.", "traces": "OpenTelemetry Traces signal."}, "compression": {"none": "No payload compression on the wire.", "gzip": "gzip payload compression.", "zstd": "zstd payload compression."}};</script>
+  <script>window.GLOSSARY = [{"term": "DFE", "definition": "Dataflow Engine - the OTAP-native Rust pipeline being benchmarked in this repo."}, {"term": "OTC", "definition": "OpenTelemetry Collector (contrib distribution) - the reference Go implementation."}, {"term": "FBIT", "definition": "Fluent Bit - An observability pipeline engine in the fluentd family."}, {"term": "Rotel", "definition": "rotel-dev/rotel - Rust-based telemetry collector."}, {"term": "OTAP", "definition": "OpenTelemetry Arrow Protocol - columnar gRPC transport using Apache Arrow record batches."}, {"term": "OTLP", "definition": "OpenTelemetry Protocol - the standard row-oriented gRPC/HTTP protobuf protocol."}, {"term": "OTLP HTTP", "definition": "OpenTelemetry Protocol over pure HTTP."}, {"term": "Kafka OTLP", "definition": "Kafka-based transport using OTLP protobuf message encoding (producer -> broker -> consumer pipeline)."}, {"term": "Kafka OTAP", "definition": "Kafka-based transport using OTAP Arrow protobuf message encoding (producer -> broker -> consumer pipeline)."}, {"term": "Kafka Receiver Isolation", "definition": "Benchmark that measures only a variant's Kafka receiver. A fixed DFE Kafka exporter produces to the broker; the benchmarked receiver consumes and forwards to a DFE backend."}, {"term": "Kafka Exporter Isolation", "definition": "Benchmark that measures only a variant's Kafka exporter. A DFE loadgen feeds the benchmarked exporter, which produces to the broker; a fixed DFE Kafka receiver consumes on the backend."}];</script>
+  <script>window.COMPARISONS = [
+  {
+    "slug": "log_baselines_multi_rate",
+    "name": "Log Baselines",
+    "description": "Baseline log runs across engines over OTAP, OTLP, and OTLP/HTTP with none, gzip, and zstd compression.",
+    "chart": {
+      "axes": {
+        "x": {
+          "title": "Generated Load (logs/sec)",
+          "description": "Rate at which the load generator is configured to produce logs e.g. \"100k\" == \"100,000 logs/sec\"."
+        }
+      }
+    },
+    "tests": [
+      {
+        "name": "100k",
+        "loadgen_rate": 100000,
+        "label": "100k"
+      },
+      {
+        "name": "200k",
+        "loadgen_rate": 200000,
+        "label": "200k"
+      },
+      {
+        "name": "300k",
+        "loadgen_rate": 300000,
+        "label": "300k"
+      },
+      {
+        "name": "400k",
+        "loadgen_rate": 400000,
+        "label": "400k"
+      },
+      {
+        "name": "600k",
+        "loadgen_rate": 600000,
+        "label": "600k"
+      },
+      {
+        "name": "800k",
+        "loadgen_rate": 800000,
+        "label": "800k"
+      },
+      {
+        "name": "1000k",
+        "loadgen_rate": 1000000,
+        "label": "1M"
+      }
+    ],
+    "suites": [
+      {
+        "name": "DFE Logs OTAP Baseline (None)",
+        "slug": "dfe_logs_otap_none_baseline",
+        "short": "DFE OTAP/None"
+      },
+      {
+        "name": "DFE Logs OTAP Baseline (Gzip)",
+        "slug": "dfe_logs_otap_gzip_baseline",
+        "short": "DFE OTAP/Gzip"
+      },
+      {
+        "name": "DFE Logs OTAP Baseline (Zstd)",
+        "slug": "dfe_logs_otap_zstd_baseline",
+        "short": "DFE OTAP/Zstd"
+      },
+      {
+        "name": "DFE Logs OTLP Baseline (None)",
+        "slug": "dfe_logs_otlp_none_baseline",
+        "short": "DFE OTLP/None"
+      },
+      {
+        "name": "DFE Logs OTLP Baseline (Gzip)",
+        "slug": "dfe_logs_otlp_gzip_baseline",
+        "short": "DFE OTLP/Gzip"
+      },
+      {
+        "name": "DFE Logs OTLP Baseline (Zstd)",
+        "slug": "dfe_logs_otlp_zstd_baseline",
+        "short": "DFE OTLP/Zstd"
+      },
+      {
+        "name": "DFE Logs OTLP/HTTP Baseline (None)",
+        "slug": "dfe_logs_otlphttp_none_baseline",
+        "short": "DFE OTLP-HTTP/None"
+      },
+      {
+        "name": "DFE Logs OTLP/HTTP Baseline (Gzip)",
+        "slug": "dfe_logs_otlphttp_gzip_baseline",
+        "short": "DFE OTLP-HTTP/Gzip"
+      },
+      {
+        "name": "DFE Logs OTLP/HTTP Baseline (Zstd)",
+        "slug": "dfe_logs_otlphttp_zstd_baseline",
+        "short": "DFE OTLP-HTTP/Zstd"
+      },
+      {
+        "name": "OTC Logs OTAP Baseline (None)",
+        "slug": "otc_logs_otap_none_baseline",
+        "short": "OTC OTAP/None"
+      },
+      {
+        "name": "OTC Logs OTAP Baseline (Gzip)",
+        "slug": "otc_logs_otap_gzip_baseline",
+        "short": "OTC OTAP/Gzip"
+      },
+      {
+        "name": "OTC Logs OTAP Baseline (Zstd)",
+        "slug": "otc_logs_otap_zstd_baseline",
+        "short": "OTC OTAP/Zstd"
+      },
+      {
+        "name": "OTC Logs OTLP Baseline (None)",
+        "slug": "otc_logs_otlp_none_baseline",
+        "short": "OTC OTLP/None"
+      },
+      {
+        "name": "OTC Logs OTLP Baseline (Gzip)",
+        "slug": "otc_logs_otlp_gzip_baseline",
+        "short": "OTC OTLP/Gzip"
+      },
+      {
+        "name": "OTC Logs OTLP Baseline (Zstd)",
+        "slug": "otc_logs_otlp_zstd_baseline",
+        "short": "OTC OTLP/Zstd"
+      },
+      {
+        "name": "OTC Logs OTLP/HTTP Baseline (None)",
+        "slug": "otc_logs_otlphttp_none_baseline",
+        "short": "OTC OTLP-HTTP/None"
+      },
+      {
+        "name": "FB Logs OTLP Baseline (None)",
+        "slug": "fbit_logs_otlp_none_baseline",
+        "short": "FB OTLP/None"
+      },
+      {
+        "name": "FB Logs OTLP/HTTP Baseline (None)",
+        "slug": "fbit_logs_otlphttp_none_baseline",
+        "short": "FB OTLP-HTTP/None"
+      },
+      {
+        "name": "FB Logs OTLP/HTTP Baseline (Gzip)",
+        "slug": "fbit_logs_otlphttp_gzip_baseline",
+        "short": "FB OTLP-HTTP/Gzip"
+      },
+      {
+        "name": "FB Logs OTLP/HTTP Baseline (Zstd)",
+        "slug": "fbit_logs_otlphttp_zstd_baseline",
+        "short": "FB OTLP-HTTP/Zstd"
+      },
+      {
+        "name": "Rotel Logs OTLP Baseline (Gzip)",
+        "slug": "rotel_logs_otlp_gzip_baseline",
+        "short": "Rotel OTLP/Gzip"
+      },
+      {
+        "name": "Rotel Logs OTLP/HTTP Baseline (Gzip)",
+        "slug": "rotel_logs_otlphttp_gzip_baseline",
+        "short": "Rotel OTLP-HTTP/Gzip"
+      }
+    ]
+  },
+  {
+    "slug": "metric_baselines_multi_rate",
+    "name": "Metric Baselines",
+    "description": "Baseline metric runs across engines over OTAP, OTLP, and OTLP/HTTP with none, gzip, and zstd compression.",
+    "chart": {
+      "axes": {
+        "x": {
+          "title": "Generated Load (datapoints/sec)",
+          "description": "Rate at which the load generator is configured to submit metric datapoints e.g. \"100k\" == \"100,000 datapoints/sec\"."
+        }
+      }
+    },
+    "tests": [
+      {
+        "name": "100k",
+        "loadgen_rate": 100000,
+        "label": "100k"
+      },
+      {
+        "name": "200k",
+        "loadgen_rate": 200000,
+        "label": "200k"
+      },
+      {
+        "name": "300k",
+        "loadgen_rate": 300000,
+        "label": "300k"
+      },
+      {
+        "name": "400k",
+        "loadgen_rate": 400000,
+        "label": "400k"
+      },
+      {
+        "name": "600k",
+        "loadgen_rate": 600000,
+        "label": "600k"
+      },
+      {
+        "name": "800k",
+        "loadgen_rate": 800000,
+        "label": "800k"
+      },
+      {
+        "name": "1000k",
+        "loadgen_rate": 1000000,
+        "label": "1M"
+      }
+    ],
+    "suites": [
+      {
+        "name": "DFE Metrics OTAP Baseline (None)",
+        "slug": "dfe_metrics_otap_none_baseline",
+        "short": "DFE OTAP/None"
+      },
+      {
+        "name": "DFE Metrics OTAP Baseline (Gzip)",
+        "slug": "dfe_metrics_otap_gzip_baseline",
+        "short": "DFE OTAP/Gzip"
+      },
+      {
+        "name": "DFE Metrics OTAP Baseline (Zstd)",
+        "slug": "dfe_metrics_otap_zstd_baseline",
+        "short": "DFE OTAP/Zstd"
+      },
+      {
+        "name": "DFE Metrics OTLP Baseline (None)",
+        "slug": "dfe_metrics_otlp_none_baseline",
+        "short": "DFE OTLP/None"
+      },
+      {
+        "name": "DFE Metrics OTLP Baseline (Gzip)",
+        "slug": "dfe_metrics_otlp_gzip_baseline",
+        "short": "DFE OTLP/Gzip"
+      },
+      {
+        "name": "DFE Metrics OTLP Baseline (Zstd)",
+        "slug": "dfe_metrics_otlp_zstd_baseline",
+        "short": "DFE OTLP/Zstd"
+      },
+      {
+        "name": "DFE Metrics OTLP/HTTP Baseline (None)",
+        "slug": "dfe_metrics_otlphttp_none_baseline",
+        "short": "DFE OTLP-HTTP/None"
+      },
+      {
+        "name": "DFE Metrics OTLP/HTTP Baseline (Gzip)",
+        "slug": "dfe_metrics_otlphttp_gzip_baseline",
+        "short": "DFE OTLP-HTTP/Gzip"
+      },
+      {
+        "name": "DFE Metrics OTLP/HTTP Baseline (Zstd)",
+        "slug": "dfe_metrics_otlphttp_zstd_baseline",
+        "short": "DFE OTLP-HTTP/Zstd"
+      },
+      {
+        "name": "OTC Metrics OTAP Baseline (None)",
+        "slug": "otc_metrics_otap_none_baseline",
+        "short": "OTC OTAP/None"
+      },
+      {
+        "name": "OTC Metrics OTAP Baseline (Gzip)",
+        "slug": "otc_metrics_otap_gzip_baseline",
+        "short": "OTC OTAP/Gzip"
+      },
+      {
+        "name": "OTC Metrics OTAP Baseline (Zstd)",
+        "slug": "otc_metrics_otap_zstd_baseline",
+        "short": "OTC OTAP/Zstd"
+      },
+      {
+        "name": "OTC Metrics OTLP Baseline (None)",
+        "slug": "otc_metrics_otlp_none_baseline",
+        "short": "OTC OTLP/None"
+      },
+      {
+        "name": "OTC Metrics OTLP Baseline (Gzip)",
+        "slug": "otc_metrics_otlp_gzip_baseline",
+        "short": "OTC OTLP/Gzip"
+      },
+      {
+        "name": "OTC Metrics OTLP Baseline (Zstd)",
+        "slug": "otc_metrics_otlp_zstd_baseline",
+        "short": "OTC OTLP/Zstd"
+      },
+      {
+        "name": "OTC Metrics OTLP/HTTP Baseline (None)",
+        "slug": "otc_metrics_otlphttp_none_baseline",
+        "short": "OTC OTLP-HTTP/None"
+      },
+      {
+        "name": "Rotel Metrics OTLP Baseline (Gzip)",
+        "slug": "rotel_metrics_otlp_gzip_baseline",
+        "short": "Rotel OTLP/Gzip"
+      },
+      {
+        "name": "Rotel Metrics OTLP/HTTP Baseline (Gzip)",
+        "slug": "rotel_metrics_otlphttp_gzip_baseline",
+        "short": "Rotel OTLP-HTTP/Gzip"
+      }
+    ]
+  },
+  {
+    "slug": "trace_baselines_multi_rate",
+    "name": "Trace Baselines",
+    "description": "Baseline trace runs across engines over OTAP, OTLP, and OTLP/HTTP with none, gzip, and zstd compression.",
+    "chart": {
+      "axes": {
+        "x": {
+          "title": "Generated Load (spans/sec)",
+          "description": "Rate at which the load generator is configured to submit spans e.g. \"100k\" == \"100,000 spans/sec\"."
+        }
+      }
+    },
+    "tests": [
+      {
+        "name": "100k",
+        "loadgen_rate": 100000,
+        "label": "100k"
+      },
+      {
+        "name": "200k",
+        "loadgen_rate": 200000,
+        "label": "200k"
+      },
+      {
+        "name": "300k",
+        "loadgen_rate": 300000,
+        "label": "300k"
+      },
+      {
+        "name": "400k",
+        "loadgen_rate": 400000,
+        "label": "400k"
+      },
+      {
+        "name": "600k",
+        "loadgen_rate": 600000,
+        "label": "600k"
+      },
+      {
+        "name": "800k",
+        "loadgen_rate": 800000,
+        "label": "800k"
+      },
+      {
+        "name": "1000k",
+        "loadgen_rate": 1000000,
+        "label": "1M"
+      }
+    ],
+    "suites": [
+      {
+        "name": "DFE Traces OTAP Baseline (None)",
+        "slug": "dfe_traces_otap_none_baseline",
+        "short": "DFE OTAP/None"
+      },
+      {
+        "name": "DFE Traces OTAP Baseline (Gzip)",
+        "slug": "dfe_traces_otap_gzip_baseline",
+        "short": "DFE OTAP/Gzip"
+      },
+      {
+        "name": "DFE Traces OTAP Baseline (Zstd)",
+        "slug": "dfe_traces_otap_zstd_baseline",
+        "short": "DFE OTAP/Zstd"
+      },
+      {
+        "name": "DFE Traces OTLP Baseline (None)",
+        "slug": "dfe_traces_otlp_none_baseline",
+        "short": "DFE OTLP/None"
+      },
+      {
+        "name": "DFE Traces OTLP Baseline (Gzip)",
+        "slug": "dfe_traces_otlp_gzip_baseline",
+        "short": "DFE OTLP/Gzip"
+      },
+      {
+        "name": "DFE Traces OTLP Baseline (Zstd)",
+        "slug": "dfe_traces_otlp_zstd_baseline",
+        "short": "DFE OTLP/Zstd"
+      },
+      {
+        "name": "DFE Traces OTLP/HTTP Baseline (None)",
+        "slug": "dfe_traces_otlphttp_none_baseline",
+        "short": "DFE OTLP-HTTP/None"
+      },
+      {
+        "name": "DFE Traces OTLP/HTTP Baseline (Gzip)",
+        "slug": "dfe_traces_otlphttp_gzip_baseline",
+        "short": "DFE OTLP-HTTP/Gzip"
+      },
+      {
+        "name": "DFE Traces OTLP/HTTP Baseline (Zstd)",
+        "slug": "dfe_traces_otlphttp_zstd_baseline",
+        "short": "DFE OTLP-HTTP/Zstd"
+      },
+      {
+        "name": "OTC Traces OTAP Baseline (None)",
+        "slug": "otc_traces_otap_none_baseline",
+        "short": "OTC OTAP/None"
+      },
+      {
+        "name": "OTC Traces OTAP Baseline (Gzip)",
+        "slug": "otc_traces_otap_gzip_baseline",
+        "short": "OTC OTAP/Gzip"
+      },
+      {
+        "name": "OTC Traces OTAP Baseline (Zstd)",
+        "slug": "otc_traces_otap_zstd_baseline",
+        "short": "OTC OTAP/Zstd"
+      },
+      {
+        "name": "OTC Traces OTLP Baseline (None)",
+        "slug": "otc_traces_otlp_none_baseline",
+        "short": "OTC OTLP/None"
+      },
+      {
+        "name": "OTC Traces OTLP Baseline (Gzip)",
+        "slug": "otc_traces_otlp_gzip_baseline",
+        "short": "OTC OTLP/Gzip"
+      },
+      {
+        "name": "OTC Traces OTLP Baseline (Zstd)",
+        "slug": "otc_traces_otlp_zstd_baseline",
+        "short": "OTC OTLP/Zstd"
+      },
+      {
+        "name": "OTC Traces OTLP/HTTP Baseline (None)",
+        "slug": "otc_traces_otlphttp_none_baseline",
+        "short": "OTC OTLP-HTTP/None"
+      },
+      {
+        "name": "Rotel Traces OTLP Baseline (Gzip)",
+        "slug": "rotel_traces_otlp_gzip_baseline",
+        "short": "Rotel OTLP/Gzip"
+      }
+    ]
+  },
+  {
+    "slug": "log_transform_attr_processor_rename",
+    "name": "Log Attribute Rename (Multi Rate)",
+    "description": "Renaming the semantic-convention attribute exception.type to exception.kind on logs. Comparing the attributes processor vs the transform processor across engines and transports.\n",
+    "chart": {
+      "axes": {
+        "x": {
+          "title": "Generated Load (logs/sec)",
+          "description": "Rate at which the load generator is configured to produce logs e.g. \"100k\" == \"100,000 logs/sec\"."
+        }
+      }
+    },
+    "tests": [
+      {
+        "name": "100k",
+        "loadgen_rate": 100000,
+        "label": "100k"
+      },
+      {
+        "name": "200k",
+        "loadgen_rate": 200000,
+        "label": "200k"
+      },
+      {
+        "name": "300k",
+        "loadgen_rate": 300000,
+        "label": "300k"
+      },
+      {
+        "name": "400k",
+        "loadgen_rate": 400000,
+        "label": "400k"
+      },
+      {
+        "name": "600k",
+        "loadgen_rate": 600000,
+        "label": "600k"
+      },
+      {
+        "name": "800k",
+        "loadgen_rate": 800000,
+        "label": "800k"
+      },
+      {
+        "name": "1000k",
+        "loadgen_rate": 1000000,
+        "label": "1M"
+      }
+    ],
+    "suites": [
+      {
+        "name": "DFE OTAP Attr Rename",
+        "slug": "dfe_logs_otap_none_attr_rename",
+        "short": "DFE OTAP/Attr"
+      },
+      {
+        "name": "DFE OTAP Transform Rename",
+        "slug": "dfe_logs_otap_none_transform_rename",
+        "short": "DFE OTAP/Transform"
+      },
+      {
+        "name": "DFE OTAP Baseline",
+        "slug": "dfe_logs_otap_none_baseline",
+        "short": "DFE OTAP/Baseline"
+      },
+      {
+        "name": "DFE OTLP Attr Rename",
+        "slug": "dfe_logs_otlp_none_attr_rename",
+        "short": "DFE OTLP/Attr"
+      },
+      {
+        "name": "DFE OTLP Transform Rename",
+        "slug": "dfe_logs_otlp_none_transform_rename",
+        "short": "DFE OTLP/Transform"
+      },
+      {
+        "name": "DFE OTLP Baseline",
+        "slug": "dfe_logs_otlp_none_baseline",
+        "short": "DFE OTLP/Baseline"
+      },
+      {
+        "name": "OTC OTLP Attr Rename",
+        "slug": "otc_logs_otlp_none_attr_rename",
+        "short": "OTC OTLP/Attr"
+      },
+      {
+        "name": "OTC OTLP Transform Rename",
+        "slug": "otc_logs_otlp_none_transform_rename",
+        "short": "OTC OTLP/Transform"
+      },
+      {
+        "name": "OTC OTLP Baseline",
+        "slug": "otc_logs_otlp_none_baseline",
+        "short": "OTC OTLP/Baseline"
+      },
+      {
+        "name": "FB OTLP Modify Rename",
+        "slug": "fbit_logs_otlp_none_attr_rename",
+        "short": "FB OTLP/Modify"
+      },
+      {
+        "name": "FB OTLP Baseline",
+        "slug": "fbit_logs_otlp_none_baseline",
+        "short": "FB OTLP/Baseline"
+      }
+    ]
+  },
+  {
+    "slug": "log_transform_attr_processor_insert",
+    "name": "Log Attribute Insert (Multi Rate)",
+    "description": "Inserting an attribute \"processing.engine\" with a static value \"benchmark\" on logs. Comparing the attributes processor vs the transform processor across engines and transports.\n",
+    "chart": {
+      "axes": {
+        "x": {
+          "title": "Generated Load (logs/sec)",
+          "description": "Rate at which the load generator is configured to produce logs e.g. \"100k\" == \"100,000 logs/sec\"."
+        }
+      }
+    },
+    "tests": [
+      {
+        "name": "100k",
+        "loadgen_rate": 100000,
+        "label": "100k"
+      },
+      {
+        "name": "200k",
+        "loadgen_rate": 200000,
+        "label": "200k"
+      },
+      {
+        "name": "300k",
+        "loadgen_rate": 300000,
+        "label": "300k"
+      },
+      {
+        "name": "400k",
+        "loadgen_rate": 400000,
+        "label": "400k"
+      },
+      {
+        "name": "600k",
+        "loadgen_rate": 600000,
+        "label": "600k"
+      },
+      {
+        "name": "800k",
+        "loadgen_rate": 800000,
+        "label": "800k"
+      },
+      {
+        "name": "1000k",
+        "loadgen_rate": 1000000,
+        "label": "1M"
+      }
+    ],
+    "suites": [
+      {
+        "name": "DFE OTAP Attr Insert",
+        "slug": "dfe_logs_otap_none_attr_insert",
+        "short": "DFE OTAP/Attr"
+      },
+      {
+        "name": "DFE OTAP Transform Insert",
+        "slug": "dfe_logs_otap_none_transform_insert",
+        "short": "DFE OTAP/Transform"
+      },
+      {
+        "name": "DFE OTAP Baseline",
+        "slug": "dfe_logs_otap_none_baseline",
+        "short": "DFE OTAP/Baseline"
+      },
+      {
+        "name": "DFE OTLP Attr Insert",
+        "slug": "dfe_logs_otlp_none_attr_insert",
+        "short": "DFE OTLP/Attr"
+      },
+      {
+        "name": "DFE OTLP Transform Insert",
+        "slug": "dfe_logs_otlp_none_transform_insert",
+        "short": "DFE OTLP/Transform"
+      },
+      {
+        "name": "DFE OTLP Baseline",
+        "slug": "dfe_logs_otlp_none_baseline",
+        "short": "DFE OTLP/Baseline"
+      },
+      {
+        "name": "OTC OTLP Attr Insert",
+        "slug": "otc_logs_otlp_none_attr_insert",
+        "short": "OTC OTLP/Attr"
+      },
+      {
+        "name": "OTC OTLP Transform Insert",
+        "slug": "otc_logs_otlp_none_transform_insert",
+        "short": "OTC OTLP/Transform"
+      },
+      {
+        "name": "OTC OTLP Baseline",
+        "slug": "otc_logs_otlp_none_baseline",
+        "short": "OTC OTLP/Baseline"
+      },
+      {
+        "name": "FB OTLP Modify Insert",
+        "slug": "fbit_logs_otlp_none_attr_insert",
+        "short": "FB OTLP/Modify"
+      },
+      {
+        "name": "FB OTLP Baseline",
+        "slug": "fbit_logs_otlp_none_baseline",
+        "short": "FB OTLP/Baseline"
+      }
+    ]
+  },
+  {
+    "slug": "log_attr_processor_insert_multi_batch",
+    "name": "Log Attribute Insert (Multi Batch)",
+    "description": "Inserting an attribute \"processing.engine\" with a static value \"benchmark\" on logs. Comparing the attributes processor across engines and transports with varying loadgen batch sizes at a fixed 400k logs/sec generated load.\n",
+    "chart": {
+      "axes": {
+        "x": {
+          "title": "Loadgen Batch Size (logs/batch)",
+          "description": "Batch size emitted by the load generator. All tests run at a fixed 400k logs/sec generated load."
+        }
+      }
+    },
+    "tests": [
+      {
+        "name": "batch-256",
+        "label": "256",
+        "loadgen_rate": 400000,
+        "description": "256 logs per batch @ 400k logs/sec"
+      },
+      {
+        "name": "batch-512",
+        "label": "512",
+        "loadgen_rate": 400000,
+        "description": "512 logs per batch @ 400k logs/sec"
+      },
+      {
+        "name": "batch-1024",
+        "label": "1024",
+        "loadgen_rate": 400000,
+        "description": "1024 logs per batch @ 400k logs/sec"
+      },
+      {
+        "name": "batch-2048",
+        "label": "2048",
+        "loadgen_rate": 400000,
+        "description": "2048 logs per batch @ 400k logs/sec"
+      },
+      {
+        "name": "batch-4096",
+        "label": "4096",
+        "loadgen_rate": 400000,
+        "description": "4096 logs per batch @ 400k logs/sec"
+      }
+    ],
+    "suites": [
+      {
+        "name": "DFE OTAP Attr Insert",
+        "slug": "dfe_logs_otap_none_attr_insert_multi_batch",
+        "short": "DFE OTAP/Attr"
+      },
+      {
+        "name": "DFE OTLP Attr Insert",
+        "slug": "dfe_logs_otlp_none_attr_insert_multi_batch",
+        "short": "DFE OTLP/Attr"
+      },
+      {
+        "name": "OTC OTLP Attr Insert",
+        "slug": "otc_logs_otlp_none_attr_insert_multi_batch",
+        "short": "OTC OTLP/Attr"
+      },
+      {
+        "name": "FB OTLP Modify Insert",
+        "slug": "fbit_logs_otlp_none_attr_insert_multi_batch",
+        "short": "FB OTLP/Modify"
+      }
+    ]
+  },
+  {
+    "slug": "log_attr_processor_rename_multi_batch",
+    "name": "Log Attribute Rename (Multi Batch)",
+    "description": "Renaming the semantic-convention attribute exception.type to exception.kind on logs. Comparing the attributes processor across engines and transports with varying loadgen batch sizes at a fixed 400k logs/sec generated load.\n",
+    "chart": {
+      "axes": {
+        "x": {
+          "title": "Loadgen Batch Size (logs/batch)",
+          "description": "Batch size emitted by the load generator. All tests run at a fixed 400k logs/sec generated load."
+        }
+      }
+    },
+    "tests": [
+      {
+        "name": "batch-256",
+        "label": "256",
+        "loadgen_rate": 400000,
+        "description": "256 logs per batch @ 400k logs/sec"
+      },
+      {
+        "name": "batch-512",
+        "label": "512",
+        "loadgen_rate": 400000,
+        "description": "512 logs per batch @ 400k logs/sec"
+      },
+      {
+        "name": "batch-1024",
+        "label": "1024",
+        "loadgen_rate": 400000,
+        "description": "1024 logs per batch @ 400k logs/sec"
+      },
+      {
+        "name": "batch-2048",
+        "label": "2048",
+        "loadgen_rate": 400000,
+        "description": "2048 logs per batch @ 400k logs/sec"
+      },
+      {
+        "name": "batch-4096",
+        "label": "4096",
+        "loadgen_rate": 400000,
+        "description": "4096 logs per batch @ 400k logs/sec"
+      }
+    ],
+    "suites": [
+      {
+        "name": "DFE OTAP Attr Rename",
+        "slug": "dfe_logs_otap_none_attr_rename_multi_batch",
+        "short": "DFE OTAP/Attr"
+      },
+      {
+        "name": "DFE OTLP Attr Rename",
+        "slug": "dfe_logs_otlp_none_attr_rename_multi_batch",
+        "short": "DFE OTLP/Attr"
+      },
+      {
+        "name": "OTC OTLP Attr Rename",
+        "slug": "otc_logs_otlp_none_attr_rename_multi_batch",
+        "short": "OTC OTLP/Attr"
+      },
+      {
+        "name": "FB OTLP Modify Rename",
+        "slug": "fbit_logs_otlp_none_attr_rename_multi_batch",
+        "short": "FB OTLP/Modify"
+      }
+    ]
+  },
+  {
+    "slug": "log_transform_attr_processor_insert_multi_transform",
+    "name": "Log Attribute Insert (Multi Transform)",
+    "description": "Inserting 1-4 attributes on logs across engines and transports at a fixed 200k logs/sec generated load.\n",
+    "chart": {
+      "axes": {
+        "x": {
+          "title": "Number of Insert Actions",
+          "description": "Number of insert actions configured on the processor. All tests run at a fixed 200k logs/sec generated load."
+        }
+      }
+    },
+    "tests": [
+      {
+        "name": "transform-1",
+        "label": "1",
+        "loadgen_rate": 200000,
+        "description": "1 insert action @ 200k logs/sec"
+      },
+      {
+        "name": "transform-2",
+        "label": "2",
+        "loadgen_rate": 200000,
+        "description": "2 insert actions @ 200k logs/sec"
+      },
+      {
+        "name": "transform-3",
+        "label": "3",
+        "loadgen_rate": 200000,
+        "description": "3 insert actions @ 200k logs/sec"
+      },
+      {
+        "name": "transform-4",
+        "label": "4",
+        "loadgen_rate": 200000,
+        "description": "4 insert actions @ 200k logs/sec"
+      }
+    ],
+    "suites": [
+      {
+        "name": "DFE OTAP Attr Insert",
+        "slug": "dfe_logs_otap_none_attr_insert_multi_transform",
+        "short": "DFE OTAP/Attr"
+      },
+      {
+        "name": "DFE OTAP Transform Insert",
+        "slug": "dfe_logs_otap_none_transform_insert_multi_transform",
+        "short": "DFE OTAP/Transform"
+      },
+      {
+        "name": "DFE OTLP Attr Insert",
+        "slug": "dfe_logs_otlp_none_attr_insert_multi_transform",
+        "short": "DFE OTLP/Attr"
+      },
+      {
+        "name": "DFE OTLP Transform Insert",
+        "slug": "dfe_logs_otlp_none_transform_insert_multi_transform",
+        "short": "DFE OTLP/Transform"
+      },
+      {
+        "name": "OTC OTAP Attr Insert",
+        "slug": "otc_logs_otap_none_attr_insert_multi_transform",
+        "short": "OTC OTAP/Attr"
+      },
+      {
+        "name": "OTC OTLP Attr Insert",
+        "slug": "otc_logs_otlp_none_attr_insert_multi_transform",
+        "short": "OTC OTLP/Attr"
+      },
+      {
+        "name": "OTC OTLP Transform Insert",
+        "slug": "otc_logs_otlp_none_transform_insert_multi_transform",
+        "short": "OTC OTLP/Transform"
+      },
+      {
+        "name": "FB OTLP Modify Insert",
+        "slug": "fbit_logs_otlp_none_attr_insert_multi_transform",
+        "short": "FB OTLP/Modify"
+      }
+    ]
+  },
+  {
+    "slug": "log_transform_attr_processor_rename_multi_transform",
+    "name": "Log Attribute Rename (Multi Transform)",
+    "description": "Renaming 1-4 attributes on logs across engines and transports at a fixed 200k logs/sec generated load.\n",
+    "chart": {
+      "axes": {
+        "x": {
+          "title": "Number of Rename Actions",
+          "description": "Number of rename actions configured on the processor. All tests run at a fixed 200k logs/sec generated load."
+        }
+      }
+    },
+    "tests": [
+      {
+        "name": "transform-1",
+        "label": "1",
+        "loadgen_rate": 200000,
+        "description": "1 rename action @ 200k logs/sec"
+      },
+      {
+        "name": "transform-2",
+        "label": "2",
+        "loadgen_rate": 200000,
+        "description": "2 rename actions @ 200k logs/sec"
+      },
+      {
+        "name": "transform-3",
+        "label": "3",
+        "loadgen_rate": 200000,
+        "description": "3 rename actions @ 200k logs/sec"
+      },
+      {
+        "name": "transform-4",
+        "label": "4",
+        "loadgen_rate": 200000,
+        "description": "4 rename actions @ 200k logs/sec"
+      }
+    ],
+    "suites": [
+      {
+        "name": "DFE OTAP Attr Rename",
+        "slug": "dfe_logs_otap_none_attr_rename_multi_transform",
+        "short": "DFE OTAP/Attr"
+      },
+      {
+        "name": "DFE OTAP Transform Rename",
+        "slug": "dfe_logs_otap_none_transform_rename_multi_transform",
+        "short": "DFE OTAP/Transform"
+      },
+      {
+        "name": "DFE OTLP Attr Rename",
+        "slug": "dfe_logs_otlp_none_attr_rename_multi_transform",
+        "short": "DFE OTLP/Attr"
+      },
+      {
+        "name": "DFE OTLP Transform Rename",
+        "slug": "dfe_logs_otlp_none_transform_rename_multi_transform",
+        "short": "DFE OTLP/Transform"
+      },
+      {
+        "name": "OTC OTAP Attr Rename",
+        "slug": "otc_logs_otap_none_attr_rename_multi_transform",
+        "short": "OTC OTAP/Attr"
+      },
+      {
+        "name": "OTC OTLP Attr Rename",
+        "slug": "otc_logs_otlp_none_attr_rename_multi_transform",
+        "short": "OTC OTLP/Attr"
+      },
+      {
+        "name": "OTC OTLP Transform Rename",
+        "slug": "otc_logs_otlp_none_transform_rename_multi_transform",
+        "short": "OTC OTLP/Transform"
+      },
+      {
+        "name": "FB OTLP Modify Rename",
+        "slug": "fbit_logs_otlp_none_attr_rename_multi_transform",
+        "short": "FB OTLP/Modify"
+      }
+    ]
+  }
+];</script>
+  <script type="module" src="shared/app.js"></script>
+</body>
+</html>
