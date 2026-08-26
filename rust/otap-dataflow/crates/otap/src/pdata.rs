@@ -641,6 +641,31 @@ impl OtapPdata {
         self.payload.signal_type()
     }
 
+    /// Encoded representation identity, or None for native OTAP.
+    #[must_use]
+    pub fn encoding(&self) -> Option<&otel_arrow_dfe_pdata::codec::PdataEncoding> {
+        self.payload.encoding()
+    }
+
+    /// Lazily materializes native OTAP, retaining all context and input on error.
+    pub fn materialize_otap(
+        &mut self,
+        options: otel_arrow_dfe_config::ConversionOptions,
+    ) -> Result<(), Error> {
+        self.payload.materialize_otap(options).map_err(Error::from)
+    }
+
+    /// Converts encoded representations without changing context or failed input.
+    pub fn convert_encoding(
+        &mut self,
+        encoding: otel_arrow_dfe_pdata::codec::PdataEncoding,
+        options: otel_arrow_dfe_config::ConversionOptions,
+    ) -> Result<(), Error> {
+        self.payload
+            .convert_encoding(encoding, options)
+            .map_err(Error::from)
+    }
+
     /// Returns the format of signal represented by this `OtapPdata` instance.
     #[must_use]
     pub const fn signal_format(&self) -> SignalFormat {
@@ -2392,6 +2417,56 @@ mod test {
             next_nack(nack).is_none(),
             "reset context must not route nacks"
         );
+    }
+
+    /// Scenario: opaque encoded pdata is cloned across a topic boundary or Nacked after decode failure.
+    /// Guarantees: bytes and headers survive; only the detached clone loses Ack/Nack routing.
+    #[test]
+    fn encoded_payload_preserves_metadata_and_nack_routing() {
+        use otel_arrow_dfe_pdata::codec::{EncodedPdata, PdataEncoding};
+        let bytes = bytes::Bytes::from(vec![0xff, 0x80]);
+        let encoding = PdataEncoding::new("test-missing-codec");
+        let mut headers = TransportHeaders::new();
+        headers.push(TransportHeader::text("tenant", "x-tenant", "acme"));
+        let addr = "127.0.0.1:5005".parse().unwrap();
+        let (test_data, _) = create_test();
+        let pdata = OtapPdata::new_default(
+            EncodedPdata::new(encoding.clone(), SignalType::Logs, bytes.clone()).into(),
+        )
+        .with_transport_headers(headers.clone())
+        .with_peer_addr(addr)
+        .test_subscribe_to(
+            Interests::NACKS | Interests::RETURN_DATA,
+            test_data.into(),
+            101,
+        );
+
+        let detached = pdata.clone_without_context();
+        assert!(!detached.has_ack_or_nack_interests());
+        assert_eq!(detached.transport_headers(), Some(&headers));
+        assert_eq!(detached.peer_addr(), Some(addr));
+        let output = detached
+            .into_parts()
+            .1
+            .into_encoded(encoding.clone(), Default::default())
+            .unwrap();
+        assert_eq!(output.bytes().as_ptr(), bytes.as_ptr());
+
+        let (context, mut payload) = pdata.into_parts();
+        let error = payload.materialize_otap(Default::default()).unwrap_err();
+        let nack = NackMsg::new_permanent(error.to_string(), OtapPdata::new(context, payload));
+        let (node_id, nack) = next_nack(nack).unwrap();
+        assert_eq!(node_id, 101);
+        assert!(nack.permanent);
+        assert_eq!(nack.refused.transport_headers(), Some(&headers));
+        assert_eq!(nack.refused.peer_addr(), Some(addr));
+        let output = nack
+            .refused
+            .into_parts()
+            .1
+            .into_encoded(encoding, Default::default())
+            .unwrap();
+        assert_eq!(output.bytes().as_ptr(), bytes.as_ptr());
     }
 
     /// Scenario: a context carrying transport headers, a peer address, Ack/Nack

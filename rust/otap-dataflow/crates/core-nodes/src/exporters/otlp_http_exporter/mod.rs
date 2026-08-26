@@ -40,8 +40,6 @@ use otel_arrow_dfe_engine::node::NodeId;
 use otel_arrow_dfe_engine::terminal_state::TerminalState;
 use otel_arrow_dfe_engine::wiring_contract::WiringContract;
 use otel_arrow_dfe_engine::{ConsumerEffectHandlerExtension, ExporterFactory};
-#[cfg(test)]
-use otel_arrow_dfe_pdata::TryIntoWithOptions;
 use otel_arrow_dfe_pdata::otlp::logs::LogsProtoBytesEncoder;
 use otel_arrow_dfe_pdata::otlp::metrics::MetricsProtoBytesEncoder;
 use otel_arrow_dfe_pdata::otlp::traces::TracesProtoBytesEncoder;
@@ -56,6 +54,7 @@ use otel_arrow_dfe_pdata::proto::opentelemetry::collector::trace::v1::{
     ExportTracePartialSuccess, ExportTraceServiceResponse,
 };
 use otel_arrow_dfe_pdata::{OtapPayload, OtapPayloadHelpers, PayloadData};
+use otel_arrow_dfe_pdata::{OtlpProtoBytes, TryIntoWithOptions};
 use prost::Message as _;
 use reqwest::{Client, Response};
 use secrecy::ExposeSecret;
@@ -500,6 +499,34 @@ impl Exporter<OtapPdata> for OtlpHttpExporter {
                     // proto encode the payload into the request body, while keeping a copy of the
                     // original payload if the context allows it to be returned.
                     let (uncompressed, saved_payload) = match payload.into_data() {
+                        PayloadData::Encoded(encoded) => {
+                            let original = OtapPayload::from(encoded);
+                            let mut otlp_bytes: OtlpProtoBytes =
+                                match original.clone().try_into_with_default() {
+                                    Ok(bytes) => bytes,
+                                    Err(error) => {
+                                        _ = effect_handler
+                                            .notify_nack(NackMsg::new_permanent(
+                                                error.to_string(),
+                                                OtapPdata::new(context, original),
+                                            ))
+                                            .await;
+                                        self.metrics.record_failure(
+                                            signal_type,
+                                            OtlpHttpExporterErrorType::Encoding,
+                                            export_started_at.elapsed(),
+                                        );
+                                        continue;
+                                    }
+                                };
+                            let body = otlp_bytes.replace_bytes(Bytes::new());
+                            let saved = if context.may_return_payload() {
+                                original
+                            } else {
+                                OtapPayload::empty(signal_type)
+                            };
+                            (Uncompressed::Bytes(body), saved)
+                        }
                         PayloadData::OtlpBytes(mut otlp_bytes) => {
                             if context.may_return_payload() {
                                 // use cheap clone of bytes as the request body
@@ -2122,6 +2149,64 @@ mod test {
         wait_for_port_ready(endpoint_addr);
 
         (pdata_rx, server_cancellation_token2)
+    }
+
+    /// Scenario: an OTLP exporter receives bytes whose decoder is not registered.
+    /// Guarantees: it emits a permanent Nack with the original encoding and shared bytes.
+    #[test]
+    fn missing_pdata_codec_nacks_original_encoded_payload() {
+        use otel_arrow_dfe_pdata::codec::{EncodedPdata, PdataEncoding};
+        let runtime = TestRuntime::<OtapPdata>::new();
+        let (_, exporter) = setup_exporter(
+            &runtime,
+            default_test_config("http://127.0.0.1:1".to_owned()),
+        );
+        let encoding = PdataEncoding::new("test-unavailable-codec");
+        let bytes = Bytes::from(vec![1, 2, 3]);
+        let expected = bytes.clone();
+        let pdatas = subscribe_pdatas(
+            vec![OtapPdata::new_default(
+                EncodedPdata::new(encoding.clone(), SignalType::Logs, bytes).into(),
+            )],
+            true,
+        );
+        runtime
+            .set_exporter(exporter)
+            .run_test(|ctx| {
+                Box::pin(async move {
+                    for pdata in pdatas {
+                        ctx.send_pdata(pdata).await.unwrap();
+                    }
+                    ctx.send_shutdown(Instant::now() + Duration::from_secs(1), "test complete")
+                        .await
+                        .unwrap();
+                })
+            })
+            .run_validation(move |mut ctx, result| {
+                Box::pin(async move {
+                    result.unwrap();
+                    let mut completion = ctx.take_pipeline_completion_receiver().unwrap();
+                    let message = tokio::time::timeout(Duration::from_secs(3), completion.recv())
+                        .await
+                        .unwrap()
+                        .unwrap();
+                    match message {
+                        PipelineCompletionMsg::DeliverNack { nack } => {
+                            assert!(nack.permanent);
+                            assert!(nack.reason.contains("test-unavailable-codec"));
+                            let output = nack
+                                .refused
+                                .into_parts()
+                                .1
+                                .into_encoded(encoding, Default::default())
+                                .unwrap();
+                            assert_eq!(output.bytes().as_ptr(), expected.as_ptr());
+                            assert_eq!(output.bytes(), &expected);
+                        }
+                        other => panic!("expected codec Nack, got {other:?}"),
+                    }
+                })
+            });
     }
 
     fn setup_exporter(

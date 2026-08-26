@@ -22,7 +22,7 @@ use otel_arrow_dfe_config::error::Error as ConfigError;
 use otel_arrow_dfe_config::node::NodeUserConfig;
 use otel_arrow_dfe_engine::config::ProcessorConfig;
 use otel_arrow_dfe_engine::context::PipelineContext;
-use otel_arrow_dfe_engine::control::{AckMsg, NodeControlMsg};
+use otel_arrow_dfe_engine::control::{AckMsg, NackMsg, NodeControlMsg};
 use otel_arrow_dfe_engine::error::{Error, ProcessorErrorKind, format_error_sources};
 use otel_arrow_dfe_engine::local::processor as local;
 use otel_arrow_dfe_engine::message::Message;
@@ -152,7 +152,14 @@ impl local::Processor<OtapPdata> for FilterProcessor {
                 }
                 Ok(())
             }
-            Message::PData(pdata) => {
+            Message::PData(mut pdata) => {
+                if let Err(error) = pdata.materialize_otap(Default::default()) {
+                    effect_handler
+                        .notify_nack(NackMsg::new_permanent(error.to_string(), pdata))
+                        .await?;
+                    return Ok(());
+                }
+
                 let signal = pdata.signal_type();
                 // convert to arrow records
                 let (context, payload) = pdata.into_parts();

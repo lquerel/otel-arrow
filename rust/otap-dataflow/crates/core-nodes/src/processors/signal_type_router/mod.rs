@@ -732,6 +732,8 @@ mod tests {
         assert!(result.is_err());
     }
 
+    /// Scenario: the router receives native OTAP and an unknown encoded log batch.
+    /// Guarantees: routing forwards both, preserving opaque bytes and identity without a codec.
     #[test]
     fn test_process_messages_pass_through() {
         use otel_arrow_dfe_config::node::NodeUserConfig;
@@ -761,6 +763,23 @@ mod tests {
                     .expect("data processing failed");
                 let forwarded = ctx.drain_pdata().await;
                 assert_eq!(forwarded.len(), 1);
+
+                let bytes = bytes::Bytes::from(vec![0xff, 0x80]);
+                let encoding = otel_arrow_dfe_pdata::codec::PdataEncoding::new("test-opaque");
+                let payload = otel_arrow_dfe_pdata::codec::EncodedPdata::new(
+                    encoding.clone(),
+                    otel_arrow_dfe_config::SignalType::Logs,
+                    bytes.clone(),
+                );
+                ctx.process(Message::data_msg(OtapPdata::new_default(payload.into())))
+                    .await
+                    .unwrap();
+                let forwarded = ctx.drain_pdata().await;
+                assert_eq!(forwarded.len(), 1);
+                let (_, payload) = forwarded.into_iter().next().unwrap().into_parts();
+                let output = payload.into_encoded(encoding, Default::default()).unwrap();
+                assert_eq!(output.bytes().as_ptr(), bytes.as_ptr());
+                assert_eq!(output.bytes(), &bytes);
             })
         });
 

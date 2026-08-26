@@ -111,9 +111,17 @@ impl LogSamplingProcessor {
         mut pdata: OtapPdata,
         effect_handler: &mut local::EffectHandler<OtapPdata>,
     ) -> Result<(), EngineError> {
+        // Materialize before counting: an encoded envelope may have no item count.
+        // Failed decoding must leave the original bytes available for the Nack.
+        if let Err(error) = pdata.materialize_otap(Default::default()) {
+            effect_handler
+                .notify_nack(NackMsg::new_permanent(error.to_string(), pdata))
+                .await?;
+            return Ok(());
+        }
         let total = pdata.num_items();
 
-        // Convert to Arrow records (no-op if already Arrow)
+        // Conversion is now an ownership transfer of the materialized records.
         let (context, payload) = pdata.into_parts();
         let mut records: OtapArrowRecords = payload.try_into_with_default()?;
         records.decode_transport_optimized_ids()?;
@@ -277,8 +285,101 @@ mod tests {
     use otel_arrow_dfe_telemetry::registry::TelemetryRegistryHandle;
     use std::future::Future;
 
+    use otel_arrow_dfe_pdata::codec::{
+        EncodedPdata, OtlpCodec, PDATA_CODEC_FACTORIES, PdataCodecMetadata, PdataCodecRegistration,
+        PdataEncoding,
+    };
+
+    const TEST_ENCODING: PdataEncoding = PdataEncoding::new("test-log-sampler-otlp");
+    static TEST_CODEC_METADATA: PdataCodecMetadata = PdataCodecMetadata {
+        encoding: TEST_ENCODING,
+        signals: &[SignalType::Logs],
+        format_version: None,
+        compression: None,
+        can_decode: true,
+        can_encode: true,
+    };
+
+    #[allow(unsafe_code)]
+    #[linkme::distributed_slice(PDATA_CODEC_FACTORIES)]
+    static TEST_CODEC: PdataCodecRegistration = PdataCodecRegistration {
+        metadata: &TEST_CODEC_METADATA,
+        create: || Box::new(OtlpCodec),
+    };
+
+    /// Scenario: a registered encoded log batch reaches sampling without an envelope count.
+    /// Guarantees: sampling uses decoded record counts and emits the configured fraction.
+    #[test]
+    fn encoded_logs_without_item_count_are_sampled() {
+        run_processor_test(
+            serde_json::json!({"policy": {"ratio": {"emit": 1, "out_of": 10}}}),
+            |mut ctx| {
+                Box::pin(async move {
+                    let encoded = make_log_pdata_arrow(100)
+                        .into_parts()
+                        .1
+                        .into_encoded(TEST_ENCODING, Default::default())
+                        .unwrap();
+                    let mut pdata = OtapPdata::new_default(
+                        EncodedPdata::new(TEST_ENCODING, SignalType::Logs, encoded.into_bytes())
+                            .into(),
+                    );
+                    assert_eq!(pdata.num_items(), 0, "the envelope has no count");
+                    ctx.process(Message::PData(pdata)).await.unwrap();
+                    let mut output = ctx.drain_pdata().await;
+                    assert_eq!(output.len(), 1);
+                    assert_eq!(output[0].num_items(), 10);
+                })
+            },
+        );
+    }
+
+    /// Scenario: a log batch needs a codec that is not registered.
+    /// Guarantees: sampling returns a permanent Nack with the original shared bytes.
+    #[test]
+    fn missing_codec_nacks_encoded_logs() {
+        run_processor_test(
+            serde_json::json!({"policy": {"ratio": {"emit": 1, "out_of": 10}}}),
+            |mut ctx| {
+                Box::pin(async move {
+                    let (completion_tx, mut completion_rx) = pipeline_completion_msg_channel(1);
+                    ctx.set_pipeline_completion_sender(completion_tx);
+                    let encoding = PdataEncoding::new("test-missing-log-codec");
+                    let bytes = bytes::Bytes::from(vec![1, 2, 3]);
+                    let pdata = OtapPdata::new_default(
+                        EncodedPdata::new(encoding.clone(), SignalType::Logs, bytes.clone()).into(),
+                    )
+                    .test_subscribe_to(
+                        Interests::NACKS | Interests::RETURN_DATA,
+                        TestCallData::new_with(0, 0).into(),
+                        11,
+                    );
+                    ctx.process(Message::PData(pdata)).await.unwrap();
+                    assert!(ctx.drain_pdata().await.is_empty());
+                    match completion_rx.recv().await.unwrap() {
+                        PipelineCompletionMsg::DeliverNack { nack } => {
+                            assert!(nack.permanent);
+                            assert!(nack.reason.contains(encoding.as_str()));
+                            let output = nack
+                                .refused
+                                .into_parts()
+                                .1
+                                .into_encoded(encoding, Default::default())
+                                .unwrap();
+                            assert_eq!(output.bytes().as_ptr(), bytes.as_ptr());
+                            assert_eq!(output.bytes(), &bytes);
+                        }
+                        other => panic!("expected codec Nack, got {other:?}"),
+                    }
+                })
+            },
+        );
+    }
+
     // ==================== Integration Tests ====================
 
+    /// Scenario: sampling receives logs with transport-optimized IDs and related attributes.
+    /// Guarantees: selected logs retain the correct attributes after ID decoding.
     #[test]
     fn test_transport_optimized_encoding_removed() {
         let config = serde_json::json!({
@@ -322,7 +423,9 @@ mod tests {
 
                 let output_payload = msgs[0].clone().into_parts().1.take_payload();
                 let output_otap = match output_payload.into_data() {
-                    PayloadData::OtlpBytes(_) => panic!("Unexpected otlp bytes"),
+                    PayloadData::OtlpBytes(_) | PayloadData::Encoded(_) => {
+                        panic!("Unexpected otlp bytes")
+                    }
                     PayloadData::OtapArrowRecords(otap_arrow_records) => otap_arrow_records,
                 };
 

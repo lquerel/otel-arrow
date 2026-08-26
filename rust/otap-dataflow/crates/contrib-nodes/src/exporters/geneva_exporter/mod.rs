@@ -1395,8 +1395,18 @@ impl GenevaExporter {
             return Ok(0);
         }
 
+        let mut payload = payload;
+        if matches!(payload.data(), PayloadData::Encoded(_)) {
+            payload
+                .materialize_otap(Default::default())
+                .map_err(|error| {
+                    self.metrics.conversion_errors.inc();
+                    error.to_string()
+                })?;
+        }
         // Handle based on payload type
         match payload.into_data() {
+            PayloadData::Encoded(_) => unreachable!("extension bytes were materialized above"),
             // OTAP Arrow path: encode logs through LogsDataView without converting back to OTLP.
             PayloadData::OtapArrowRecords(otap_records) => {
                 match otap_records {

@@ -91,7 +91,7 @@ use otel_arrow_dfe_engine::{
 };
 use otel_arrow_dfe_otap::OTAP_PROCESSOR_FACTORIES;
 use otel_arrow_dfe_otap::pdata::OtapPdata;
-use otel_arrow_dfe_pdata::PayloadData;
+use otel_arrow_dfe_pdata::PayloadView;
 use otel_arrow_dfe_pdata::TryFromWithOptions;
 use otel_arrow_dfe_pdata::otlp::OtlpProtoBytes;
 use otel_arrow_dfe_pdata::views::otap::OtapLogsView;
@@ -567,8 +567,12 @@ impl ContentRouter {
     fn resolve_route(&self, pdata: &OtapPdata) -> RouteResolution {
         let signal_type = pdata.signal_type();
 
-        match pdata.payload_ref().data() {
-            PayloadData::OtlpBytes(otlp_bytes) => match (signal_type, otlp_bytes) {
+        let view = match pdata.payload_ref().view(Default::default()) {
+            Ok(view) => view,
+            Err(_) => return RouteResolution::ConversionError,
+        };
+        match view {
+            PayloadView::OtlpBytes(otlp_bytes) => match (signal_type, otlp_bytes) {
                 (SignalType::Logs, OtlpProtoBytes::ExportLogsRequest(bytes)) => {
                     let data = RawLogsData::new(bytes.as_ref());
                     self.resolve_logs_route(&data)
@@ -585,13 +589,13 @@ impl ContentRouter {
                 // since signal_type() is derived from the OtlpProtoBytes variant itself.
                 _ => RouteResolution::ConversionError,
             },
-            PayloadData::OtapArrowRecords(arrow_records) => {
+            PayloadView::OtapArrowRecords(arrow_records) => {
                 match signal_type {
                     // Use native OTAP Arrow view for logs (avoids clone + OTLP round-trip)
-                    SignalType::Logs => self.resolve_arrow_logs_route(arrow_records),
+                    SignalType::Logs => self.resolve_arrow_logs_route(arrow_records.as_ref()),
                     // Metrics/Traces Arrow views not yet available -- convert to OTLP.
                     // TODO: Use OtapMetricsView/OtapTracesView when available.
-                    _ => match OtlpProtoBytes::try_from_with_default(arrow_records.clone()) {
+                    _ => match OtlpProtoBytes::try_from_with_default(arrow_records.into_owned()) {
                         Ok(OtlpProtoBytes::ExportMetricsRequest(bytes)) => {
                             let data = RawMetricsData::new(bytes.as_ref());
                             self.resolve_metrics_route(&data)

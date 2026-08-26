@@ -347,6 +347,9 @@ pub(super) fn create_test_pipeline_context() -> PipelineContext {
 fn payload_to_otlp(payload: &OtapPayload) -> otel_arrow_dfe_pdata::proto::OtlpProtoMessage {
     match payload.data() {
         PayloadData::OtapArrowRecords(records) => otap_to_otlp(records),
+        PayloadData::Encoded(encoded) => {
+            otap_to_otlp(&OtapPayload::from(encoded.clone()).into_otap().unwrap())
+        }
         PayloadData::OtlpBytes(bytes) => {
             otel_arrow_dfe_pdata::testing::round_trip::otlp_bytes_to_message(bytes.clone())
         }

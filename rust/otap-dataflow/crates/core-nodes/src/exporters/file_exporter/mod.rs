@@ -40,7 +40,7 @@ use otel_arrow_dfe_pdata::views::otap::{OtapLogsView, OtapMetricsView, OtapTrace
 use otel_arrow_dfe_pdata::views::otlp::bytes::logs::RawLogsData;
 use otel_arrow_dfe_pdata::views::otlp::bytes::metrics::RawMetricsData;
 use otel_arrow_dfe_pdata::views::otlp::bytes::traces::RawTraceData;
-use otel_arrow_dfe_pdata::{OtapPayload, OtapPayloadHelpers, PayloadData};
+use otel_arrow_dfe_pdata::{OtapPayload, OtapPayloadHelpers, PayloadView};
 use otel_arrow_dfe_telemetry::attributes::AttributeEnum as _;
 use otel_arrow_dfe_telemetry::common_attributes::{
     Outcome, SignalAttributes, SignalOutcomeAttributes,
@@ -368,8 +368,11 @@ fn encode_payload(
     max_frame_bytes: usize,
 ) -> Result<(), EncodeFailure> {
     frame.clear();
-    match payload.data() {
-        PayloadData::OtlpBytes(bytes) => match bytes {
+    match payload
+        .view(Default::default())
+        .map_err(|error| EncodeFailure::View(error.to_string()))?
+    {
+        PayloadView::OtlpBytes(bytes) => match bytes {
             otel_arrow_dfe_pdata::OtlpProtoBytes::ExportLogsRequest(_) => {
                 let view = RawLogsData::try_from(bytes)
                     .map_err(|error| EncodeFailure::View(error.to_string()))?;
@@ -386,19 +389,19 @@ fn encode_payload(
                 encode_traces(&view, frame, max_frame_bytes)?;
             }
         },
-        PayloadData::OtapArrowRecords(records) => match records.signal_type() {
+        PayloadView::OtapArrowRecords(records) => match records.signal_type() {
             SignalType::Logs => {
-                let view = OtapLogsView::try_from(records)
+                let view = OtapLogsView::try_from(records.as_ref())
                     .map_err(|error| EncodeFailure::View(error.to_string()))?;
                 encode_logs(&view, frame, max_frame_bytes)?;
             }
             SignalType::Metrics => {
-                let view = OtapMetricsView::try_from(records)
+                let view = OtapMetricsView::try_from(records.as_ref())
                     .map_err(|error| EncodeFailure::View(error.to_string()))?;
                 encode_metrics(&view, frame, max_frame_bytes)?;
             }
             SignalType::Traces => {
-                let view = OtapTracesView::try_from(records)
+                let view = OtapTracesView::try_from(records.as_ref())
                     .map_err(|error| EncodeFailure::View(error.to_string()))?;
                 encode_traces(&view, frame, max_frame_bytes)?;
             }

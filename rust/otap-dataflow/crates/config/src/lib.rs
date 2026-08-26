@@ -73,8 +73,8 @@ pub enum SignalFormat {
     OtapRecords,
     /// OTLP protobuf bytes
     OtlpBytes,
-    // TODO: maybe add types not included in OtapPdata including
-    // OtlpProtoMessage, OtapArrowBytes, and possible opaque.
+    /// Encoded bytes identified by a pdata codec, other than OTLP protobuf.
+    Encoded,
 }
 
 /// The id of a pipeline group.

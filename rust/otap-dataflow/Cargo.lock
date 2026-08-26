@@ -7763,6 +7763,7 @@ dependencies = [
  "datafusion",
  "hex",
  "itertools 0.15.0",
+ "linkme",
  "nix 0.31.3",
  "num_enum",
  "otel-arrow-dfe-config",

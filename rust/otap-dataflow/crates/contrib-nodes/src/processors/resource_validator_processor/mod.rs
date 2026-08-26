@@ -65,7 +65,7 @@ use otel_arrow_dfe_engine::message::Message;
 use otel_arrow_dfe_engine::node::NodeId;
 use otel_arrow_dfe_engine::processor::ProcessorWrapper;
 use otel_arrow_dfe_pdata::OtapArrowRecords;
-use otel_arrow_dfe_pdata::PayloadData;
+use otel_arrow_dfe_pdata::PayloadView;
 use otel_arrow_dfe_pdata::TryFromWithOptions;
 #[cfg(test)]
 use otel_arrow_dfe_pdata::TryIntoWithOptions;
@@ -492,8 +492,21 @@ impl local::Processor<OtapPdata> for ResourceValidatorProcessor {
                 let allowed_values = self.get_allowed_values(&pdata);
 
                 // Validate based on payload type
-                let validation_result = match pdata.payload_ref().data() {
-                    PayloadData::OtlpBytes(otlp_bytes) => match (signal_type, otlp_bytes) {
+                let view = match pdata.payload_ref().view(Default::default()) {
+                    Ok(view) => view,
+                    Err(error) => {
+                        let failure = ValidationFailure::ConversionError;
+                        let result = Err((failure, error.to_string()));
+                        let count = pdata.num_items() as u64;
+                        self.update_metrics(&result, count);
+                        effect_handler
+                            .notify_nack(NackMsg::new_permanent(error.to_string(), pdata))
+                            .await?;
+                        return Ok(());
+                    }
+                };
+                let validation_result = match view {
+                    PayloadView::OtlpBytes(otlp_bytes) => match (signal_type, otlp_bytes) {
                         (SignalType::Logs, OtlpProtoBytes::ExportLogsRequest(bytes)) => {
                             let logs_data = RawLogsData::new(bytes.as_ref());
                             self.validate_logs(&logs_data, &allowed_values)
@@ -512,14 +525,15 @@ impl local::Processor<OtapPdata> for ResourceValidatorProcessor {
                             Ok(())
                         }
                     },
-                    PayloadData::OtapArrowRecords(arrow_records) => match signal_type {
+                    PayloadView::OtapArrowRecords(arrow_records) => match signal_type {
                         SignalType::Logs => {
-                            self.validate_arrow_logs(arrow_records, &allowed_values)
+                            self.validate_arrow_logs(arrow_records.as_ref(), &allowed_values)
                         }
                         // Metrics/Traces Arrow views not yet available - convert to OTLP
                         // TODO: Implement OtapMetricsView/OtapTracesView to avoid clone + conversion
                         SignalType::Metrics | SignalType::Traces => {
-                            match OtlpProtoBytes::try_from_with_default(arrow_records.clone()) {
+                            match OtlpProtoBytes::try_from_with_default(arrow_records.into_owned())
+                            {
                                 Ok(OtlpProtoBytes::ExportMetricsRequest(bytes)) => {
                                     let data = RawMetricsData::new(bytes.as_ref());
                                     self.validate_metrics(&data, &allowed_values)

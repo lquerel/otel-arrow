@@ -45,15 +45,18 @@ use linkme::distributed_slice;
 use otel_arrow_dfe_config::SignalType;
 use otel_arrow_dfe_config::error::Error as ConfigError;
 use otel_arrow_dfe_config::node::NodeUserConfig;
-use otel_arrow_dfe_engine::MessageSourceLocalEffectHandlerExtension;
 use otel_arrow_dfe_engine::config::ProcessorConfig;
 use otel_arrow_dfe_engine::context::PipelineContext;
+use otel_arrow_dfe_engine::control::NackMsg;
 use otel_arrow_dfe_engine::error::Error as EngineError;
 use otel_arrow_dfe_engine::local::processor as local;
 use otel_arrow_dfe_engine::message::Message;
 use otel_arrow_dfe_engine::node::NodeId;
 use otel_arrow_dfe_engine::process_duration::ComputeDuration;
 use otel_arrow_dfe_engine::processor::ProcessorWrapper;
+use otel_arrow_dfe_engine::{
+    ConsumerEffectHandlerExtension, MessageSourceLocalEffectHandlerExtension,
+};
 use otel_arrow_dfe_otap::{
     OTAP_PROCESSOR_FACTORIES, opaque_string::OpaqueString, pdata::OtapPdata,
 };
@@ -409,7 +412,7 @@ impl local::Processor<OtapPdata> for AttributesProcessor {
                 }
                 _ => Ok(()),
             },
-            Message::PData(pdata) => {
+            Message::PData(mut pdata) => {
                 // Fast path: no actions to apply
                 if self.is_noop() {
                     let res = effect_handler
@@ -417,6 +420,13 @@ impl local::Processor<OtapPdata> for AttributesProcessor {
                         .await
                         .map_err(|e| e.into());
                     return res;
+                }
+
+                if let Err(error) = pdata.materialize_otap(Default::default()) {
+                    effect_handler
+                        .notify_nack(NackMsg::new_permanent(error.to_string(), pdata))
+                        .await?;
+                    return Ok(());
                 }
 
                 let signal = pdata.signal_type();

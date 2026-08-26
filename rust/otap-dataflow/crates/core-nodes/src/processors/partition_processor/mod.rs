@@ -233,6 +233,13 @@ impl Processor<OtapPdata> for PartitionProcessor {
                     pdata.add_flow_compute(flow);
                 }
 
+                if let Err(error) = pdata.materialize_otap(Default::default()) {
+                    effect_handler
+                        .notify_nack(NackMsg::new_permanent(error.to_string(), pdata))
+                        .await?;
+                    return Ok(());
+                }
+
                 let (mut inbound_context, payload) = pdata.into_parts();
                 let signal_type = payload.signal_type();
                 let mut otap_batch: OtapArrowRecords = payload.try_into_with_default()?;

@@ -18,13 +18,14 @@ pub mod otap;
 pub mod schema;
 
 pub mod arrays;
+pub mod codec;
 pub(crate) mod decode;
 pub mod encode;
 pub(crate) mod payload;
 
 pub use otap::OtapArrowRecords;
 pub use otlp::OtlpProtoBytes;
-pub use payload::{OtapPayload, OtapPayloadHelpers, PayloadData};
+pub use payload::{OtapPayload, OtapPayloadHelpers, PayloadData, PayloadView};
 
 /// Testing support
 #[cfg(any(test, feature = "testing"))]

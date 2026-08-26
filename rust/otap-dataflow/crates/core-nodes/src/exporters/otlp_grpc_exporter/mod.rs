@@ -41,6 +41,7 @@ use otel_arrow_dfe_otap::otap_grpc::otlp::client::{
 };
 use otel_arrow_dfe_otap::pdata::{Context, OtapPdata};
 use otel_arrow_dfe_otap::transport_headers::ValueKind;
+use otel_arrow_dfe_pdata::TryIntoWithOptions;
 use otel_arrow_dfe_pdata::otlp::logs::LogsProtoBytesEncoder;
 use otel_arrow_dfe_pdata::otlp::metrics::MetricsProtoBytesEncoder;
 use otel_arrow_dfe_pdata::otlp::traces::TracesProtoBytesEncoder;
@@ -590,6 +591,50 @@ impl Exporter<OtapPdata> for OTLPExporter {
                                 &effect_handler,
                             )
                             .await;
+                        }
+                        (_, PayloadData::Encoded(encoded)) => {
+                            let original = OtapPayload::from(encoded);
+                            let mut service_req: OtlpProtoBytes =
+                                match original.clone().try_into_with_default() {
+                                    Ok(bytes) => bytes,
+                                    Err(error) => {
+                                        _ = effect_handler
+                                            .notify_nack(NackMsg::new_permanent(
+                                                error.to_string(),
+                                                OtapPdata::new(context, original),
+                                            ))
+                                            .await;
+                                        self.metrics.record_failure(
+                                            signal_type,
+                                            OtlpGrpcExporterErrorType::Encoding,
+                                            export_started_at.elapsed(),
+                                        );
+                                        continue;
+                                    }
+                                };
+                            let saved_payload = if context.may_return_payload() {
+                                original
+                            } else {
+                                OtapPayload::empty(signal_type)
+                            };
+                            let prepared = EncodedExport {
+                                bytes: service_req.replace_bytes(Bytes::new()),
+                                context,
+                                metadata,
+                                signal_type,
+                                export_started_at,
+                                saved_payload,
+                            };
+                            let client = match signal_type {
+                                SignalType::Logs => SignalClient::Logs(grpc_clients.take_logs()),
+                                SignalType::Metrics => {
+                                    SignalClient::Metrics(grpc_clients.take_metrics())
+                                }
+                                SignalType::Traces => {
+                                    SignalClient::Traces(grpc_clients.take_traces())
+                                }
+                            };
+                            inflight_exports.push(make_export_future(prepared, client));
                         }
                         (_, PayloadData::OtlpBytes(service_req)) => {
                             let prepared = match service_req {

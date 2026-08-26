@@ -582,6 +582,28 @@ impl Processor<OtapPdata> for TransformProcessor {
                     }
                     transformed = true;
 
+                    // Keep the original encoding and delivery context on decoder failure.
+                    if let Err(error) = payload
+                        .as_mut()
+                        .expect("payload initialized")
+                        .materialize_otap(Default::default())
+                    {
+                        self.metrics.record_failure(
+                            pdata_signal_type,
+                            TransformErrorType::PayloadConversion,
+                        );
+                        effect_handler
+                            .notify_nack(NackMsg::new_permanent(
+                                error.to_string(),
+                                OtapPdata::new(
+                                    context,
+                                    payload.take().expect("payload initialized"),
+                                ),
+                            ))
+                            .await?;
+                        return Ok(());
+                    }
+
                     // convert payload to OTAP & remove delta encoded IDs.
                     // safety: we know payload will have been initialized to Some either, before
                     // entering the loop, or during the previous iteration.
@@ -1399,8 +1421,8 @@ mod test {
         .expect("no process error")
     }
 
-    /// Scenario: A traces-scoped query receives one traces message and one metrics message.
-    /// Guarantees: Only the matching traces message produces a transform operation metric.
+    /// Scenario: a traces-scoped query receives traces, metrics and an unknown encoded log batch.
+    /// Guarantees: only traces are transformed; unselected encoded bytes pass through without a codec.
     #[test]
     fn test_signal_scope() {
         // test ensure it will only operate on traces, but ignores other signals
@@ -1434,6 +1456,25 @@ mod test {
                     .get(ArrowPayloadType::UnivariateMetrics)
                     .expect("metrics present");
                 assert_eq!(metrics.num_rows(), 2);
+
+                use otel_arrow_dfe_pdata::codec::{EncodedPdata, PdataEncoding};
+                let encoding = PdataEncoding::new("test-opaque-unselected-signal");
+                let bytes = bytes::Bytes::from(vec![1, 2, 3]);
+                ctx.process(Message::PData(OtapPdata::new_default(
+                    EncodedPdata::new(encoding.clone(), SignalType::Logs, bytes.clone()).into(),
+                )))
+                .await
+                .unwrap();
+                let mut output = ctx.drain_pdata().await;
+                assert_eq!(output.len(), 1);
+                let encoded = output
+                    .pop()
+                    .unwrap()
+                    .into_parts()
+                    .1
+                    .into_encoded(encoding, Default::default())
+                    .unwrap();
+                assert_eq!(encoded.bytes().as_ptr(), bytes.as_ptr());
 
                 ctx.process(Message::Control(NodeControlMsg::CollectTelemetry {
                     metrics_reporter,

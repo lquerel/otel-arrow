@@ -20,6 +20,12 @@ pub type Result<T> = std::result::Result<T, Error>;
 #[derive(thiserror::Error, Debug)]
 #[allow(missing_docs)]
 pub enum Error {
+    #[error("Pdata codec '{encoding}': {reason}")]
+    PdataCodec {
+        encoding: crate::codec::PdataEncoding,
+        reason: String,
+    },
+
     #[error("Cannot find column: {}", name)]
     ColumnNotFound { name: String },
 

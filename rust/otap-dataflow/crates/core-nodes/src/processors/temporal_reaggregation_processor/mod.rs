@@ -38,10 +38,12 @@ use otel_arrow_dfe_engine::{ConsumerEffectHandlerExtension, Interests};
 use otel_arrow_dfe_otap::OTAP_PROCESSOR_FACTORIES;
 use otel_arrow_dfe_otap::accessory::slots::{Key as SlotKey, State as SlotState};
 use otel_arrow_dfe_otap::pdata::{Context, OtapPdata, PeerAddrMerger};
+#[cfg(test)]
+use otel_arrow_dfe_pdata::PayloadData;
 use otel_arrow_dfe_pdata::otap::OtapArrowRecords;
 use otel_arrow_dfe_pdata::views::otap::OtapMetricsView;
 use otel_arrow_dfe_pdata::views::otlp::bytes::metrics::RawMetricsData;
-use otel_arrow_dfe_pdata::{OtapPayload, OtapPayloadHelpers, PayloadData};
+use otel_arrow_dfe_pdata::{OtapPayload, OtapPayloadHelpers};
 use otel_arrow_dfe_pdata_views::views::common::InstrumentationScopeView;
 use otel_arrow_dfe_pdata_views::views::metrics::{
     AggregationTemporality, DataType, DataView, ExponentialHistogramDataPointView,
@@ -623,21 +625,33 @@ impl TemporalReaggregationProcessor {
         effect_handler: &mut local::EffectHandler<OtapPdata>,
         pdata: OtapPdata,
     ) -> Result<(), Error> {
-        let result = match pdata.payload_ref().data() {
-            PayloadData::OtapArrowRecords(records) => match OtapMetricsView::try_from(records) {
-                Ok(view) => self.process_view(effect_handler, &view).await,
-                Err(e) => {
-                    otel_warn!(telemetry::VIEW_CREATION_FAILED_EVENT, error = %e);
-                    self.metrics.batches_rejected.inc();
-                    let msg = format!("Failed to create view: {:#}", e);
-                    effect_handler
-                        .notify_nack(NackMsg::new_permanent(msg, pdata))
-                        .await?;
+        let view = match pdata.payload_ref().view(Default::default()) {
+            Ok(view) => view,
+            Err(error) => {
+                self.metrics.batches_rejected.inc();
+                effect_handler
+                    .notify_nack(NackMsg::new_permanent(error.to_string(), pdata))
+                    .await?;
+                return Ok(());
+            }
+        };
+        let result = match view {
+            otel_arrow_dfe_pdata::PayloadView::OtapArrowRecords(records) => {
+                match OtapMetricsView::try_from(records.as_ref()) {
+                    Ok(view) => self.process_view(effect_handler, &view).await,
+                    Err(e) => {
+                        otel_warn!(telemetry::VIEW_CREATION_FAILED_EVENT, error = %e);
+                        self.metrics.batches_rejected.inc();
+                        let msg = format!("Failed to create view: {:#}", e);
+                        effect_handler
+                            .notify_nack(NackMsg::new_permanent(msg, pdata))
+                            .await?;
 
-                    return Ok(());
+                        return Ok(());
+                    }
                 }
-            },
-            PayloadData::OtlpBytes(otlp) => {
+            }
+            otel_arrow_dfe_pdata::PayloadView::OtlpBytes(otlp) => {
                 let view = RawMetricsData::new(otlp.as_bytes());
                 self.process_view(effect_handler, &view).await
             }

@@ -717,7 +717,16 @@ impl local::Exporter<OtapPdata> for OTAPExporter {
                         let export_started_at = Instant::now();
                         let signal_type = pdata.signal_type();
 
-                        let payload = pdata.take_payload();
+                        // Encoded input can fail conversion. Keep its shared bytes
+                        // until decoding succeeds, and retain any requested return data.
+                        // Native OTAP without return-data interests is still moved directly.
+                        let return_payload = pdata.context_mut().may_return_payload();
+                        let retain_for_conversion = return_payload || pdata.encoding().is_some();
+                        let payload = if retain_for_conversion {
+                            pdata.payload_ref().clone()
+                        } else {
+                            pdata.take_payload()
+                        };
 
                         let message: OtapArrowRecords = match payload.try_into_with_default() {
                             Ok(m) => m,
@@ -727,10 +736,13 @@ impl local::Exporter<OtapPdata> for OTAPExporter {
                                     OtapExporterErrorType::PayloadConversion,
                                     export_started_at.elapsed(),
                                 );
-                                effect_handler.notify_nack(NackMsg::new("payload conversion failed", pdata)).await?;
-                                return Err(e.into());
+                                effect_handler.notify_nack(NackMsg::new_permanent(e.to_string(), pdata)).await?;
+                                continue;
                             }
                         };
+                        if retain_for_conversion && !return_payload {
+                            drop(pdata.take_payload());
+                        }
 
                         // Route each batch to the stream with the smallest
                         // local backlog. This is intentionally based on queue
@@ -1689,6 +1701,88 @@ mod tests {
             .run_validation(validation_procedure(receiver));
 
         _ = shutdown_sender.send("Shutdown");
+    }
+
+    /// Scenario: consecutive encoded batches have a missing codec or malformed OTLP.
+    /// Guarantees: each receives a permanent Nack with original bytes and routing, and export continues.
+    #[test]
+    fn codec_failures_nack_original_payloads() {
+        use bytes::Bytes;
+        use otel_arrow_dfe_pdata::codec::{EncodedPdata, PdataEncoding};
+
+        let runtime = TestRuntime::<OtapPdata>::new();
+        let controller_ctx = ControllerContext::new(runtime.metrics_registry());
+        let pipeline_ctx =
+            controller_ctx.pipeline_context_with("grp".into(), "pipeline".into(), 0, 1, 0);
+        let exporter = ExporterWrapper::local(
+            OTAPExporter::from_config(
+                pipeline_ctx,
+                &json!({"grpc_endpoint": "http://127.0.0.1:1"}),
+            )
+            .unwrap(),
+            test_node(runtime.config().name.clone()),
+            Arc::new(NodeUserConfig::new_exporter_config(OTAP_EXPORTER_URN)),
+            runtime.config(),
+        );
+        let expected = [
+            (
+                PdataEncoding::new("test-unavailable-codec"),
+                Bytes::from(vec![1, 2, 3]),
+            ),
+            (PdataEncoding::OTLP, Bytes::from(vec![0xff])),
+        ];
+        let pdatas: Vec<_> = expected
+            .iter()
+            .enumerate()
+            .map(|(id, (encoding, bytes))| {
+                OtapPdata::new_default(
+                    EncodedPdata::new(encoding.clone(), SignalType::Logs, bytes.clone()).into(),
+                )
+                .test_subscribe_to(
+                    Interests::NACKS | Interests::RETURN_DATA,
+                    calldata_with_id(id as u64),
+                    0,
+                )
+            })
+            .collect();
+        runtime
+            .set_exporter(exporter)
+            .run_test(move |mut ctx| {
+                Box::pin(async move {
+                    let mut completion = ctx.take_pipeline_completion_receiver().unwrap();
+                    for pdata in pdatas {
+                        ctx.send_pdata(pdata).await.unwrap();
+                    }
+                    for (id, (encoding, bytes)) in expected.into_iter().enumerate() {
+                        let message = timeout(Duration::from_secs(3), completion.recv())
+                            .await
+                            .unwrap()
+                            .unwrap();
+                        match message {
+                            PipelineCompletionMsg::DeliverNack { nack } => {
+                                assert!(nack.permanent);
+                                assert_eq!(calldata_id(&nack.refused), id as u64);
+                                if id == 0 {
+                                    assert!(nack.reason.contains(encoding.as_str()));
+                                }
+                                let output = nack
+                                    .refused
+                                    .into_parts()
+                                    .1
+                                    .into_encoded(encoding, Default::default())
+                                    .unwrap();
+                                assert_eq!(output.bytes().as_ptr(), bytes.as_ptr());
+                                assert_eq!(output.bytes(), &bytes);
+                            }
+                            other => panic!("expected codec Nack, got {other:?}"),
+                        }
+                    }
+                    ctx.send_shutdown(Instant::now() + Duration::from_secs(1), "test complete")
+                        .await
+                        .unwrap();
+                })
+            })
+            .run_validation(|_, result| Box::pin(async move { result.unwrap() }));
     }
 
     #[test]

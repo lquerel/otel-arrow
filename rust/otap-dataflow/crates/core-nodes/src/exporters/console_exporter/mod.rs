@@ -33,7 +33,7 @@ use otel_arrow_dfe_otap::pdata::OtapPdata;
 use otel_arrow_dfe_pdata::views::otap::{OtapLogsView, OtapMetricsView};
 use otel_arrow_dfe_pdata::views::otlp::bytes::logs::RawLogsData;
 use otel_arrow_dfe_pdata::views::otlp::bytes::metrics::RawMetricsData;
-use otel_arrow_dfe_pdata::{OtapPayload, PayloadData};
+use otel_arrow_dfe_pdata::{OtapPayload, PayloadView};
 use otel_arrow_dfe_pdata_views::views::common::InstrumentationScopeView;
 use otel_arrow_dfe_pdata_views::views::logs::{
     LogRecordView, LogsDataView, ResourceLogsView, ScopeLogsView,
@@ -302,21 +302,26 @@ impl ConsoleExporter {
     }
 
     async fn export_logs(&self, payload: &OtapPayload) -> Result<(), ConsoleExportErrorType> {
-        match payload.data() {
-            PayloadData::OtlpBytes(bytes) => match RawLogsData::try_from(bytes) {
+        match payload.view(Default::default()).map_err(|error| {
+            otel_error!("console.pdata.decode_failed", error = %error);
+            ConsoleExportErrorType::OtapViewCreation
+        })? {
+            PayloadView::OtlpBytes(bytes) => match RawLogsData::try_from(bytes) {
                 Ok(logs_view) => self.formatter.print_logs_data(&logs_view).await,
                 Err(e) => {
                     otel_error!("console.logs_view.otlp_create_failed", error = ?e, message = "Failed to create OTLP logs view");
                     Err(ConsoleExportErrorType::OtlpViewCreation)
                 }
             },
-            PayloadData::OtapArrowRecords(records) => match OtapLogsView::try_from(records) {
-                Ok(logs_view) => self.formatter.print_logs_data(&logs_view).await,
-                Err(e) => {
-                    otel_error!("console.logs_view.otap_create_failed", error = ?e, message = "Failed to create OTAP logs view");
-                    Err(ConsoleExportErrorType::OtapViewCreation)
+            PayloadView::OtapArrowRecords(records) => {
+                match OtapLogsView::try_from(records.as_ref()) {
+                    Ok(logs_view) => self.formatter.print_logs_data(&logs_view).await,
+                    Err(e) => {
+                        otel_error!("console.logs_view.otap_create_failed", error = ?e, message = "Failed to create OTAP logs view");
+                        Err(ConsoleExportErrorType::OtapViewCreation)
+                    }
                 }
-            },
+            }
         }
     }
 
@@ -325,8 +330,11 @@ impl ConsoleExporter {
             return self.unsupported_signal("metrics");
         }
 
-        match payload.data() {
-            PayloadData::OtlpBytes(bytes) => {
+        match payload.view(Default::default()).map_err(|error| {
+            otel_error!("console.pdata.decode_failed", error = %error);
+            ConsoleExportErrorType::OtapViewCreation
+        })? {
+            PayloadView::OtlpBytes(bytes) => {
                 let metrics_bytes = match bytes {
                     otel_arrow_dfe_pdata::OtlpProtoBytes::ExportMetricsRequest(bytes) => bytes,
                     _ => unreachable!("metrics payload must contain metrics OTLP bytes"),
@@ -339,13 +347,15 @@ impl ConsoleExporter {
                     }
                 }
             }
-            PayloadData::OtapArrowRecords(records) => match OtapMetricsView::try_from(records) {
-                Ok(metrics_view) => self.formatter.print_metrics_data(&metrics_view).await,
-                Err(e) => {
-                    otel_warn!("console.metrics_view.otap_create_failed", error = ?e);
-                    Err(ConsoleExportErrorType::OtapViewCreation)
+            PayloadView::OtapArrowRecords(records) => {
+                match OtapMetricsView::try_from(records.as_ref()) {
+                    Ok(metrics_view) => self.formatter.print_metrics_data(&metrics_view).await,
+                    Err(e) => {
+                        otel_warn!("console.metrics_view.otap_create_failed", error = ?e);
+                        Err(ConsoleExportErrorType::OtapViewCreation)
+                    }
                 }
-            },
+            }
         }
     }
 

@@ -15,7 +15,7 @@ use otel_arrow_dfe_engine::terminal_state::TerminalState;
 use otel_arrow_dfe_pdata::otlp::OtlpProtoBytes;
 use otel_arrow_dfe_pdata::views::otap::OtapLogsView;
 use otel_arrow_dfe_pdata::views::otlp::bytes::logs::RawLogsData;
-use otel_arrow_dfe_pdata::{OtapArrowRecords, OtapPayload, PayloadData};
+use otel_arrow_dfe_pdata::{OtapArrowRecords, OtapPayload, PayloadView};
 
 use super::client::LogsIngestionClientPool;
 use super::config::Config;
@@ -456,15 +456,28 @@ impl AzureMonitorExporter {
                 *msg_id += 1;
                 let (context, payload) = pdata.into_parts();
 
-                let log_entries = match payload.data() {
-                    PayloadData::OtapArrowRecords(otap_records) => match otap_records {
+                let view = match payload.view(Default::default()) {
+                    Ok(view) => view,
+                    Err(error) => {
+                        effect_handler
+                            .notify_nack(NackMsg::new_permanent(
+                                error.to_string(),
+                                OtapPdata::new(context, payload),
+                            ))
+                            .await?;
+                        return Ok(());
+                    }
+                };
+                let log_entries = match view {
+                    PayloadView::OtapArrowRecords(otap_records) => match otap_records.as_ref() {
                         OtapArrowRecords::Logs(_) => {
-                            let logs_view = OtapLogsView::try_from(otap_records).map_err(|e| {
-                                let error = Error::LogsViewCreationFailed { source: e };
-                                EngineError::InternalError {
-                                    message: error.to_string(),
-                                }
-                            })?;
+                            let logs_view =
+                                OtapLogsView::try_from(otap_records.as_ref()).map_err(|e| {
+                                    let error = Error::LogsViewCreationFailed { source: e };
+                                    EngineError::InternalError {
+                                        message: error.to_string(),
+                                    }
+                                })?;
                             Some(self.transformer.convert_to_log_analytics(&logs_view))
                         }
                         OtapArrowRecords::Metrics(_) | OtapArrowRecords::Traces(_) => {
@@ -476,7 +489,7 @@ impl AzureMonitorExporter {
                             None
                         }
                     },
-                    PayloadData::OtlpBytes(otlp_bytes) => match otlp_bytes {
+                    PayloadView::OtlpBytes(otlp_bytes) => match otlp_bytes {
                         OtlpProtoBytes::ExportLogsRequest(bytes) => {
                             let logs_view = RawLogsData::new(bytes.as_ref());
                             Some(self.transformer.convert_to_log_analytics(&logs_view))

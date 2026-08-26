@@ -93,6 +93,7 @@ const LOG_MSG_BATCHING_FAILED_SUFFIX: &str = "; dropping";
 const fn wakeup_slot(format: SignalFormat, signal: SignalType) -> WakeupSlot {
     let format_base = match format {
         SignalFormat::OtapRecords => 0,
+        SignalFormat::Encoded => panic!("encoded batches are materialized before buffering"),
         SignalFormat::OtlpBytes => 3,
     };
     let signal_offset = match signal {
@@ -448,6 +449,11 @@ impl FormatConfig {
         // items, OTLP supports only bytes.
         let (expect_sizer, with_msg) = match format {
             SignalFormat::OtapRecords => (Sizer::Items, "OTAP batch sizer: must be items"),
+            SignalFormat::Encoded => {
+                return Err(ConfigError::InvalidUserConfig {
+                    error: "encoded batches require conversion before batching".into(),
+                });
+            }
             SignalFormat::OtlpBytes => (Sizer::Bytes, "OTLP batch sizer: must be bytes"),
         };
         if self.sizer != expect_sizer {
@@ -774,10 +780,10 @@ impl BatchProcessor {
         signal_format: SignalFormat,
     ) -> Option<ActiveBatchProcessorFormatKind> {
         match signal_format {
-            SignalFormat::OtapRecords if self.otap_signals.is_some() => {
+            SignalFormat::OtapRecords | SignalFormat::Encoded if self.otap_signals.is_some() => {
                 Some(ActiveBatchProcessorFormatKind::Otap)
             }
-            SignalFormat::OtapRecords if self.otlp_signals.is_some() => {
+            SignalFormat::OtapRecords | SignalFormat::Encoded if self.otlp_signals.is_some() => {
                 Some(ActiveBatchProcessorFormatKind::Otlp)
             }
             SignalFormat::OtlpBytes if self.otlp_signals.is_some() => {
@@ -815,6 +821,47 @@ impl BatchProcessor {
                         .for_signal(signal)
                         .accept_payload(effect, ctx, otlp_payload)
                         .await?
+                } else {
+                    return Err(Self::no_active_format_error());
+                }
+            }
+            PayloadData::Encoded(encoded) => {
+                let original = OtapPayload::from(encoded);
+                let otap: OtapArrowRecords = match original.clone().try_into_with_default() {
+                    Ok(records) => records,
+                    Err(error) => {
+                        effect
+                            .notify_nack(NackMsg::new_permanent(
+                                error.to_string(),
+                                OtapPdata::new(ctx, original),
+                            ))
+                            .await?;
+                        return Ok(());
+                    }
+                };
+                if let Some(mut otap_format) = self.otap_format() {
+                    otap_format
+                        .for_signal(signal)
+                        .accept_payload(effect, ctx, otap)
+                        .await?;
+                } else if let Some(mut otlp_format) = self.otlp_format() {
+                    let conversion: Result<OtlpProtoBytes, _> = otap.try_into_with_default();
+                    let otlp = match conversion {
+                        Ok(bytes) => bytes,
+                        Err(error) => {
+                            effect
+                                .notify_nack(NackMsg::new_permanent(
+                                    error.to_string(),
+                                    OtapPdata::new(ctx, original),
+                                ))
+                                .await?;
+                            return Ok(());
+                        }
+                    };
+                    otlp_format
+                        .for_signal(signal)
+                        .accept_payload(effect, ctx, otlp)
+                        .await?;
                 } else {
                     return Err(Self::no_active_format_error());
                 }
@@ -1374,6 +1421,7 @@ impl local::Processor<OtapPdata> for BatchProcessor {
                     };
 
                     match format {
+                        SignalFormat::Encoded => unreachable!("no wakeup slot for encoded batches"),
                         SignalFormat::OtapRecords => {
                             if let Some(mut otap_format) = self.otap_format() {
                                 otap_format
@@ -3316,8 +3364,8 @@ mod tests {
             });
     }
 
-    /// Test Preserve mode: this can't use the same test harness used above because it
-    /// arranges mixed-format inputs.
+    /// Scenario: preserve-mode batching receives interleaved OTLP and native OTAP batches.
+    /// Guarantees: each built-in representation is batched independently and keeps its output format.
     #[test]
     fn test_preserve_mode_mixed_formats() {
         let (_telemetry_registry, metrics_reporter, phase) = setup_test_runtime(json!({
@@ -3387,6 +3435,7 @@ mod tests {
                 for output in &outputs {
                     match output.signal_format() {
                         SignalFormat::OtapRecords => has_otap = true,
+                        SignalFormat::Encoded => panic!("batch output must be OTAP or OTLP"),
                         SignalFormat::OtlpBytes => has_otlp = true,
                     }
                 }

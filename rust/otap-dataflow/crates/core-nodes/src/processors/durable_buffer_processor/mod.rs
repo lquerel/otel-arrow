@@ -1069,6 +1069,34 @@ impl DurableBuffer {
                     }
                 }
             }
+            PayloadData::Encoded(encoded) => {
+                // Quiver's opaque storage is OTLP-specific. Other formats use
+                // their registered decoder and the existing native Arrow storage.
+                let original = OtapPayload::from(encoded);
+                let records: OtapArrowRecords = match original.clone().try_into_with_default() {
+                    Ok(records) => records,
+                    Err(error) => {
+                        self.metrics
+                            .ingest_for(IngestFailure::Error)
+                            .failures
+                            .add(1);
+                        effect_handler
+                            .notify_nack(NackMsg::new_permanent(
+                                error.to_string(),
+                                OtapPdata::new(context, original),
+                            ))
+                            .await?;
+                        return Ok(());
+                    }
+                };
+                let count = records.num_items() as u64;
+                let adapter = OtapRecordBundleAdapter::new(records);
+                let result = engine
+                    .ingest(&adapter)
+                    .await
+                    .map_err(|error| (error, original));
+                (result, count)
+            }
             PayloadData::OtapArrowRecords(records) => {
                 // Native Arrow data: count items (cheap) and store directly.
                 let num_items = records.num_items() as u64;
