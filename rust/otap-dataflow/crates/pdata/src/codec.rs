@@ -4,13 +4,15 @@
 //! Pluggable codecs between independent encoded batches and native OTAP.
 //!
 //! Codec extensions register immutable factories at link time. A factory creates
-//! private codec state on the calling core; implementations need not be `Send`
-//! or `Sync`. Payloads contain identity, signal, bytes, and optional item counts,
-//! never codec state. Passing or cloning a payload does not consult the registry
-//! or materialize telemetry records.
+//! private codec state owned by a pipeline runtime. Payloads contain identity,
+//! signal, bytes, and optional item counts, never codec state. Passing or cloning
+//! a payload does not consult the registry or materialize telemetry records.
 
 use std::borrow::Cow;
+use std::cell::RefCell;
 use std::fmt;
+use std::rc::Rc;
+use std::sync::{Arc, Mutex, MutexGuard};
 
 use bytes::Bytes;
 use otel_arrow_dfe_config::{ConversionOptions, SignalType};
@@ -22,7 +24,10 @@ use crate::otlp::logs::LogsProtoBytesEncoder;
 use crate::otlp::metrics::MetricsProtoBytesEncoder;
 use crate::otlp::traces::TracesProtoBytesEncoder;
 use crate::otlp::{BoundedBuf, ProtoBuffer, ProtoBytesEncoder};
-use crate::{OtapPayloadHelpers, OtlpProtoBytes, PayloadView, TryIntoWithOptions};
+use crate::{
+    OtapPayload, OtapPayloadDecodeError, OtapPayloadHelpers, OtlpProtoBytes, PayloadView,
+    TryIntoWithOptions,
+};
 
 /// Stable identity of an independently decodable byte representation.
 ///
@@ -166,12 +171,12 @@ pub struct PdataCodecMetadata {
     pub batching: Option<BatchingSupport>,
 }
 
-/// Per-consumer codec state. No cross-core sharing or locks are required.
+/// Reusable synchronous codec implementation owned by a pipeline runtime.
 ///
 /// Each call must consume/produce a complete independent batch: stream-relative
 /// dictionary deltas are not an independent encoded representation. Implementors
 /// must validate input, respect conversion options, and preserve the signal.
-pub trait PdataCodec {
+pub trait PdataCodec: Send {
     /// Converts a complete encoded batch to native OTAP.
     fn decode(
         &mut self,
@@ -262,7 +267,7 @@ pub type ItemCounter = fn(SignalType, &[u8]) -> Option<usize>;
 pub struct PdataCodecRegistration {
     /// Representation identity and capabilities.
     pub metadata: &'static PdataCodecMetadata,
-    /// Creates independent state on the calling core.
+    /// Creates independent state in the runtime codec service.
     pub create: fn() -> Box<dyn PdataCodec>,
     /// Optional stateless item scan for flow metrics. Returning None means the
     /// count is unknown. Admission and forwarding never invoke this hook.
@@ -272,8 +277,9 @@ pub struct PdataCodecRegistration {
 /// Trusted codec extensions compiled into this binary.
 ///
 /// Register with `#[linkme::distributed_slice(PDATA_CODEC_FACTORIES)]`.
-/// This is separate from service extensions with background lifecycles: codecs
-/// are synchronous data conversions and have no engine task or control channel.
+/// This is separate from service extensions with background lifecycles. Current
+/// codecs are synchronous data conversions; effect handlers provide the async
+/// boundary needed by future blocking or asynchronous codec executors.
 #[allow(unsafe_code)]
 #[linkme::distributed_slice]
 pub static PDATA_CODEC_FACTORIES: [PdataCodecRegistration];
@@ -347,11 +353,191 @@ pub fn registered_codecs() -> impl Iterator<Item = ResolvedCodec> {
     PDATA_CODEC_FACTORIES.iter().map(ResolvedCodec)
 }
 
-/// Reusable synchronous codec state belonging to one consuming node or task.
+/// Reusable synchronous codec state owned by a pipeline runtime.
 /// Neither payloads nor the immutable registry own these instances.
 #[derive(Default)]
 pub struct CodecContext {
     codecs: Vec<(ResolvedCodec, Box<dyn PdataCodec>)>,
+}
+
+/// Lock-free handle to codec state confined to one pipeline runtime thread.
+///
+/// Cloning this value only clones an `Rc`. Codec operations are deliberately
+/// scoped: mutable codec state cannot escape the call or remain borrowed across
+/// an async suspension point.
+#[derive(Clone, Default)]
+pub struct LocalCodecExecutor {
+    context: Rc<RefCell<CodecContext>>,
+}
+
+/// Scoped access implemented by runtime-local and sendable codec handles.
+#[doc(hidden)]
+pub trait CodecExecutor {
+    /// Runs one synchronous operation without allowing codec state to escape.
+    fn execute<R>(&self, operation: impl FnOnce(&mut CodecContext) -> R) -> R;
+}
+
+impl LocalCodecExecutor {
+    /// Runs one synchronous codec operation on the runtime-local state.
+    ///
+    /// This is an implementation hook for pdata-aware effect handlers. Node
+    /// implementations should use those higher-level capabilities instead.
+    #[doc(hidden)]
+    pub fn execute<R>(&self, operation: impl FnOnce(&mut CodecContext) -> R) -> R {
+        operation(&mut self.context.borrow_mut())
+    }
+
+    /// Extracts or decodes native records while retaining failed input.
+    pub fn try_into_otap(
+        &self,
+        payload: OtapPayload,
+        options: ConversionOptions,
+    ) -> Result<OtapArrowRecords, OtapPayloadDecodeError> {
+        self.execute(|context| payload.try_into_otap_with(context, options))
+    }
+
+    /// Borrows a representation-independent view of a payload.
+    pub fn view<'a>(
+        &self,
+        payload: &'a OtapPayload,
+        options: ConversionOptions,
+    ) -> Result<PayloadView<'a>, crate::encode::Error> {
+        self.execute(|context| payload.view_with(context, options))
+    }
+
+    /// Encodes inside a scope that cannot outlive reusable codec storage.
+    pub fn with_encoded<R>(
+        &self,
+        payload: &mut OtapPayload,
+        codec: ResolvedCodec,
+        options: ConversionOptions,
+        consume: impl FnOnce(&[u8]) -> R,
+    ) -> Result<R, Error> {
+        self.execute(|context| {
+            let output = payload.prepare_encoded(context, codec, options)?;
+            Ok(consume(output.as_ref()))
+        })
+    }
+
+    /// Encodes to owned bytes suitable for an asynchronous send.
+    pub fn encode_owned(
+        &self,
+        payload: &mut OtapPayload,
+        codec: ResolvedCodec,
+        options: ConversionOptions,
+    ) -> Result<Bytes, Error> {
+        self.execute(|context| {
+            payload
+                .prepare_encoded(context, codec, options)
+                .map(EncodedOutput::into_bytes)
+        })
+    }
+
+    /// Returns whether two handles address the same runtime-owned state.
+    #[must_use]
+    pub fn shares_state_with(&self, other: &Self) -> bool {
+        Rc::ptr_eq(&self.context, &other.context)
+    }
+}
+
+impl CodecExecutor for LocalCodecExecutor {
+    fn execute<R>(&self, operation: impl FnOnce(&mut CodecContext) -> R) -> R {
+        Self::execute(self, operation)
+    }
+}
+
+/// Sendable handle to codec state used by shared pipeline nodes.
+///
+/// Shared nodes may execute on worker threads, so this variant serializes the
+/// current synchronous codec implementations. Future async and blocking codec
+/// pools can replace the implementation without changing node-facing APIs.
+#[derive(Clone, Default)]
+pub struct SharedCodecExecutor {
+    context: Arc<Mutex<CodecContext>>,
+}
+
+impl SharedCodecExecutor {
+    fn lock(&self) -> MutexGuard<'_, CodecContext> {
+        self.context
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+    }
+
+    /// Runs one synchronous codec operation on shared runtime state.
+    ///
+    /// This is an implementation hook for pdata-aware effect handlers. Node
+    /// implementations should use those higher-level capabilities instead.
+    #[doc(hidden)]
+    pub fn execute<R>(&self, operation: impl FnOnce(&mut CodecContext) -> R) -> R {
+        operation(&mut self.lock())
+    }
+
+    /// Extracts or decodes native records while retaining failed input.
+    pub fn try_into_otap(
+        &self,
+        payload: OtapPayload,
+        options: ConversionOptions,
+    ) -> Result<OtapArrowRecords, OtapPayloadDecodeError> {
+        self.execute(|context| payload.try_into_otap_with(context, options))
+    }
+
+    /// Borrows a representation-independent view of a payload.
+    pub fn view<'a>(
+        &self,
+        payload: &'a OtapPayload,
+        options: ConversionOptions,
+    ) -> Result<PayloadView<'a>, crate::encode::Error> {
+        self.execute(|context| payload.view_with(context, options))
+    }
+
+    /// Encodes inside a scope that cannot outlive reusable codec storage.
+    pub fn with_encoded<R>(
+        &self,
+        payload: &mut OtapPayload,
+        codec: ResolvedCodec,
+        options: ConversionOptions,
+        consume: impl FnOnce(&[u8]) -> R,
+    ) -> Result<R, Error> {
+        self.execute(|context| {
+            let output = payload.prepare_encoded(context, codec, options)?;
+            Ok(consume(output.as_ref()))
+        })
+    }
+
+    /// Encodes to owned bytes suitable for an asynchronous send.
+    pub fn encode_owned(
+        &self,
+        payload: &mut OtapPayload,
+        codec: ResolvedCodec,
+        options: ConversionOptions,
+    ) -> Result<Bytes, Error> {
+        self.execute(|context| {
+            payload
+                .prepare_encoded(context, codec, options)
+                .map(EncodedOutput::into_bytes)
+        })
+    }
+
+    /// Returns whether two handles address the same runtime-owned state.
+    #[must_use]
+    pub fn shares_state_with(&self, other: &Self) -> bool {
+        Arc::ptr_eq(&self.context, &other.context)
+    }
+}
+
+impl CodecExecutor for SharedCodecExecutor {
+    fn execute<R>(&self, operation: impl FnOnce(&mut CodecContext) -> R) -> R {
+        Self::execute(self, operation)
+    }
+}
+
+/// Codec handles created once for a pipeline runtime and injected into effect handlers.
+#[derive(Clone, Default)]
+pub struct CodecExecutors {
+    /// Direct, lock-free executor used by local nodes on the pipeline thread.
+    pub local: LocalCodecExecutor,
+    /// Sendable executor used by shared nodes running on worker threads.
+    pub shared: SharedCodecExecutor,
 }
 
 impl CodecContext {
@@ -367,7 +553,7 @@ impl CodecContext {
         self.codecs[index].1.as_mut()
     }
 
-    /// Decodes using consumer-local state and verifies the codec's signal contract.
+    /// Decodes using reusable runtime-owned state and verifies the codec's signal contract.
     pub fn decode(
         &mut self,
         encoded: EncodedPdata,
@@ -700,7 +886,6 @@ mod tests {
     use prost::Message;
     use std::cell::Cell;
     use std::mem::size_of;
-    use std::rc::Rc;
     use std::sync::Arc;
 
     thread_local! {
@@ -719,11 +904,11 @@ mod tests {
         batching: None,
     };
 
-    // The Rc deliberately makes this codec !Send and !Sync. Only its factory
-    // is shared; no implementation state is attached to a payload.
+    // The codec is Send but not Sync. Mutable instances remain behind one
+    // runtime executor and are never attached to a payload.
     #[derive(Default)]
     struct TestCodec {
-        calls: Rc<Cell<usize>>,
+        calls: Cell<usize>,
         otlp: OtlpCodec,
     }
 
@@ -795,12 +980,61 @@ mod tests {
         .into()
     }
 
+    fn framed_logs_payload() -> OtapPayload {
+        let mut bytes = vec![1];
+        bytes.extend_from_slice(&logs_with_full_resource_and_scope().encode_to_vec());
+        EncodedPdata::new(TEST_ENCODING, SignalType::Logs, bytes.into())
+            .expect("registered test codec")
+            .into()
+    }
+
+    /// Scenario: cloned local executor handles perform repeated codec work.
+    /// Guarantees: handles share one lazily created codec instance without a lock or per-node state.
+    #[test]
+    fn local_executor_clones_share_lazy_codec_state() {
+        CREATES.with(|count| count.set(0));
+        let first = LocalCodecExecutor::default();
+        let second = first.clone();
+        assert!(first.shares_state_with(&second));
+
+        _ = first
+            .try_into_otap(framed_logs_payload(), Default::default())
+            .unwrap();
+        _ = second
+            .try_into_otap(framed_logs_payload(), Default::default())
+            .unwrap();
+
+        CREATES.with(|count| assert_eq!(count.get(), 1));
+    }
+
+    /// Scenario: cloned shared executor handles perform repeated codec work.
+    /// Guarantees: the sendable handles share one lazily created codec instance and are Send + Sync.
+    #[test]
+    fn shared_executor_clones_share_lazy_codec_state() {
+        fn assert_send_sync<T: Send + Sync>() {}
+        assert_send_sync::<SharedCodecExecutor>();
+
+        CREATES.with(|count| count.set(0));
+        let first = SharedCodecExecutor::default();
+        let second = first.clone();
+        assert!(first.shares_state_with(&second));
+
+        _ = first
+            .try_into_otap(framed_logs_payload(), Default::default())
+            .unwrap();
+        _ = second
+            .try_into_otap(framed_logs_payload(), Default::default())
+            .unwrap();
+
+        CREATES.with(|count| assert_eq!(count.get(), 1));
+    }
+
     /// Scenario: OTLP payloads pass through the generalized encoded API.
     /// Guarantees: payload layout stays compact and signal/bytes are unchanged without a decode.
     #[test]
     fn otlp_passthrough_keeps_original_buffer() {
         assert_eq!(
-            size_of::<crate::OtapPayloadDecodeError>(),
+            size_of::<OtapPayloadDecodeError>(),
             size_of::<usize>(),
             "recoverable failures stay off the successful conversion path"
         );

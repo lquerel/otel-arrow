@@ -29,7 +29,7 @@ use otel_arrow_dfe_engine::message::{ExporterInbox, Message};
 use otel_arrow_dfe_engine::node::NodeId;
 use otel_arrow_dfe_engine::terminal_state::TerminalState;
 use otel_arrow_dfe_otap::OTAP_EXPORTER_FACTORIES;
-use otel_arrow_dfe_otap::pdata::OtapPdata;
+use otel_arrow_dfe_otap::pdata::{OtapPdata, PdataEffectHandlerExtension};
 use otel_arrow_dfe_pdata::Producer;
 use otel_arrow_dfe_pdata::encode::producer::ProducerOptions;
 use otel_arrow_dfe_pdata::otap::OtapArrowRecords;
@@ -484,7 +484,6 @@ impl local::Exporter<OtapPdata> for OTAPExporter {
         mut msg_chan: ExporterInbox<OtapPdata>,
         effect_handler: local::EffectHandler<OtapPdata>,
     ) -> Result<TerminalState, Error> {
-        let mut codecs = otel_arrow_dfe_pdata::codec::CodecContext::default();
         otel_info!(
             "otap_exporter.start",
             grpc_endpoint = self.config.grpc.grpc_endpoint.as_str(),
@@ -728,7 +727,10 @@ impl local::Exporter<OtapPdata> for OTAPExporter {
                             pdata.take_payload()
                         };
 
-                        let message: OtapArrowRecords = match payload.try_into_otap_with(&mut codecs, Default::default()) {
+                        let message: OtapArrowRecords = match effect_handler
+                            .try_payload_into_otap(payload, Default::default())
+                            .await
+                        {
                             Ok(m) => m,
                             Err(e) => {
                                 self.metrics.record_failure(

@@ -69,7 +69,6 @@ use otel_arrow_dfe_pdata::PayloadView;
 use otel_arrow_dfe_pdata::TryFromWithOptions;
 #[cfg(test)]
 use otel_arrow_dfe_pdata::TryIntoWithOptions;
-use otel_arrow_dfe_pdata::codec::CodecContext;
 use otel_arrow_dfe_pdata::otlp::OtlpProtoBytes;
 use otel_arrow_dfe_pdata::views::otap::OtapLogsView;
 use otel_arrow_dfe_pdata::views::otlp::bytes::logs::RawLogsData;
@@ -87,7 +86,7 @@ use std::collections::HashSet;
 use std::sync::Arc;
 
 use otel_arrow_dfe_otap::OTAP_PROCESSOR_FACTORIES;
-use otel_arrow_dfe_otap::pdata::OtapPdata;
+use otel_arrow_dfe_otap::pdata::{OtapPdata, PdataEffectHandlerExtension};
 
 /// URN identifier for the Resource Validator processor
 pub const RESOURCE_VALIDATOR_PROCESSOR_URN: &str = "urn:otel:processor:resource_validator";
@@ -146,7 +145,6 @@ impl std::fmt::Display for ValidationFailure {
 /// - `source_mode`: Determines where allowed values come from
 /// - `get_allowed_values()`: Extension point for per-request allowed values
 pub struct ResourceValidatorProcessor {
-    codecs: CodecContext,
     /// The attribute key to validate
     required_attribute_key: String,
     /// Pre-normalized allowed values (used as-is for Static, as fallback for Dynamic)
@@ -206,7 +204,6 @@ impl ResourceValidatorProcessor {
         config.validate()?;
 
         Ok(Self {
-            codecs: CodecContext::default(),
             required_attribute_key: config.required_attribute_key.clone(),
             allowed_values: config.allowed_values_set(),
             source_mode: AllowedValuesSource::Static,
@@ -226,7 +223,6 @@ impl ResourceValidatorProcessor {
     ) -> Self {
         let metrics = pipeline_ctx.register_metrics::<ResourceValidatorMetrics>();
         Self {
-            codecs: CodecContext::default(),
             required_attribute_key,
             allowed_values,
             source_mode: AllowedValuesSource::Static,
@@ -493,9 +489,9 @@ impl local::Processor<OtapPdata> for ResourceValidatorProcessor {
                 let signal_type = pdata.signal_type();
 
                 // Validate based on payload type
-                let view = match pdata
-                    .payload_ref()
-                    .view_with(&mut self.codecs, Default::default())
+                let view = match effect_handler
+                    .view(pdata.payload_ref(), Default::default())
+                    .await
                 {
                     Ok(view) => view,
                     Err(error) => {

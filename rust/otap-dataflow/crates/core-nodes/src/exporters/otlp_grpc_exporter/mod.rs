@@ -39,7 +39,7 @@ use otel_arrow_dfe_otap::otap_grpc::client_settings::GrpcClientSettings;
 use otel_arrow_dfe_otap::otap_grpc::otlp::client::{
     LogsServiceClient, MetricsServiceClient, TraceServiceClient,
 };
-use otel_arrow_dfe_otap::pdata::{Context, OtapPdata};
+use otel_arrow_dfe_otap::pdata::{Context, OtapPdata, PdataEffectHandlerExtension};
 use otel_arrow_dfe_otap::transport_headers::ValueKind;
 use otel_arrow_dfe_pdata::OtapPayload;
 #[cfg(test)]
@@ -246,9 +246,6 @@ impl Exporter<OtapPdata> for OTLPExporter {
         // Returns `None` when no static headers are configured, which preserves
         // the zero-allocation fast path in `build_grpc_metadata`.
         let static_metadata = self.config.grpc.build_static_metadata();
-
-        // reuse the encoder and the buffer across pdatas
-        let mut codecs = otel_arrow_dfe_pdata::codec::CodecContext::default();
 
         let mut grpc_clients = GrpcClientPool::new(max_in_flight, channels, compression);
         grpc_clients.prepopulate_clients();
@@ -519,12 +516,15 @@ impl Exporter<OtapPdata> for OTLPExporter {
                         token_generation,
                     };
 
-                    let bytes = match payload.prepare_encoded(
-                        &mut codecs,
-                        otel_arrow_dfe_pdata::codec::ResolvedCodec::OTLP,
-                        Default::default(),
-                    ) {
-                        Ok(encoded) => encoded.into_bytes(),
+                    let bytes = match effect_handler
+                        .encode_owned(
+                            &mut payload,
+                            otel_arrow_dfe_pdata::codec::ResolvedCodec::OTLP,
+                            Default::default(),
+                        )
+                        .await
+                    {
+                        Ok(bytes) => bytes,
                         Err(error) => {
                             _ = effect_handler
                                 .notify_nack(NackMsg::new_permanent(

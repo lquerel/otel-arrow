@@ -31,7 +31,7 @@ use otel_arrow_dfe_engine::message::Message;
 use otel_arrow_dfe_engine::node::NodeId;
 use otel_arrow_dfe_engine::processor::ProcessorWrapper;
 use otel_arrow_dfe_otap::OTAP_PROCESSOR_FACTORIES;
-use otel_arrow_dfe_otap::pdata::OtapPdata;
+use otel_arrow_dfe_otap::pdata::{OtapPdata, PdataEffectHandlerExtension};
 use otel_arrow_dfe_pdata::OtapArrowRecords;
 use otel_arrow_dfe_pdata::OtapPayload;
 use serde::{Deserialize, Serialize};
@@ -64,7 +64,6 @@ pub struct WasmProcessorConfig {
 /// The wasmtime types are `!Send`/`!Sync`; the node is therefore a local
 /// (single-threaded) processor confined to one pipeline/core thread.
 pub struct WasmProcessor {
-    codecs: otel_arrow_dfe_pdata::codec::CodecContext,
     store: Store<HostState>,
     instance: KernelProcessor,
     metrics: WasmProcessorAllMetrics,
@@ -108,7 +107,6 @@ impl WasmProcessor {
             })?;
 
         Ok(Self {
-            codecs: Default::default(),
             store,
             instance,
             metrics,
@@ -170,17 +168,19 @@ impl local::Processor<OtapPdata> for WasmProcessor {
             Message::Control(_) => Ok(()),
             Message::PData(pdata) => {
                 let processor_id = effect_handler.processor_id();
-                let arrow_pdata =
-                    match pdata.try_into_otap_with(&mut self.codecs, Default::default()) {
-                        Ok(arrow_pdata) => arrow_pdata,
-                        Err(error) => {
-                            let (error, pdata) = error.into_parts();
-                            effect_handler
-                                .notify_nack(NackMsg::new_permanent(error.to_string(), pdata))
-                                .await?;
-                            return Ok(());
-                        }
-                    };
+                let arrow_pdata = match effect_handler
+                    .try_into_otap(pdata, Default::default())
+                    .await
+                {
+                    Ok(arrow_pdata) => arrow_pdata,
+                    Err(error) => {
+                        let (error, pdata) = error.into_parts();
+                        effect_handler
+                            .notify_nack(NackMsg::new_permanent(error.to_string(), pdata))
+                            .await?;
+                        return Ok(());
+                    }
+                };
                 let context = arrow_pdata.context().clone();
                 let signal_type = arrow_pdata.signal_type();
                 let output = bridge::run_on_otap_records(arrow_pdata, |records| {

@@ -33,7 +33,7 @@ use otel_arrow_dfe_engine::{
 use otel_arrow_dfe_otap::OTAP_PROCESSOR_FACTORIES;
 use otel_arrow_dfe_otap::accessory::context::split_contexts::Contexts;
 use otel_arrow_dfe_otap::accessory::slots::Key;
-use otel_arrow_dfe_otap::pdata::OtapPdata;
+use otel_arrow_dfe_otap::pdata::{OtapPdata, PdataEffectHandlerExtension};
 use otel_arrow_dfe_otap::transport_headers::{TransportHeader, ValueKind};
 #[cfg(test)]
 use otel_arrow_dfe_pdata::OtapArrowRecords;
@@ -109,7 +109,6 @@ pub static PARTITION_PROCESSOR_FACTORY: ProcessorFactory<OtapPdata> = ProcessorF
 
 /// partition processor.
 pub struct PartitionProcessor {
-    codecs: otel_arrow_dfe_pdata::codec::CodecContext,
     contexts: Contexts,
     partitioner: Partitioner,
     header_name: String,
@@ -145,7 +144,6 @@ impl PartitionProcessor {
         };
 
         Ok(Self {
-            codecs: Default::default(),
             partitioner,
             contexts: Contexts::new(config.inbound_request_limit, config.outbound_request_limit),
             header_name: config.partition_header_name,
@@ -237,17 +235,19 @@ impl Processor<OtapPdata> for PartitionProcessor {
                     pdata.add_flow_compute(flow);
                 }
 
-                let arrow_pdata =
-                    match pdata.try_into_otap_with(&mut self.codecs, Default::default()) {
-                        Ok(arrow_pdata) => arrow_pdata,
-                        Err(error) => {
-                            let (error, pdata) = error.into_parts();
-                            effect_handler
-                                .notify_nack(NackMsg::new_permanent(error.to_string(), pdata))
-                                .await?;
-                            return Ok(());
-                        }
-                    };
+                let arrow_pdata = match effect_handler
+                    .try_into_otap(pdata, Default::default())
+                    .await
+                {
+                    Ok(arrow_pdata) => arrow_pdata,
+                    Err(error) => {
+                        let (error, pdata) = error.into_parts();
+                        effect_handler
+                            .notify_nack(NackMsg::new_permanent(error.to_string(), pdata))
+                            .await?;
+                        return Ok(());
+                    }
+                };
 
                 let signal_type = arrow_pdata.signal_type();
                 let (mut inbound_context, mut otap_batch) = arrow_pdata.into_parts();

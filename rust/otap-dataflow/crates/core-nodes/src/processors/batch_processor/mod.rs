@@ -54,10 +54,12 @@ use otel_arrow_dfe_engine::{
 };
 use otel_arrow_dfe_otap::OTAP_PROCESSOR_FACTORIES;
 use otel_arrow_dfe_otap::accessory::slots::{Key as SlotKey, State as SlotState};
-use otel_arrow_dfe_otap::pdata::{Context, OtapPdata, PeerAddrMerger};
+use otel_arrow_dfe_otap::pdata::{Context, OtapPdata, PdataEffectHandlerExtension, PeerAddrMerger};
 pub use otel_arrow_dfe_pdata::batching::BatchSizer as Sizer;
 use otel_arrow_dfe_pdata::batching::{BatchPlan, BatchProfile, BatchingOutput, PdataFormat};
-use otel_arrow_dfe_pdata::codec::{CodecContext, registered_codecs};
+#[cfg(test)]
+use otel_arrow_dfe_pdata::codec::CodecContext;
+use otel_arrow_dfe_pdata::codec::registered_codecs;
 use otel_arrow_dfe_pdata::{OtapPayload, error::Error as PDataError};
 #[cfg(test)]
 use otel_arrow_dfe_pdata::{OtlpProtoBytes, TryIntoWithOptions};
@@ -558,7 +560,6 @@ pub struct BatchProcessor {
     config: Config,
     formats: Vec<Option<FormatState>>,
     routes: Vec<(PdataFormat, usize)>,
-    codecs: CodecContext,
     metrics: MetricSet<BatchProcessorMetrics>,
 }
 
@@ -571,7 +572,6 @@ struct BatchProcessorFormat<'a> {
     config: &'a Config,
     plan: &'a BatchPlan,
     signals: &'a mut SignalBatches,
-    codecs: &'a mut CodecContext,
     metrics: &'a mut MetricSet<BatchProcessorMetrics>,
 }
 
@@ -580,7 +580,6 @@ struct BatchProcessorSignal<'a> {
     config: &'a Config,
     fmtcfg: &'a BatchProfile,
     plan: &'a BatchPlan,
-    codecs: &'a mut CodecContext,
     buffer: &'a mut SignalBuffer,
     metrics: &'a mut MetricSet<BatchProcessorMetrics>,
 }
@@ -702,7 +701,6 @@ impl BatchProcessor {
             config,
             formats,
             routes,
-            codecs: CodecContext::default(),
             metrics,
         })
     }
@@ -749,7 +747,6 @@ impl BatchProcessor {
                 config: &self.config,
                 plan: &state.plan,
                 signals: &mut state.signals,
-                codecs: &mut self.codecs,
                 metrics: &mut self.metrics,
             })
     }
@@ -780,7 +777,7 @@ impl BatchProcessor {
             return Ok(());
         };
         let mut format = self.format(index).expect("configured route");
-        if let Err(error) = format.plan.prepare(&mut payload, format.codecs) {
+        if let Err(error) = effect.prepare_batch(format.plan, &mut payload).await {
             format.metrics.dropped_conversion.inc();
             effect
                 .notify_nack(NackMsg::new_permanent(
@@ -804,7 +801,6 @@ impl<'a> BatchProcessorFormat<'a> {
             config: self.config,
             fmtcfg: self.plan.profile(),
             plan: self.plan,
-            codecs: self.codecs,
             buffer: match signal {
                 SignalType::Logs => &mut self.signals.logs,
                 SignalType::Traces => &mut self.signals.traces,
@@ -974,7 +970,7 @@ impl<'a> BatchProcessorSignal<'a> {
         let BatchingOutput {
             batches: mut output_batches,
             budget_fallbacks,
-        } = match self.plan.batch(self.signal, pending, self.codecs) {
+        } = match effect.batch(self.plan, self.signal, pending).await {
             Ok(v) => v,
             Err(e) => {
                 self.metrics.batching_errors.add(count as u64);
@@ -1065,7 +1061,7 @@ impl<'a> BatchProcessorSignal<'a> {
             // If any inputs require completion tracking, get an outbound slot
             // and subscribe so their contexts can unwind after this output.
             let (routed_ctxs, merged_peer) = self.buffer.drain_context(weight, &mut input_context);
-            if let Err(error) = self.plan.finish(&mut records, self.codecs) {
+            if let Err(error) = effect.finish_batch(self.plan, &mut records).await {
                 self.metrics.dropped_conversion.inc();
                 if let Some(parts) = routed_ctxs {
                     self.buffer

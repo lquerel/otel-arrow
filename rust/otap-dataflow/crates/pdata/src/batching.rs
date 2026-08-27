@@ -14,7 +14,7 @@ use serde::{Deserialize, Serialize};
 
 use crate::OtapPayload;
 use crate::codec::{
-    self, CodecContext, CodecDirection, EncodedPdata, PdataEncoding, ResolvedCodec,
+    self, CodecContext, CodecDirection, CodecExecutor, EncodedPdata, PdataEncoding, ResolvedCodec,
 };
 use crate::error::Error;
 
@@ -308,6 +308,15 @@ impl BatchPlan {
         Ok(())
     }
 
+    /// Prepares one input using pipeline-runtime codec state.
+    pub fn prepare_with<E: CodecExecutor>(
+        &self,
+        payload: &mut OtapPayload,
+        executor: &E,
+    ) -> Result<(), Error> {
+        executor.execute(|context| self.prepare(payload, context))
+    }
+
     /// Finishes a flushed output. Retained tails stay in the working format so
     /// their ownership units and measured sizes do not change between flushes.
     pub fn finish(
@@ -316,6 +325,15 @@ impl BatchPlan {
         context: &mut CodecContext,
     ) -> Result<(), Error> {
         self.output.materialize(payload, context)
+    }
+
+    /// Finishes a flushed output using pipeline-runtime codec state.
+    pub fn finish_with<E: CodecExecutor>(
+        &self,
+        payload: &mut OtapPayload,
+        executor: &E,
+    ) -> Result<(), Error> {
+        executor.execute(|context| self.finish(payload, context))
     }
 
     /// Merges/splits prepared inputs while preserving their in-line ownership.
@@ -393,6 +411,16 @@ impl BatchPlan {
             ));
         }
         Ok(result)
+    }
+
+    /// Batches prepared input using pipeline-runtime codec state.
+    pub fn batch_with<E: CodecExecutor>(
+        &self,
+        signal: SignalType,
+        inputs: Vec<OtapPayload>,
+        executor: &E,
+    ) -> Result<BatchingOutput, Error> {
+        executor.execute(|context| self.batch(signal, inputs, context))
     }
 }
 

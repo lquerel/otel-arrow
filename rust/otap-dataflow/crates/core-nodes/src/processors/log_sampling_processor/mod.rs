@@ -40,7 +40,7 @@ use otel_arrow_dfe_engine::processor::{
     FlowMetricHook, ProcessorRuntimeRequirements, ProcessorWrapper,
 };
 use otel_arrow_dfe_otap::OTAP_PROCESSOR_FACTORIES;
-use otel_arrow_dfe_otap::pdata::OtapPdata;
+use otel_arrow_dfe_otap::pdata::{OtapPdata, PdataEffectHandlerExtension};
 use otel_arrow_dfe_pdata::OtapPayload;
 #[cfg(test)]
 use otel_arrow_dfe_pdata::otap::OtapArrowRecords;
@@ -71,7 +71,6 @@ static LOG_SAMPLING_PROCESSOR_FACTORY: otel_arrow_dfe_engine::ProcessorFactory<O
 
 /// Log sampling processor.
 struct LogSamplingProcessor {
-    codecs: otel_arrow_dfe_pdata::codec::CodecContext,
     /// The chosen sampler
     sampler: Box<dyn Sampler>,
     /// Telemetry metrics.
@@ -99,7 +98,6 @@ impl LogSamplingProcessor {
         );
 
         Ok(Self {
-            codecs: Default::default(),
             sampler,
             metrics,
             id_bitmap_pool: IdBitmapPool::new(),
@@ -115,7 +113,10 @@ impl LogSamplingProcessor {
     ) -> Result<(), EngineError> {
         // Materialize before counting: an encoded envelope may have no item count.
         // Failed decoding must leave the original bytes available for the Nack.
-        let arrow_pdata = match pdata.try_into_otap_with(&mut self.codecs, Default::default()) {
+        let arrow_pdata = match effect_handler
+            .try_into_otap(pdata, Default::default())
+            .await
+        {
             Ok(arrow_pdata) => arrow_pdata,
             Err(error) => {
                 let (error, pdata) = error.into_parts();

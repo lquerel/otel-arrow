@@ -90,10 +90,9 @@ use otel_arrow_dfe_engine::{
     ProcessorRuntimeRequirements, RouteAdmission, WakeupError,
 };
 use otel_arrow_dfe_otap::OTAP_PROCESSOR_FACTORIES;
-use otel_arrow_dfe_otap::pdata::OtapPdata;
+use otel_arrow_dfe_otap::pdata::{OtapPdata, PdataEffectHandlerExtension};
 use otel_arrow_dfe_pdata::PayloadView;
 use otel_arrow_dfe_pdata::TryFromWithOptions;
-use otel_arrow_dfe_pdata::codec::CodecContext;
 use otel_arrow_dfe_pdata::otlp::OtlpProtoBytes;
 use otel_arrow_dfe_pdata::views::otap::OtapLogsView;
 use otel_arrow_dfe_pdata::views::otlp::bytes::logs::RawLogsData;
@@ -376,7 +375,6 @@ enum SelectedRouteKind {
 /// The ContentRouter processor routes messages to output ports based on
 /// a resource attribute value.
 pub struct ContentRouter {
-    codecs: CodecContext,
     /// The source and key used to extract the routing value.
     routing_key: RoutingKeyExpr,
     /// Normalized routes: attribute value -> output port name.
@@ -398,7 +396,6 @@ impl ContentRouter {
         let routes = config.normalized_routes();
         Self {
             routing_key: config.routing_key,
-            codecs: CodecContext::default(),
             routes,
             default_output: config.default_output,
             case_sensitive: config.case_sensitive,
@@ -567,12 +564,16 @@ impl ContentRouter {
     }
 
     /// Resolves the output port for a given message payload.
-    fn resolve_route(&mut self, pdata: &OtapPdata) -> RouteResolution {
+    async fn resolve_route(
+        &mut self,
+        effect_handler: &local::EffectHandler<OtapPdata>,
+        pdata: &OtapPdata,
+    ) -> RouteResolution {
         let signal_type = pdata.signal_type();
 
-        let view = match pdata
-            .payload_ref()
-            .view_with(&mut self.codecs, Default::default())
+        let view = match effect_handler
+            .view(pdata.payload_ref(), Default::default())
+            .await
         {
             Ok(view) => view,
             Err(_) => return RouteResolution::ConversionError,
@@ -878,7 +879,7 @@ impl local::Processor<OtapPdata> for ContentRouter {
             Message::PData(data) => {
                 // Resolve routing once up front, then handle route-selection
                 // failures separately from downstream admission failures.
-                let resolution = self.resolve_route(&data);
+                let resolution = self.resolve_route(effect_handler, &data).await;
 
                 match resolution {
                     RouteResolution::Matched(port) => {

@@ -76,7 +76,7 @@ use prost::Message as ProstMessage;
 // Use crate-relative paths since we're now a module within otap
 use otel_arrow_dfe_otap::OTAP_EXPORTER_FACTORIES;
 use otel_arrow_dfe_otap::metrics::ExporterExportMetrics;
-use otel_arrow_dfe_otap::pdata::OtapPdata;
+use otel_arrow_dfe_otap::pdata::{OtapPdata, PdataEffectHandlerExtension};
 use otel_arrow_dfe_telemetry::common_attributes::{Outcome, SignalOutcomeAttributes};
 
 mod agent_fed_source;
@@ -1094,7 +1094,6 @@ struct ExporterMetrics {
 
 /// Geneva exporter that sends OTAP data to Geneva backend
 pub struct GenevaExporter {
-    codecs: otel_arrow_dfe_pdata::codec::CodecContext,
     config: Config,
     pdata_metrics: MeasurementMetricSet<ExporterExportMetrics>,
     metrics: MetricSet<ExporterMetrics>,
@@ -1223,7 +1222,6 @@ impl GenevaExporter {
         let metrics = pipeline_ctx.register_metrics::<ExporterMetrics>();
 
         Ok(Self {
-            codecs: Default::default(),
             config,
             pdata_metrics,
             metrics,
@@ -1386,7 +1384,7 @@ impl GenevaExporter {
     async fn export_payload(
         &mut self,
         payload: OtapPayload,
-        _effect_handler: &EffectHandler<OtapPdata>,
+        effect_handler: &EffectHandler<OtapPdata>,
     ) -> Result<usize, String> {
         if payload.is_empty() {
             self.metrics.empty_payloads_skipped.inc();
@@ -1398,8 +1396,9 @@ impl GenevaExporter {
         }
 
         if payload.format() != otel_arrow_dfe_pdata::batching::PdataFormat::OTLP {
-            let otap_records = payload
-                .try_into_otap_with(&mut self.codecs, Default::default())
+            let otap_records = effect_handler
+                .try_payload_into_otap(payload, Default::default())
+                .await
                 .map_err(|error| {
                     self.metrics.conversion_errors.inc();
                     error.to_string()

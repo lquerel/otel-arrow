@@ -29,7 +29,7 @@ use super::metrics::AzureMonitorExporterMetricsRc;
 use super::state::AzureMonitorExporterState;
 use super::transformer::Transformer;
 use otel_arrow_dfe_otap::bearer_auth::{BearerAuth, BearerAuthEvents};
-use otel_arrow_dfe_otap::pdata::{Context, OtapPdata};
+use otel_arrow_dfe_otap::pdata::{Context, OtapPdata, PdataEffectHandlerExtension};
 
 use otel_arrow_dfe_telemetry::common_attributes::{HttpResponse, Outcome};
 
@@ -57,7 +57,6 @@ const AZURE_MONITOR_BEARER_AUTH_EVENTS: BearerAuthEvents = BearerAuthEvents {
 
 /// Azure Monitor exporter.
 pub struct AzureMonitorExporter {
-    codecs: otel_arrow_dfe_pdata::codec::CodecContext,
     config: Config,
     transformer: Transformer,
     gzip_batcher: GzipBatcher,
@@ -106,7 +105,6 @@ impl AzureMonitorExporter {
         };
 
         Ok(Self {
-            codecs: otel_arrow_dfe_pdata::codec::CodecContext::default(),
             config,
             transformer,
             gzip_batcher,
@@ -459,7 +457,7 @@ impl AzureMonitorExporter {
                 *msg_id += 1;
                 let (context, payload) = pdata.into_parts();
 
-                let view = match payload.view_with(&mut self.codecs, Default::default()) {
+                let view = match effect_handler.view(&payload, Default::default()).await {
                     Ok(view) => view,
                     Err(error) => {
                         effect_handler

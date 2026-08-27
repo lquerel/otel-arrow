@@ -35,6 +35,7 @@ use otel_arrow_dfe_engine::node::NodeId;
 use otel_arrow_dfe_engine::process_duration::ComputeDuration;
 use otel_arrow_dfe_engine::processor::ProcessorWrapper;
 use otel_arrow_dfe_pdata::TryIntoWithOptions;
+#[cfg(test)]
 use otel_arrow_dfe_pdata::codec::CodecContext;
 use otel_arrow_dfe_pdata::encode::record::attributes::StrKeysAttributesRecordBatchBuilder;
 use otel_arrow_dfe_pdata::otlp::attributes::AttributeValueType;
@@ -46,7 +47,7 @@ use std::collections::{HashMap, HashSet};
 use std::sync::Arc;
 
 use otel_arrow_dfe_otap::OTAP_PROCESSOR_FACTORIES;
-use otel_arrow_dfe_otap::pdata::OtapPdata;
+use otel_arrow_dfe_otap::pdata::{OtapPdata, PdataEffectHandlerExtension};
 
 /// URN identifier for the Condense Attributes processor
 pub const CONDENSE_ATTRIBUTES_PROCESSOR_URN: &str = "urn:otel:processor:condense_attributes";
@@ -163,7 +164,6 @@ impl Config {
 
 /// Processor that condenses multiple attributes into a single attribute based on predefined rules.
 pub struct CondenseAttributesProcessor {
-    codecs: CodecContext,
     config: Config,
     compute_duration: ComputeDuration,
 }
@@ -218,7 +218,6 @@ impl CondenseAttributesProcessor {
     pub fn from_config(pipeline_ctx: PipelineContext, config: &Value) -> Result<Self, ConfigError> {
         let compute_duration = ComputeDuration::new(&pipeline_ctx);
         Ok(Self {
-            codecs: CodecContext::default(),
             config: Config::from_config(config)?,
             compute_duration,
         })
@@ -656,17 +655,19 @@ impl local::Processor<OtapPdata> for CondenseAttributesProcessor {
                     OtapPayload::empty(signal)
                 };
 
-                let arrow_pdata =
-                    match pdata.try_into_otap_with(&mut self.codecs, Default::default()) {
-                        Ok(arrow_pdata) => arrow_pdata,
-                        Err(error) => {
-                            let (error, pdata) = error.into_parts();
-                            effect_handler
-                                .notify_nack(NackMsg::new_permanent(error.to_string(), pdata))
-                                .await?;
-                            return Ok(());
-                        }
-                    };
+                let arrow_pdata = match effect_handler
+                    .try_into_otap(pdata, Default::default())
+                    .await
+                {
+                    Ok(arrow_pdata) => arrow_pdata,
+                    Err(error) => {
+                        let (error, pdata) = error.into_parts();
+                        effect_handler
+                            .notify_nack(NackMsg::new_permanent(error.to_string(), pdata))
+                            .await?;
+                        return Ok(());
+                    }
+                };
                 let (context, mut records) = arrow_pdata.into_parts();
 
                 let input_items = records.num_items() as u64;

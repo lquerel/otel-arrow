@@ -62,7 +62,7 @@ use otel_arrow_dfe_otap::OTAP_EXPORTER_FACTORIES;
 use otel_arrow_dfe_otap::bearer_auth::{BearerAuth, BearerAuthEvents, apply_auth_rejection};
 use otel_arrow_dfe_otap::otlp_http::client_settings::{HttpClientError, HttpClientSettings};
 use otel_arrow_dfe_otap::otlp_http::{LOGS_PATH, METRICS_PATH, PROTOBUF_CONTENT_TYPE, TRACES_PATH};
-use otel_arrow_dfe_otap::pdata::{Context, OtapPdata};
+use otel_arrow_dfe_otap::pdata::{Context, OtapPdata, PdataEffectHandlerExtension};
 
 mod config;
 mod metrics;
@@ -296,8 +296,6 @@ impl Exporter<OtapPdata> for OtlpHttpExporter {
 
         let mut inflight_exports = InFlightExports::new();
 
-        let mut codecs = otel_arrow_dfe_pdata::codec::CodecContext::default();
-
         let compression = self.config.http.compression();
         // Buffer to hold compressed bytes. We re-use this scratch space to place
         // the compressed bytes and then allocate an exact sized Bytes to copy
@@ -479,46 +477,76 @@ impl Exporter<OtapPdata> for OtlpHttpExporter {
                             None => (None, None),
                         };
 
-                    let encoded = match payload.prepare_encoded(
-                        &mut codecs,
-                        otel_arrow_dfe_pdata::codec::ResolvedCodec::OTLP,
-                        Default::default(),
-                    ) {
-                        Ok(encoded) => encoded,
-                        Err(error) => {
-                            _ = effect_handler
-                                .notify_nack(NackMsg::new_permanent(
-                                    error.to_string(),
-                                    OtapPdata::new(context, payload),
-                                ))
-                                .await;
-                            self.metrics.record_failure(
-                                signal_type,
-                                OtlpHttpExporterErrorType::Encoding,
-                                export_started_at.elapsed(),
-                            );
-                            continue;
-                        }
-                    };
                     let body = if let Some(method) = compression {
-                        if let Err(error) = method.encode(encoded.as_ref(), &mut compressed_buffer)
+                        match effect_handler
+                            .with_encoded(
+                                &mut payload,
+                                otel_arrow_dfe_pdata::codec::ResolvedCodec::OTLP,
+                                Default::default(),
+                                |encoded| {
+                                    method.encode(encoded, &mut compressed_buffer)?;
+                                    Ok::<Bytes, std::io::Error>(Bytes::copy_from_slice(
+                                        &compressed_buffer,
+                                    ))
+                                },
+                            )
+                            .await
                         {
-                            _ = effect_handler
-                                .notify_nack(NackMsg::new_permanent(
-                                    error.to_string(),
-                                    OtapPdata::new(context, payload),
-                                ))
-                                .await;
-                            self.metrics.record_failure(
-                                signal_type,
-                                OtlpHttpExporterErrorType::Compression,
-                                export_started_at.elapsed(),
-                            );
-                            continue;
+                            Ok(Ok(body)) => body,
+                            Ok(Err(error)) => {
+                                _ = effect_handler
+                                    .notify_nack(NackMsg::new_permanent(
+                                        error.to_string(),
+                                        OtapPdata::new(context, payload),
+                                    ))
+                                    .await;
+                                self.metrics.record_failure(
+                                    signal_type,
+                                    OtlpHttpExporterErrorType::Compression,
+                                    export_started_at.elapsed(),
+                                );
+                                continue;
+                            }
+                            Err(error) => {
+                                _ = effect_handler
+                                    .notify_nack(NackMsg::new_permanent(
+                                        error.to_string(),
+                                        OtapPdata::new(context, payload),
+                                    ))
+                                    .await;
+                                self.metrics.record_failure(
+                                    signal_type,
+                                    OtlpHttpExporterErrorType::Encoding,
+                                    export_started_at.elapsed(),
+                                );
+                                continue;
+                            }
                         }
-                        Bytes::copy_from_slice(&compressed_buffer)
                     } else {
-                        encoded.copy_into_bytes()
+                        match effect_handler
+                            .encode_owned(
+                                &mut payload,
+                                otel_arrow_dfe_pdata::codec::ResolvedCodec::OTLP,
+                                Default::default(),
+                            )
+                            .await
+                        {
+                            Ok(body) => body,
+                            Err(error) => {
+                                _ = effect_handler
+                                    .notify_nack(NackMsg::new_permanent(
+                                        error.to_string(),
+                                        OtapPdata::new(context, payload),
+                                    ))
+                                    .await;
+                                self.metrics.record_failure(
+                                    signal_type,
+                                    OtlpHttpExporterErrorType::Encoding,
+                                    export_started_at.elapsed(),
+                                );
+                                continue;
+                            }
+                        }
                     };
                     let saved_payload = if context.may_return_payload() {
                         payload

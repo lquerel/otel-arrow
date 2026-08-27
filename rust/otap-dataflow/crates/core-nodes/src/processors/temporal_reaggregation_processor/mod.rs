@@ -37,7 +37,7 @@ use otel_arrow_dfe_engine::processor::{ProcessorRuntimeRequirements, ProcessorWr
 use otel_arrow_dfe_engine::{ConsumerEffectHandlerExtension, Interests};
 use otel_arrow_dfe_otap::OTAP_PROCESSOR_FACTORIES;
 use otel_arrow_dfe_otap::accessory::slots::{Key as SlotKey, State as SlotState};
-use otel_arrow_dfe_otap::pdata::{Context, OtapPdata, PeerAddrMerger};
+use otel_arrow_dfe_otap::pdata::{Context, OtapPdata, PdataEffectHandlerExtension, PeerAddrMerger};
 use otel_arrow_dfe_pdata::otap::OtapArrowRecords;
 use otel_arrow_dfe_pdata::views::otap::OtapMetricsView;
 use otel_arrow_dfe_pdata::views::otlp::bytes::metrics::RawMetricsData;
@@ -210,7 +210,6 @@ const FLUSH_WAKEUP_SLOT: WakeupSlot = WakeupSlot(0);
 /// stream. On each wakeup it flushes the accumulated state as an
 /// [`OtapArrowRecords`] batch.
 pub struct TemporalReaggregationProcessor {
-    codecs: otel_arrow_dfe_pdata::codec::CodecContext,
     /// Processor metrics
     metrics: MetricSet<TemporalReaggregationMetrics>,
 
@@ -358,7 +357,6 @@ impl TemporalReaggregationProcessor {
         config.validate()?;
         Ok(Self {
             metrics,
-            codecs: Default::default(),
             collection_period: config.period,
             wakeup_revision: None,
             max_stream_cardinality: config.max_stream_cardinality.get(),
@@ -625,9 +623,9 @@ impl TemporalReaggregationProcessor {
         effect_handler: &mut local::EffectHandler<OtapPdata>,
         pdata: OtapPdata,
     ) -> Result<(), Error> {
-        let view = match pdata
-            .payload_ref()
-            .view_with(&mut self.codecs, Default::default())
+        let view = match effect_handler
+            .view(pdata.payload_ref(), Default::default())
+            .await
         {
             Ok(view) => view,
             Err(error) => {

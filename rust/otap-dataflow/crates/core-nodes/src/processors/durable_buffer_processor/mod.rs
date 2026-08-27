@@ -100,7 +100,7 @@ use otel_arrow_dfe_quiver::{
 use smallvec::smallvec;
 
 use otel_arrow_dfe_otap::OTAP_PROCESSOR_FACTORIES;
-use otel_arrow_dfe_otap::pdata::OtapPdata;
+use otel_arrow_dfe_otap::pdata::{OtapPdata, PdataEffectHandlerExtension};
 
 use bundle_adapter::{
     OtapRecordBundleAdapter, OtlpBytesAdapter, convert_bundle_to_pdata, recover_item_count,
@@ -289,7 +289,6 @@ fn retention_loss_delta(
 /// **immutable** after finalization, the cache entry for a given segment
 /// never needs invalidation -- only eviction when the segment is cleaned up.
 pub struct DurableBuffer {
-    codecs: otel_arrow_dfe_pdata::codec::CodecContext,
     /// The Quiver engine state (lazy initialized on first message).
     engine_state: EngineState,
 
@@ -394,7 +393,6 @@ impl DurableBuffer {
         }
 
         Ok(Self {
-            codecs: Default::default(),
             engine_state: EngineState::Uninitialized,
             pending_bundles: HashMap::new(),
             deferred_retry_state: DeferredRetryState::new(),
@@ -1024,21 +1022,21 @@ impl DurableBuffer {
                     }
                 }
             } else {
-                let arrow_pdata =
-                    match data.try_into_otap_with(&mut self.codecs, Default::default()) {
-                        Ok(arrow_pdata) => arrow_pdata,
-                        Err(error) => {
-                            self.metrics
-                                .ingest_for(IngestFailure::Error)
-                                .failures
-                                .add(1);
-                            let (error, pdata) = error.into_parts();
-                            effect_handler
-                                .notify_nack(NackMsg::new_permanent(error.to_string(), pdata))
-                                .await?;
-                            return Ok(());
-                        }
-                    };
+                let arrow_pdata = match effect_handler.try_into_otap(data, Default::default()).await
+                {
+                    Ok(arrow_pdata) => arrow_pdata,
+                    Err(error) => {
+                        self.metrics
+                            .ingest_for(IngestFailure::Error)
+                            .failures
+                            .add(1);
+                        let (error, pdata) = error.into_parts();
+                        effect_handler
+                            .notify_nack(NackMsg::new_permanent(error.to_string(), pdata))
+                            .await?;
+                        return Ok(());
+                    }
+                };
                 let (context, records) = arrow_pdata.into_parts();
                 let count = records.num_items() as u64;
                 let adapter = OtapRecordBundleAdapter::new(records);

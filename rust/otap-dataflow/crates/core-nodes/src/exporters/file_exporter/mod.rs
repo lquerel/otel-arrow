@@ -35,13 +35,16 @@ use otel_arrow_dfe_engine::node::NodeId;
 use otel_arrow_dfe_engine::terminal_state::TerminalState;
 use otel_arrow_dfe_engine::{ConsumerEffectHandlerExtension, ExporterFactory};
 use otel_arrow_dfe_otap::OTAP_EXPORTER_FACTORIES;
-use otel_arrow_dfe_otap::pdata::OtapPdata;
+use otel_arrow_dfe_otap::pdata::{OtapPdata, PdataEffectHandlerExtension};
+#[cfg(test)]
+use otel_arrow_dfe_pdata::OtapPayload;
+#[cfg(test)]
 use otel_arrow_dfe_pdata::codec::CodecContext;
 use otel_arrow_dfe_pdata::views::otap::{OtapLogsView, OtapMetricsView, OtapTracesView};
 use otel_arrow_dfe_pdata::views::otlp::bytes::logs::RawLogsData;
 use otel_arrow_dfe_pdata::views::otlp::bytes::metrics::RawMetricsData;
 use otel_arrow_dfe_pdata::views::otlp::bytes::traces::RawTraceData;
-use otel_arrow_dfe_pdata::{OtapPayload, OtapPayloadHelpers, PayloadView};
+use otel_arrow_dfe_pdata::{OtapPayloadHelpers, PayloadView};
 use otel_arrow_dfe_telemetry::attributes::AttributeEnum as _;
 use otel_arrow_dfe_telemetry::common_attributes::{
     Outcome, SignalAttributes, SignalOutcomeAttributes,
@@ -57,7 +60,6 @@ pub const FILE_EXPORTER_URN: &str = "urn:otel:exporter:file";
 
 /// OTLP JSON file exporter with one lazily opened writer per signal.
 pub struct FileExporter {
-    codecs: CodecContext,
     config: FileExporterConfig,
     paths: RenderedPaths,
     writers: [Option<SignalWriter>; 3],
@@ -84,7 +86,6 @@ pub static FILE_EXPORTER: ExporterFactory<OtapPdata> = ExporterFactory {
             let paths =
                 config.render_paths(pipeline.core_id(), pipeline.deployment_generation())?;
             let exporter = FileExporter {
-                codecs: CodecContext::default(),
                 frame: Vec::with_capacity(config.max_frame_bytes.min(8 * 1024)),
                 config,
                 paths,
@@ -163,12 +164,14 @@ impl FileExporter {
             self.record_export_outcome(signal, Outcome::Success);
             return Ok(());
         }
-        if let Err(error) = encode_payload(
-            pdata.payload_ref(),
-            &mut self.codecs,
-            &mut self.frame,
-            self.config.max_frame_bytes,
-        ) {
+        self.frame.clear();
+        let view = effect_handler
+            .view(pdata.payload_ref(), Default::default())
+            .await
+            .map_err(|error| EncodeFailure::View(error.to_string()));
+        if let Err(error) =
+            view.and_then(|view| encode_payload(view, &mut self.frame, self.config.max_frame_bytes))
+        {
             self.record_export_outcome(signal, Outcome::Failure);
             let reason = match error {
                 EncodeFailure::Frame(FrameEncodeError::FrameTooLarge { .. }) => {
@@ -367,16 +370,11 @@ enum EncodeFailure {
 }
 
 fn encode_payload(
-    payload: &OtapPayload,
-    codecs: &mut CodecContext,
+    view: PayloadView<'_>,
     frame: &mut Vec<u8>,
     max_frame_bytes: usize,
 ) -> Result<(), EncodeFailure> {
-    frame.clear();
-    match payload
-        .view_with(codecs, Default::default())
-        .map_err(|error| EncodeFailure::View(error.to_string()))?
-    {
+    match view {
         PayloadView::OtlpBytes { signal, bytes } => match signal {
             SignalType::Logs => {
                 let view = RawLogsData::try_new(bytes)
@@ -421,6 +419,19 @@ const fn signal_index(signal: SignalType) -> usize {
         SignalType::Metrics => 1,
         SignalType::Traces => 2,
     }
+}
+
+#[cfg(test)]
+fn encode_payload_for_test(
+    payload: &OtapPayload,
+    frame: &mut Vec<u8>,
+    max_frame_bytes: usize,
+) -> Result<(), EncodeFailure> {
+    frame.clear();
+    let view = payload
+        .view_with(&mut CodecContext::default(), Default::default())
+        .map_err(|error| EncodeFailure::View(error.to_string()))?;
+    encode_payload(view, frame, max_frame_bytes)
 }
 
 fn exporter_error(
@@ -564,7 +575,7 @@ mod tests {
         let expected_fields = ["resourceLogs", "resourceMetrics", "resourceSpans"];
         let mut frame = Vec::new();
         for (payload, expected_field) in payloads.iter().zip(expected_fields) {
-            encode_payload(payload, &mut CodecContext::default(), &mut frame, 4096).unwrap();
+            encode_payload_for_test(payload, &mut frame, 4096).unwrap();
             let value: serde_json::Value = serde_json::from_slice(&frame).unwrap();
             assert!(value.get(expected_field).is_some());
         }
@@ -577,7 +588,7 @@ mod tests {
         let payload =
             OtapPayload::from(OtlpProtoBytes::new_from_bytes(SignalType::Logs, vec![0x80]));
         let mut frame = b"previous telemetry\n".to_vec();
-        assert!(encode_payload(&payload, &mut CodecContext::default(), &mut frame, 4096).is_err());
+        assert!(encode_payload_for_test(&payload, &mut frame, 4096).is_err());
         assert!(frame.is_empty());
     }
 

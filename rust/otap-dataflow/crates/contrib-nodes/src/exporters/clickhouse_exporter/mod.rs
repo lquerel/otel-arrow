@@ -50,7 +50,7 @@ use otel_arrow_dfe_engine::terminal_state::TerminalState;
 use otel_arrow_dfe_engine::{ConsumerEffectHandlerExtension, ExporterFactory};
 use otel_arrow_dfe_otap::OTAP_EXPORTER_FACTORIES;
 use otel_arrow_dfe_otap::metrics::ExporterExportMetrics;
-use otel_arrow_dfe_otap::pdata::OtapPdata;
+use otel_arrow_dfe_otap::pdata::{OtapPdata, PdataEffectHandlerExtension};
 #[cfg(test)]
 use otel_arrow_dfe_pdata::OtlpProtoBytes;
 use otel_arrow_dfe_pdata::error::Error as PdataError;
@@ -273,7 +273,6 @@ impl Exporter<OtapPdata> for ClickhouseExporter {
         mut inbox: ExporterInbox<OtapPdata>,
         effect_handler: EffectHandler<OtapPdata>,
     ) -> Result<TerminalState, Error> {
-        let mut codecs = otel_arrow_dfe_pdata::codec::CodecContext::default();
         let exporter_id = effect_handler.exporter_id();
         otel_info!(
             "clickhouse.exporter.start",
@@ -430,8 +429,9 @@ impl Exporter<OtapPdata> for ClickhouseExporter {
                     let write_batches = if let Some(batches) = direct_otlp_batches {
                         batches
                     } else {
-                        let mut arrow_records: OtapArrowRecords = match payload
-                            .try_into_otap_with(&mut codecs, Default::default())
+                        let mut arrow_records: OtapArrowRecords = match effect_handler
+                            .try_payload_into_otap(payload, Default::default())
+                            .await
                         {
                             Ok(arrow_records) => arrow_records,
                             Err(e) => {

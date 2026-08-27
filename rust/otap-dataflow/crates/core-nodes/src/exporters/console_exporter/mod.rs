@@ -29,8 +29,7 @@ use otel_arrow_dfe_engine::node::NodeId;
 use otel_arrow_dfe_engine::terminal_state::TerminalState;
 use otel_arrow_dfe_engine::{ConsumerEffectHandlerExtension, ExporterFactory};
 use otel_arrow_dfe_otap::OTAP_EXPORTER_FACTORIES;
-use otel_arrow_dfe_otap::pdata::OtapPdata;
-use otel_arrow_dfe_pdata::codec::CodecContext;
+use otel_arrow_dfe_otap::pdata::{OtapPdata, PdataEffectHandlerExtension};
 use otel_arrow_dfe_pdata::views::otap::{OtapLogsView, OtapMetricsView};
 use otel_arrow_dfe_pdata::views::otlp::bytes::logs::RawLogsData;
 use otel_arrow_dfe_pdata::views::otlp::bytes::metrics::RawMetricsData;
@@ -200,7 +199,6 @@ const fn default_record_json_scope() -> bool {
 
 /// Console exporter that prints OTLP data to stdout.
 pub struct ConsoleExporter {
-    codecs: CodecContext,
     formatter: ConsoleFormatter,
     metrics: ConsoleExporterMetrics,
 }
@@ -220,11 +218,7 @@ impl ConsoleExporter {
                 ConsoleFormatter::RecordJson(RecordJsonFormatter::new(config.record_json))
             }
         };
-        Self {
-            codecs: CodecContext::default(),
-            formatter,
-            metrics,
-        }
+        Self { formatter, metrics }
     }
 
     fn terminal_state(&mut self, deadline: Instant) -> TerminalState {
@@ -281,7 +275,7 @@ impl Exporter<OtapPdata> for ConsoleExporter {
                 Message::PData(data) => {
                     let export_start = Instant::now();
                     let signal = data.signal_type();
-                    match self.export(data.payload_ref()).await {
+                    match self.export(data.payload_ref(), &effect_handler).await {
                         Ok(()) => self.metrics.record_success(signal, export_start.elapsed()),
                         Err(error_type) => {
                             self.metrics
@@ -299,17 +293,26 @@ impl Exporter<OtapPdata> for ConsoleExporter {
 }
 
 impl ConsoleExporter {
-    async fn export(&mut self, payload: &OtapPayload) -> Result<(), ConsoleExportErrorType> {
+    async fn export(
+        &mut self,
+        payload: &OtapPayload,
+        effect_handler: &EffectHandler<OtapPdata>,
+    ) -> Result<(), ConsoleExportErrorType> {
         match payload.signal_type() {
-            SignalType::Logs => self.export_logs(payload).await,
+            SignalType::Logs => self.export_logs(payload, effect_handler).await,
             SignalType::Traces => self.unsupported_signal("traces"),
-            SignalType::Metrics => self.export_metrics(payload).await,
+            SignalType::Metrics => self.export_metrics(payload, effect_handler).await,
         }
     }
 
-    async fn export_logs(&mut self, payload: &OtapPayload) -> Result<(), ConsoleExportErrorType> {
-        match payload
-            .view_with(&mut self.codecs, Default::default())
+    async fn export_logs(
+        &mut self,
+        payload: &OtapPayload,
+        effect_handler: &EffectHandler<OtapPdata>,
+    ) -> Result<(), ConsoleExportErrorType> {
+        match effect_handler
+            .view(payload, Default::default())
+            .await
             .map_err(|error| {
                 otel_error!("console.pdata.decode_failed", error = %error);
                 ConsoleExportErrorType::OtapViewCreation
@@ -336,13 +339,15 @@ impl ConsoleExporter {
     async fn export_metrics(
         &mut self,
         payload: &OtapPayload,
+        effect_handler: &EffectHandler<OtapPdata>,
     ) -> Result<(), ConsoleExportErrorType> {
         if !self.formatter.supports_metrics() {
             return self.unsupported_signal("metrics");
         }
 
-        match payload
-            .view_with(&mut self.codecs, Default::default())
+        match effect_handler
+            .view(payload, Default::default())
+            .await
             .map_err(|error| {
                 otel_error!("console.pdata.decode_failed", error = %error);
                 ConsoleExportErrorType::OtapViewCreation

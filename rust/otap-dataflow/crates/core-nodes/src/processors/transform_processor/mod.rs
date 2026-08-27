@@ -39,7 +39,7 @@ use otel_arrow_dfe_engine::{
 use otel_arrow_dfe_otap::{
     OTAP_PROCESSOR_FACTORIES,
     accessory::{context::split_contexts::Contexts, slots::Key},
-    pdata::{Context, OtapPdata},
+    pdata::{Context, OtapPdata, PdataEffectHandlerExtension},
 };
 use otel_arrow_dfe_pdata::{
     OtapArrowRecords, OtapPayload, otap::transform::sanitize::sanitize_otap_batch,
@@ -70,7 +70,6 @@ pub const TRANSFORM_PROCESSOR_URN: &str = "urn:otel:processor:transform";
 
 /// Transform Processor
 pub struct TransformProcessor {
-    codecs: otel_arrow_dfe_pdata::codec::CodecContext,
     execution_state: ExecutionState,
     transforms: Vec<Transform>,
     contexts: Contexts,
@@ -240,7 +239,6 @@ impl TransformProcessor {
         execution_state.set_extension::<RouterExtType>(Box::new(RouterImpl::new()));
 
         Ok(Self {
-            codecs: Default::default(),
             transforms,
             metrics: TransformMetrics::register(pipeline_ctx, language),
             contexts: Contexts::new(config.inbound_request_limit, config.outbound_request_limit),
@@ -568,21 +566,23 @@ impl Processor<OtapPdata> for TransformProcessor {
                 // batch.
                 self.execution_state.reset_counters();
 
-                let arrow_pdata =
-                    match pdata.try_into_otap_with(&mut self.codecs, Default::default()) {
-                        Ok(arrow_pdata) => arrow_pdata,
-                        Err(error) => {
-                            self.metrics.record_failure(
-                                pdata_signal_type,
-                                TransformErrorType::PayloadConversion,
-                            );
-                            let (error, pdata) = error.into_parts();
-                            effect_handler
-                                .notify_nack(NackMsg::new_permanent(error.to_string(), pdata))
-                                .await?;
-                            return Ok(());
-                        }
-                    };
+                let arrow_pdata = match effect_handler
+                    .try_into_otap(pdata, Default::default())
+                    .await
+                {
+                    Ok(arrow_pdata) => arrow_pdata,
+                    Err(error) => {
+                        self.metrics.record_failure(
+                            pdata_signal_type,
+                            TransformErrorType::PayloadConversion,
+                        );
+                        let (error, pdata) = error.into_parts();
+                        effect_handler
+                            .notify_nack(NackMsg::new_permanent(error.to_string(), pdata))
+                            .await?;
+                        return Ok(());
+                    }
+                };
                 let (context, records) = arrow_pdata.into_parts();
                 let mut records = Some(records);
 
