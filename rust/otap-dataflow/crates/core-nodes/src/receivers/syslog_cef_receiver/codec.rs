@@ -1,0 +1,502 @@
+// Copyright The OpenTelemetry Authors
+// SPDX-License-Identifier: Apache-2.0
+
+//! Independently decodable batches of original syslog and CEF messages.
+//!
+//! `syslog-cef-batch-v1` uses this big-endian framing:
+//!
+//! ```text
+//! "SLG1" | item_count:u32 | repeated {
+//!     observed_time_unix_nano:i64 | message_length:u32 | message_bytes
+//! }
+//! ```
+//!
+//! Timestamps are captured when a receiver batch is sealed. Native batching
+//! copies complete frames without parsing their syslog contents.
+
+use std::num::NonZeroUsize;
+
+use bytes::{BufMut, Bytes, BytesMut};
+use linkme::distributed_slice;
+use otel_arrow_dfe_config::{ConversionOptions, SignalType};
+use otel_arrow_dfe_pdata::OtapArrowRecords;
+use otel_arrow_dfe_pdata::batching::{BatchProfile, BatchSizer, BatchingSupport, CodecBatches};
+use otel_arrow_dfe_pdata::codec::{
+    PDATA_CODEC_FACTORIES, PdataCodec, PdataCodecMetadata, PdataCodecRegistration, PdataEncoding,
+};
+use otel_arrow_dfe_pdata::error::Error;
+
+use super::arrow_records_encoder::ArrowRecordsBuilder;
+use super::parser;
+
+/// Stable identity of the versioned syslog/CEF batch representation.
+pub const SYSLOG_CEF_ENCODING: PdataEncoding = PdataEncoding::new("syslog-cef-batch-v1");
+
+const MAGIC: &[u8; 4] = b"SLG1";
+const BATCH_HEADER_LEN: usize = 8;
+const FRAME_HEADER_LEN: usize = 12;
+const MAX_NATIVE_LOGS: usize = 65_535;
+
+const SYSLOG_BATCH_PROFILE: BatchProfile = BatchProfile {
+    min_size: NonZeroUsize::new(8192),
+    max_size: NonZeroUsize::new(MAX_NATIVE_LOGS),
+    sizer: BatchSizer::Items,
+    max_split_fragments: None,
+    max_split_overhead_bytes: None,
+    max_split_fragments_per_flush: None,
+};
+
+/// Accumulates framed syslog messages without parsing them.
+pub(crate) struct SyslogBatchBuilder {
+    bytes: BytesMut,
+    item_count: u32,
+}
+
+impl Default for SyslogBatchBuilder {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+impl SyslogBatchBuilder {
+    /// Creates an empty batch with space for its header.
+    #[must_use]
+    pub(crate) fn new() -> Self {
+        let mut bytes = BytesMut::with_capacity(BATCH_HEADER_LEN);
+        bytes.extend_from_slice(MAGIC);
+        bytes.put_u32(0);
+        Self {
+            bytes,
+            item_count: 0,
+        }
+    }
+
+    /// Number of framed messages currently buffered.
+    #[must_use]
+    pub(crate) const fn len(&self) -> u32 {
+        self.item_count
+    }
+
+    /// Returns true when no messages have been appended.
+    #[must_use]
+    pub(crate) const fn is_empty(&self) -> bool {
+        self.item_count == 0
+    }
+
+    /// Copies one socket-backed message into the independent batch buffer.
+    pub(crate) fn append(&mut self, message: &[u8]) -> Result<(), Error> {
+        let message_len = u32::try_from(message.len())
+            .map_err(|_| format_error("syslog message length exceeds u32"))?;
+        self.item_count = self
+            .item_count
+            .checked_add(1)
+            .ok_or_else(|| format_error("syslog batch item count exceeds u32"))?;
+        self.bytes.put_i64(0);
+        self.bytes.put_u32(message_len);
+        self.bytes.extend_from_slice(message);
+        Ok(())
+    }
+
+    /// Seals a non-empty batch and stamps every message with the flush time.
+    pub(crate) fn finish(mut self, observed_time: i64) -> Result<(Bytes, usize), Error> {
+        if self.is_empty() {
+            return Err(format_error("cannot seal an empty syslog batch"));
+        }
+        self.bytes[4..BATCH_HEADER_LEN].copy_from_slice(&self.item_count.to_be_bytes());
+        let mut cursor = BATCH_HEADER_LEN;
+        for _ in 0..self.item_count {
+            self.bytes[cursor..cursor + 8].copy_from_slice(&observed_time.to_be_bytes());
+            let message_len = read_u32(&self.bytes[cursor + 8..cursor + FRAME_HEADER_LEN]) as usize;
+            cursor += FRAME_HEADER_LEN + message_len;
+        }
+        let item_count = self.item_count as usize;
+        Ok((self.bytes.freeze(), item_count))
+    }
+}
+
+#[derive(Clone, Copy)]
+struct Frame<'a> {
+    observed_time: i64,
+    message: &'a [u8],
+    encoded: &'a [u8],
+}
+
+struct FrameIter<'a> {
+    bytes: &'a [u8],
+    cursor: usize,
+    remaining: usize,
+}
+
+impl<'a> Iterator for FrameIter<'a> {
+    type Item = Frame<'a>;
+
+    fn next(&mut self) -> Option<Self::Item> {
+        if self.remaining == 0 {
+            return None;
+        }
+        let start = self.cursor;
+        let observed_time = read_i64(&self.bytes[start..start + 8]);
+        let message_len = read_u32(&self.bytes[start + 8..start + FRAME_HEADER_LEN]) as usize;
+        let message_start = start + FRAME_HEADER_LEN;
+        let end = message_start + message_len;
+        self.cursor = end;
+        self.remaining -= 1;
+        Some(Frame {
+            observed_time,
+            message: &self.bytes[message_start..end],
+            encoded: &self.bytes[start..end],
+        })
+    }
+}
+
+fn validated_frames(bytes: &[u8]) -> Result<(usize, FrameIter<'_>), Error> {
+    if bytes.len() < BATCH_HEADER_LEN {
+        return Err(format_error("truncated syslog batch header"));
+    }
+    if &bytes[..4] != MAGIC {
+        return Err(format_error("invalid syslog batch magic"));
+    }
+    let count = read_u32(&bytes[4..BATCH_HEADER_LEN]) as usize;
+    if count == 0 {
+        return Err(format_error("empty syslog batches are invalid"));
+    }
+    let minimum_len = count
+        .checked_mul(FRAME_HEADER_LEN)
+        .and_then(|len| len.checked_add(BATCH_HEADER_LEN))
+        .ok_or_else(|| format_error("syslog batch length overflow"))?;
+    if minimum_len > bytes.len() {
+        return Err(format_error("syslog batch frame count exceeds its length"));
+    }
+
+    let mut cursor = BATCH_HEADER_LEN;
+    for _ in 0..count {
+        let header_end = cursor
+            .checked_add(FRAME_HEADER_LEN)
+            .ok_or_else(|| format_error("syslog frame header overflow"))?;
+        if header_end > bytes.len() {
+            return Err(format_error("truncated syslog frame header"));
+        }
+        let message_len = read_u32(&bytes[cursor + 8..header_end]) as usize;
+        cursor = header_end
+            .checked_add(message_len)
+            .ok_or_else(|| format_error("syslog frame length overflow"))?;
+        if cursor > bytes.len() {
+            return Err(format_error("truncated syslog frame body"));
+        }
+    }
+    if cursor != bytes.len() {
+        return Err(format_error("trailing bytes after syslog batch frames"));
+    }
+    Ok((
+        count,
+        FrameIter {
+            bytes,
+            cursor: BATCH_HEADER_LEN,
+            remaining: count,
+        },
+    ))
+}
+
+const fn read_u32(bytes: &[u8]) -> u32 {
+    u32::from_be_bytes([bytes[0], bytes[1], bytes[2], bytes[3]])
+}
+
+const fn read_i64(bytes: &[u8]) -> i64 {
+    i64::from_be_bytes([
+        bytes[0], bytes[1], bytes[2], bytes[3], bytes[4], bytes[5], bytes[6], bytes[7],
+    ])
+}
+
+fn format_error(reason: impl Into<String>) -> Error {
+    Error::PdataCodec {
+        encoding: SYSLOG_CEF_ENCODING,
+        reason: reason.into(),
+    }
+}
+
+#[derive(Default)]
+struct SyslogCefCodec;
+
+impl PdataCodec for SyslogCefCodec {
+    fn decode(
+        &mut self,
+        signal: SignalType,
+        bytes: Bytes,
+        _options: ConversionOptions,
+    ) -> Result<OtapArrowRecords, otel_arrow_dfe_pdata::encode::Error> {
+        if signal != SignalType::Logs {
+            return Err(format_error(format!("unsupported signal {signal:?}")).into());
+        }
+        let (count, frames) = validated_frames(&bytes)?;
+        if count > MAX_NATIVE_LOGS {
+            return Err(format_error("syslog batch exceeds native log ID capacity").into());
+        }
+        let mut builder = ArrowRecordsBuilder::new();
+        for frame in frames {
+            let parsed = parser::parse(frame.message)
+                .map_err(|error| format_error(format!("invalid syslog message: {error:?}")))?;
+            builder.append_syslog_with_observed_time(parsed, frame.observed_time);
+        }
+        builder.build()
+    }
+
+    fn encode(
+        &mut self,
+        _records: OtapArrowRecords,
+        _options: ConversionOptions,
+    ) -> Result<Bytes, Error> {
+        Err(format_error(
+            "encoding native OTAP as original syslog is unsupported",
+        ))
+    }
+
+    fn measure(
+        &mut self,
+        signal: SignalType,
+        bytes: Bytes,
+        sizer: BatchSizer,
+    ) -> Result<usize, Error> {
+        if signal != SignalType::Logs {
+            return Err(format_error(format!("unsupported signal {signal:?}")));
+        }
+        match sizer {
+            BatchSizer::Items => validated_frames(&bytes).map(|(count, _)| count),
+            BatchSizer::Bytes => Ok(bytes.len()),
+            BatchSizer::Requests => Err(format_error("request sizing is unsupported")),
+        }
+    }
+
+    fn batch(
+        &mut self,
+        signal: SignalType,
+        profile: &BatchProfile,
+        inputs: Vec<Bytes>,
+    ) -> Result<CodecBatches, Error> {
+        if signal != SignalType::Logs {
+            return Err(format_error(format!("unsupported signal {signal:?}")));
+        }
+        if profile.sizer != BatchSizer::Items {
+            return Err(format_error("syslog native batching supports items only"));
+        }
+        let max_items = profile
+            .max_size
+            .map_or(MAX_NATIVE_LOGS, |size| size.get().min(MAX_NATIVE_LOGS));
+        let mut outputs = Vec::new();
+        let mut output = RawBatchWriter::new();
+        for input in inputs {
+            let (_, frames) = validated_frames(&input)?;
+            for frame in frames {
+                if output.len() == max_items {
+                    outputs.push(output.finish()?);
+                    output = RawBatchWriter::new();
+                }
+                output.append(frame.encoded)?;
+            }
+        }
+        if !output.is_empty() {
+            outputs.push(output.finish()?);
+        }
+        Ok(CodecBatches {
+            batches: outputs,
+            budget_fallbacks: 0,
+        })
+    }
+}
+
+struct RawBatchWriter {
+    bytes: BytesMut,
+    count: u32,
+}
+
+impl RawBatchWriter {
+    fn new() -> Self {
+        let mut bytes = BytesMut::with_capacity(BATCH_HEADER_LEN);
+        bytes.extend_from_slice(MAGIC);
+        bytes.put_u32(0);
+        Self { bytes, count: 0 }
+    }
+
+    const fn len(&self) -> usize {
+        self.count as usize
+    }
+
+    const fn is_empty(&self) -> bool {
+        self.count == 0
+    }
+
+    fn append(&mut self, frame: &[u8]) -> Result<(), Error> {
+        self.count = self
+            .count
+            .checked_add(1)
+            .ok_or_else(|| format_error("syslog batch item count exceeds u32"))?;
+        self.bytes.extend_from_slice(frame);
+        Ok(())
+    }
+
+    fn finish(mut self) -> Result<(Bytes, usize), Error> {
+        if self.is_empty() {
+            return Err(format_error("cannot finish an empty syslog batch"));
+        }
+        self.bytes[4..BATCH_HEADER_LEN].copy_from_slice(&self.count.to_be_bytes());
+        let count = self.count as usize;
+        Ok((self.bytes.freeze(), count))
+    }
+}
+
+fn count_items(signal: SignalType, bytes: &[u8]) -> Option<usize> {
+    (signal == SignalType::Logs)
+        .then(|| validated_frames(bytes).ok().map(|(count, _)| count))
+        .flatten()
+}
+
+static SYSLOG_CEF_METADATA: PdataCodecMetadata = PdataCodecMetadata {
+    encoding: SYSLOG_CEF_ENCODING,
+    signals: &[SignalType::Logs],
+    format_version: Some("1"),
+    compression: None,
+    can_decode: true,
+    can_encode: false,
+    batching: Some(BatchingSupport {
+        sizers: &[BatchSizer::Items],
+        default_profile: SYSLOG_BATCH_PROFILE,
+    }),
+};
+
+#[allow(unsafe_code)]
+#[distributed_slice(PDATA_CODEC_FACTORIES)]
+static SYSLOG_CEF_CODEC: PdataCodecRegistration = PdataCodecRegistration {
+    metadata: &SYSLOG_CEF_METADATA,
+    create: || Box::<SyslogCefCodec>::default(),
+    count_items: Some(count_items),
+};
+
+#[cfg(test)]
+mod tests {
+    use arrow::array::TimestampNanosecondArray;
+    use otel_arrow_dfe_pdata::OtapPayload;
+    use otel_arrow_dfe_pdata::codec::{CodecDirection, resolve};
+    use otel_arrow_dfe_pdata::proto::opentelemetry::arrow::v1::ArrowPayloadType;
+
+    use super::*;
+
+    fn batch(messages: &[&[u8]], observed_time: i64) -> Bytes {
+        let mut builder = SyslogBatchBuilder::new();
+        for message in messages {
+            builder.append(message).expect("append test message");
+        }
+        builder.finish(observed_time).expect("seal test batch").0
+    }
+
+    /// Scenario: A receiver seals multiple original messages into one encoded batch.
+    /// Guarantees: Framing preserves byte order, item count, and the flush timestamp.
+    #[test]
+    fn framing_round_trip_preserves_messages_and_timestamp() {
+        let bytes = batch(&[b"first", b"second"], 42);
+        let (count, frames) = validated_frames(&bytes).expect("valid framed batch");
+        let frames = frames.collect::<Vec<_>>();
+
+        assert_eq!(count, 2);
+        assert_eq!(frames[0].message, b"first");
+        assert_eq!(frames[1].message, b"second");
+        assert!(frames.iter().all(|frame| frame.observed_time == 42));
+    }
+
+    /// Scenario: Encoded framing is malformed or contains trailing data.
+    /// Guarantees: Stateless counting and decoding reject the batch without panicking.
+    #[test]
+    fn malformed_framing_is_rejected() {
+        let mut truncated = batch(&[b"message"], 7).to_vec();
+        let _ = truncated.pop();
+        assert!(validated_frames(&truncated).is_err());
+
+        let mut trailing = batch(&[b"message"], 7).to_vec();
+        trailing.push(0);
+        assert!(validated_frames(&trailing).is_err());
+        assert_eq!(count_items(SignalType::Logs, &trailing), None);
+        assert_eq!(count_items(SignalType::Metrics, &trailing), None);
+    }
+
+    /// Scenario: A native consumer requests OTAP logs from a mixed syslog and CEF batch.
+    /// Guarantees: Lazy decoding parses every frame and produces one Arrow log per item.
+    #[test]
+    fn decode_mixed_messages_to_logs() {
+        let bytes = batch(
+            &[
+                b"<34>1 2024-01-15T10:30:45.123Z host app - ID1 message",
+                b"<34>Oct 11 22:14:15 host app[123]: message",
+                b"CEF:0|Vendor|Product|1.0|100|Event|5|src=10.0.0.1",
+            ],
+            123,
+        );
+        let records = SyslogCefCodec
+            .decode(SignalType::Logs, bytes, Default::default())
+            .expect("decode mixed batch");
+        let logs = records
+            .get(ArrowPayloadType::Logs)
+            .expect("logs record batch");
+        let observed_times = logs
+            .column_by_name("observed_time_unix_nano")
+            .expect("observed time column")
+            .as_any()
+            .downcast_ref::<TimestampNanosecondArray>()
+            .expect("timestamp nanosecond array");
+
+        assert_eq!(logs.num_rows(), 3);
+        assert!((0..3).all(|index| observed_times.value(index) == 123));
+    }
+
+    /// Scenario: Flow metrics inspect an admitted syslog batch before codec creation.
+    /// Guarantees: The registration supplies an exact stateless count while admission stays lazy.
+    #[test]
+    fn registration_counts_admitted_items_without_decode() {
+        let bytes = batch(&[b"first", b"second", b"third"], 5);
+        let codec = resolve(
+            &SYSLOG_CEF_ENCODING,
+            SignalType::Logs,
+            CodecDirection::Decode,
+        )
+        .expect("resolve syslog codec");
+        let mut payload: OtapPayload = codec
+            .admit(SignalType::Logs, bytes)
+            .expect("admit framed bytes")
+            .into();
+
+        assert_eq!(payload.known_item_count(), None);
+        assert_eq!(payload.num_items(), 3);
+        assert_eq!(payload.known_item_count(), Some(3));
+    }
+
+    /// Scenario: Native batching combines inputs and splits at an item limit.
+    /// Guarantees: Output weights, order, original bytes, and observed timestamps are preserved.
+    #[test]
+    fn native_batching_splits_by_item_count() {
+        let first = batch(&[b"one", b"two"], 11);
+        let second = batch(&[b"three"], 22);
+        let profile = BatchProfile {
+            min_size: NonZeroUsize::new(2),
+            max_size: NonZeroUsize::new(2),
+            sizer: BatchSizer::Items,
+            max_split_fragments: None,
+            max_split_overhead_bytes: None,
+            max_split_fragments_per_flush: None,
+        };
+
+        let output = SyslogCefCodec
+            .batch(SignalType::Logs, &profile, vec![first, second])
+            .expect("batch encoded syslog");
+
+        assert_eq!(output.budget_fallbacks, 0);
+        assert_eq!(output.batches.len(), 2);
+        assert_eq!(output.batches[0].1, 2);
+        assert_eq!(output.batches[1].1, 1);
+        let (_, first_frames) = validated_frames(&output.batches[0].0).expect("first output");
+        let (_, second_frames) = validated_frames(&output.batches[1].0).expect("second output");
+        let first_frames = first_frames.collect::<Vec<_>>();
+        let second_frames = second_frames.collect::<Vec<_>>();
+        assert_eq!(first_frames[0].message, b"one");
+        assert_eq!(first_frames[1].message, b"two");
+        assert!(first_frames.iter().all(|frame| frame.observed_time == 11));
+        assert_eq!(second_frames[0].message, b"three");
+        assert_eq!(second_frames[0].observed_time, 22);
+    }
+}
