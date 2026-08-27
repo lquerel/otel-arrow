@@ -198,6 +198,7 @@ fn bench_receiver_pdata_paths(c: &mut Criterion) {
     const BATCH_SIZE: usize = 100;
     let messages = vec![RFC5424_MSG; BATCH_SIZE];
     let mut codec = SyslogCodecBench::new();
+    let framed = codec.frame(&messages);
     let _ = codec.admit_and_materialize(&messages);
 
     let mut group = c.benchmark_group("receiver_pdata_path");
@@ -217,6 +218,14 @@ fn bench_receiver_pdata_paths(c: &mut Criterion) {
 
     let _ = group.bench_function("codec_admit_encoded_100_msgs", |b| {
         b.iter(|| black_box(codec.admit(black_box(&messages))));
+    });
+
+    let _ = group.bench_function("codec_frame_100_msgs", |b| {
+        b.iter(|| black_box(codec.frame(black_box(&messages))));
+    });
+
+    let _ = group.bench_function("codec_materialize_preframed_100_msgs", |b| {
+        b.iter(|| black_box(codec.materialize_framed(black_box(&framed), BATCH_SIZE)));
     });
 
     let _ = group.bench_function("codec_admit_and_materialize_100_msgs", |b| {

@@ -22,16 +22,16 @@ impl PdataCodec for TestCodec {
     fn decode(
         &mut self,
         signal: SignalType,
-        bytes: Bytes,
+        bytes: &Bytes,
         options: ConversionOptions,
     ) -> Result<OtapArrowRecords, crate::encode::Error> {
         use crate::views::otlp::bytes::{
             logs::RawLogsData, metrics::RawMetricsData, traces::RawTraceData,
         };
         match signal {
-            SignalType::Logs => RawLogsData::try_new(&bytes).map(|_| ()),
-            SignalType::Metrics => RawMetricsData::try_new(&bytes).map(|_| ()),
-            SignalType::Traces => RawTraceData::try_new(&bytes).map(|_| ()),
+            SignalType::Logs => RawLogsData::try_new(bytes).map(|_| ()),
+            SignalType::Metrics => RawMetricsData::try_new(bytes).map(|_| ()),
+            SignalType::Traces => RawTraceData::try_new(bytes).map(|_| ()),
         }
         .map_err(|error| Error::Format {
             error: error.to_string(),

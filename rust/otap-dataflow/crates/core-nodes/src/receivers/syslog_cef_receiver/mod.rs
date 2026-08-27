@@ -269,7 +269,7 @@ fn drop_syslog_batch(
     if items == 0 {
         return;
     }
-    *batch_builder = SyslogBatchBuilder::new();
+    batch_builder.discard();
     metrics.borrow_mut().record_rejection(
         SyslogCefProtocol::Tcp,
         ReceiverRejectionErrorType::MemoryPressure,
@@ -312,7 +312,7 @@ fn seal_syslog_batch(
     codec: ResolvedCodec,
 ) -> Result<(OtapPdata, u64), (otel_arrow_dfe_pdata::error::Error, u64)> {
     let item_count = u64::from(batch_builder.len());
-    let builder = std::mem::take(batch_builder);
+    let builder = batch_builder.take();
     let observed_time = Utc::now().timestamp_nanos_opt().unwrap_or(0);
     let (bytes, _) = builder
         .finish(observed_time)
@@ -580,7 +580,9 @@ impl local::Receiver<OtapPdata> for SyslogCefReceiver {
                                         let mut discard_until_newline = false;
                                         let mut warned_rate_limit_drop = false;
 
-                                        let mut batch_builder = SyslogBatchBuilder::new();
+                                        let mut batch_builder = SyslogBatchBuilder::with_max_items(
+                                            usize::from(max_batch_size),
+                                        );
 
                                         let start = tokio::time::Instant::now() + max_batch_duration;
                                         let mut interval = tokio::time::interval_at(start, max_batch_duration);
@@ -881,7 +883,8 @@ impl local::Receiver<OtapPdata> for SyslogCefReceiver {
 
                 let socket = effect_handler.udp_socket(udp_config.listening_addr)?;
                 let mut buf = vec![0u8; MAX_MESSAGE_SIZE];
-                let mut batch_builder = SyslogBatchBuilder::new();
+                let mut batch_builder =
+                    SyslogBatchBuilder::with_max_items(usize::from(self.config.max_batch_size()));
 
                 let max_batch_duration = self.config.max_batch_duration();
                 let max_batch_size = self.config.max_batch_size();
@@ -1391,20 +1394,23 @@ mod tests {
     use tokio::time::{Duration, timeout};
 
     /// Scenario: Memory pressure discards a buffered encoded syslog batch.
-    /// Guarantees: Buffered items are cleared and counted as rejected without a forward.
+    /// Guarantees: Buffered items and their allocation are released and counted as rejected
+    /// without a forward.
     #[test]
     fn drop_syslog_batch_discards_records_without_downstream_send() {
         let receiver = SyslogCefReceiver::new(Config::new_tcp(
             "127.0.0.1:0".parse().expect("valid loopback address"),
         ));
-        let mut batch_builder = SyslogBatchBuilder::new();
+        let mut batch_builder = SyslogBatchBuilder::with_max_items(100);
         batch_builder
             .append(b"<34>1 2024-01-15T10:30:45.123Z host app - ID1 msg")
             .expect("append syslog line");
+        let allocated_capacity = batch_builder.capacity();
 
         drop_syslog_batch(&receiver.metrics, &mut batch_builder);
 
         assert!(batch_builder.is_empty());
+        assert!(batch_builder.capacity() < allocated_capacity);
         let m = receiver.metrics.borrow();
         assert_eq!(m.forwards_for(Outcome::Success).items.get(), 0);
         assert_eq!(m.forwards_for(Outcome::Refused).items.get(), 0);

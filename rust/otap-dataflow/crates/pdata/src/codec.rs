@@ -173,15 +173,16 @@ pub struct PdataCodecMetadata {
 
 /// Reusable synchronous codec implementation owned by a pipeline runtime.
 ///
-/// Each call must consume/produce a complete independent batch: stream-relative
+/// Each call must process/produce a complete independent batch: stream-relative
 /// dictionary deltas are not an independent encoded representation. Implementors
 /// must validate input, respect conversion options, and preserve the signal.
 pub trait PdataCodec: Send {
-    /// Converts a complete encoded batch to native OTAP.
+    /// Converts a borrowed complete encoded batch to native OTAP. Borrowing lets
+    /// the caller retain the exact input for recovery without cloning its buffer.
     fn decode(
         &mut self,
         signal: SignalType,
-        bytes: Bytes,
+        bytes: &Bytes,
         options: ConversionOptions,
     ) -> Result<OtapArrowRecords, crate::encode::Error>;
 
@@ -211,7 +212,7 @@ pub trait PdataCodec: Send {
         bytes: &'a Bytes,
         options: ConversionOptions,
     ) -> Result<PayloadView<'a>, crate::encode::Error> {
-        self.decode(signal, bytes.clone(), options)
+        self.decode(signal, bytes, options)
             .map(|records| PayloadView::OtapArrowRecords(Cow::Owned(records)))
     }
 
@@ -227,7 +228,7 @@ pub trait PdataCodec: Send {
             BatchSizer::Bytes => Ok(bytes.len()),
             BatchSizer::Items => {
                 let records = self
-                    .decode(signal, bytes, ConversionOptions::default())
+                    .decode(signal, &bytes, ConversionOptions::default())
                     .map_err(|error| Error::Format {
                         error: error.to_string(),
                     })?;
@@ -556,14 +557,14 @@ impl CodecContext {
     /// Decodes using reusable runtime-owned state and verifies the codec's signal contract.
     pub fn decode(
         &mut self,
-        encoded: EncodedPdata,
+        encoded: &EncodedPdata,
         options: ConversionOptions,
     ) -> Result<OtapArrowRecords, crate::encode::Error> {
         let codec = encoded.codec;
         let signal = encoded.signal;
         let records = self
             .instance(codec)
-            .decode(signal, encoded.bytes, options)
+            .decode(signal, &encoded.bytes, options)
             .map_err(|error| codec_error(&codec.metadata().encoding, error.to_string()))?;
         if records.signal_type() != signal {
             return Err(codec_error(
@@ -771,10 +772,10 @@ impl PdataCodec for OtlpCodec {
     fn decode(
         &mut self,
         signal: SignalType,
-        bytes: Bytes,
+        bytes: &Bytes,
         options: ConversionOptions,
     ) -> Result<OtapArrowRecords, crate::encode::Error> {
-        OtlpProtoBytes::new_from_bytes(signal, bytes).try_into_with_options(options)
+        OtlpProtoBytes::new_from_bytes(signal, bytes.clone()).try_into_with_options(options)
     }
 
     fn encode(
@@ -916,7 +917,7 @@ mod tests {
         fn decode(
             &mut self,
             signal: SignalType,
-            bytes: Bytes,
+            bytes: &Bytes,
             options: ConversionOptions,
         ) -> Result<OtapArrowRecords, crate::encode::Error> {
             DECODES.with(|count| count.set(count.get() + 1));
@@ -927,7 +928,7 @@ mod tests {
             if bytes.first() != Some(&1) {
                 return Err(codec_error(&TEST_ENCODING, "invalid test frame").into());
             }
-            self.otlp.decode(signal, bytes.slice(1..), options)
+            self.otlp.decode(signal, &bytes.slice(1..), options)
         }
 
         fn encode(
@@ -1359,16 +1360,16 @@ mod tests {
         CREATES.with(|count| count.set(0));
         let mut first = CodecContext::default();
         let mut second = CodecContext::default();
-        _ = first.decode(input.clone(), Default::default()).unwrap();
-        _ = first.decode(input.clone(), Default::default()).unwrap();
+        _ = first.decode(&input, Default::default()).unwrap();
+        _ = first.decode(&input, Default::default()).unwrap();
         let bad = input
             .codec()
             .admit(SignalType::Logs, Bytes::from_static(&[0]))
             .unwrap();
-        assert!(first.decode(bad, Default::default()).is_err());
-        _ = first.decode(input.clone(), Default::default()).unwrap();
+        assert!(first.decode(&bad, Default::default()).is_err());
+        _ = first.decode(&input, Default::default()).unwrap();
         assert_eq!(CREATES.with(Cell::get), 1);
-        _ = second.decode(input, Default::default()).unwrap();
+        _ = second.decode(&input, Default::default()).unwrap();
         assert_eq!(CREATES.with(Cell::get), 2);
     }
 
@@ -1653,7 +1654,7 @@ mod tests {
             fn decode(
                 &mut self,
                 signal: SignalType,
-                bytes: Bytes,
+                bytes: &Bytes,
                 options: ConversionOptions,
             ) -> Result<OtapArrowRecords, crate::encode::Error> {
                 OtlpCodec::default().decode(signal, bytes, options)

@@ -369,15 +369,15 @@ impl OtapPayload {
     ) -> Result<OtapArrowRecords, OtapPayloadDecodeError> {
         match self.storage {
             PayloadStorage::OtapArrowRecords { records, .. } => Ok(records),
-            PayloadStorage::Encoded(encoded) => {
-                let payload = Self::from_encoded(encoded.clone());
-                context.decode(encoded, options).map_err(|source| {
-                    OtapPayloadDecodeError(Box::new(OtapPayloadDecodeErrorInner {
+            PayloadStorage::Encoded(encoded) => match context.decode(&encoded, options) {
+                Ok(records) => Ok(records),
+                Err(source) => Err(OtapPayloadDecodeError(Box::new(
+                    OtapPayloadDecodeErrorInner {
                         source,
-                        payload,
-                    }))
-                })
-            }
+                        payload: Self::from_encoded(encoded),
+                    },
+                ))),
+            },
         }
     }
 
