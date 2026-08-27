@@ -35,6 +35,7 @@ use otel_arrow_dfe_engine::node::NodeId;
 use otel_arrow_dfe_engine::process_duration::ComputeDuration;
 use otel_arrow_dfe_engine::processor::ProcessorWrapper;
 use otel_arrow_dfe_pdata::TryIntoWithOptions;
+use otel_arrow_dfe_pdata::codec::CodecContext;
 use otel_arrow_dfe_pdata::encode::record::attributes::StrKeysAttributesRecordBatchBuilder;
 use otel_arrow_dfe_pdata::otlp::attributes::AttributeValueType;
 use otel_arrow_dfe_pdata::proto::opentelemetry::arrow::v1::ArrowPayloadType;
@@ -162,6 +163,7 @@ impl Config {
 
 /// Processor that condenses multiple attributes into a single attribute based on predefined rules.
 pub struct CondenseAttributesProcessor {
+    codecs: CodecContext,
     config: Config,
     compute_duration: ComputeDuration,
 }
@@ -216,6 +218,7 @@ impl CondenseAttributesProcessor {
     pub fn from_config(pipeline_ctx: PipelineContext, config: &Value) -> Result<Self, ConfigError> {
         let compute_duration = ComputeDuration::new(&pipeline_ctx);
         Ok(Self {
+            codecs: CodecContext::default(),
             config: Config::from_config(config)?,
             compute_duration,
         })
@@ -644,16 +647,27 @@ impl local::Processor<OtapPdata> for CondenseAttributesProcessor {
                     _ => Ok(()),
                 }
             }
-            Message::PData(pdata) => {
+            Message::PData(mut pdata) => {
                 let signal = pdata.signal_type();
-                let (context, payload) = pdata.into_parts();
-                let saved_payload = if context.may_return_payload() {
-                    payload.clone()
+                let may_return_payload = pdata.context_mut().may_return_payload();
+                let saved_payload = if may_return_payload {
+                    pdata.payload_ref().clone()
                 } else {
                     OtapPayload::empty(signal)
                 };
 
-                let mut records: OtapArrowRecords = payload.try_into_with_default()?;
+                let arrow_pdata =
+                    match pdata.try_into_otap_with(&mut self.codecs, Default::default()) {
+                        Ok(arrow_pdata) => arrow_pdata,
+                        Err(error) => {
+                            let (error, pdata) = error.into_parts();
+                            effect_handler
+                                .notify_nack(NackMsg::new_permanent(error.to_string(), pdata))
+                                .await?;
+                            return Ok(());
+                        }
+                    };
+                let (context, mut records) = arrow_pdata.into_parts();
 
                 let input_items = records.num_items() as u64;
 
@@ -988,8 +1002,9 @@ mod condense_tests {
         let mut bytes = BytesMut::new();
         input.encode(&mut bytes).expect("encode input");
         let payload: OtapPayload = OtlpProtoBytes::ExportLogsRequest(bytes.freeze()).into();
-        let mut records: OtapArrowRecords =
-            payload.try_into_with_default().expect("convert to records");
+        let mut records = payload
+            .try_into_otap_with(&mut CodecContext::default(), Default::default())
+            .expect("convert to records");
 
         let before_batch = records
             .get(ArrowPayloadType::LogAttrs)

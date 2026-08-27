@@ -12,6 +12,7 @@ use otel_arrow_dfe_engine::local::capability::auth::bearer_token_provider::Beare
 use otel_arrow_dfe_engine::local::exporter::{EffectHandler, Exporter};
 use otel_arrow_dfe_engine::message::{ExporterInbox, Message};
 use otel_arrow_dfe_engine::terminal_state::TerminalState;
+#[cfg(test)]
 use otel_arrow_dfe_pdata::otlp::OtlpProtoBytes;
 use otel_arrow_dfe_pdata::views::otap::OtapLogsView;
 use otel_arrow_dfe_pdata::views::otlp::bytes::logs::RawLogsData;
@@ -56,6 +57,7 @@ const AZURE_MONITOR_BEARER_AUTH_EVENTS: BearerAuthEvents = BearerAuthEvents {
 
 /// Azure Monitor exporter.
 pub struct AzureMonitorExporter {
+    codecs: otel_arrow_dfe_pdata::codec::CodecContext,
     config: Config,
     transformer: Transformer,
     gzip_batcher: GzipBatcher,
@@ -104,6 +106,7 @@ impl AzureMonitorExporter {
         };
 
         Ok(Self {
+            codecs: otel_arrow_dfe_pdata::codec::CodecContext::default(),
             config,
             transformer,
             gzip_batcher,
@@ -456,7 +459,7 @@ impl AzureMonitorExporter {
                 *msg_id += 1;
                 let (context, payload) = pdata.into_parts();
 
-                let view = match payload.view(Default::default()) {
+                let view = match payload.view_with(&mut self.codecs, Default::default()) {
                     Ok(view) => view,
                     Err(error) => {
                         effect_handler
@@ -489,13 +492,12 @@ impl AzureMonitorExporter {
                             None
                         }
                     },
-                    PayloadView::OtlpBytes(otlp_bytes) => match otlp_bytes {
-                        OtlpProtoBytes::ExportLogsRequest(bytes) => {
-                            let logs_view = RawLogsData::new(bytes.as_ref());
+                    PayloadView::OtlpBytes { signal, bytes } => match signal {
+                        SignalType::Logs => {
+                            let logs_view = RawLogsData::new(bytes);
                             Some(self.transformer.convert_to_log_analytics(&logs_view))
                         }
-                        OtlpProtoBytes::ExportMetricsRequest(_)
-                        | OtlpProtoBytes::ExportTracesRequest(_) => {
+                        SignalType::Metrics | SignalType::Traces => {
                             otel_warn!(
                                 "azure_monitor_exporter.message.unsupported_signal",
                                 signal = "metrics_or_traces",

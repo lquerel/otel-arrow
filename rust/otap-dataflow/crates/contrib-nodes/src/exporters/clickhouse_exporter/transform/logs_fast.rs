@@ -11,7 +11,7 @@
 //! `UInt16` when the corresponding resource, scope, or log attribute payload is present. Missing
 //! optional columns and attribute payloads do not prevent fast-path use.
 //!
-//! The fast path is not attempted for raw OTLP protobuf (`SignalFormat::OtlpBytes`), traces, or
+//! The fast path is not attempted for raw OTLP protobuf (`SignalFormat::Encoded`), traces, or
 //! metrics; those inputs use the generic transformation plan directly. If an OTAP logs batch is
 //! eligible for an attempt but has an unsupported layout, this transformer returns
 //! [`LogsFastTransform::NotApplicable`] and the caller falls back to the generic plan.

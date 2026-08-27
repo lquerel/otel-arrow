@@ -993,7 +993,6 @@ mod multi_plus_single_tests {
 mod realistic_otap_tests {
     #![allow(unused_results)]
 
-    use otel_arrow_dfe_pdata::TryIntoWithOptions;
     use std::collections::HashMap;
 
     use arrow::array::{Array, ListArray, MapArray, RecordBatch, StringArray, UInt64Array};
@@ -1033,7 +1032,10 @@ mod realistic_otap_tests {
         request.encode(&mut buf).expect("encode OTLP logs request");
         let payload: OtapPayload = OtlpProtoBytes::ExportLogsRequest(Bytes::from(buf)).into();
         payload
-            .try_into_with_default()
+            .try_into_otap_with(
+                &mut otel_arrow_dfe_pdata::codec::CodecContext::default(),
+                Default::default(),
+            )
             .expect("convert OTLP logs to OTAP Arrow")
     }
 
@@ -1044,7 +1046,10 @@ mod realistic_otap_tests {
             .expect("encode OTLP traces request");
         let payload: OtapPayload = OtlpProtoBytes::ExportTracesRequest(Bytes::from(buf)).into();
         payload
-            .try_into_with_default()
+            .try_into_otap_with(
+                &mut otel_arrow_dfe_pdata::codec::CodecContext::default(),
+                Default::default(),
+            )
             .expect("convert OTLP traces to OTAP Arrow")
     }
 

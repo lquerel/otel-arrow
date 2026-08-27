@@ -93,6 +93,7 @@ use otel_arrow_dfe_otap::OTAP_PROCESSOR_FACTORIES;
 use otel_arrow_dfe_otap::pdata::OtapPdata;
 use otel_arrow_dfe_pdata::PayloadView;
 use otel_arrow_dfe_pdata::TryFromWithOptions;
+use otel_arrow_dfe_pdata::codec::CodecContext;
 use otel_arrow_dfe_pdata::otlp::OtlpProtoBytes;
 use otel_arrow_dfe_pdata::views::otap::OtapLogsView;
 use otel_arrow_dfe_pdata::views::otlp::bytes::logs::RawLogsData;
@@ -375,6 +376,7 @@ enum SelectedRouteKind {
 /// The ContentRouter processor routes messages to output ports based on
 /// a resource attribute value.
 pub struct ContentRouter {
+    codecs: CodecContext,
     /// The source and key used to extract the routing value.
     routing_key: RoutingKeyExpr,
     /// Normalized routes: attribute value -> output port name.
@@ -396,6 +398,7 @@ impl ContentRouter {
         let routes = config.normalized_routes();
         Self {
             routing_key: config.routing_key,
+            codecs: CodecContext::default(),
             routes,
             default_output: config.default_output,
             case_sensitive: config.case_sensitive,
@@ -564,30 +567,30 @@ impl ContentRouter {
     }
 
     /// Resolves the output port for a given message payload.
-    fn resolve_route(&self, pdata: &OtapPdata) -> RouteResolution {
+    fn resolve_route(&mut self, pdata: &OtapPdata) -> RouteResolution {
         let signal_type = pdata.signal_type();
 
-        let view = match pdata.payload_ref().view(Default::default()) {
+        let view = match pdata
+            .payload_ref()
+            .view_with(&mut self.codecs, Default::default())
+        {
             Ok(view) => view,
             Err(_) => return RouteResolution::ConversionError,
         };
         match view {
-            PayloadView::OtlpBytes(otlp_bytes) => match (signal_type, otlp_bytes) {
-                (SignalType::Logs, OtlpProtoBytes::ExportLogsRequest(bytes)) => {
-                    let data = RawLogsData::new(bytes.as_ref());
+            PayloadView::OtlpBytes { signal, bytes } => match signal {
+                SignalType::Logs => {
+                    let data = RawLogsData::new(bytes);
                     self.resolve_logs_route(&data)
                 }
-                (SignalType::Metrics, OtlpProtoBytes::ExportMetricsRequest(bytes)) => {
-                    let data = RawMetricsData::new(bytes.as_ref());
+                SignalType::Metrics => {
+                    let data = RawMetricsData::new(bytes);
                     self.resolve_metrics_route(&data)
                 }
-                (SignalType::Traces, OtlpProtoBytes::ExportTracesRequest(bytes)) => {
-                    let data = RawTraceData::new(bytes.as_ref());
+                SignalType::Traces => {
+                    let data = RawTraceData::new(bytes);
                     self.resolve_traces_route(&data)
                 }
-                // Defensive: signal_type/payload mismatch cannot occur for OtlpBytes
-                // since signal_type() is derived from the OtlpProtoBytes variant itself.
-                _ => RouteResolution::ConversionError,
             },
             PayloadView::OtapArrowRecords(arrow_records) => {
                 match signal_type {

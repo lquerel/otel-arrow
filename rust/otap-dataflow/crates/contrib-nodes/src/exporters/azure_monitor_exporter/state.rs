@@ -184,6 +184,8 @@ mod tests {
         assert!(state.msg_to_data.contains_key(&msg_id));
     }
 
+    /// Scenario: A completed message has no remaining batches, or still owns an active batch.
+    /// Guarantees: Only orphaned messages are removed, and their encoded payload bytes are returned intact.
     #[test]
     fn test_delete_msg_data_if_orphaned() {
         let mut state = AzureMonitorExporterState::new();
@@ -196,8 +198,8 @@ mod tests {
         // Verify the payload matches
         let (_, payload) = removed.unwrap();
         match payload.into_data() {
-            PayloadData::OtlpBytes(OtlpProtoBytes::ExportLogsRequest(bytes)) => {
-                assert_eq!(bytes.as_ref(), b"test");
+            PayloadData::Encoded(encoded) => {
+                assert_eq!(encoded.bytes().as_ref(), b"test");
             }
             _ => panic!("Expected OtlpBytes::ExportLogsRequest"),
         }
@@ -212,6 +214,8 @@ mod tests {
         assert!(state.msg_to_data.contains_key(&msg_id));
     }
 
+    /// Scenario: An orphaned message contains an empty encoded payload.
+    /// Guarantees: Removing the orphan preserves an empty payload without retaining message state.
     #[test]
     fn test_delete_msg_data_if_orphaned_with_empty_payload() {
         let mut state = AzureMonitorExporterState::new();
@@ -223,8 +227,8 @@ mod tests {
         assert!(removed.is_some());
         let (_, payload) = removed.unwrap();
         match payload.into_data() {
-            PayloadData::OtlpBytes(OtlpProtoBytes::ExportLogsRequest(bytes)) => {
-                assert!(bytes.is_empty());
+            PayloadData::Encoded(encoded) => {
+                assert!(encoded.bytes().is_empty());
             }
             _ => panic!("Expected OtlpBytes::ExportLogsRequest"),
         }

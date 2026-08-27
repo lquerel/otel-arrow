@@ -41,9 +41,10 @@ use otel_arrow_dfe_otap::{
     accessory::{context::split_contexts::Contexts, slots::Key},
     pdata::{Context, OtapPdata},
 };
-use otel_arrow_dfe_pdata::TryIntoWithOptions;
+#[cfg(test)]
+use otel_arrow_dfe_pdata::PayloadData;
 use otel_arrow_dfe_pdata::{
-    OtapArrowRecords, OtapPayload, PayloadData, otap::transform::sanitize::sanitize_otap_batch,
+    OtapArrowRecords, OtapPayload, otap::transform::sanitize::sanitize_otap_batch,
 };
 use otel_arrow_dfe_query_engine::{
     parser::default_parser_options,
@@ -71,6 +72,7 @@ pub const TRANSFORM_PROCESSOR_URN: &str = "urn:otel:processor:transform";
 
 /// Transform Processor
 pub struct TransformProcessor {
+    codecs: otel_arrow_dfe_pdata::codec::CodecContext,
     execution_state: ExecutionState,
     transforms: Vec<Transform>,
     contexts: Contexts,
@@ -240,6 +242,7 @@ impl TransformProcessor {
         execution_state.set_extension::<RouterExtType>(Box::new(RouterImpl::new()));
 
         Ok(Self {
+            codecs: Default::default(),
             transforms,
             metrics: TransformMetrics::register(pipeline_ctx, language),
             contexts: Contexts::new(config.inbound_request_limit, config.outbound_request_limit),
@@ -547,10 +550,19 @@ impl Processor<OtapPdata> for TransformProcessor {
                 }
             },
             Message::PData(pdata) => {
-                let (context, payload) = pdata.into_parts();
-                let pdata_signal_type = payload.signal_type();
-                let mut payload = Some(payload);
-                let mut transformed = false;
+                let pdata_signal_type = pdata.signal_type();
+                let should_transform = self.transforms.iter().any(|transform| {
+                    matches!(transform.signal_scope, SignalScope::All)
+                        || matches!(
+                            transform.signal_scope,
+                            SignalScope::Signal(signal) if signal == pdata_signal_type
+                        )
+                });
+                if !should_transform {
+                    effect_handler.send_message_with_source_node(pdata).await?;
+                    return Ok(());
+                }
+
                 let mut transform_error = None;
 
                 // Reset the engine's record-removal counters so that, after the
@@ -558,16 +570,27 @@ impl Processor<OtapPdata> for TransformProcessor {
                 // batch.
                 self.execution_state.reset_counters();
 
-                // Execute all transforms. We skip transforms where the batch's signal type is not
-                // selected by the signal scope, and lazily convert the pdata payload to OTAP
-                // if/when we find a transform to apply. If any transform error occurs, break early
-                // and set transform_error to `Some`.
-                //
-                // State at the end of this loop:
-                // - Either payload or `transform_error` will be `Some`
-                // - If we applied any transform then:
-                //   - `transformed` will be set to `true`
-                //   - if payload is `Some` then contained payload variant will be OtelArrowRecords
+                let arrow_pdata =
+                    match pdata.try_into_otap_with(&mut self.codecs, Default::default()) {
+                        Ok(arrow_pdata) => arrow_pdata,
+                        Err(error) => {
+                            self.metrics.record_failure(
+                                pdata_signal_type,
+                                TransformErrorType::PayloadConversion,
+                            );
+                            let (error, pdata) = error.into_parts();
+                            effect_handler
+                                .notify_nack(NackMsg::new_permanent(error.to_string(), pdata))
+                                .await?;
+                            return Ok(());
+                        }
+                    };
+                let (context, records) = arrow_pdata.into_parts();
+                let mut records = Some(records);
+
+                // Execute every transform selecting this signal. Conversion happens
+                // only after proving at least one transform applies, so unmatched
+                // messages retain their original encoded representation.
                 for transform in &mut self.transforms {
                     let should_process = match &transform.signal_scope {
                         SignalScope::All => true,
@@ -577,50 +600,10 @@ impl Processor<OtapPdata> for TransformProcessor {
                     };
 
                     if !should_process {
-                        // skip applying this transform as it does not select the signal type
                         continue;
                     }
-                    transformed = true;
 
-                    // Keep the original encoding and delivery context on decoder failure.
-                    if let Err(error) = payload
-                        .as_mut()
-                        .expect("payload initialized")
-                        .materialize_otap(Default::default())
-                    {
-                        self.metrics.record_failure(
-                            pdata_signal_type,
-                            TransformErrorType::PayloadConversion,
-                        );
-                        effect_handler
-                            .notify_nack(NackMsg::new_permanent(
-                                error.to_string(),
-                                OtapPdata::new(
-                                    context,
-                                    payload.take().expect("payload initialized"),
-                                ),
-                            ))
-                            .await?;
-                        return Ok(());
-                    }
-
-                    // convert payload to OTAP & remove delta encoded IDs.
-                    // safety: we know payload will have been initialized to Some either, before
-                    // entering the loop, or during the previous iteration.
-                    let conversion_result: Result<OtapArrowRecords, _> = payload
-                        .take()
-                        .expect("payload initialized")
-                        .try_into_with_default();
-                    let mut otap_batch = match conversion_result {
-                        Ok(otap_batch) => otap_batch,
-                        Err(error) => {
-                            transform_error = Some(TransformOperationError::new(
-                                TransformErrorType::PayloadConversion,
-                                error.into(),
-                            ));
-                            break;
-                        }
-                    };
+                    let mut otap_batch = records.take().expect("records initialized");
                     if let Err(error) = otap_batch.decode_transport_optimized_ids() {
                         transform_error = Some(TransformOperationError::new(
                             TransformErrorType::IdDecode,
@@ -647,8 +630,7 @@ impl Processor<OtapPdata> for TransformProcessor {
 
                     match result {
                         Ok(next_result) => {
-                            // initialize payload for the next loop iteration
-                            payload = Some(OtapPayload::from(next_result));
+                            records = Some(next_result);
                         }
                         Err(e) => {
                             transform_error = Some(e);
@@ -657,57 +639,29 @@ impl Processor<OtapPdata> for TransformProcessor {
                     }
                 }
 
-                if transformed {
-                    let result = match transform_error {
-                        Some(e) => Err(e),
-                        None => {
-                            // safety: since error is `None`, we know payload must be `Some` based
-                            // on the logic in the loop above, so it is safe to expect here
-                            match payload
-                                .take()
-                                .expect("payload option initialized")
-                                .into_data()
-                            {
-                                PayloadData::OtapArrowRecords(otap_batch) => Ok(otap_batch),
-                                _ => {
-                                    // safety: if any transform applied then we'll have converted
-                                    // the payload the OTAP, so we know here that it must be this
-                                    // variant of OtapPayload
-                                    unreachable!("expected OTAP payload variant")
-                                }
-                            }
-                        }
-                    };
-                    // Hand the engine's per-batch counters to the result handler,
-                    // which records the corresponding flow metrics.
-                    let counters = self.execution_state.counters();
-                    match self
-                        .handle_exec_result(
-                            context,
-                            pdata_signal_type,
-                            result,
-                            counters,
-                            effect_handler,
-                        )
-                        .await
-                    {
-                        Ok(()) => self.metrics.record_success(pdata_signal_type),
-                        Err(operation_error) => {
-                            self.metrics
-                                .record_failure(pdata_signal_type, operation_error.error_type);
-                            return Err(operation_error.error);
-                        }
+                let result = match transform_error {
+                    Some(error) => Err(error),
+                    None => Ok(records.take().expect("transformed records initialized")),
+                };
+                // Hand the engine's per-batch counters to the result handler,
+                // which records the corresponding flow metrics.
+                let counters = self.execution_state.counters();
+                match self
+                    .handle_exec_result(
+                        context,
+                        pdata_signal_type,
+                        result,
+                        counters,
+                        effect_handler,
+                    )
+                    .await
+                {
+                    Ok(()) => self.metrics.record_success(pdata_signal_type),
+                    Err(operation_error) => {
+                        self.metrics
+                            .record_failure(pdata_signal_type, operation_error.error_type);
+                        return Err(operation_error.error);
                     }
-                } else {
-                    // safety: payload is initialized to Some, and only modified if any transforms
-                    // are applied. In this location, we know no transforms were applied so we can
-                    // safely expect take here to return Some
-                    let payload = payload.take().expect("payload option initialized");
-
-                    // all transforms were skipped for this pdata, just forward the original payload
-                    effect_handler
-                        .send_message_with_source_node(OtapPdata::new(context, payload))
-                        .await?;
                 }
             }
         };
@@ -745,7 +699,6 @@ mod test {
         },
     };
     use otel_arrow_dfe_pdata::{
-        TryFromWithOptions,
         otap::Logs,
         proto::{
             OtlpProtoMessage,
@@ -771,6 +724,26 @@ mod test {
     };
     use otel_arrow_dfe_telemetry::registry::TelemetryRegistryHandle;
     use std::net::SocketAddr;
+
+    fn pdata_to_otap(pdata: OtapPdata) -> OtapArrowRecords {
+        pdata
+            .try_into_otap_with(
+                &mut otel_arrow_dfe_pdata::codec::CodecContext::default(),
+                Default::default(),
+            )
+            .expect("convert pdata to OTAP")
+            .into_parts()
+            .1
+    }
+
+    fn payload_to_otap(payload: OtapPayload) -> OtapArrowRecords {
+        payload
+            .try_into_otap_with(
+                &mut otel_arrow_dfe_pdata::codec::CodecContext::default(),
+                Default::default(),
+            )
+            .expect("convert payload to OTAP")
+    }
 
     #[derive(Debug, PartialEq, Eq)]
     struct TransformMetricPoint {
@@ -991,13 +964,7 @@ mod test {
                     .await
                     .expect("no process error");
 
-                let out = ctx
-                    .drain_pdata()
-                    .await
-                    .into_iter()
-                    .map(OtapPdata::payload)
-                    .map(OtapArrowRecords::try_from_with_default)
-                    .map(Result::unwrap);
+                let out = ctx.drain_pdata().await.into_iter().map(pdata_to_otap);
                 let otap_batch = out.into_iter().next().unwrap();
 
                 // double check the result has been "sanitized"
@@ -1169,13 +1136,7 @@ mod test {
                     .await
                     .expect("no process error");
 
-                let out = ctx
-                    .drain_pdata()
-                    .await
-                    .into_iter()
-                    .map(OtapPdata::payload)
-                    .map(OtapArrowRecords::try_from_with_default)
-                    .map(Result::unwrap);
+                let out = ctx.drain_pdata().await.into_iter().map(pdata_to_otap);
                 let otap_batch = out.into_iter().next().unwrap();
 
                 let result = otap_to_otlp(&otap_batch);
@@ -1260,9 +1221,7 @@ mod test {
                     .drain_pdata()
                     .await
                     .into_iter()
-                    .map(OtapPdata::payload)
-                    .map(OtapArrowRecords::try_from_with_default)
-                    .map(Result::unwrap);
+                    .map(pdata_to_otap);
                 let otap_batch = out.into_iter().next().unwrap();
                 let result = otap_to_otlp(&otap_batch);
 
@@ -1337,13 +1296,7 @@ mod test {
                     .await
                     .expect("no process error");
 
-                let out = ctx
-                    .drain_pdata()
-                    .await
-                    .into_iter()
-                    .map(OtapPdata::payload)
-                    .map(OtapArrowRecords::try_from_with_default)
-                    .map(Result::unwrap);
+                let out = ctx.drain_pdata().await.into_iter().map(pdata_to_otap);
                 let otap_batch = out.into_iter().next().unwrap();
                 let result = otap_to_otlp(&otap_batch);
 
@@ -1421,7 +1374,7 @@ mod test {
         .expect("no process error")
     }
 
-    /// Scenario: a traces-scoped query receives traces, metrics and an unknown encoded log batch.
+    /// Scenario: a traces-scoped query receives traces, metrics and an admitted encoded log batch.
     /// Guarantees: only traces are transformed; unselected encoded bytes pass through without a codec.
     #[test]
     fn test_signal_scope() {
@@ -1435,13 +1388,7 @@ mod test {
             .set_processor(processor)
             .run_test(|mut ctx| async move {
                 send_one_traces_one_metrics_same_names(&mut ctx).await;
-                let mut processed_pdata = ctx
-                    .drain_pdata()
-                    .await
-                    .into_iter()
-                    .map(OtapPdata::payload)
-                    .map(OtapArrowRecords::try_from_with_default)
-                    .map(Result::unwrap);
+                let mut processed_pdata = ctx.drain_pdata().await.into_iter().map(pdata_to_otap);
                 let traces_batch = processed_pdata.next().expect("sent traces batch");
                 let metrics_batch = processed_pdata.next().expect("sent metrics batch");
 
@@ -1458,10 +1405,12 @@ mod test {
                 assert_eq!(metrics.num_rows(), 2);
 
                 use otel_arrow_dfe_pdata::codec::{EncodedPdata, PdataEncoding};
-                let encoding = PdataEncoding::new("test-opaque-unselected-signal");
+                let encoding = PdataEncoding::new("test-otlp-codec");
                 let bytes = bytes::Bytes::from(vec![1, 2, 3]);
                 ctx.process(Message::PData(OtapPdata::new_default(
-                    EncodedPdata::new(encoding.clone(), SignalType::Logs, bytes.clone()).into(),
+                    EncodedPdata::new(encoding.clone(), SignalType::Logs, bytes.clone())
+                        .expect("registered test codec")
+                        .into(),
                 )))
                 .await
                 .unwrap();
@@ -1526,13 +1475,7 @@ mod test {
             .set_processor(processor)
             .run_test(|mut ctx| async move {
                 send_one_traces_one_metrics_same_names(&mut ctx).await;
-                let mut processed_pdata = ctx
-                    .drain_pdata()
-                    .await
-                    .into_iter()
-                    .map(OtapPdata::payload)
-                    .map(OtapArrowRecords::try_from_with_default)
-                    .map(Result::unwrap);
+                let mut processed_pdata = ctx.drain_pdata().await.into_iter().map(pdata_to_otap);
                 let traces_batch = processed_pdata.next().expect("sent traces batch");
                 let metrics_batch = processed_pdata.next().expect("sent metrics batch");
 
@@ -1593,6 +1536,8 @@ mod test {
         test_port_rx
     }
 
+    /// Scenario: A transform routes its input to a named output.
+    /// Guarantees: The selected route receives the expected transformed records.
     #[test]
     fn test_simple_route_to() {
         // test ensure it will only operate on all signals
@@ -1618,13 +1563,7 @@ mod test {
                     .await
                     .expect("no process error");
 
-                let out = ctx
-                    .drain_pdata()
-                    .await
-                    .into_iter()
-                    .map(OtapPdata::payload)
-                    .map(OtapArrowRecords::try_from_with_default)
-                    .map(Result::unwrap);
+                let out = ctx.drain_pdata().await.into_iter().map(pdata_to_otap);
                 let result = out.into_iter().next().expect("one result");
 
                 // expect we got an empty batch:
@@ -1638,7 +1577,9 @@ mod test {
                 assert_eq!(routed.len(), 1);
                 let (_context, payload) = routed.pop().unwrap().into_parts();
                 match payload.into_data() {
-                    PayloadData::OtapArrowRecords(result) => {
+                    PayloadData::OtapArrowRecords {
+                        records: result, ..
+                    } => {
                         assert_eq!(result, input)
                     }
                     _ => panic!("unexpected payload type"),
@@ -1723,9 +1664,7 @@ mod test {
                     .drain_pdata()
                     .await
                     .into_iter()
-                    .map(OtapPdata::payload)
-                    .map(OtapArrowRecords::try_from_with_default)
-                    .map(Result::unwrap)
+                    .map(pdata_to_otap)
                     .map(|otap_batch| otap_to_otlp(&otap_batch));
 
                 let result = out.next().unwrap();
@@ -1767,6 +1706,8 @@ mod test {
             .validate(|_ctx| async move {})
     }
 
+    /// Scenario: A transform chooses routes based on input values.
+    /// Guarantees: Each record is delivered to the route selected by its condition.
     #[test]
     fn test_conditional_route_to() {
         // test ensure it will only operate on all signals
@@ -1820,13 +1761,7 @@ mod test {
                     .expect("no process error");
 
                 // check anything not routed get outputted to the default port
-                let out = ctx
-                    .drain_pdata()
-                    .await
-                    .into_iter()
-                    .map(OtapPdata::payload)
-                    .map(OtapArrowRecords::try_from_with_default)
-                    .map(Result::unwrap);
+                let out = ctx.drain_pdata().await.into_iter().map(pdata_to_otap);
                 let default_result = out.into_iter().next().expect("one result");
                 assert_logs_records_equal(default_result, other_log_record);
 
@@ -1838,7 +1773,9 @@ mod test {
                 assert_eq!(routed.len(), 1);
                 let (_context, payload) = routed.pop().unwrap().into_parts();
                 match payload.into_data() {
-                    PayloadData::OtapArrowRecords(result) => {
+                    PayloadData::OtapArrowRecords {
+                        records: result, ..
+                    } => {
                         // ensure the routed record was "sanitized"
                         let logs_batch = result.get(ArrowPayloadType::Logs).unwrap();
                         let severity_text_col = logs_batch
@@ -1866,7 +1803,9 @@ mod test {
                 assert_eq!(routed.len(), 1);
                 let (_context, payload) = routed.pop().unwrap().into_parts();
                 match payload.into_data() {
-                    PayloadData::OtapArrowRecords(result) => {
+                    PayloadData::OtapArrowRecords {
+                        records: result, ..
+                    } => {
                         assert_logs_records_equal(result, info_log_record);
                     }
                     _ => panic!("unexpected payload type"),
@@ -1916,12 +1855,7 @@ mod test {
 
                 let mut out = ctx.drain_pdata().await.into_iter().collect::<Vec<_>>();
                 assert_eq!(out.len(), 1);
-                let default_out: OtapArrowRecords = out
-                    .pop()
-                    .unwrap()
-                    .payload()
-                    .try_into_with_default()
-                    .unwrap();
+                let default_out = payload_to_otap(out.pop().unwrap().payload());
                 assert_eq!(default_out, OtapArrowRecords::Logs(Logs::default()));
 
                 // assert on what came out of the error out port
@@ -1931,9 +1865,7 @@ mod test {
                 }
                 assert_eq!(routed.len(), 1);
                 let (_, r) = routed.pop().unwrap().into_parts();
-                let OtlpProtoMessage::Logs(logs_data) =
-                    otap_to_otlp(&r.try_into_with_default().unwrap())
-                else {
+                let OtlpProtoMessage::Logs(logs_data) = otap_to_otlp(&payload_to_otap(r)) else {
                     panic!("unexpected signal type from result")
                 };
                 assert_eq!(logs_data.resource_logs.len(), 1);
@@ -1953,9 +1885,7 @@ mod test {
                 }
                 assert_eq!(routed.len(), 1);
                 let (_, r) = routed.pop().unwrap().into_parts();
-                let OtlpProtoMessage::Logs(logs_data) =
-                    otap_to_otlp(&r.try_into_with_default().unwrap())
-                else {
+                let OtlpProtoMessage::Logs(logs_data) = otap_to_otlp(&payload_to_otap(r)) else {
                     panic!("unexpected signal type from result")
                 };
                 assert_eq!(logs_data.resource_logs.len(), 1);
@@ -2812,6 +2742,8 @@ mod test {
             .validate(|_ctx| async move {})
     }
 
+    /// Scenario: A transform runs with sanitization disabled.
+    /// Guarantees: The output retains the expected unsanitized representation and values.
     #[test]
     fn test_skip_sanitize() {
         let runtime = TestRuntime::<OtapPdata>::new();
@@ -2857,13 +2789,7 @@ mod test {
                     .expect("no process error");
 
                 // check anything not routed get outputted to the default port
-                let out = ctx
-                    .drain_pdata()
-                    .await
-                    .into_iter()
-                    .map(OtapPdata::payload)
-                    .map(OtapArrowRecords::try_from_with_default)
-                    .map(Result::unwrap);
+                let out = ctx.drain_pdata().await.into_iter().map(pdata_to_otap);
                 let default_result = out.into_iter().next().expect("one result");
                 // check we skipped the sanitization on the default output
                 // check sanitization was skipped on routed record
@@ -2889,7 +2815,9 @@ mod test {
                 assert_eq!(routed.len(), 1);
                 let (_context, payload) = routed.pop().unwrap().into_parts();
                 match payload.into_data() {
-                    PayloadData::OtapArrowRecords(result) => {
+                    PayloadData::OtapArrowRecords {
+                        records: result, ..
+                    } => {
                         // check sanitization was skipped on routed record
                         let logs_batch = result.get(ArrowPayloadType::Logs).unwrap();
                         let severity_text_col = logs_batch
@@ -2973,8 +2901,7 @@ mod test {
                 let mut result1 = outputs.next().unwrap();
                 let mut result2 = outputs.next().unwrap();
 
-                let payload1: OtapArrowRecords =
-                    result1.take_payload().try_into_with_default().unwrap();
+                let payload1 = payload_to_otap(result1.take_payload());
                 let OtlpProtoMessage::Metrics(metrics_result1) = otap_to_otlp(&payload1) else {
                     panic!("invalid signal type result")
                 };
@@ -2991,8 +2918,7 @@ mod test {
                     ]
                 );
 
-                let payload2: OtapArrowRecords =
-                    result2.take_payload().try_into_with_default().unwrap();
+                let payload2 = payload_to_otap(result2.take_payload());
                 let OtlpProtoMessage::Metrics(metrics_result2) = otap_to_otlp(&payload2) else {
                     panic!("invalid signal type result")
                 };

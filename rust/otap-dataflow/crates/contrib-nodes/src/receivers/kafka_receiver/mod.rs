@@ -20,3 +20,20 @@ pub mod offset_tracker;
 pub mod rebalance;
 /// Implementation of the main kafka receiver
 pub mod receiver;
+
+/// Checks received OTLP storage without converting or reconstructing its envelope.
+#[cfg(test)]
+fn encoded_otlp(
+    pdata: &otel_arrow_dfe_otap::pdata::OtapPdata,
+    signal: otel_arrow_dfe_config::SignalType,
+) -> &[u8] {
+    use otel_arrow_dfe_pdata::PayloadData;
+    use otel_arrow_dfe_pdata::codec::ResolvedCodec;
+
+    let PayloadData::Encoded(encoded) = pdata.payload_ref().data() else {
+        panic!("OTLP receiver output must remain encoded");
+    };
+    assert_eq!(encoded.codec(), ResolvedCodec::OTLP);
+    assert_eq!(encoded.signal_type(), signal);
+    encoded.bytes().as_ref()
+}

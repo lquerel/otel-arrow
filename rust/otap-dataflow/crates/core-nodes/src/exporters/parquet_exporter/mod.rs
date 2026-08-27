@@ -60,7 +60,7 @@ use otel_arrow_dfe_engine::terminal_state::TerminalState;
 use otel_arrow_dfe_otap::OTAP_EXPORTER_FACTORIES;
 use otel_arrow_dfe_otap::metrics::ExporterExportMetrics;
 use otel_arrow_dfe_otap::pdata::OtapPdata;
-use otel_arrow_dfe_pdata::TryIntoWithOptions;
+#[cfg(test)]
 use otel_arrow_dfe_pdata::otap::OtapArrowRecords;
 use otel_arrow_dfe_telemetry::common_attributes::{Outcome, SignalOutcomeAttributes};
 use otel_arrow_dfe_telemetry::metrics::{MeasurementMetricSet, MetricSet, MetricSetHandler};
@@ -180,6 +180,7 @@ impl Exporter<OtapPdata> for ParquetExporter {
         mut msg_chan: ExporterInbox<OtapPdata>,
         effect_handler: EffectHandler<OtapPdata>,
     ) -> Result<TerminalState, Error> {
+        let mut codecs = otel_arrow_dfe_pdata::codec::CodecContext::default();
         let exporter_id = effect_handler.exporter_id();
         if self.config.retry.is_some()
             && matches!(
@@ -328,20 +329,24 @@ impl Exporter<OtapPdata> for ParquetExporter {
                     // Capture signal type before moving pdata into try_from
                     let signal_type = pdata.signal_type();
 
-                    // Note: context is not used
-                    let (_context, payload) = pdata.into_parts();
-
-                    let mut otap_batch: OtapArrowRecords =
-                        payload.try_into_with_default().inspect_err(|_| {
-                            if let Some(metrics) = self.pdata_metrics.as_mut() {
-                                metrics
-                                    .with(SignalOutcomeAttributes {
-                                        signal: signal_type,
-                                        outcome: Outcome::Failure,
-                                    })
-                                    .record(export_start.elapsed());
+                    let arrow_pdata =
+                        match pdata.try_into_otap_with(&mut codecs, Default::default()) {
+                            Ok(arrow_pdata) => arrow_pdata,
+                            Err(error) => {
+                                if let Some(metrics) = self.pdata_metrics.as_mut() {
+                                    metrics
+                                        .with(SignalOutcomeAttributes {
+                                            signal: signal_type,
+                                            outcome: Outcome::Failure,
+                                        })
+                                        .record(export_start.elapsed());
+                                }
+                                let (error, _pdata) = error.into_parts();
+                                return Err(error.into());
                             }
-                        })?;
+                        };
+                    // Note: context is not used by this terminal exporter.
+                    let (_context, mut otap_batch) = arrow_pdata.into_parts();
 
                     // decode the transport optimized IDs before converting
                     // to unvalidated parquet records
@@ -562,16 +567,23 @@ mod test {
     };
     use otel_arrow_dfe_otap::object_store;
     use otel_arrow_dfe_pdata::Consumer;
+    use otel_arrow_dfe_pdata::OtapPayload;
+    use otel_arrow_dfe_pdata::codec::CodecContext;
     use otel_arrow_dfe_pdata::otap::from_record_messages;
     use otel_arrow_dfe_pdata::proto::opentelemetry::arrow::v1::ArrowPayloadType;
     use otel_arrow_dfe_pdata::proto::opentelemetry::common::v1::{
         AnyValue, KeyValue, any_value::Value,
     };
     use otel_arrow_dfe_pdata::schema::consts;
-    use otel_arrow_dfe_pdata::{TryFromWithOptions, TryIntoWithOptions};
     use parquet::arrow::async_reader::ParquetRecordBatchStreamBuilder;
     use tokio::fs::File;
     use tokio::time::sleep;
+
+    fn payload_to_otap(payload: OtapPayload) -> OtapArrowRecords {
+        payload
+            .try_into_otap_with(&mut CodecContext::default(), Default::default())
+            .expect("convert payload to OTAP")
+    }
 
     fn logs_scenario(
         num_rows: usize,
@@ -665,7 +677,7 @@ mod test {
                         })
                     }
                     let pdata3 = fixtures::create_single_logs_pdata_with_attrs(attrs3).payload();
-                    let mut otap_batch = OtapArrowRecords::try_from_with_default(pdata3).unwrap();
+                    let mut otap_batch = payload_to_otap(pdata3);
                     let mut attrs_batch =
                         otap_batch.get(ArrowPayloadType::LogAttrs).unwrap().clone();
                     let old_column = attrs_batch.remove_column(
@@ -736,23 +748,21 @@ mod test {
             .set_exporter(exporter)
             .run_test(move |ctx| {
                 Box::pin(async move {
-                    let batch1: OtapArrowRecords =
+                    let batch1 = payload_to_otap(
                         fixtures::create_single_logs_pdata_with_attrs(vec![KeyValue {
                             key: "strkey".to_string(),
                             value: Some(AnyValue::new_string("terry")),
                         }])
-                        .payload()
-                        .try_into_with_default()
-                        .unwrap();
+                        .payload(),
+                    );
 
-                    let batch2: OtapArrowRecords =
+                    let batch2 = payload_to_otap(
                         fixtures::create_single_logs_pdata_with_attrs(vec![KeyValue {
                             key: "intkey".to_string(),
                             value: Some(AnyValue::new_int(418)),
                         }])
-                        .payload()
-                        .try_into_with_default()
-                        .unwrap();
+                        .payload(),
+                    );
 
                     // double check that these contain schemas that are not the same ...
                     let batch1_attrs = batch1.get(ArrowPayloadType::LogAttrs).unwrap();

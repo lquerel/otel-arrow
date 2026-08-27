@@ -42,7 +42,7 @@ use otel_arrow_dfe_engine::processor::{
 use otel_arrow_dfe_otap::OTAP_PROCESSOR_FACTORIES;
 use otel_arrow_dfe_otap::pdata::OtapPdata;
 use otel_arrow_dfe_pdata::OtapPayload;
-use otel_arrow_dfe_pdata::TryIntoWithOptions;
+#[cfg(test)]
 use otel_arrow_dfe_pdata::otap::OtapArrowRecords;
 use otel_arrow_dfe_pdata::otap::filter::{IdBitmapPool, filter_otap_batch};
 use otel_arrow_dfe_telemetry::metrics::MetricSet;
@@ -71,6 +71,7 @@ static LOG_SAMPLING_PROCESSOR_FACTORY: otel_arrow_dfe_engine::ProcessorFactory<O
 
 /// Log sampling processor.
 struct LogSamplingProcessor {
+    codecs: otel_arrow_dfe_pdata::codec::CodecContext,
     /// The chosen sampler
     sampler: Box<dyn Sampler>,
     /// Telemetry metrics.
@@ -98,6 +99,7 @@ impl LogSamplingProcessor {
         );
 
         Ok(Self {
+            codecs: Default::default(),
             sampler,
             metrics,
             id_bitmap_pool: IdBitmapPool::new(),
@@ -108,22 +110,24 @@ impl LogSamplingProcessor {
     /// Processes a log payload: sample, filter, and forward or ack.
     async fn process_logs(
         &mut self,
-        mut pdata: OtapPdata,
+        pdata: OtapPdata,
         effect_handler: &mut local::EffectHandler<OtapPdata>,
     ) -> Result<(), EngineError> {
         // Materialize before counting: an encoded envelope may have no item count.
         // Failed decoding must leave the original bytes available for the Nack.
-        if let Err(error) = pdata.materialize_otap(Default::default()) {
-            effect_handler
-                .notify_nack(NackMsg::new_permanent(error.to_string(), pdata))
-                .await?;
-            return Ok(());
-        }
-        let total = pdata.num_items();
+        let arrow_pdata = match pdata.try_into_otap_with(&mut self.codecs, Default::default()) {
+            Ok(arrow_pdata) => arrow_pdata,
+            Err(error) => {
+                let (error, pdata) = error.into_parts();
+                effect_handler
+                    .notify_nack(NackMsg::new_permanent(error.to_string(), pdata))
+                    .await?;
+                return Ok(());
+            }
+        };
+        let total = arrow_pdata.records().num_items();
 
-        // Conversion is now an ownership transfer of the materialized records.
-        let (context, payload) = pdata.into_parts();
-        let mut records: OtapArrowRecords = payload.try_into_with_default()?;
+        let (context, mut records) = arrow_pdata.into_parts();
         records.decode_transport_optimized_ids()?;
 
         // Prepare the filter buffer.
@@ -298,13 +302,15 @@ mod tests {
         compression: None,
         can_decode: true,
         can_encode: true,
+        batching: None,
     };
 
     #[allow(unsafe_code)]
     #[linkme::distributed_slice(PDATA_CODEC_FACTORIES)]
     static TEST_CODEC: PdataCodecRegistration = PdataCodecRegistration {
+        count_items: None,
         metadata: &TEST_CODEC_METADATA,
-        create: || Box::new(OtlpCodec),
+        create: || Box::new(OtlpCodec::default()),
     };
 
     /// Scenario: a registered encoded log batch reaches sampling without an envelope count.
@@ -322,6 +328,7 @@ mod tests {
                         .unwrap();
                     let mut pdata = OtapPdata::new_default(
                         EncodedPdata::new(TEST_ENCODING, SignalType::Logs, encoded.into_bytes())
+                            .expect("registered test codec")
                             .into(),
                     );
                     assert_eq!(pdata.num_items(), 0, "the envelope has no count");
@@ -334,20 +341,22 @@ mod tests {
         );
     }
 
-    /// Scenario: a log batch needs a codec that is not registered.
+    /// Scenario: an admitted log batch contains malformed encoded data.
     /// Guarantees: sampling returns a permanent Nack with the original shared bytes.
     #[test]
-    fn missing_codec_nacks_encoded_logs() {
+    fn malformed_codec_input_nacks_encoded_logs() {
         run_processor_test(
             serde_json::json!({"policy": {"ratio": {"emit": 1, "out_of": 10}}}),
             |mut ctx| {
                 Box::pin(async move {
                     let (completion_tx, mut completion_rx) = pipeline_completion_msg_channel(1);
                     ctx.set_pipeline_completion_sender(completion_tx);
-                    let encoding = PdataEncoding::new("test-missing-log-codec");
+                    let encoding = PdataEncoding::new("test-otlp-codec");
                     let bytes = bytes::Bytes::from(vec![1, 2, 3]);
                     let pdata = OtapPdata::new_default(
-                        EncodedPdata::new(encoding.clone(), SignalType::Logs, bytes.clone()).into(),
+                        EncodedPdata::new(encoding.clone(), SignalType::Logs, bytes.clone())
+                            .expect("registered test codec")
+                            .into(),
                     )
                     .test_subscribe_to(
                         Interests::NACKS | Interests::RETURN_DATA,
@@ -423,10 +432,13 @@ mod tests {
 
                 let output_payload = msgs[0].clone().into_parts().1.take_payload();
                 let output_otap = match output_payload.into_data() {
-                    PayloadData::OtlpBytes(_) | PayloadData::Encoded(_) => {
+                    PayloadData::Encoded(_) => {
                         panic!("Unexpected otlp bytes")
                     }
-                    PayloadData::OtapArrowRecords(otap_arrow_records) => otap_arrow_records,
+                    PayloadData::OtapArrowRecords {
+                        records: otap_arrow_records,
+                        ..
+                    } => otap_arrow_records,
                 };
 
                 let output_attrs = output_otap.get(ArrowPayloadType::LogAttrs).unwrap();

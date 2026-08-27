@@ -33,7 +33,6 @@ use otel_arrow_dfe_engine::shared::receiver::EffectHandler;
 use otel_arrow_dfe_engine::{
     Interests, MessageSourceSharedEffectHandlerExtension, ProducerEffectHandlerExtension,
 };
-use otel_arrow_dfe_pdata::OtlpProtoBytes;
 use otel_arrow_dfe_pdata::proto::opentelemetry::collector::logs::v1::ExportLogsServiceResponse;
 use otel_arrow_dfe_pdata::proto::opentelemetry::collector::metrics::v1::ExportMetricsServiceResponse;
 use otel_arrow_dfe_pdata::proto::opentelemetry::collector::trace::v1::ExportTraceServiceResponse;
@@ -782,11 +781,12 @@ impl HttpHandler {
                 Context::default()
             };
 
-            let payload = match signal {
-                SignalType::Logs => OtlpProtoBytes::ExportLogsRequest(body),
-                SignalType::Metrics => OtlpProtoBytes::ExportMetricsRequest(body),
-                SignalType::Traces => OtlpProtoBytes::ExportTracesRequest(body),
-            };
+            let payload = otel_arrow_dfe_pdata::codec::ResolvedCodec::OTLP
+                .admit(signal, body)
+                .map_err(|_| {
+                    self.record_rejection(ReceiverRejectionErrorType::InvalidRequest);
+                    unsupported_media_type()
+                })?;
 
             let mut pdata = OtapPdata::new(context, payload.into());
             pdata.set_peer_addr(self.peer_addr);

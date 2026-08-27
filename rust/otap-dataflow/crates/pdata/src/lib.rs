@@ -18,6 +18,7 @@ pub mod otap;
 pub mod schema;
 
 pub mod arrays;
+pub mod batching;
 pub mod codec;
 pub(crate) mod decode;
 pub mod encode;
@@ -25,7 +26,11 @@ pub(crate) mod payload;
 
 pub use otap::OtapArrowRecords;
 pub use otlp::OtlpProtoBytes;
-pub use payload::{OtapPayload, OtapPayloadHelpers, PayloadData, PayloadView};
+#[cfg(any(test, feature = "test-internals"))]
+pub use payload::PayloadData;
+#[cfg(not(any(test, feature = "test-internals")))]
+pub(crate) use payload::PayloadData;
+pub use payload::{OtapPayload, OtapPayloadDecodeError, OtapPayloadHelpers, PayloadView};
 
 /// Testing support
 #[cfg(any(test, feature = "testing"))]

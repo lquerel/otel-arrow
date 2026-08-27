@@ -30,6 +30,7 @@ use otel_arrow_dfe_engine::terminal_state::TerminalState;
 use otel_arrow_dfe_engine::{ConsumerEffectHandlerExtension, ExporterFactory};
 use otel_arrow_dfe_otap::OTAP_EXPORTER_FACTORIES;
 use otel_arrow_dfe_otap::pdata::OtapPdata;
+use otel_arrow_dfe_pdata::codec::CodecContext;
 use otel_arrow_dfe_pdata::views::otap::{OtapLogsView, OtapMetricsView};
 use otel_arrow_dfe_pdata::views::otlp::bytes::logs::RawLogsData;
 use otel_arrow_dfe_pdata::views::otlp::bytes::metrics::RawMetricsData;
@@ -199,6 +200,7 @@ const fn default_record_json_scope() -> bool {
 
 /// Console exporter that prints OTLP data to stdout.
 pub struct ConsoleExporter {
+    codecs: CodecContext,
     formatter: ConsoleFormatter,
     metrics: ConsoleExporterMetrics,
 }
@@ -218,7 +220,11 @@ impl ConsoleExporter {
                 ConsoleFormatter::RecordJson(RecordJsonFormatter::new(config.record_json))
             }
         };
-        Self { formatter, metrics }
+        Self {
+            codecs: CodecContext::default(),
+            formatter,
+            metrics,
+        }
     }
 
     fn terminal_state(&mut self, deadline: Instant) -> TerminalState {
@@ -293,7 +299,7 @@ impl Exporter<OtapPdata> for ConsoleExporter {
 }
 
 impl ConsoleExporter {
-    async fn export(&self, payload: &OtapPayload) -> Result<(), ConsoleExportErrorType> {
+    async fn export(&mut self, payload: &OtapPayload) -> Result<(), ConsoleExportErrorType> {
         match payload.signal_type() {
             SignalType::Logs => self.export_logs(payload).await,
             SignalType::Traces => self.unsupported_signal("traces"),
@@ -301,12 +307,14 @@ impl ConsoleExporter {
         }
     }
 
-    async fn export_logs(&self, payload: &OtapPayload) -> Result<(), ConsoleExportErrorType> {
-        match payload.view(Default::default()).map_err(|error| {
-            otel_error!("console.pdata.decode_failed", error = %error);
-            ConsoleExportErrorType::OtapViewCreation
-        })? {
-            PayloadView::OtlpBytes(bytes) => match RawLogsData::try_from(bytes) {
+    async fn export_logs(&mut self, payload: &OtapPayload) -> Result<(), ConsoleExportErrorType> {
+        match payload
+            .view_with(&mut self.codecs, Default::default())
+            .map_err(|error| {
+                otel_error!("console.pdata.decode_failed", error = %error);
+                ConsoleExportErrorType::OtapViewCreation
+            })? {
+            PayloadView::OtlpBytes { bytes, .. } => match RawLogsData::try_new(bytes) {
                 Ok(logs_view) => self.formatter.print_logs_data(&logs_view).await,
                 Err(e) => {
                     otel_error!("console.logs_view.otlp_create_failed", error = ?e, message = "Failed to create OTLP logs view");
@@ -325,28 +333,27 @@ impl ConsoleExporter {
         }
     }
 
-    async fn export_metrics(&self, payload: &OtapPayload) -> Result<(), ConsoleExportErrorType> {
+    async fn export_metrics(
+        &mut self,
+        payload: &OtapPayload,
+    ) -> Result<(), ConsoleExportErrorType> {
         if !self.formatter.supports_metrics() {
             return self.unsupported_signal("metrics");
         }
 
-        match payload.view(Default::default()).map_err(|error| {
-            otel_error!("console.pdata.decode_failed", error = %error);
-            ConsoleExportErrorType::OtapViewCreation
-        })? {
-            PayloadView::OtlpBytes(bytes) => {
-                let metrics_bytes = match bytes {
-                    otel_arrow_dfe_pdata::OtlpProtoBytes::ExportMetricsRequest(bytes) => bytes,
-                    _ => unreachable!("metrics payload must contain metrics OTLP bytes"),
-                };
-                match RawMetricsData::try_new(metrics_bytes) {
-                    Ok(metrics_view) => self.formatter.print_metrics_data(&metrics_view).await,
-                    Err(e) => {
-                        otel_warn!("console.metrics_view.otlp_create_failed", error = ?e);
-                        Err(ConsoleExportErrorType::OtlpViewCreation)
-                    }
+        match payload
+            .view_with(&mut self.codecs, Default::default())
+            .map_err(|error| {
+                otel_error!("console.pdata.decode_failed", error = %error);
+                ConsoleExportErrorType::OtapViewCreation
+            })? {
+            PayloadView::OtlpBytes { bytes, .. } => match RawMetricsData::try_new(bytes) {
+                Ok(metrics_view) => self.formatter.print_metrics_data(&metrics_view).await,
+                Err(e) => {
+                    otel_warn!("console.metrics_view.otlp_create_failed", error = ?e);
+                    Err(ConsoleExportErrorType::OtlpViewCreation)
                 }
-            }
+            },
             PayloadView::OtapArrowRecords(records) => {
                 match OtapMetricsView::try_from(records.as_ref()) {
                     Ok(metrics_view) => self.formatter.print_metrics_data(&metrics_view).await,

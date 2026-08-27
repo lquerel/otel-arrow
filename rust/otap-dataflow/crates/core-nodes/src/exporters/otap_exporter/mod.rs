@@ -31,7 +31,6 @@ use otel_arrow_dfe_engine::terminal_state::TerminalState;
 use otel_arrow_dfe_otap::OTAP_EXPORTER_FACTORIES;
 use otel_arrow_dfe_otap::pdata::OtapPdata;
 use otel_arrow_dfe_pdata::Producer;
-use otel_arrow_dfe_pdata::TryIntoWithOptions;
 use otel_arrow_dfe_pdata::encode::producer::ProducerOptions;
 use otel_arrow_dfe_pdata::otap::OtapArrowRecords;
 use otel_arrow_dfe_pdata::proto::opentelemetry::arrow::v1::{
@@ -485,6 +484,7 @@ impl local::Exporter<OtapPdata> for OTAPExporter {
         mut msg_chan: ExporterInbox<OtapPdata>,
         effect_handler: local::EffectHandler<OtapPdata>,
     ) -> Result<TerminalState, Error> {
+        let mut codecs = otel_arrow_dfe_pdata::codec::CodecContext::default();
         otel_info!(
             "otap_exporter.start",
             grpc_endpoint = self.config.grpc.grpc_endpoint.as_str(),
@@ -728,7 +728,7 @@ impl local::Exporter<OtapPdata> for OTAPExporter {
                             pdata.take_payload()
                         };
 
-                        let message: OtapArrowRecords = match payload.try_into_with_default() {
+                        let message: OtapArrowRecords = match payload.try_into_otap_with(&mut codecs, Default::default()) {
                             Ok(m) => m,
                             Err(e) => {
                                 self.metrics.record_failure(
@@ -1386,7 +1386,8 @@ mod tests {
         test_node,
     };
     use otel_arrow_dfe_otap::compression::CompressionMethod;
-    use otel_arrow_dfe_pdata::TryIntoWithOptions;
+    use otel_arrow_dfe_pdata::OtapPayload;
+    use otel_arrow_dfe_pdata::codec::CodecContext;
     use otel_arrow_dfe_pdata::otap::OtapArrowRecords;
     use otel_arrow_dfe_pdata::proto::opentelemetry::arrow::v1::{
         ArrowPayloadType, BatchArrowRecords, BatchStatus, StatusCode,
@@ -1415,6 +1416,12 @@ mod tests {
     const METRIC_BATCH_ID: i64 = 0;
     const LOG_BATCH_ID: i64 = 1;
     const TRACE_BATCH_ID: i64 = 2;
+
+    fn payload_to_otap(payload: OtapPayload) -> OtapArrowRecords {
+        payload
+            .try_into_otap_with(&mut CodecContext::default(), Default::default())
+            .expect("convert payload to OTAP")
+    }
 
     fn calldata_with_id(id: u64) -> CallData {
         smallvec::smallvec!(id.into())
@@ -1595,40 +1602,37 @@ mod tests {
                 exporter_result.unwrap();
 
                 // check that the message was properly sent from the exporter
-                let metrics_received: OtapArrowRecords =
+                let metrics_received = payload_to_otap(
                     timeout(Duration::from_secs(3), receiver.recv())
                         .await
                         .expect("Timed out waiting for message")
                         .expect("No message received")
-                        .payload()
-                        .try_into_with_default()
-                        .expect("Could convert pdata to OTAPData");
+                        .payload(),
+                );
 
                 // Assert that the message received is what the exporter sent
                 let _expected_metrics_message =
                     create_otap_batch(METRIC_BATCH_ID, ArrowPayloadType::UnivariateMetrics);
                 assert!(matches!(metrics_received, _expected_metrics_message));
 
-                let logs_received: OtapArrowRecords =
+                let logs_received = payload_to_otap(
                     timeout(Duration::from_secs(3), receiver.recv())
                         .await
                         .expect("Timed out waiting for message")
                         .expect("No message received")
-                        .payload()
-                        .try_into_with_default()
-                        .expect("Could convert pdata to OTAPData");
+                        .payload(),
+                );
                 let _expected_logs_message =
                     create_otap_batch(LOG_BATCH_ID, ArrowPayloadType::Logs);
                 assert!(matches!(logs_received, _expected_logs_message));
 
-                let traces_received: OtapArrowRecords =
+                let traces_received = payload_to_otap(
                     timeout(Duration::from_secs(3), receiver.recv())
                         .await
                         .expect("Timed out waiting for message")
                         .expect("No message received")
-                        .payload()
-                        .try_into_with_default()
-                        .expect("Could convert pdata to OTAPData");
+                        .payload(),
+                );
 
                 let _expected_trace_message =
                     create_otap_batch(TRACE_BATCH_ID, ArrowPayloadType::Spans);
@@ -1637,6 +1641,8 @@ mod tests {
         }
     }
 
+    /// Scenario: The OTAP exporter sends batches to an OTAP service.
+    /// Guarantees: The service receives the expected signal data without changing payload semantics.
     #[test]
     fn test_otap_exporter() {
         let test_runtime = TestRuntime::new();
@@ -1703,7 +1709,7 @@ mod tests {
         _ = shutdown_sender.send("Shutdown");
     }
 
-    /// Scenario: consecutive encoded batches have a missing codec or malformed OTLP.
+    /// Scenario: consecutive admitted encoded batches contain malformed OTLP.
     /// Guarantees: each receives a permanent Nack with original bytes and routing, and export continues.
     #[test]
     fn codec_failures_nack_original_payloads() {
@@ -1726,7 +1732,7 @@ mod tests {
         );
         let expected = [
             (
-                PdataEncoding::new("test-unavailable-codec"),
+                PdataEncoding::new("test-otlp-codec"),
                 Bytes::from(vec![1, 2, 3]),
             ),
             (PdataEncoding::OTLP, Bytes::from(vec![0xff])),
@@ -1736,7 +1742,9 @@ mod tests {
             .enumerate()
             .map(|(id, (encoding, bytes))| {
                 OtapPdata::new_default(
-                    EncodedPdata::new(encoding.clone(), SignalType::Logs, bytes.clone()).into(),
+                    EncodedPdata::new(encoding.clone(), SignalType::Logs, bytes.clone())
+                        .expect("registered test codec")
+                        .into(),
                 )
                 .test_subscribe_to(
                     Interests::NACKS | Interests::RETURN_DATA,
@@ -2364,7 +2372,7 @@ mod tests {
         batches_tx
             .send(StreamBatch {
                 pdata,
-                records: payload.payload().try_into_with_default().unwrap(),
+                records: payload_to_otap(payload.payload()),
                 export_started_at: Instant::now(),
             })
             .await
@@ -2432,7 +2440,7 @@ mod tests {
             batches_tx
                 .send(StreamBatch {
                     pdata,
-                    records: payload.payload().try_into_with_default().unwrap(),
+                    records: payload_to_otap(payload.payload()),
                     export_started_at: Instant::now(),
                 })
                 .await
@@ -3419,7 +3427,7 @@ mod tests {
             batches_tx
                 .send(StreamBatch {
                     pdata,
-                    records: payload.payload().try_into_with_default().unwrap(),
+                    records: payload_to_otap(payload.payload()),
                     export_started_at: Instant::now(),
                 })
                 .await

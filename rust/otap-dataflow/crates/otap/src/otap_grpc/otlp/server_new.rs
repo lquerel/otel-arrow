@@ -33,7 +33,6 @@ use otel_arrow_dfe_engine::{
     Interests, MessageSourceSharedEffectHandlerExtension, ProducerEffectHandlerExtension,
 };
 use otel_arrow_dfe_pdata::OtapPayload;
-use otel_arrow_dfe_pdata::OtlpProtoBytes;
 use otel_arrow_dfe_pdata::proto::opentelemetry::collector::logs::v1::ExportLogsServiceResponse;
 use otel_arrow_dfe_pdata::proto::opentelemetry::collector::metrics::v1::ExportMetricsServiceResponse;
 use otel_arrow_dfe_pdata::proto::opentelemetry::collector::trace::v1::ExportTraceServiceResponse;
@@ -299,11 +298,9 @@ impl Decoder for OtlpBytesDecoder {
         let len = src.remaining();
         // Use copy_to_bytes so accepted requests copy once while advancing the buffer.
         let bytes = src.copy_to_bytes(len);
-        let result = match self.signal {
-            SignalType::Logs => OtlpProtoBytes::ExportLogsRequest(bytes),
-            SignalType::Metrics => OtlpProtoBytes::ExportMetricsRequest(bytes),
-            SignalType::Traces => OtlpProtoBytes::ExportTracesRequest(bytes),
-        };
+        let result = otel_arrow_dfe_pdata::codec::ResolvedCodec::OTLP
+            .admit(self.signal, bytes)
+            .map_err(|error| Status::invalid_argument(error.to_string()))?;
         let context = if self.preallocate_frame {
             // Pre-reserve a single frame since wait_for_result uses one slot.
             Context::with_capacity(1)
@@ -803,12 +800,28 @@ mod tests {
     use otel_arrow_dfe_engine::control::runtime_ctrl_msg_channel;
     use otel_arrow_dfe_engine::shared::message::SharedSender;
     use otel_arrow_dfe_engine::testing::test_node;
-    use otel_arrow_dfe_pdata::OtlpProtoBytes;
+    #[cfg(test)]
+    use otel_arrow_dfe_pdata::codec::ResolvedCodec;
     use otel_arrow_dfe_telemetry::registry::TelemetryRegistryHandle;
     use otel_arrow_dfe_telemetry::reporter::MetricsReporter;
     use std::collections::HashMap;
     use tokio::sync::mpsc as tokio_mpsc;
     use tonic::Code;
+
+    /// Scenario: the current gRPC decoder receives all signals with or without Ack frame reservation.
+    /// Guarantees: both modes admit unchanged encoded OTLP without eager protobuf parsing.
+    #[tokio::test]
+    async fn decoder_admits_encoded_otlp_for_all_signals() {
+        for signal in [SignalType::Logs, SignalType::Metrics, SignalType::Traces] {
+            for preallocate in [false, true] {
+                super::super::assert_encoded_decoder(
+                    OtlpBytesDecoder::new(signal, preallocate),
+                    signal,
+                )
+                .await;
+            }
+        }
+    }
 
     fn new_test_metrics() -> Arc<Mutex<OtlpReceiverMetrics>> {
         let registry = TelemetryRegistryHandle::new();
@@ -841,7 +854,12 @@ mod tests {
     }
 
     fn make_nack(permanent: bool) -> NackMsg<OtapPdata> {
-        let pdata = OtapPdata::new_default(OtlpProtoBytes::ExportLogsRequest(Bytes::new()).into());
+        let pdata = OtapPdata::new_default(
+            ResolvedCodec::OTLP
+                .admit(SignalType::Logs, Bytes::new())
+                .expect("admit OTLP logs")
+                .into(),
+        );
         if permanent {
             NackMsg::new_permanent("permanent failure", pdata)
         } else {
@@ -911,7 +929,12 @@ mod tests {
         let (mut service, mut msg_rx) = new_test_service(None, metrics.clone());
         let payload = Bytes::from_static(b"grpc-payload");
         let payload_bytes = payload.len() as u64;
-        let pdata = OtapPdata::new_default(OtlpProtoBytes::ExportLogsRequest(payload).into());
+        let pdata = OtapPdata::new_default(
+            ResolvedCodec::OTLP
+                .admit(SignalType::Logs, payload)
+                .expect("admit OTLP logs")
+                .into(),
+        );
 
         let result = UnaryService::call(&mut service, tonic::Request::new(pdata)).await;
 
@@ -931,7 +954,12 @@ mod tests {
         let metrics = new_test_metrics();
         let (mut service, mut msg_rx) = new_test_service(Some(AckSlot::new(0)), metrics.clone());
         let payload = Bytes::from_static(b"grpc-rejected-payload");
-        let pdata = OtapPdata::new_default(OtlpProtoBytes::ExportLogsRequest(payload).into());
+        let pdata = OtapPdata::new_default(
+            ResolvedCodec::OTLP
+                .admit(SignalType::Logs, payload)
+                .expect("admit OTLP logs")
+                .into(),
+        );
 
         let result = UnaryService::call(&mut service, tonic::Request::new(pdata)).await;
 

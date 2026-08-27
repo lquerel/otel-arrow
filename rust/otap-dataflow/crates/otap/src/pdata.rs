@@ -31,7 +31,8 @@ use otel_arrow_dfe_engine::{
     MessageSourceLocalEffectHandlerExtension, MessageSourceSharedEffectHandlerExtension,
     ProducerEffectHandlerExtension,
 };
-use otel_arrow_dfe_pdata::OtapPayload;
+use otel_arrow_dfe_pdata::codec::CodecContext;
+use otel_arrow_dfe_pdata::{OtapArrowRecords, OtapPayload, OtapPayloadHelpers};
 
 use crate::transport_headers::TransportHeaders;
 
@@ -598,6 +599,101 @@ impl OtapPdata {
     }
 }
 
+/// Context paired with records proven to be in native OTAP Arrow representation.
+#[derive(Debug)]
+#[must_use]
+pub struct OtapArrowPdata {
+    context: Context,
+    records: OtapArrowRecords,
+}
+
+impl OtapArrowPdata {
+    /// Constructs native OTAP pdata from its context and records.
+    pub const fn new(context: Context, records: OtapArrowRecords) -> Self {
+        Self { context, records }
+    }
+
+    /// Returns the signal carried by the records.
+    #[must_use]
+    pub fn signal_type(&self) -> SignalType {
+        self.records.signal_type()
+    }
+
+    /// Borrows the delivery context.
+    #[must_use]
+    pub const fn context(&self) -> &Context {
+        &self.context
+    }
+
+    /// Mutably borrows the delivery context.
+    pub const fn context_mut(&mut self) -> &mut Context {
+        &mut self.context
+    }
+
+    /// Borrows the native records.
+    #[must_use]
+    pub const fn records(&self) -> &OtapArrowRecords {
+        &self.records
+    }
+
+    /// Mutably borrows the native records.
+    pub const fn records_mut(&mut self) -> &mut OtapArrowRecords {
+        &mut self.records
+    }
+
+    /// Splits this value into its delivery context and native records.
+    #[must_use]
+    pub fn into_parts(self) -> (Context, OtapArrowRecords) {
+        (self.context, self.records)
+    }
+
+    /// Erases the proven native representation for transport through the pipeline.
+    #[must_use]
+    pub fn into_pdata(self) -> OtapPdata {
+        OtapPdata::new(self.context, self.records.into())
+    }
+}
+
+impl From<OtapArrowPdata> for OtapPdata {
+    fn from(value: OtapArrowPdata) -> Self {
+        value.into_pdata()
+    }
+}
+
+/// A failed native conversion together with the original pipeline message.
+#[derive(Debug, thiserror::Error)]
+#[error(transparent)]
+pub struct OtapPdataDecodeError(Box<OtapPdataDecodeErrorInner>);
+
+#[derive(Debug, thiserror::Error)]
+#[error("{source}")]
+struct OtapPdataDecodeErrorInner {
+    #[source]
+    source: otel_arrow_dfe_pdata::encode::Error,
+    pdata: OtapPdata,
+}
+
+impl OtapPdataDecodeError {
+    /// Returns the codec conversion error.
+    #[must_use]
+    pub const fn error(&self) -> &otel_arrow_dfe_pdata::encode::Error {
+        &self.0.source
+    }
+
+    /// Returns the original pdata retained for Nack or retry.
+    #[must_use]
+    pub fn pdata(&self) -> &OtapPdata {
+        &self.0.pdata
+    }
+
+    /// Splits the codec error and original pdata.
+    #[must_use]
+    pub fn into_parts(self) -> (otel_arrow_dfe_pdata::encode::Error, OtapPdata) {
+        let inner = *self.0;
+        (inner.source, inner.pdata)
+    }
+}
+
 /// Context + container for telemetry data
 #[derive(Clone, Debug)]
 pub struct OtapPdata {
@@ -647,12 +743,27 @@ impl OtapPdata {
         self.payload.encoding()
     }
 
-    /// Lazily materializes native OTAP, retaining all context and input on error.
-    pub fn materialize_otap(
-        &mut self,
+    /// Converts this message to native OTAP using reusable consumer-local codec state.
+    ///
+    /// On failure, the returned error owns the original message, including its
+    /// delivery context and encoded bytes, so the caller can Nack or retry it.
+    #[inline]
+    pub fn try_into_otap_with(
+        self,
+        codecs: &mut CodecContext,
         options: otel_arrow_dfe_config::ConversionOptions,
-    ) -> Result<(), Error> {
-        self.payload.materialize_otap(options).map_err(Error::from)
+    ) -> Result<OtapArrowPdata, OtapPdataDecodeError> {
+        let (context, payload) = self.into_parts();
+        match payload.try_into_otap_with(codecs, options) {
+            Ok(records) => Ok(OtapArrowPdata::new(context, records)),
+            Err(error) => {
+                let (source, payload) = error.into_parts();
+                Err(OtapPdataDecodeError(Box::new(OtapPdataDecodeErrorInner {
+                    source,
+                    pdata: Self::new(context, payload),
+                })))
+            }
+        }
     }
 
     /// Converts encoded representations without changing context or failed input.
@@ -1197,6 +1308,7 @@ mod test {
     use pretty_assertions::assert_eq;
     use std::cell::Cell;
     use std::collections::HashMap;
+    use std::mem::size_of;
     use tokio::sync::mpsc;
 
     fn create_test() -> (TestCallData, OtapPdata) {
@@ -1204,11 +1316,10 @@ mod test {
     }
 
     fn create_test_otap_pdata() -> OtapPdata {
-        use otel_arrow_dfe_pdata::{OtapArrowRecords, TryIntoWithOptions};
-
-        let payload = create_test_pdata().into_parts().1;
-        let records: OtapArrowRecords = payload.try_into_with_default().expect("OTAP conversion");
-        OtapPdata::new_default(records.into())
+        create_test_pdata()
+            .try_into_otap_with(&mut CodecContext::default(), Default::default())
+            .expect("OTAP conversion")
+            .into_pdata()
     }
 
     struct FakeFlowMetricHandler {
@@ -2425,13 +2536,15 @@ mod test {
     fn encoded_payload_preserves_metadata_and_nack_routing() {
         use otel_arrow_dfe_pdata::codec::{EncodedPdata, PdataEncoding};
         let bytes = bytes::Bytes::from(vec![0xff, 0x80]);
-        let encoding = PdataEncoding::new("test-missing-codec");
+        let encoding = PdataEncoding::new("test-otlp-codec");
         let mut headers = TransportHeaders::new();
         headers.push(TransportHeader::text("tenant", "x-tenant", "acme"));
         let addr = "127.0.0.1:5005".parse().unwrap();
         let (test_data, _) = create_test();
         let pdata = OtapPdata::new_default(
-            EncodedPdata::new(encoding.clone(), SignalType::Logs, bytes.clone()).into(),
+            EncodedPdata::new(encoding.clone(), SignalType::Logs, bytes.clone())
+                .expect("registered test codec")
+                .into(),
         )
         .with_transport_headers(headers.clone())
         .with_peer_addr(addr)
@@ -2452,9 +2565,11 @@ mod test {
             .unwrap();
         assert_eq!(output.bytes().as_ptr(), bytes.as_ptr());
 
-        let (context, mut payload) = pdata.into_parts();
-        let error = payload.materialize_otap(Default::default()).unwrap_err();
-        let nack = NackMsg::new_permanent(error.to_string(), OtapPdata::new(context, payload));
+        let error = pdata
+            .try_into_otap_with(&mut CodecContext::default(), Default::default())
+            .unwrap_err();
+        let (error, pdata) = error.into_parts();
+        let nack = NackMsg::new_permanent(error.to_string(), pdata);
         let (node_id, nack) = next_nack(nack).unwrap();
         assert_eq!(node_id, 101);
         assert!(nack.permanent);
@@ -2467,6 +2582,60 @@ mod test {
             .into_encoded(encoding, Default::default())
             .unwrap();
         assert_eq!(output.bytes().as_ptr(), bytes.as_ptr());
+    }
+
+    /// Scenario: valid OTLP logs, metrics and traces cross the typed native boundary.
+    /// Guarantees: one API converts every signal and erasing the capability produces native pdata.
+    #[test]
+    fn typed_otap_conversion_supports_every_signal() {
+        use otel_arrow_dfe_pdata::codec::ResolvedCodec;
+        use otel_arrow_dfe_pdata::testing::fixtures::{
+            log_with_no_scope, metrics_sum_with_full_resource_and_scope,
+            traces_with_full_resource_and_scope,
+        };
+        use prost::Message as _;
+
+        let mut codecs = CodecContext::default();
+        for (signal, bytes) in [
+            (SignalType::Logs, log_with_no_scope().encode_to_vec()),
+            (
+                SignalType::Metrics,
+                metrics_sum_with_full_resource_and_scope().encode_to_vec(),
+            ),
+            (
+                SignalType::Traces,
+                traces_with_full_resource_and_scope().encode_to_vec(),
+            ),
+        ] {
+            let pdata = OtapPdata::new_default(
+                ResolvedCodec::OTLP
+                    .admit(signal, bytes.into())
+                    .expect("admit OTLP")
+                    .into(),
+            );
+            let arrow_pdata = pdata
+                .try_into_otap_with(&mut codecs, Default::default())
+                .expect("convert OTLP to native records");
+            assert_eq!(arrow_pdata.signal_type(), signal);
+            assert_eq!(arrow_pdata.records().signal_type(), signal);
+            assert_eq!(
+                arrow_pdata.into_pdata().signal_format(),
+                SignalFormat::OtapRecords
+            );
+        }
+    }
+
+    /// Scenario: the native capability is introduced alongside the queued pdata type.
+    /// Guarantees: queued pdata keeps its measured 64-bit layout and the capability is no larger.
+    #[test]
+    fn typed_otap_conversion_does_not_enlarge_queued_pdata() {
+        assert!(size_of::<OtapArrowPdata>() <= size_of::<OtapPdata>());
+        assert_eq!(size_of::<OtapPdataDecodeError>(), size_of::<usize>());
+        assert!(
+            size_of::<Result<OtapArrowPdata, OtapPdataDecodeError>>() <= size_of::<OtapPdata>()
+        );
+        #[cfg(target_pointer_width = "64")]
+        assert_eq!(size_of::<OtapPdata>(), 144);
     }
 
     /// Scenario: a context carrying transport headers, a peer address, Ack/Nack

@@ -1526,7 +1526,10 @@ mod tests {
                     .payload();
 
                 // Extract arrow_records for further validation
-                let PayloadData::OtapArrowRecords(arrow_records) = message1_received.into_data()
+                let PayloadData::OtapArrowRecords {
+                    records: arrow_records,
+                    ..
+                } = message1_received.into_data()
                 else {
                     panic!("Expected OtapArrowRecords::Logs variant")
                 };
@@ -1597,7 +1600,10 @@ mod tests {
                     .payload();
 
                 // Extract arrow_records for further validation
-                let PayloadData::OtapArrowRecords(arrow_records) = message1_received.into_data()
+                let PayloadData::OtapArrowRecords {
+                    records: arrow_records,
+                    ..
+                } = message1_received.into_data()
                 else {
                     panic!("Expected OtapArrowRecords::Logs variant")
                 };
@@ -1668,8 +1674,10 @@ mod tests {
                 while total_records < 2 {
                     match timeout(Duration::from_secs(3), ctx.recv()).await {
                         Ok(Ok(message)) => {
-                            let PayloadData::OtapArrowRecords(arrow_records) =
-                                message.payload().into_data()
+                            let PayloadData::OtapArrowRecords {
+                                records: arrow_records,
+                                ..
+                            } = message.payload().into_data()
                             else {
                                 panic!("Expected OtapArrowRecords variant")
                             };
@@ -1881,8 +1889,10 @@ mod tests {
                 loop {
                     match timeout(Duration::from_secs(3), ctx.recv()).await {
                         Ok(Ok(message)) => {
-                            let PayloadData::OtapArrowRecords(arrow_records) =
-                                message.payload().into_data()
+                            let PayloadData::OtapArrowRecords {
+                                records: arrow_records,
+                                ..
+                            } = message.payload().into_data()
                             else {
                                 panic!("Expected OtapArrowRecords variant");
                             };

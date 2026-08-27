@@ -51,11 +51,11 @@ use otel_arrow_dfe_engine::{ConsumerEffectHandlerExtension, ExporterFactory};
 use otel_arrow_dfe_otap::OTAP_EXPORTER_FACTORIES;
 use otel_arrow_dfe_otap::metrics::ExporterExportMetrics;
 use otel_arrow_dfe_otap::pdata::OtapPdata;
+#[cfg(test)]
+use otel_arrow_dfe_pdata::OtlpProtoBytes;
 use otel_arrow_dfe_pdata::error::Error as PdataError;
 use otel_arrow_dfe_pdata::proto::opentelemetry::arrow::v1::ArrowPayloadType;
-use otel_arrow_dfe_pdata::{
-    OtapArrowRecords, OtapPayload, OtlpProtoBytes, PayloadData, TryIntoWithOptions,
-};
+use otel_arrow_dfe_pdata::{OtapArrowRecords, OtapPayload};
 use otel_arrow_dfe_telemetry::common_attributes::{Outcome, SignalOutcomeAttributes};
 use otel_arrow_dfe_telemetry::metrics::MetricSetHandler;
 use otel_arrow_dfe_telemetry::metrics::{MeasurementMetricSet, MetricSet};
@@ -208,11 +208,12 @@ fn transform_raw_otlp_logs(
     payload: &OtapPayload,
     transformer: &mut OtlpLogsTransformer,
 ) -> Option<Result<Option<arrow::array::RecordBatch>, error::ClickhouseExporterError>> {
-    match payload.data() {
-        PayloadData::OtlpBytes(OtlpProtoBytes::ExportLogsRequest(bytes)) => {
-            Some(transformer.transform(bytes))
-        }
-        _ => None,
+    if payload.signal_type() == SignalType::Logs
+        && payload.format() == otel_arrow_dfe_pdata::batching::PdataFormat::OTLP
+    {
+        Some(transformer.transform(payload.encoded_bytes().expect("OTLP view input")))
+    } else {
+        None
     }
 }
 
@@ -272,6 +273,7 @@ impl Exporter<OtapPdata> for ClickhouseExporter {
         mut inbox: ExporterInbox<OtapPdata>,
         effect_handler: EffectHandler<OtapPdata>,
     ) -> Result<TerminalState, Error> {
+        let mut codecs = otel_arrow_dfe_pdata::codec::CodecContext::default();
         let exporter_id = effect_handler.exporter_id();
         otel_info!(
             "clickhouse.exporter.start",
@@ -429,7 +431,7 @@ impl Exporter<OtapPdata> for ClickhouseExporter {
                         batches
                     } else {
                         let mut arrow_records: OtapArrowRecords = match payload
-                            .try_into_with_default()
+                            .try_into_otap_with(&mut codecs, Default::default())
                         {
                             Ok(arrow_records) => arrow_records,
                             Err(e) => {

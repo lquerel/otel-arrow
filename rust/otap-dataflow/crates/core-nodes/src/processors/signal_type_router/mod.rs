@@ -717,6 +717,8 @@ mod tests {
         assert!(result.is_ok());
     }
 
+    /// Scenario: The signal router receives an invalid configuration.
+    /// Guarantees: Factory validation rejects invalid routing before the processor starts.
     #[test]
     fn test_factory_creation_bad_config() {
         // An invalid type (e.g., number instead of object) should error
@@ -732,7 +734,7 @@ mod tests {
         assert!(result.is_err());
     }
 
-    /// Scenario: the router receives native OTAP and an unknown encoded log batch.
+    /// Scenario: the router receives native OTAP and an admitted encoded log batch.
     /// Guarantees: routing forwards both, preserving opaque bytes and identity without a codec.
     #[test]
     fn test_process_messages_pass_through() {
@@ -765,12 +767,13 @@ mod tests {
                 assert_eq!(forwarded.len(), 1);
 
                 let bytes = bytes::Bytes::from(vec![0xff, 0x80]);
-                let encoding = otel_arrow_dfe_pdata::codec::PdataEncoding::new("test-opaque");
+                let encoding = otel_arrow_dfe_pdata::codec::PdataEncoding::new("test-otlp-codec");
                 let payload = otel_arrow_dfe_pdata::codec::EncodedPdata::new(
                     encoding.clone(),
                     otel_arrow_dfe_config::SignalType::Logs,
                     bytes.clone(),
-                );
+                )
+                .expect("registered test codec");
                 ctx.process(Message::data_msg(OtapPdata::new_default(payload.into())))
                     .await
                     .unwrap();

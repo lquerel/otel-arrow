@@ -406,8 +406,8 @@ mod tests {
 
         assert_eq!(
             match arrow_payload.into_data() {
-                PayloadData::OtapArrowRecords(records) => records.root_payload_type(),
-                PayloadData::OtlpBytes(_) | PayloadData::Encoded(_) => unreachable!(),
+                PayloadData::OtapArrowRecords { records, .. } => records.root_payload_type(),
+                PayloadData::Encoded(_) => unreachable!(),
             },
             ArrowPayloadType::Logs
         );

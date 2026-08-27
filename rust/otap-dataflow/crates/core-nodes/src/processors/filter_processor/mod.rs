@@ -35,7 +35,6 @@ use otel_arrow_dfe_engine::{
     ConsumerEffectHandlerExtension, MessageSourceLocalEffectHandlerExtension,
 };
 use otel_arrow_dfe_otap::{OTAP_PROCESSOR_FACTORIES, pdata::OtapPdata};
-use otel_arrow_dfe_pdata::TryIntoWithOptions;
 use otel_arrow_dfe_pdata::otap::OtapArrowRecords;
 use otel_arrow_dfe_pdata::otap::filter::IdBitmapPool;
 use otel_arrow_dfe_telemetry::common_attributes::SignalAttributes;
@@ -50,6 +49,7 @@ pub const FILTER_PROCESSOR_URN: &str = "urn:otel:processor:filter";
 
 /// processor that outputs all data received to stdout
 pub struct FilterProcessor {
+    codecs: otel_arrow_dfe_pdata::codec::CodecContext,
     config: Config,
     metrics: MeasurementMetricSet<FilterPdataMetrics>,
     compute_duration: ComputeDuration,
@@ -104,6 +104,7 @@ impl FilterProcessor {
         let metrics = FilterPdataMetrics::register(&pipeline_ctx);
         let compute_duration = ComputeDuration::new(&pipeline_ctx);
         FilterProcessor {
+            codecs: Default::default(),
             config,
             metrics,
             compute_duration,
@@ -120,6 +121,7 @@ impl FilterProcessor {
                 error: e.to_string(),
             })?;
         Ok(FilterProcessor {
+            codecs: Default::default(),
             config,
             metrics,
             compute_duration,
@@ -152,19 +154,21 @@ impl local::Processor<OtapPdata> for FilterProcessor {
                 }
                 Ok(())
             }
-            Message::PData(mut pdata) => {
-                if let Err(error) = pdata.materialize_otap(Default::default()) {
-                    effect_handler
-                        .notify_nack(NackMsg::new_permanent(error.to_string(), pdata))
-                        .await?;
-                    return Ok(());
-                }
+            Message::PData(pdata) => {
+                let arrow_pdata =
+                    match pdata.try_into_otap_with(&mut self.codecs, Default::default()) {
+                        Ok(arrow_pdata) => arrow_pdata,
+                        Err(error) => {
+                            let (error, pdata) = error.into_parts();
+                            effect_handler
+                                .notify_nack(NackMsg::new_permanent(error.to_string(), pdata))
+                                .await?;
+                            return Ok(());
+                        }
+                    };
 
-                let signal = pdata.signal_type();
-                // convert to arrow records
-                let (context, payload) = pdata.into_parts();
-
-                let mut arrow_records: OtapArrowRecords = payload.try_into_with_default()?;
+                let signal = arrow_pdata.signal_type();
+                let (context, mut arrow_records) = arrow_pdata.into_parts();
                 arrow_records.decode_transport_optimized_ids()?;
 
                 let (filtered_arrow_records, _signals_consumed, dropped_items): (

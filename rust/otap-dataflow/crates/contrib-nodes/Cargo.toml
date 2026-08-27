@@ -200,7 +200,7 @@ otel-arrow-dfe-channel = { workspace = true }
 opentelemetry-proto.workspace = true
 otel-arrow-dfe-engine = { workspace = true, features = ["test-utils"] }
 otel-arrow-dfe-otap = { workspace = true, features = ["test-utils"] }
-otel-arrow-dfe-pdata = { workspace = true, features = ["testing"] }
+otel-arrow-dfe-pdata = { workspace = true, features = ["test-internals"] }
 pretty_assertions.workspace = true
 rand.workspace = true
 serde_yaml.workspace = true

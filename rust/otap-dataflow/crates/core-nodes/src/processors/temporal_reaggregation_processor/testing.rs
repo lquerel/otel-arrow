@@ -346,13 +346,15 @@ pub(super) fn create_test_pipeline_context() -> PipelineContext {
 /// equivalence comparison.
 fn payload_to_otlp(payload: &OtapPayload) -> otel_arrow_dfe_pdata::proto::OtlpProtoMessage {
     match payload.data() {
-        PayloadData::OtapArrowRecords(records) => otap_to_otlp(records),
-        PayloadData::Encoded(encoded) => {
-            otap_to_otlp(&OtapPayload::from(encoded.clone()).into_otap().unwrap())
-        }
-        PayloadData::OtlpBytes(bytes) => {
-            otel_arrow_dfe_pdata::testing::round_trip::otlp_bytes_to_message(bytes.clone())
-        }
+        PayloadData::OtapArrowRecords { records, .. } => otap_to_otlp(records),
+        PayloadData::Encoded(encoded) => otap_to_otlp(
+            &OtapPayload::from(encoded.clone())
+                .try_into_otap_with(
+                    &mut otel_arrow_dfe_pdata::codec::CodecContext::default(),
+                    Default::default(),
+                )
+                .unwrap(),
+        ),
     }
 }
 
@@ -360,7 +362,7 @@ fn payload_to_otlp(payload: &OtapPayload) -> otel_arrow_dfe_pdata::proto::OtlpPr
 /// expected set of [`OtapArrowRecords`] batches combined.
 pub(super) fn assert_output_equivalent(output: &OtapPdata, expected: &[OtapArrowRecords]) {
     let actual = match output.payload_ref().data() {
-        PayloadData::OtapArrowRecords(r) => r,
+        PayloadData::OtapArrowRecords { records: r, .. } => r,
         _ => panic!("expected OtapArrowRecords payload"),
     };
     let expected_msgs: Vec<_> = expected.iter().map(otap_to_otlp).collect();
@@ -371,7 +373,7 @@ pub(super) fn assert_output_equivalent(output: &OtapPdata, expected: &[OtapArrow
 /// expected OTLP [`MetricsData`].
 pub(super) fn assert_output_otlp_equivalent(output: &OtapPdata, expected: MetricsData) {
     let actual = match output.payload_ref().data() {
-        PayloadData::OtapArrowRecords(r) => r,
+        PayloadData::OtapArrowRecords { records: r, .. } => r,
         _ => panic!("expected OtapArrowRecords payload"),
     };
     assert_equivalent(

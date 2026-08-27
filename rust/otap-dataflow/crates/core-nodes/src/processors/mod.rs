@@ -63,10 +63,10 @@ mod tests {
     use serde_json::json;
     use std::sync::Arc;
 
-    /// Scenario: record processors receive a batch whose decoder is not registered.
+    /// Scenario: record processors receive an admitted batch containing malformed encoded data.
     /// Guarantees: attributes, filter, partition and transform Nack the original bytes without exiting.
     #[test]
-    fn record_processors_nack_missing_codec() {
+    fn record_processors_nack_malformed_codec_input() {
         let configs = [
             (
                 super::attributes_processor::ATTRIBUTES_PROCESSOR_URN,
@@ -110,10 +110,12 @@ mod tests {
                 .run_test(move |mut ctx| async move {
                     let (completion_tx, mut completion_rx) = pipeline_completion_msg_channel(1);
                     ctx.set_pipeline_completion_sender(completion_tx);
-                    let encoding = PdataEncoding::new("test-missing-processor-codec");
+                    let encoding = PdataEncoding::new("test-otlp-codec");
                     let bytes = Bytes::from(vec![1, 2, 3]);
                     let pdata = OtapPdata::new_default(
-                        EncodedPdata::new(encoding.clone(), SignalType::Logs, bytes.clone()).into(),
+                        EncodedPdata::new(encoding.clone(), SignalType::Logs, bytes.clone())
+                            .expect("registered test codec")
+                            .into(),
                     )
                     .test_subscribe_to(
                         Interests::NACKS | Interests::RETURN_DATA,

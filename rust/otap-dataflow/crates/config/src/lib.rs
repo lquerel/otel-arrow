@@ -71,9 +71,7 @@ pub enum SignalType {
 pub enum SignalFormat {
     /// OTel-Arrow records
     OtapRecords,
-    /// OTLP protobuf bytes
-    OtlpBytes,
-    /// Encoded bytes identified by a pdata codec, other than OTLP protobuf.
+    /// Encoded bytes identified by a pdata codec, including OTLP protobuf.
     Encoded,
 }
 

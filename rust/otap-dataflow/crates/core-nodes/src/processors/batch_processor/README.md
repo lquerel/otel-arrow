@@ -10,9 +10,10 @@
 
 ## Overview
 
-The batch processor combines OTAP and OTLP payloads before forwarding them
-downstream. It can preserve the inbound payload format or force output to OTAP
-or OTLP, and it tracks ACK/NACK-sensitive request state across batch flushes.
+The batch processor combines admitted pdata before forwarding it downstream.
+It uses a codec native batcher when available and otherwise batches OTAP records.
+It tracks ACK/NACK-sensitive request state across batch flushes, independently
+of downstream representation changes.
 
 ## Getting Started
 
@@ -110,13 +111,63 @@ Each format object contains:
   look ahead over later entries and is independent of Ack/Nack outbound-slot
   accounting (which governs *sending*, not up-front allocation).
 
-## Examples
+## Codec profiles and output selection
 
-Flush every incoming message:
+Existing `otap` and `otlp` profiles remain supported. The equivalent canonical
+configuration uses `codecs.otap` and `codecs.otlp-bytes`:
 
 ```yaml
 type: processor:batch
 config:
+  format: preserve
+  codecs:
+    otap:
+      min_size: 8192
+      sizer: items
+    otlp-bytes:
+      min_size: 262144
+      sizer: bytes
+  max_batch_duration: 200ms
+```
+
+`format` accepts `preserve` (the default), `otap`, or a registered codec name.
+`otlp` remains an alias for `otlp-bytes`. Configuring a profile through both a
+legacy field and its canonical name is an error, even if the values agree.
+
+With `max_batch_duration: 0s`, an unconfigured extension profile uses its native
+threshold as a split limit and flushes immediately. Explicit profiles still
+require `max_size` and no `min_size`, as do the legacy OTLP and OTAP profiles.
+
+Under `preserve`, native batching retains the input representation. If the
+codec lacks native support for the requested sizing mode, item batching falls
+back to OTAP and emits OTAP; it does not immediately re-encode to the input
+format. This also permits decoder-only input codecs. An explicit output codec
+requires an encoder and produces that format after batching. Byte limits require
+native byte-batching support; they are not approximated by OTAP item counts.
+`requests` sizing remains unsupported.
+
+Unconfigured extensions use their declared native default profile, or the
+configured OTAP profile when they have no native batcher. Per-codec overrides
+use the same profile fields and must request supported capabilities. Adding a
+compiled codec does not require a new storage branch in the processor.
+
+Timers and inbound/outbound tracking limits apply to each resolved batching
+buffer and signal. Equivalent OTAP fallback profiles share a buffer. The number
+of buffers is bounded by compiled codec registrations and configuration, not by
+arbitrary incoming names.
+
+## Examples
+
+Flush every incoming message, splitting above 8192 items:
+
+```yaml
+type: processor:batch
+config:
+  format: otap
+  otap:
+    min_size: null
+    max_size: 8192
+    sizer: items
   max_batch_duration: 0s
 ```
 

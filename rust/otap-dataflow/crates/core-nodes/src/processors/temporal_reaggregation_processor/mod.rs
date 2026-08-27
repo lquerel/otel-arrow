@@ -212,6 +212,7 @@ const FLUSH_WAKEUP_SLOT: WakeupSlot = WakeupSlot(0);
 /// stream. On each wakeup it flushes the accumulated state as an
 /// [`OtapArrowRecords`] batch.
 pub struct TemporalReaggregationProcessor {
+    codecs: otel_arrow_dfe_pdata::codec::CodecContext,
     /// Processor metrics
     metrics: MetricSet<TemporalReaggregationMetrics>,
 
@@ -359,6 +360,7 @@ impl TemporalReaggregationProcessor {
         config.validate()?;
         Ok(Self {
             metrics,
+            codecs: Default::default(),
             collection_period: config.period,
             wakeup_revision: None,
             max_stream_cardinality: config.max_stream_cardinality.get(),
@@ -625,7 +627,10 @@ impl TemporalReaggregationProcessor {
         effect_handler: &mut local::EffectHandler<OtapPdata>,
         pdata: OtapPdata,
     ) -> Result<(), Error> {
-        let view = match pdata.payload_ref().view(Default::default()) {
+        let view = match pdata
+            .payload_ref()
+            .view_with(&mut self.codecs, Default::default())
+        {
             Ok(view) => view,
             Err(error) => {
                 self.metrics.batches_rejected.inc();
@@ -651,8 +656,8 @@ impl TemporalReaggregationProcessor {
                     }
                 }
             }
-            otel_arrow_dfe_pdata::PayloadView::OtlpBytes(otlp) => {
-                let view = RawMetricsData::new(otlp.as_bytes());
+            otel_arrow_dfe_pdata::PayloadView::OtlpBytes { bytes, .. } => {
+                let view = RawMetricsData::new(bytes);
                 self.process_view(effect_handler, &view).await
             }
         };
@@ -2464,6 +2469,8 @@ mod tests {
         });
     }
 
+    /// Scenario: Encoded OTLP metrics contain distinct resources.
+    /// Guarantees: Reaggregation keeps resource groups separate in the emitted metrics.
     #[test]
     fn test_otlp_different_resources_preserved() {
         // Two OTLP gauges with different resource attributes should be treated
@@ -2497,7 +2504,7 @@ mod tests {
             // Both streams should be present: verify by converting the output
             // to OTLP and checking we have 2 resource_metrics entries.
             let actual = match output[0].payload_ref().data() {
-                PayloadData::OtapArrowRecords(r) => r,
+                PayloadData::OtapArrowRecords { records: r, .. } => r,
                 _ => panic!("expected OtapArrowRecords payload"),
             };
             let otlp = otap_to_otlp(actual);
@@ -3127,6 +3134,8 @@ mod tests {
         });
     }
 
+    /// Scenario: An OTLP metric lacks a resource and needs no aggregation.
+    /// Guarantees: The unchanged batch retains its encoded representation and metric contents.
     #[test]
     fn test_none_resource_passthrough() {
         // A delta sum under a None resource should pass through immediately.
@@ -3148,7 +3157,7 @@ mod tests {
             // Full passthrough forwards original OTLP bytes unchanged -
             // just verify something was emitted, the payload format is preserved.
             assert!(
-                matches!(output[0].payload_ref().data(), PayloadData::OtlpBytes(_)),
+                matches!(output[0].payload_ref().data(), PayloadData::Encoded(_)),
                 "full passthrough should preserve OTLP bytes payload"
             );
         });

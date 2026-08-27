@@ -60,6 +60,7 @@ use otel_arrow_dfe_engine::{
 use otel_arrow_dfe_otap::{
     OTAP_PROCESSOR_FACTORIES, opaque_string::OpaqueString, pdata::OtapPdata,
 };
+#[cfg(test)]
 use otel_arrow_dfe_pdata::TryIntoWithOptions;
 use otel_arrow_dfe_pdata::otap::transform::apply_attribute_transform;
 use otel_arrow_dfe_pdata::otap::{
@@ -186,6 +187,7 @@ pub struct Config {
 /// efficient Arrow operations across all attribute types (resource, scope, and
 /// signal-specific attributes) for logs, metrics, and traces telemetry.
 pub struct AttributesProcessor {
+    codecs: otel_arrow_dfe_pdata::codec::CodecContext,
     // Pre-computed transform to avoid rebuilding per message
     transform: AttributesTransform,
     // Pre-computed flags for domain lookup
@@ -315,6 +317,7 @@ impl AttributesProcessor {
         })?;
 
         Ok(Self {
+            codecs: Default::default(),
             transform,
             has_resource_domain,
             has_scope_domain,
@@ -412,7 +415,7 @@ impl local::Processor<OtapPdata> for AttributesProcessor {
                 }
                 _ => Ok(()),
             },
-            Message::PData(mut pdata) => {
+            Message::PData(pdata) => {
                 // Fast path: no actions to apply
                 if self.is_noop() {
                     let res = effect_handler
@@ -422,17 +425,20 @@ impl local::Processor<OtapPdata> for AttributesProcessor {
                     return res;
                 }
 
-                if let Err(error) = pdata.materialize_otap(Default::default()) {
-                    effect_handler
-                        .notify_nack(NackMsg::new_permanent(error.to_string(), pdata))
-                        .await?;
-                    return Ok(());
-                }
+                let arrow_pdata =
+                    match pdata.try_into_otap_with(&mut self.codecs, Default::default()) {
+                        Ok(arrow_pdata) => arrow_pdata,
+                        Err(error) => {
+                            let (error, pdata) = error.into_parts();
+                            effect_handler
+                                .notify_nack(NackMsg::new_permanent(error.to_string(), pdata))
+                                .await?;
+                            return Ok(());
+                        }
+                    };
 
-                let signal = pdata.signal_type();
-                let (context, payload) = pdata.into_parts();
-
-                let mut records: OtapArrowRecords = payload.try_into_with_default()?;
+                let signal = arrow_pdata.signal_type();
+                let (context, mut records) = arrow_pdata.into_parts();
 
                 // Apply transform across selected domains and record per-(action, domain) stats.
                 let result = effect_handler.timed(&self.compute_duration, || {
@@ -2199,6 +2205,8 @@ mod tests {
             .validate(|_| async move {});
     }
 
+    /// Scenario: Attribute deletion removes every attribute from the input records.
+    /// Guarantees: Output records remain valid and no deleted attribute survives processing.
     #[test]
     fn test_delete_all_attributes() {
         let input = build_logs_with_attrs(
@@ -2247,7 +2255,10 @@ mod tests {
                 let first = out.into_iter().next().expect("one output").payload();
 
                 let otap_batch = match first.into_data() {
-                    PayloadData::OtapArrowRecords(otap_batch) => otap_batch,
+                    PayloadData::OtapArrowRecords {
+                        records: otap_batch,
+                        ..
+                    } => otap_batch,
                     _ => panic!("unexpected output payload type"),
                 };
 

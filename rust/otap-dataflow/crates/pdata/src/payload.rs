@@ -4,9 +4,8 @@
 //! Implementation of the pipeline data that is passed between pipeline components.
 //!
 //! Internally, data is native OTAP Arrow records or independently encoded bytes
-//! identified by a pdata codec. The built-in OTLP protobuf encoding retains a
-//! specialized storage variant for its existing byte-view and batching paths.
-//! Additional representations use the same lazy conversion interface; see
+//! identified by a pdata codec. OTLP protobuf uses the same encoded storage and
+//! lazy conversion interface as every other byte representation; see
 //! [crate::codec] for the extension contract.
 //!
 //! OTAP stream-relative Arrow IPC dictionary deltas are transport state, not
@@ -27,7 +26,9 @@
 //!     logs::v1::{LogRecord, ResourceLogs, ScopeLogs, SeverityNumber},
 //!     resource::v1::Resource
 //! };
-//! # use otel_arrow_dfe_pdata::{OtapPayload, OtlpProtoBytes, TryIntoWithOptions};
+//! # use otel_arrow_dfe_pdata::OtapPayload;
+//! # use otel_arrow_dfe_pdata::codec::{CodecContext, ResolvedCodec};
+//! # use otel_arrow_dfe_config::SignalType;
 //! # use prost::Message;
 //! # use bytes::Bytes;
 //! let otlp_service_req = ExportLogsServiceRequest::new(vec![
@@ -52,10 +53,13 @@
 //! otlp_service_req.encode(&mut buf).unwrap();
 //!
 //! // Create a new OtapPayload from OTLP bytes
-//! let payload: OtapPayload = OtlpProtoBytes::ExportLogsRequest(Bytes::from(buf)).into();
+//! let payload: OtapPayload = ResolvedCodec::OTLP
+//!     .admit(SignalType::Logs, Bytes::from(buf)).unwrap().into();
 //!
 //! // Convert to OTAP records
-//! let otap_arrow_records: OtapArrowRecords = payload.try_into_with_default().unwrap();
+//! let otap_arrow_records: OtapArrowRecords = payload
+//!     .try_into_otap_with(&mut CodecContext::default(), Default::default())
+//!     .unwrap();
 //! ```
 //!
 //! Internally, conversions are happening using various utility functions:
@@ -84,7 +88,13 @@
 // directly from OTAP -> OTLP bytes. The utility functions we use might change as part of
 // this diagram may need to be updated (https://github.com/open-telemetry/otel-arrow/issues/1095)
 
-use crate::codec::{self, CodecDirection, EncodedPdata, OtlpCodec, PdataCodec, PdataEncoding};
+use crate::TryFromWithOptions;
+#[cfg(test)]
+use crate::TryIntoWithOptions;
+use crate::batching::PdataFormat;
+use crate::codec::{
+    self, CodecContext, CodecDirection, EncodedOutput, EncodedPdata, PdataEncoding, ResolvedCodec,
+};
 use crate::encode::{encode_logs_otap_batch, encode_metrics_otap_batch, encode_spans_otap_batch};
 use crate::error::Error;
 use crate::otap::{OtapArrowRecords, OtapBatchStore};
@@ -96,7 +106,6 @@ use crate::proto::OtlpProtoMessage;
 use crate::views::otlp::bytes::logs::RawLogsData;
 use crate::views::otlp::bytes::metrics::RawMetricsData;
 use crate::views::otlp::bytes::traces::RawTraceData;
-use crate::{TryFromWithOptions, TryIntoWithOptions};
 use bytes::{Bytes, BytesMut};
 use otel_arrow_dfe_config::{ConversionOptions, SignalFormat, SignalType};
 use prost::{EncodeError, Message};
@@ -105,97 +114,95 @@ use std::sync::Arc;
 
 /// Concrete storage representation backing an [`OtapPayload`].
 ///
-/// This enum is public so callers can pattern-match on the representation via
-/// [`OtapPayload::data`] / [`OtapPayload::into_data`], but constructing or
-/// consuming an [`OtapPayload`] should normally go through the wrapper so its
-/// cached measurements stay correctly scoped to the exact logical payload
-/// version.
+/// Storage introspection is exported only for tests. Production consumers use
+/// the wrapper operations, so extending encoded formats requires no new matches
+/// in processors or exporters.
 #[derive(Clone, Debug)]
 pub enum PayloadData {
-    /// Specialized storage for the built-in otlp-bytes codec. Generic consumers
-    /// use OtapPayload::encoding and OtapPayload::into_encoded.
-    OtlpBytes(OtlpProtoBytes),
-
-    /// Other independently encoded bytes, identified by a registered pdata codec.
-    /// Sharing the envelope keeps this enum compact and avoids allocations on fan-out.
-    Encoded(Arc<EncodedPdata>),
-
-    /// data is contained in `OtapBatch` which contains Arrow `RecordBatches` for OTAP payload type
-    /// TODO: Remove "Arrow" from this case name, it stutters; follow SignalFormat.
-    OtapArrowRecords(OtapArrowRecords),
+    /// Independently encoded bytes, including OTLP, with an immutable codec identity.
+    Encoded(EncodedPdata),
+    /// Native OTAP records and their cached logical byte size.
+    OtapArrowRecords {
+        /// Arrow records for the primary signal.
+        records: OtapArrowRecords,
+        /// Measurement scoped to these exact records; cleared before mutation.
+        size: Option<usize>,
+    },
 }
 
-/// Readable representations for components with native OTAP and OTLP view paths.
-///
-/// Existing representations are borrowed. Other encodings are decoded to an
-/// owned OTAP batch without changing the original payload or its delivery state.
+/// Readable representations supplied by codecs or borrowed from native OTAP.
+/// Views borrow input bytes, never mutable codec state.
 pub enum PayloadView<'a> {
-    /// Borrowed OTLP bytes for direct protobuf views.
-    OtlpBytes(&'a OtlpProtoBytes),
-    /// Borrowed native OTAP or records decoded from an extension's bytes.
+    /// Borrowed OTLP protobuf bytes for direct views without an owned envelope.
+    OtlpBytes {
+        /// Signal carried by the protobuf service request.
+        signal: SignalType,
+        /// Uncompressed service-request bytes.
+        bytes: &'a [u8],
+    },
+    /// Borrowed native OTAP or records decoded from encoded bytes.
     OtapArrowRecords(Cow<'a, OtapArrowRecords>),
+}
+
+impl PayloadView<'_> {
+    /// Signal exposed by this view.
+    #[must_use]
+    pub fn signal_type(&self) -> SignalType {
+        match self {
+            Self::OtlpBytes { signal, .. } => *signal,
+            Self::OtapArrowRecords(records) => records.signal_type(),
+        }
+    }
 }
 
 impl PayloadData {
     fn signal_type(&self) -> SignalType {
         match self {
-            Self::OtlpBytes(value) => value.signal_type(),
             Self::Encoded(value) => value.signal_type(),
-            Self::OtapArrowRecords(value) => value.signal_type(),
+            Self::OtapArrowRecords { records, .. } => records.signal_type(),
         }
     }
 
     const fn signal_format(&self) -> SignalFormat {
         match self {
-            Self::OtapArrowRecords(_) => SignalFormat::OtapRecords,
-            Self::OtlpBytes(_) => SignalFormat::OtlpBytes,
+            Self::OtapArrowRecords { .. } => SignalFormat::OtapRecords,
             Self::Encoded(_) => SignalFormat::Encoded,
         }
     }
 
     fn is_empty(&self) -> bool {
         match self {
-            Self::OtlpBytes(value) => value.is_empty(),
             Self::Encoded(value) => value.bytes().is_empty(),
-            Self::OtapArrowRecords(value) => value.is_empty(),
+            Self::OtapArrowRecords { records, .. } => records.is_empty(),
         }
     }
 
-    /// Empties this representation in place, returning the old contents.
+    /// Empties this representation in place, returning the old contents and caches.
     fn take_payload(&mut self) -> Self {
         match self {
-            Self::OtlpBytes(value) => Self::OtlpBytes(value.take_payload()),
             Self::Encoded(value) => {
                 let empty =
-                    EncodedPdata::new(value.encoding().clone(), value.signal_type(), Bytes::new())
-                        .with_item_count(0);
-                Self::Encoded(std::mem::replace(value, Arc::new(empty)))
+                    EncodedPdata::from_resolved(value.codec(), value.signal_type(), Bytes::new());
+                Self::Encoded(std::mem::replace(value, empty))
             }
-            Self::OtapArrowRecords(value) => Self::OtapArrowRecords(value.take_payload()),
-        }
-    }
-
-    fn num_items(&self) -> usize {
-        match self {
-            Self::OtlpBytes(value) => value.num_items(),
-            Self::Encoded(value) => value.item_count().unwrap_or(0),
-            Self::OtapArrowRecords(value) => value.num_items(),
+            Self::OtapArrowRecords { records, size } => Self::OtapArrowRecords {
+                records: records.take_payload(),
+                size: size.take(),
+            },
         }
     }
 
     fn num_bytes(&self) -> Option<usize> {
         match self {
-            Self::OtlpBytes(value) => Some(value.num_bytes()),
             Self::Encoded(value) => Some(value.bytes().len()),
-            Self::OtapArrowRecords(value) => value.num_bytes(),
+            Self::OtapArrowRecords { records, size } => size.or_else(|| records.num_bytes()),
         }
     }
 
     fn retained_memory_bytes(&self) -> usize {
         match self {
-            Self::OtlpBytes(value) => value.retained_memory_bytes(),
             Self::Encoded(value) => value.bytes().len(),
-            Self::OtapArrowRecords(value) => value.retained_memory_bytes(),
+            Self::OtapArrowRecords { records, .. } => records.retained_memory_bytes(),
         }
     }
 }
@@ -207,127 +214,278 @@ impl PayloadData {
 /// first requested. The cache is scoped to the exact logical payload version it
 /// was created for:
 ///
-/// - Constructing a new `OtapPayload` (via `From`, [`Self::empty`], or
-///   [`Self::take_payload`]'s emptied remainder) always starts with a fresh,
-///   uninitialized cache.
+/// - Wrapping native records or OTLP compatibility bytes starts a fresh cache.
+///   Admitted encoded envelopes preserve any supplied counts. [`Self::empty`]
+///   and [`Self::take_payload`]'s emptied remainder start with fresh caches.
 /// - Ordinary clones copy any measurements already computed for the source
 ///   payload.
 /// - [`Self::take_payload`]'s returned value preserves the cache of the
 ///   payload version it contains.
 ///
-/// [`Self::data`] exposes only a shared reference. Accessing the underlying
+/// Test-only storage introspection exposes a shared reference. Accessing the underlying
 /// representation for mutation requires consuming the wrapper through
-/// [`Self::into_data`] or [`Self::into_otap`], and wrapping the mutated
+/// [`Self::into_data`] or [`Self::try_into_otap_with`], and wrapping the mutated
 /// representation creates a fresh cache. No manual invalidation is required.
 #[derive(Clone, Debug)]
 pub struct OtapPayload {
     data: PayloadData,
-    item_count: Option<usize>,
-    size: Option<usize>,
+}
+
+/// A failed native OTAP conversion together with the recoverable input payload.
+#[derive(Debug, thiserror::Error)]
+#[error(transparent)]
+pub struct OtapPayloadDecodeError(Box<OtapPayloadDecodeErrorInner>);
+
+#[derive(Debug, thiserror::Error)]
+#[error("{source}")]
+struct OtapPayloadDecodeErrorInner {
+    #[source]
+    source: crate::encode::Error,
+    payload: OtapPayload,
+}
+
+impl OtapPayloadDecodeError {
+    /// Returns the conversion error.
+    #[must_use]
+    pub const fn error(&self) -> &crate::encode::Error {
+        &self.0.source
+    }
+
+    /// Returns the payload retained for Nack or retry.
+    #[must_use]
+    pub fn payload(&self) -> &OtapPayload {
+        &self.0.payload
+    }
+
+    /// Splits the conversion error and recoverable payload.
+    #[must_use]
+    pub fn into_parts(self) -> (crate::encode::Error, OtapPayload) {
+        let inner = *self.0;
+        (inner.source, inner.payload)
+    }
+
+    fn into_error(self) -> crate::encode::Error {
+        let inner = *self.0;
+        inner.source
+    }
 }
 
 impl OtapPayload {
     /// Wraps payload data in a fresh `OtapPayload` with an uninitialized
     /// measurement cache.
     fn from_data(data: PayloadData) -> Self {
-        Self {
-            data,
-            item_count: None,
-            size: None,
-        }
+        Self { data }
     }
 
     /// Constructs a fresh payload from OTLP protobuf bytes.
     #[must_use]
-    pub fn from_otlp(payload: OtlpProtoBytes) -> Self {
-        Self::from_data(PayloadData::OtlpBytes(payload))
+    pub fn from_otlp(mut payload: OtlpProtoBytes) -> Self {
+        Self::from_encoded(EncodedPdata::from_resolved(
+            ResolvedCodec::OTLP,
+            payload.signal_type(),
+            payload.replace_bytes(Bytes::new()),
+        ))
     }
 
     /// Constructs a fresh payload from OTAP Arrow records.
     #[must_use]
     pub fn from_otap(payload: OtapArrowRecords) -> Self {
-        Self::from_data(PayloadData::OtapArrowRecords(payload))
+        Self::from_data(PayloadData::OtapArrowRecords {
+            records: payload,
+            size: None,
+        })
     }
 
-    /// Wraps an encoded batch without copying or decoding it.
-    ///
-    /// OTLP uses its existing compact storage variant and measurement cache.
-    /// The specialization is an implementation detail of the same codec model.
+    /// Wraps any admitted encoded batch without allocating, copying, or decoding it.
     #[must_use]
     pub fn from_encoded(encoded: EncodedPdata) -> Self {
-        if encoded.encoding() == &PdataEncoding::OTLP {
-            let signal = encoded.signal_type();
-            let item_count = encoded.item_count();
-            let mut payload =
-                Self::from_otlp(OtlpProtoBytes::new_from_bytes(signal, encoded.into_bytes()));
-            payload.item_count = item_count;
-            payload
-        } else {
-            Self::from_data(PayloadData::Encoded(Arc::new(encoded)))
-        }
+        Self::from_data(PayloadData::Encoded(encoded))
     }
 
     /// Encoding of byte-oriented payloads, or None for native OTAP.
     #[must_use]
     pub fn encoding(&self) -> Option<&PdataEncoding> {
         match &self.data {
-            PayloadData::OtlpBytes(_) => Some(&codec::OTLP_METADATA.encoding),
             PayloadData::Encoded(encoded) => Some(encoded.encoding()),
-            PayloadData::OtapArrowRecords(_) => None,
+            PayloadData::OtapArrowRecords { .. } => None,
         }
     }
 
-    /// Materializes native OTAP only when needed.
+    /// Resolved logical representation, independent of its storage layout.
+    #[must_use]
+    pub fn format(&self) -> PdataFormat {
+        match &self.data {
+            PayloadData::OtapArrowRecords { .. } => PdataFormat::OTAP,
+            PayloadData::Encoded(encoded) => PdataFormat::encoded(encoded.codec()),
+        }
+    }
+
+    /// Existing encoded bytes, without decoding or converting native records.
+    #[must_use]
+    pub fn encoded_bytes(&self) -> Option<&Bytes> {
+        match &self.data {
+            PayloadData::Encoded(encoded) => Some(encoded.bytes()),
+            PayloadData::OtapArrowRecords { .. } => None,
+        }
+    }
+
+    /// Takes existing encoded bytes, returning the original payload if native.
+    pub fn into_encoded_bytes(self) -> Result<Bytes, Self> {
+        match self.data {
+            PayloadData::Encoded(encoded) => Ok(encoded.into_bytes()),
+            _ => Err(self),
+        }
+    }
+
+    /// Borrows already materialized native records without conversion.
+    #[must_use]
+    pub fn otap_ref(&self) -> Option<&OtapArrowRecords> {
+        match &self.data {
+            PayloadData::OtapArrowRecords { records, .. } => Some(records),
+            _ => None,
+        }
+    }
+
+    /// Known item count. An absent count is distinct from an empty batch.
+    #[must_use]
+    pub fn known_item_count(&self) -> Option<usize> {
+        match &self.data {
+            PayloadData::Encoded(encoded) => encoded.item_count(),
+            PayloadData::OtapArrowRecords { records, .. } => Some(records.num_items()),
+        }
+    }
+
+    /// Returns a cached byte measurement or measures the current data read-only.
+    #[must_use]
+    pub fn measured_bytes(&self) -> Option<usize> {
+        self.data.num_bytes()
+    }
+
+    pub(crate) fn set_item_count(&mut self, count: usize) {
+        if let PayloadData::Encoded(encoded) = &mut self.data {
+            encoded.set_item_count(Some(count));
+        }
+    }
+
+    /// Extracts or decodes native records using reusable consumer-local state.
     ///
-    /// On failure, the original representation, bytes and measurement caches
-    /// remain available for Nack/retry. Cloning shares buffers, not their contents.
-    pub fn materialize_otap(
+    /// Native records move directly. Encoded input is retained with shared bytes
+    /// until decoding succeeds so callers can recover the original payload on error.
+    pub fn try_into_otap_with(
+        self,
+        context: &mut CodecContext,
+        options: ConversionOptions,
+    ) -> Result<OtapArrowRecords, OtapPayloadDecodeError> {
+        match self.data {
+            PayloadData::OtapArrowRecords { records, .. } => Ok(records),
+            PayloadData::Encoded(encoded) => {
+                let payload = Self::from_encoded(encoded.clone());
+                context.decode(encoded, options).map_err(|source| {
+                    OtapPayloadDecodeError(Box::new(OtapPayloadDecodeErrorInner {
+                        source,
+                        payload,
+                    }))
+                })
+            }
+        }
+    }
+
+    /// Materializes once on success, retaining the original payload on failure.
+    pub(crate) fn materialize_otap_with(
         &mut self,
+        context: &mut CodecContext,
         options: ConversionOptions,
     ) -> Result<(), crate::encode::Error> {
-        if !matches!(self.data, PayloadData::OtapArrowRecords(_)) {
-            let records: OtapArrowRecords = self.clone().try_into_with_options(options)?;
+        if !matches!(self.data, PayloadData::OtapArrowRecords { .. }) {
+            let records = self
+                .clone()
+                .try_into_otap_with(context, options)
+                .map_err(OtapPayloadDecodeError::into_error)?;
             *self = records.into();
         }
         Ok(())
     }
 
     /// Converts to a target encoding through OTAP, or returns compatible bytes
-    /// directly. Compatibility does not require a codec to be installed.
+    /// directly. Admission has already validated the source codec.
     pub fn into_encoded(
         self,
         encoding: PdataEncoding,
         options: ConversionOptions,
     ) -> Result<EncodedPdata, Error> {
+        let codec = codec::resolve(&encoding, self.signal_type(), CodecDirection::Decode)?;
+        self.into_encoded_with(&mut CodecContext::default(), codec, options)
+    }
+
+    /// Converts to an admitted encoded representation using reusable codec state.
+    pub fn into_encoded_with(
+        mut self,
+        context: &mut CodecContext,
+        codec: ResolvedCodec,
+        options: ConversionOptions,
+    ) -> Result<EncodedPdata, Error> {
         let signal = self.signal_type();
-        if self.encoding() == Some(&encoding) {
+        codec.require(signal, CodecDirection::Decode)?;
+        if self.format() == PdataFormat::encoded(codec) {
             return Ok(match self.data {
-                PayloadData::Encoded(encoded) => Arc::unwrap_or_clone(encoded),
-                PayloadData::OtlpBytes(mut bytes) => {
-                    let mut encoded =
-                        EncodedPdata::new(encoding, signal, bytes.replace_bytes(Bytes::new()));
-                    if let Some(count) = self.item_count {
-                        encoded = encoded.with_item_count(count);
-                    }
-                    encoded
-                }
-                PayloadData::OtapArrowRecords(_) => unreachable!("native OTAP has no encoding"),
+                PayloadData::Encoded(encoded) => encoded,
+                PayloadData::OtapArrowRecords { .. } => unreachable!("native OTAP has no encoding"),
             });
         }
-        // Validate the target before decoding the source.
-        let factory = codec::resolve(&encoding, signal, CodecDirection::Encode)?;
-        let records: OtapArrowRecords =
-            self.try_into_with_options(options.clone())
-                .map_err(|error| {
-                    codec::codec_error(&encoding, format!("source decode failed: {error}"))
-                })?;
-        let item_count = records.num_items();
-        let bytes = if encoding == PdataEncoding::OTLP {
-            OtlpCodec.encode(records, options)?
-        } else {
-            (factory.create)().encode(records, options)?
-        };
-        Ok(EncodedPdata::new(encoding, signal, bytes).with_item_count(item_count))
+        let bytes = self.prepare_encoded(context, codec, options)?.into_bytes();
+        let mut encoded = EncodedPdata::from_resolved(codec, signal, bytes);
+        if let Some(count) = self.known_item_count() {
+            encoded = encoded.with_item_count(count);
+        }
+        Ok(encoded)
+    }
+
+    /// Prepares output without changing an encoded source's representation.
+    /// Native encoding reuses scratch buffers; unchanged bytes remain shared.
+    pub fn prepare_encoded<'a>(
+        &mut self,
+        context: &'a mut CodecContext,
+        codec: ResolvedCodec,
+        options: ConversionOptions,
+    ) -> Result<EncodedOutput<'a>, Error> {
+        if self.format() == PdataFormat::encoded(codec) {
+            return Ok(EncodedOutput::bytes(
+                self.encoded_bytes()
+                    .expect("encoded representation")
+                    .clone(),
+            ));
+        }
+        codec.require(self.signal_type(), CodecDirection::Encode)?;
+        if let PayloadData::OtapArrowRecords { records, size } = &mut self.data {
+            *size = None;
+            return context.encode_records(records, codec, options);
+        }
+        let mut records = self
+            .clone()
+            .try_into_otap_with(context, options.clone())
+            .map_err(|error| {
+                codec::codec_error(
+                    &codec.metadata().encoding,
+                    format!("source decode failed: {error}"),
+                )
+            })?;
+        let count = records.num_items();
+        let output = context.encode_records(&mut records, codec, options)?;
+        self.set_item_count(count);
+        Ok(output)
+    }
+
+    /// Atomically replaces the stored representation after successful encoding.
+    pub fn convert_encoding_with(
+        &mut self,
+        context: &mut CodecContext,
+        codec: ResolvedCodec,
+        options: ConversionOptions,
+    ) -> Result<(), Error> {
+        if self.format() != PdataFormat::encoded(codec) {
+            *self = Self::from_encoded(self.clone().into_encoded_with(context, codec, options)?);
+        }
+        Ok(())
     }
 
     /// Changes the byte representation only after a successful conversion.
@@ -346,6 +504,7 @@ impl OtapPayload {
 
     /// Borrows the concrete payload data for pattern matching.
     #[must_use]
+    #[cfg(any(test, feature = "test-internals"))]
     pub fn data(&self) -> &PayloadData {
         &self.data
     }
@@ -355,15 +514,21 @@ impl OtapPayload {
         &self,
         options: ConversionOptions,
     ) -> Result<PayloadView<'_>, crate::encode::Error> {
-        Ok(match &self.data {
-            PayloadData::OtlpBytes(bytes) => PayloadView::OtlpBytes(bytes),
-            PayloadData::OtapArrowRecords(records) => {
-                PayloadView::OtapArrowRecords(Cow::Borrowed(records))
+        self.view_with(&mut CodecContext::default(), options)
+    }
+
+    /// Borrows native views or decodes once using consumer-local codec state.
+    pub fn view_with(
+        &self,
+        context: &mut CodecContext,
+        options: ConversionOptions,
+    ) -> Result<PayloadView<'_>, crate::encode::Error> {
+        match &self.data {
+            PayloadData::OtapArrowRecords { records, .. } => {
+                Ok(PayloadView::OtapArrowRecords(Cow::Borrowed(records)))
             }
-            PayloadData::Encoded(encoded) => PayloadView::OtapArrowRecords(Cow::Owned(
-                codec::decode(Arc::unwrap_or_clone(encoded.clone()), options)?,
-            )),
-        })
+            PayloadData::Encoded(encoded) => context.view(encoded, options),
+        }
     }
 
     /// Consumes this payload, returning its concrete payload data.
@@ -372,13 +537,22 @@ impl OtapPayload {
     /// (for example via `From`) to wrap the representation again with a
     /// fresh cache.
     #[must_use]
+    #[cfg(any(test, feature = "test-internals"))]
     pub fn into_data(self) -> PayloadData {
-        self.data
+        self.into_uncached_data()
     }
 
-    /// Consumes this payload and extracts or converts it to OTAP records.
-    pub fn into_otap(self) -> Result<OtapArrowRecords, crate::encode::Error> {
-        self.try_into_with_default()
+    #[cfg(not(any(test, feature = "test-internals")))]
+    pub(crate) fn into_data(self) -> PayloadData {
+        self.into_uncached_data()
+    }
+
+    fn into_uncached_data(mut self) -> PayloadData {
+        match &mut self.data {
+            PayloadData::Encoded(encoded) => encoded.set_item_count(None),
+            PayloadData::OtapArrowRecords { size, .. } => *size = None,
+        }
+        self.data
     }
 
     /// Returns the type of signal represented by this `OtapPdata` instance.
@@ -407,52 +581,31 @@ impl OtapPayload {
     /// it cannot reuse stale measurements.
     #[must_use]
     pub fn take_payload(&mut self) -> Self {
-        let old_data = self.data.take_payload();
         Self {
-            data: old_data,
-            item_count: self.item_count.take(),
-            size: self.size.take(),
+            data: self.data.take_payload(),
         }
     }
 
-    /// Returns the number of items of the primary signal (spans, data
-    /// points, log records). An extension's encoded payload reports the count
-    /// supplied in its envelope, or zero when unknown; metrics never force decoding.
+    /// Returns the primary signal count, scanning encoded bytes only if the
+    /// codec provides a stateless counter. Unknown counts report zero for metrics.
     #[must_use]
     pub fn num_items(&mut self) -> usize {
-        match &self.data {
-            // Cache OTLP counts because counting traverses protobuf records.
-            PayloadData::OtlpBytes(_) => {
-                if let Some(item_count) = self.item_count {
-                    return item_count;
-                }
-                let item_count = self.data.num_items();
-                self.item_count = Some(item_count);
-                item_count
-            }
-            // Bypass the cache for OTAP because Arrow batches store row counts.
-            PayloadData::OtapArrowRecords(_) | PayloadData::Encoded(_) => self.data.num_items(),
+        match &mut self.data {
+            PayloadData::Encoded(encoded) => encoded.num_items(),
+            PayloadData::OtapArrowRecords { records, .. } => records.num_items(),
         }
     }
 
-    /// Returns the logical byte size of the current payload representation.
-    ///
-    /// OTLP reports its protobuf service-request byte length. OTAP reports
-    /// Arrow's logical slice-memory estimate. Returns `None` if the current
-    /// representation cannot be measured.
+    /// Returns encoded byte length or a cached logical Arrow byte estimate.
     #[must_use]
     pub fn num_bytes(&mut self) -> Option<usize> {
-        match &self.data {
-            // OTLP already stores the exact encoded length in Bytes metadata.
-            PayloadData::OtlpBytes(_) | PayloadData::Encoded(_) => self.data.num_bytes(),
-            // Cache OTAP sizing because it walks every Arrow array and buffer.
-            PayloadData::OtapArrowRecords(_) => {
-                if let Some(size) = self.size {
-                    return Some(size);
+        match &mut self.data {
+            PayloadData::Encoded(encoded) => Some(encoded.bytes().len()),
+            PayloadData::OtapArrowRecords { records, size } => {
+                if size.is_none() {
+                    *size = records.num_bytes();
                 }
-                let size = self.data.num_bytes()?;
-                self.size = Some(size);
-                Some(size)
+                *size
             }
         }
     }
@@ -472,9 +625,11 @@ impl OtapPayload {
     #[must_use]
     pub const fn empty(signal: SignalType) -> Self {
         Self {
-            data: PayloadData::OtlpBytes(OtlpProtoBytes::empty(signal)),
-            item_count: None,
-            size: None,
+            data: PayloadData::Encoded(EncodedPdata::from_resolved(
+                ResolvedCodec::OTLP,
+                signal,
+                Bytes::new(),
+            )),
         }
     }
 
@@ -483,14 +638,17 @@ impl OtapPayload {
     #[cfg(any(test, feature = "testing"))]
     #[must_use]
     pub fn test_has_cached_item_count(&self) -> bool {
-        self.item_count.is_some()
+        matches!(&self.data, PayloadData::Encoded(encoded) if encoded.item_count().is_some())
     }
 
     /// Test-only introspection: true if the OTAP size cache has been computed.
     #[cfg(any(test, feature = "testing"))]
     #[must_use]
     pub fn test_has_cached_size(&self) -> bool {
-        self.size.is_some()
+        matches!(
+            &self.data,
+            PayloadData::OtapArrowRecords { size: Some(_), .. }
+        )
     }
 }
 
@@ -600,73 +758,77 @@ impl OtapPayloadHelpers for OtlpProtoBytes {
     }
 
     fn num_items(&self) -> usize {
-        // Counting requires traversing the encoded protobuf record hierarchy.
-        match self {
-            Self::ExportLogsRequest(bytes) => {
-                let logs_data_view = RawLogsData::new(bytes.as_ref());
-                use otel_arrow_dfe_pdata_views::views::logs::{
-                    LogsDataView, ResourceLogsView, ScopeLogsView,
-                };
-                logs_data_view
-                    .resources()
-                    .map(|rl| {
-                        rl.scopes()
-                            .map(|sl| sl.log_records().count())
-                            .sum::<usize>()
-                    })
-                    .sum()
-            }
-            Self::ExportTracesRequest(bytes) => {
-                let traces_data_view = RawTraceData::new(bytes.as_ref());
-                use otel_arrow_dfe_pdata_views::views::trace::{
-                    ResourceSpansView, ScopeSpansView, TracesView,
-                };
-                traces_data_view
-                    .resources()
-                    .map(|rs| rs.scopes().map(|ss| ss.spans().count()).sum::<usize>())
-                    .sum()
-            }
-            Self::ExportMetricsRequest(bytes) => {
-                let metrics_data_view = RawMetricsData::new(bytes.as_ref());
-                use otel_arrow_dfe_pdata_views::views::metrics::{
-                    DataView, ExponentialHistogramView, GaugeView, HistogramView, MetricView,
-                    MetricsView, ResourceMetricsView, ScopeMetricsView, SumView, SummaryView,
-                };
-                metrics_data_view
-                    .resources()
-                    .map(|rm| {
-                        rm.scopes()
-                            .map(|sm| {
-                                sm.metrics()
-                                    .map(|metric| {
-                                        metric
-                                            .data()
-                                            .map(|data| {
-                                                let mut count = 0;
-                                                if let Some(gauge) = data.as_gauge() {
-                                                    count += gauge.data_points().count();
-                                                } else if let Some(sum) = data.as_sum() {
-                                                    count += sum.data_points().count();
-                                                } else if let Some(histogram) = data.as_histogram()
-                                                {
-                                                    count += histogram.data_points().count();
-                                                } else if let Some(exp_histogram) =
-                                                    data.as_exponential_histogram()
-                                                {
-                                                    count += exp_histogram.data_points().count();
-                                                } else if let Some(summary) = data.as_summary() {
-                                                    count += summary.data_points().count();
-                                                }
-                                                count
-                                            })
-                                            .unwrap_or(0)
-                                    })
-                                    .sum::<usize>()
-                            })
-                            .sum::<usize>()
-                    })
-                    .sum()
-            }
+        count_otlp_items(self.signal_type(), self.as_bytes())
+    }
+}
+
+/// Stateless OTLP item scan shared by the codec and low-level compatibility helper.
+pub(crate) fn count_otlp_items(signal: SignalType, bytes: &[u8]) -> usize {
+    // Counting requires traversing the encoded protobuf record hierarchy.
+    match signal {
+        SignalType::Logs => {
+            let logs_data_view = RawLogsData::new(bytes);
+            use otel_arrow_dfe_pdata_views::views::logs::{
+                LogsDataView, ResourceLogsView, ScopeLogsView,
+            };
+            logs_data_view
+                .resources()
+                .map(|rl| {
+                    rl.scopes()
+                        .map(|sl| sl.log_records().count())
+                        .sum::<usize>()
+                })
+                .sum()
+        }
+        SignalType::Traces => {
+            let traces_data_view = RawTraceData::new(bytes);
+            use otel_arrow_dfe_pdata_views::views::trace::{
+                ResourceSpansView, ScopeSpansView, TracesView,
+            };
+            traces_data_view
+                .resources()
+                .map(|rs| rs.scopes().map(|ss| ss.spans().count()).sum::<usize>())
+                .sum()
+        }
+        SignalType::Metrics => {
+            let metrics_data_view = RawMetricsData::new(bytes);
+            use otel_arrow_dfe_pdata_views::views::metrics::{
+                DataView, ExponentialHistogramView, GaugeView, HistogramView, MetricView,
+                MetricsView, ResourceMetricsView, ScopeMetricsView, SumView, SummaryView,
+            };
+            metrics_data_view
+                .resources()
+                .map(|rm| {
+                    rm.scopes()
+                        .map(|sm| {
+                            sm.metrics()
+                                .map(|metric| {
+                                    metric
+                                        .data()
+                                        .map(|data| {
+                                            let mut count = 0;
+                                            if let Some(gauge) = data.as_gauge() {
+                                                count += gauge.data_points().count();
+                                            } else if let Some(sum) = data.as_sum() {
+                                                count += sum.data_points().count();
+                                            } else if let Some(histogram) = data.as_histogram() {
+                                                count += histogram.data_points().count();
+                                            } else if let Some(exp_histogram) =
+                                                data.as_exponential_histogram()
+                                            {
+                                                count += exp_histogram.data_points().count();
+                                            } else if let Some(summary) = data.as_summary() {
+                                                count += summary.data_points().count();
+                                            }
+                                            count
+                                        })
+                                        .unwrap_or(0)
+                                })
+                                .sum::<usize>()
+                        })
+                        .sum::<usize>()
+                })
+                .sum()
         }
     }
 }
@@ -693,37 +855,13 @@ impl From<EncodedPdata> for OtapPayload {
 
 impl From<Arc<EncodedPdata>> for OtapPayload {
     fn from(value: Arc<EncodedPdata>) -> Self {
-        if value.encoding() == &PdataEncoding::OTLP {
-            Self::from_encoded(Arc::unwrap_or_clone(value))
-        } else {
-            Self::from_data(PayloadData::Encoded(value))
-        }
+        Self::from_encoded(Arc::unwrap_or_clone(value))
     }
 }
 
 impl From<PayloadData> for OtapPayload {
     fn from(value: PayloadData) -> Self {
-        match value {
-            PayloadData::Encoded(encoded) => Self::from(encoded),
-            other => Self::from_data(other),
-        }
-    }
-}
-
-impl TryFromWithOptions<OtapPayload> for OtapArrowRecords {
-    type Error = crate::encode::Error;
-
-    fn try_from_with_options(
-        value: OtapPayload,
-        opts: ConversionOptions,
-    ) -> Result<Self, Self::Error> {
-        match value.into_data() {
-            PayloadData::OtapArrowRecords(value) => Ok(value),
-            PayloadData::OtlpBytes(mut value) => {
-                OtlpCodec.decode(value.signal_type(), value.replace_bytes(Bytes::new()), opts)
-            }
-            PayloadData::Encoded(value) => codec::decode(Arc::unwrap_or_clone(value), opts),
-        }
+        Self::from_data(value)
     }
 }
 
@@ -734,21 +872,9 @@ impl TryFromWithOptions<OtapPayload> for OtlpProtoBytes {
         value: OtapPayload,
         opts: ConversionOptions,
     ) -> Result<Self, Self::Error> {
-        match value.into_data() {
-            PayloadData::OtapArrowRecords(value) => {
-                let signal = value.signal_type();
-                Ok(OtlpProtoBytes::new_from_bytes(
-                    signal,
-                    OtlpCodec.encode(value, opts)?,
-                ))
-            }
-            PayloadData::OtlpBytes(value) => Ok(value),
-            PayloadData::Encoded(value) => {
-                let signal = value.signal_type();
-                let encoded = OtapPayload::from(value).into_encoded(PdataEncoding::OTLP, opts)?;
-                Ok(OtlpProtoBytes::new_from_bytes(signal, encoded.into_bytes()))
-            }
-        }
+        let signal = value.signal_type();
+        let encoded = value.into_encoded(PdataEncoding::OTLP, opts)?;
+        Ok(OtlpProtoBytes::new_from_bytes(signal, encoded.into_bytes()))
     }
 }
 
@@ -870,6 +996,12 @@ mod test {
     use pretty_assertions::assert_eq;
     use prost::Message;
 
+    fn into_otap(payload: OtapPayload) -> OtapArrowRecords {
+        payload
+            .try_into_otap_with(&mut CodecContext::default(), Default::default())
+            .unwrap()
+    }
+
     #[test]
     fn test_conversion_logs() {
         let mut otlp_bytes = vec![];
@@ -879,7 +1011,7 @@ mod test {
         let pdata: OtapPayload = OtlpProtoBytes::ExportLogsRequest(otlp_bytes.into()).into();
 
         // test can go OtlpProtoBytes -> OtapBatch & back
-        let otap_batch: OtapArrowRecords = pdata.try_into_with_default().unwrap();
+        let otap_batch = into_otap(pdata);
         assert!(matches!(otap_batch, OtapArrowRecords::Logs(_)));
         let pdata: OtapPayload = otap_batch.into();
 
@@ -891,7 +1023,7 @@ mod test {
         assert!(matches!(otlp_bytes, OtlpProtoBytes::ExportLogsRequest(_)));
         let pdata: OtapPayload = otlp_bytes.into();
 
-        let otap_batch: OtapArrowRecords = pdata.try_into_with_default().unwrap();
+        let otap_batch = into_otap(pdata);
         assert!(matches!(otap_batch, OtapArrowRecords::Logs(_)));
     }
 
@@ -905,7 +1037,7 @@ mod test {
         let pdata: OtapPayload = OtlpProtoBytes::ExportLogsRequest(otlp_bytes.into()).into();
 
         // test can go OtlpProtoBytes (written by prost) -> OtapBatch & back (using prost)
-        let otap_batch: OtapArrowRecords = pdata.try_into_with_default().unwrap();
+        let otap_batch = into_otap(pdata);
         assert!(matches!(otap_batch, OtapArrowRecords::Logs(_)));
         let pdata: OtapPayload = otap_batch.clone().into();
 
@@ -921,7 +1053,7 @@ mod test {
         // check that we can also re-decode the OTLP proto bytes that we encode directly
         // from OTAP, that we get the same result
         let pdata: OtapPayload = otlp_bytes.into();
-        let otap_batch2: OtapArrowRecords = pdata.try_into_with_default().unwrap();
+        let otap_batch2 = into_otap(pdata);
         assert_eq!(otap_batch, otap_batch2);
     }
 
@@ -931,7 +1063,7 @@ mod test {
         let pdata: OtapPayload = OtlpProtoBytes::ExportTracesRequest(otlp_bytes.into()).into();
 
         // test can go OtlpBytes (written by prost) -> OtapBatch & back (using prost)
-        let otap_batch: OtapArrowRecords = pdata.try_into_with_default().unwrap();
+        let otap_batch = into_otap(pdata);
         assert!(matches!(otap_batch, OtapArrowRecords::Traces(_)));
         let pdata: OtapPayload = otap_batch.clone().into();
 
@@ -947,7 +1079,7 @@ mod test {
         // check that we can also re-decode the OTLP proto bytes that we encode directly
         // from OTAP, that we get the same result
         let pdata: OtapPayload = otlp_bytes.into();
-        let otap_batch2: OtapArrowRecords = pdata.try_into_with_default().unwrap();
+        let otap_batch2 = into_otap(pdata);
         assert_eq!(otap_batch, otap_batch2);
     }
 
@@ -957,7 +1089,7 @@ mod test {
         let pdata: OtapPayload = OtlpProtoBytes::ExportMetricsRequest(otlp_bytes.into()).into();
 
         // test can go OtlpBytes (written by prost) to OTAP & back (using prost)
-        let otap_batch: OtapArrowRecords = pdata.try_into_with_default().unwrap();
+        let otap_batch = into_otap(pdata);
         assert!(matches!(otap_batch, OtapArrowRecords::Metrics(_)));
         let pdata: OtapPayload = otap_batch.clone().into();
 
@@ -973,7 +1105,7 @@ mod test {
         // check that we can also re-decode the OTLP proto bytes that we encode directly
         // from OTAP, that we get the same result
         let pdata: OtapPayload = otlp_bytes.into();
-        let otap_batch2: OtapArrowRecords = pdata.try_into_with_default().unwrap();
+        let otap_batch2 = into_otap(pdata);
         assert_eq!(otap_batch, otap_batch2);
     }
 

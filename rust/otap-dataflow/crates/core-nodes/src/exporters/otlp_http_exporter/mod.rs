@@ -40,10 +40,11 @@ use otel_arrow_dfe_engine::node::NodeId;
 use otel_arrow_dfe_engine::terminal_state::TerminalState;
 use otel_arrow_dfe_engine::wiring_contract::WiringContract;
 use otel_arrow_dfe_engine::{ConsumerEffectHandlerExtension, ExporterFactory};
-use otel_arrow_dfe_pdata::otlp::logs::LogsProtoBytesEncoder;
-use otel_arrow_dfe_pdata::otlp::metrics::MetricsProtoBytesEncoder;
-use otel_arrow_dfe_pdata::otlp::traces::TracesProtoBytesEncoder;
-use otel_arrow_dfe_pdata::otlp::{ProtoBuffer, ProtoBytesEncoder};
+use otel_arrow_dfe_pdata::OtapPayload;
+#[cfg(test)]
+use otel_arrow_dfe_pdata::PayloadData;
+#[cfg(test)]
+use otel_arrow_dfe_pdata::TryIntoWithOptions;
 use otel_arrow_dfe_pdata::proto::opentelemetry::collector::logs::v1::{
     ExportLogsPartialSuccess, ExportLogsServiceResponse,
 };
@@ -53,8 +54,6 @@ use otel_arrow_dfe_pdata::proto::opentelemetry::collector::metrics::v1::{
 use otel_arrow_dfe_pdata::proto::opentelemetry::collector::trace::v1::{
     ExportTracePartialSuccess, ExportTraceServiceResponse,
 };
-use otel_arrow_dfe_pdata::{OtapPayload, OtapPayloadHelpers, PayloadData};
-use otel_arrow_dfe_pdata::{OtlpProtoBytes, TryIntoWithOptions};
 use prost::Message as _;
 use reqwest::{Client, Response};
 use secrecy::ExposeSecret;
@@ -299,10 +298,7 @@ impl Exporter<OtapPdata> for OtlpHttpExporter {
 
         let mut inflight_exports = InFlightExports::new();
 
-        let mut logs_proto_encoder = LogsProtoBytesEncoder::new();
-        let mut metrics_proto_encoder = MetricsProtoBytesEncoder::new();
-        let mut traces_proto_encoder = TracesProtoBytesEncoder::new();
-        let mut proto_buffer = ProtoBuffer::default();
+        let mut codecs = otel_arrow_dfe_pdata::codec::CodecContext::default();
 
         let compression = self.config.http.compression();
         // Buffer to hold compressed bytes. We re-use this scratch space to place
@@ -449,7 +445,7 @@ impl Exporter<OtapPdata> for OtlpHttpExporter {
                 Message::PData(pdata) => {
                     let export_started_at = Instant::now();
                     let signal_type = pdata.signal_type();
-                    let (context, payload) = pdata.into_parts();
+                    let (context, mut payload) = pdata.into_parts();
 
                     // We normally only reach here with a usable token, since intake
                     // is gated on `accepting_pdata`. The exception is shutdown, which
@@ -485,130 +481,51 @@ impl Exporter<OtapPdata> for OtlpHttpExporter {
                             None => (None, None),
                         };
 
-                    // For the OtapArrowRecords path we keep the uncompressed bytes in
-                    // `proto_buffer` rather than materializing them into a `Bytes` up front: when
-                    // compression is enabled we feed the slice directly into the encoder, avoiding
-                    // an alloc+memcpy of the full uncompressed payload.
-                    enum Uncompressed {
-                        // Already a refcounted Bytes (OtlpBytes path).
-                        Bytes(Bytes),
-                        // Lives in `proto_buffer` (OtapArrowRecords path).
-                        InProtoBuffer,
-                    }
-
-                    // proto encode the payload into the request body, while keeping a copy of the
-                    // original payload if the context allows it to be returned.
-                    let (uncompressed, saved_payload) = match payload.into_data() {
-                        PayloadData::Encoded(encoded) => {
-                            let original = OtapPayload::from(encoded);
-                            let mut otlp_bytes: OtlpProtoBytes =
-                                match original.clone().try_into_with_default() {
-                                    Ok(bytes) => bytes,
-                                    Err(error) => {
-                                        _ = effect_handler
-                                            .notify_nack(NackMsg::new_permanent(
-                                                error.to_string(),
-                                                OtapPdata::new(context, original),
-                                            ))
-                                            .await;
-                                        self.metrics.record_failure(
-                                            signal_type,
-                                            OtlpHttpExporterErrorType::Encoding,
-                                            export_started_at.elapsed(),
-                                        );
-                                        continue;
-                                    }
-                                };
-                            let body = otlp_bytes.replace_bytes(Bytes::new());
-                            let saved = if context.may_return_payload() {
-                                original
-                            } else {
-                                OtapPayload::empty(signal_type)
-                            };
-                            (Uncompressed::Bytes(body), saved)
-                        }
-                        PayloadData::OtlpBytes(mut otlp_bytes) => {
-                            if context.may_return_payload() {
-                                // use cheap clone of bytes as the request body
-                                let body = otlp_bytes.clone_bytes();
-                                (Uncompressed::Bytes(body), otlp_bytes.into())
-                            } else {
-                                // take the bytes and replace with empty bytes in original payload
-                                let body = otlp_bytes.replace_bytes(Bytes::new());
-                                (Uncompressed::Bytes(body), otlp_bytes.into())
-                            }
-                        }
-                        PayloadData::OtapArrowRecords(mut otap_batch) => {
-                            // encode the OTAP batch as protobuf request body
-                            proto_buffer.clear();
-                            let encode_result =
-                                match signal_type {
-                                    SignalType::Logs => logs_proto_encoder
-                                        .encode(&mut otap_batch, &mut proto_buffer),
-                                    SignalType::Metrics => metrics_proto_encoder
-                                        .encode(&mut otap_batch, &mut proto_buffer),
-                                    SignalType::Traces => traces_proto_encoder
-                                        .encode(&mut otap_batch, &mut proto_buffer),
-                                };
-
-                            if !context.may_return_payload() {
-                                // drop the original OTAP batch if the context indicates it
-                                // does not wish it to be returned
-                                _ = otap_batch.take_payload();
-                            }
-
-                            if let Err(e) = encode_result {
-                                let export_duration = export_started_at.elapsed();
-                                // encoding error, we must have received an invalid structured batch
-                                let mut nack = NackMsg::new(
-                                    e.to_string(),
-                                    OtapPdata::new(context, otap_batch.into()),
-                                );
-                                nack.permanent = true;
-                                _ = effect_handler.notify_nack(nack).await;
-                                self.metrics.record_failure(
-                                    signal_type,
-                                    OtlpHttpExporterErrorType::Encoding,
-                                    export_duration,
-                                );
-                                continue;
-                            }
-
-                            (Uncompressed::InProtoBuffer, otap_batch.into())
+                    let encoded = match payload.prepare_encoded(
+                        &mut codecs,
+                        otel_arrow_dfe_pdata::codec::ResolvedCodec::OTLP,
+                        Default::default(),
+                    ) {
+                        Ok(encoded) => encoded,
+                        Err(error) => {
+                            _ = effect_handler
+                                .notify_nack(NackMsg::new_permanent(
+                                    error.to_string(),
+                                    OtapPdata::new(context, payload),
+                                ))
+                                .await;
+                            self.metrics.record_failure(
+                                signal_type,
+                                OtlpHttpExporterErrorType::Encoding,
+                                export_started_at.elapsed(),
+                            );
+                            continue;
                         }
                     };
-
-                    let body = match compression {
-                        Some(method) => {
-                            let uncompressed_slice: &[u8] = match &uncompressed {
-                                Uncompressed::Bytes(b) => b.as_ref(),
-                                Uncompressed::InProtoBuffer => proto_buffer.as_ref(),
-                            };
-                            if let Err(e) =
-                                method.encode(uncompressed_slice, &mut compressed_buffer)
-                            {
-                                let export_duration = export_started_at.elapsed();
-                                let mut nack = NackMsg::new(
-                                    e.to_string(),
-                                    OtapPdata::new(context, saved_payload),
-                                );
-                                nack.permanent = true;
-                                _ = effect_handler.notify_nack(nack).await;
-                                self.metrics.record_failure(
-                                    signal_type,
-                                    OtlpHttpExporterErrorType::Compression,
-                                    export_duration,
-                                );
-                                continue;
-                            }
-                            Bytes::copy_from_slice(&compressed_buffer)
+                    let body = if let Some(method) = compression {
+                        if let Err(error) = method.encode(encoded.as_ref(), &mut compressed_buffer)
+                        {
+                            _ = effect_handler
+                                .notify_nack(NackMsg::new_permanent(
+                                    error.to_string(),
+                                    OtapPdata::new(context, payload),
+                                ))
+                                .await;
+                            self.metrics.record_failure(
+                                signal_type,
+                                OtlpHttpExporterErrorType::Compression,
+                                export_started_at.elapsed(),
+                            );
+                            continue;
                         }
-                        None => match uncompressed {
-                            Uncompressed::Bytes(b) => b,
-                            Uncompressed::InProtoBuffer => {
-                                Bytes::copy_from_slice(proto_buffer.as_ref())
-                            }
-                        },
+                        Bytes::copy_from_slice(&compressed_buffer)
+                    } else {
+                        encoded.copy_into_bytes()
+                    };
+                    let saved_payload = if context.may_return_payload() {
+                        payload
+                    } else {
+                        OtapPayload::empty(signal_type)
                     };
 
                     let endpoint: Rc<String> = Rc::clone(match signal_type {
@@ -2151,22 +2068,24 @@ mod test {
         (pdata_rx, server_cancellation_token2)
     }
 
-    /// Scenario: an OTLP exporter receives bytes whose decoder is not registered.
+    /// Scenario: an OTLP exporter receives admitted bytes that its codec cannot decode.
     /// Guarantees: it emits a permanent Nack with the original encoding and shared bytes.
     #[test]
-    fn missing_pdata_codec_nacks_original_encoded_payload() {
+    fn malformed_codec_input_nacks_original_encoded_payload() {
         use otel_arrow_dfe_pdata::codec::{EncodedPdata, PdataEncoding};
         let runtime = TestRuntime::<OtapPdata>::new();
         let (_, exporter) = setup_exporter(
             &runtime,
             default_test_config("http://127.0.0.1:1".to_owned()),
         );
-        let encoding = PdataEncoding::new("test-unavailable-codec");
+        let encoding = PdataEncoding::new("test-otlp-codec");
         let bytes = Bytes::from(vec![1, 2, 3]);
         let expected = bytes.clone();
         let pdatas = subscribe_pdatas(
             vec![OtapPdata::new_default(
-                EncodedPdata::new(encoding.clone(), SignalType::Logs, bytes).into(),
+                EncodedPdata::new(encoding.clone(), SignalType::Logs, bytes)
+                    .expect("registered test codec")
+                    .into(),
             )],
             true,
         );
@@ -2193,7 +2112,7 @@ mod test {
                     match message {
                         PipelineCompletionMsg::DeliverNack { nack } => {
                             assert!(nack.permanent);
-                            assert!(nack.reason.contains("test-unavailable-codec"));
+                            assert!(nack.reason.contains("test-otlp-codec"));
                             let output = nack
                                 .refused
                                 .into_parts()
@@ -3029,6 +2948,8 @@ mod test {
         );
     }
 
+    /// Scenario: HTTP export fails for native OTAP without payload-return interest.
+    /// Guarantees: The Nack still carries the original nonempty native payload.
     #[test]
     fn test_nacks_for_otap_payloads_when_context_indicates_no_payload_return() {
         let port = otel_arrow_dfe_test_net::pick_unused_loopback_tcp_port();
@@ -3084,7 +3005,7 @@ mod test {
                                 ack_count += 1;
 
                                 match nack.refused.payload().into_data() {
-                                    PayloadData::OtapArrowRecords(otap_batch) => {
+                                    PayloadData::OtapArrowRecords { records: otap_batch, .. } => {
                                         let logs_batch = otap_batch.get(ArrowPayloadType::Logs).unwrap();
                                         assert!(
                                             logs_batch.num_rows() > 0,
@@ -3113,6 +3034,8 @@ mod test {
             })
     }
 
+    /// Scenario: HTTP export fails for encoded OTLP without payload-return interest.
+    /// Guarantees: The Nack still carries the original nonempty encoded payload.
     #[test]
     fn test_nacks_for_otlp_payloads_when_context_indicates_no_payload_return() {
         let port = otel_arrow_dfe_test_net::pick_unused_loopback_tcp_port();
@@ -3171,9 +3094,9 @@ mod test {
                                 ack_count += 1;
 
                                 match nack.refused.payload().into_data() {
-                                    PayloadData::OtlpBytes(proto_bytes) => {
+                                    PayloadData::Encoded(encoded) => {
                                         assert!(
-                                            !proto_bytes.as_bytes().is_empty(),
+                                            !encoded.bytes().is_empty(),
                                             "expected payload bytes to be returned in Nack, but it was empty"
                                         );
                                     }

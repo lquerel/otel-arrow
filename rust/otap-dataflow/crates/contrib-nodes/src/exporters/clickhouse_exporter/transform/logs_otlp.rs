@@ -1283,7 +1283,7 @@ mod tests {
     };
     use otel_arrow_dfe_pdata::proto::opentelemetry::resource::v1::Resource;
     use otel_arrow_dfe_pdata::testing::{fixtures, round_trip::encode_logs};
-    use otel_arrow_dfe_pdata::{OtapArrowRecords, OtapPayload, OtlpProtoBytes, TryIntoWithOptions};
+    use otel_arrow_dfe_pdata::{OtapArrowRecords, OtapPayload, OtlpProtoBytes};
     use prost::Message;
 
     use crate::exporters::clickhouse_exporter::transform::logs_fast::{
@@ -1307,7 +1307,10 @@ mod tests {
     fn legacy_batch(bytes: &Bytes) -> Option<RecordBatch> {
         let payload: OtapPayload = OtlpProtoBytes::ExportLogsRequest(bytes.clone()).into();
         let mut records: OtapArrowRecords = payload
-            .try_into_with_default()
+            .try_into_otap_with(
+                &mut otel_arrow_dfe_pdata::codec::CodecContext::default(),
+                Default::default(),
+            )
             .expect("convert raw OTLP logs through OTAP Arrow");
         records
             .decode_transport_optimized_ids()

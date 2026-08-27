@@ -37,7 +37,6 @@ use otel_arrow_dfe_engine::{
 use otel_arrow_dfe_engine::{Interests, ProducerEffectHandlerExtension};
 use otel_arrow_dfe_otap::{OTAP_PROCESSOR_FACTORIES, pdata::OtapPdata};
 use otel_arrow_dfe_pdata::OtlpProtoBytes;
-use otel_arrow_dfe_pdata::TryIntoWithOptions;
 use otel_arrow_dfe_pdata::proto::opentelemetry::{
     logs::v1::LogsData,
     metrics::v1::{MetricsData, metric::Data},
@@ -64,6 +63,7 @@ pub const DEBUG_PROCESSOR_URN: &str = "urn:otel:processor:debug";
 
 /// processor that outputs all data received to stdout
 pub struct DebugProcessor {
+    codecs: otel_arrow_dfe_pdata::codec::CodecContext,
     config: Config,
     metrics: MeasurementMetricSet<DebugMetrics>,
     compute_duration: ComputeDuration,
@@ -115,6 +115,7 @@ impl DebugProcessor {
         let compute_duration = ComputeDuration::new(&pipeline_ctx);
         let sampler = Sampler::new(config.sampling());
         DebugProcessor {
+            codecs: Default::default(),
             config,
             metrics,
             compute_duration,
@@ -132,6 +133,7 @@ impl DebugProcessor {
             })?;
         let sampler = Sampler::new(config.sampling());
         Ok(DebugProcessor {
+            codecs: Default::default(),
             config,
             metrics,
             compute_duration,
@@ -347,7 +349,13 @@ impl local::Processor<OtapPdata> for DebugProcessor {
                 }
 
                 let (_context, payload) = pdata.into_parts();
-                let otlp_bytes: OtlpProtoBytes = payload.try_into_with_default()?;
+                let signal = payload.signal_type();
+                let encoded = payload.into_encoded_with(
+                    &mut self.codecs,
+                    otel_arrow_dfe_pdata::codec::ResolvedCodec::OTLP,
+                    Default::default(),
+                )?;
+                let otlp_bytes = OtlpProtoBytes::new_from_bytes(signal, encoded.into_bytes());
 
                 match otlp_bytes {
                     OtlpProtoBytes::ExportLogsRequest(bytes) => {

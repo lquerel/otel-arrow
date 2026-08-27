@@ -362,7 +362,8 @@ fn producer_validation() -> impl FnOnce(
                 }
                 match time::timeout(Duration::from_millis(500), ctx.recv()).await {
                     Ok(Ok(pdata)) => {
-                        let PayloadData::OtapArrowRecords(records) = pdata.payload().into_data()
+                        let PayloadData::OtapArrowRecords { records, .. } =
+                            pdata.payload().into_data()
                         else {
                             panic!("Expected OtapArrowRecords payload from ETW receiver");
                         };

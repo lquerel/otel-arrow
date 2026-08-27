@@ -36,7 +36,7 @@ use otel_arrow_dfe_engine::{Interests, ProducerEffectHandlerExtension, ReceiverF
 use otel_arrow_dfe_otap::OTAP_RECEIVER_FACTORIES;
 use otel_arrow_dfe_otap::pdata::{Context, OtapPdata};
 use otel_arrow_dfe_pdata::Consumer as PdataConsumer;
-use otel_arrow_dfe_pdata::OtlpProtoBytes;
+use otel_arrow_dfe_pdata::codec::ResolvedCodec;
 use otel_arrow_dfe_pdata::otap::{OtapArrowRecords, from_record_messages};
 use otel_arrow_dfe_pdata::proto::opentelemetry::arrow::v1::BatchArrowRecords;
 use otel_arrow_dfe_telemetry::common_attributes::{Outcome, ReceiverRejectionErrorType};
@@ -1489,7 +1489,12 @@ fn decode_traces_payload(
     match message_format {
         MessageFormat::OtlpProto => Ok(OtapPdata::new(
             Context::default(),
-            OtlpProtoBytes::ExportTracesRequest(Bytes::copy_from_slice(data)).into(),
+            ResolvedCodec::OTLP
+                .admit(SignalType::Traces, Bytes::copy_from_slice(data))
+                .map_err(|error| EngineError::PdataConversionError {
+                    error: error.to_string(),
+                })?
+                .into(),
         )),
         MessageFormat::OtapProto => {
             let mut bar =
@@ -1519,7 +1524,12 @@ fn decode_metrics_payload(
     match message_format {
         MessageFormat::OtlpProto => Ok(OtapPdata::new(
             Context::default(),
-            OtlpProtoBytes::ExportMetricsRequest(Bytes::copy_from_slice(data)).into(),
+            ResolvedCodec::OTLP
+                .admit(SignalType::Metrics, Bytes::copy_from_slice(data))
+                .map_err(|error| EngineError::PdataConversionError {
+                    error: error.to_string(),
+                })?
+                .into(),
         )),
         MessageFormat::OtapProto => {
             let mut bar =
@@ -1549,7 +1559,12 @@ fn decode_logs_payload(
     match message_format {
         MessageFormat::OtlpProto => Ok(OtapPdata::new(
             Context::default(),
-            OtlpProtoBytes::ExportLogsRequest(Bytes::copy_from_slice(data)).into(),
+            ResolvedCodec::OTLP
+                .admit(SignalType::Logs, Bytes::copy_from_slice(data))
+                .map_err(|error| EngineError::PdataConversionError {
+                    error: error.to_string(),
+                })?
+                .into(),
         )),
         MessageFormat::OtapProto => {
             let mut bar =
@@ -1685,6 +1700,7 @@ mod tests {
         HeaderExtraction, IsolationLevel, KafkaReceiverConfigBuilder, RebalanceStrategy,
         SignalConfig,
     };
+    use crate::receivers::kafka_receiver::encoded_otlp;
 
     use crate::common::kafka::MessageFormat;
     use crate::common::kafka::node_harness::KafkaReceiverHarness;
@@ -1856,7 +1872,10 @@ mod tests {
         request.encode(&mut buf).expect("encode OTLP request");
 
         // Convert OTLP bytes -> OtapPayload -> OtapArrowRecords
-        let payload: OtapPayload = OtlpProtoBytes::ExportTracesRequest(Bytes::from(buf)).into();
+        let payload: OtapPayload = ResolvedCodec::OTLP
+            .admit(SignalType::Traces, Bytes::from(buf))
+            .expect("admit OTLP traces")
+            .into();
         let mut otap_records: OtapArrowRecords = payload
             .try_into_with_default()
             .expect("convert OTLP to OTAP Arrow");
@@ -6015,58 +6034,56 @@ mod tests {
 
     // ---- Routing and payload correctness ----
 
-    /// Scenario (routing and payload correctness): OTLP-proto traces bytes are decoded.
-    /// Guarantees: the payload decodes to an `ExportTracesRequest`, so OTLP-proto traces
-    /// route to the traces decoder.
+    /// Scenario: Kafka admits an OTLP protobuf traces request.
+    /// Guarantees: The payload retains encoded OTLP identity, its traces signal, and unchanged bytes.
     #[test]
     fn decode_traces_payload_otlp_proto() {
         let req = create_traces_with_spans();
         let mut bytes = vec![];
         req.encode(&mut bytes).expect("encode");
 
-        let mut pdata =
-            decode_traces_payload(&bytes, MessageFormat::OtlpProto).expect("should decode");
-        let proto: OtlpProtoBytes = pdata
-            .take_payload()
-            .try_into_with_default()
-            .expect("to OtlpProtoBytes");
-        assert!(matches!(proto, OtlpProtoBytes::ExportTracesRequest(_)));
+        let pdata = decode_traces_payload(&bytes, MessageFormat::OtlpProto).expect("should decode");
+        let PayloadData::Encoded(encoded) = pdata.payload_ref().data() else {
+            panic!("Kafka OTLP input must remain encoded");
+        };
+        assert_eq!(encoded.codec(), ResolvedCodec::OTLP);
+        assert_eq!(encoded.signal_type(), SignalType::Traces);
+        assert_eq!(encoded.bytes().as_ref(), bytes.as_slice());
     }
 
-    /// Scenario (routing and payload correctness): OTLP-proto metrics bytes are decoded.
-    /// Guarantees: the payload decodes to an `ExportMetricsRequest`, so OTLP-proto metrics
-    /// route to the metrics decoder.
+    /// Scenario: Kafka admits an OTLP protobuf metrics request.
+    /// Guarantees: The payload retains encoded OTLP identity, its metrics signal, and unchanged bytes.
     #[test]
     fn decode_metrics_payload_otlp_proto() {
         let req = create_metrics_service_request();
         let mut bytes = vec![];
         req.encode(&mut bytes).expect("encode");
 
-        let mut pdata =
+        let pdata =
             decode_metrics_payload(&bytes, MessageFormat::OtlpProto).expect("should decode");
-        let proto: OtlpProtoBytes = pdata
-            .take_payload()
-            .try_into_with_default()
-            .expect("to OtlpProtoBytes");
-        assert!(matches!(proto, OtlpProtoBytes::ExportMetricsRequest(_)));
+        let PayloadData::Encoded(encoded) = pdata.payload_ref().data() else {
+            panic!("Kafka OTLP input must remain encoded");
+        };
+        assert_eq!(encoded.codec(), ResolvedCodec::OTLP);
+        assert_eq!(encoded.signal_type(), SignalType::Metrics);
+        assert_eq!(encoded.bytes().as_ref(), bytes.as_slice());
     }
 
-    /// Scenario (routing and payload correctness): OTLP-proto logs bytes are decoded.
-    /// Guarantees: the payload decodes to an `ExportLogsRequest`, so OTLP-proto logs route
-    /// to the logs decoder.
+    /// Scenario: Kafka admits an OTLP protobuf logs request.
+    /// Guarantees: The payload retains encoded OTLP identity, its logs signal, and unchanged bytes.
     #[test]
     fn decode_logs_payload_otlp_proto() {
         let req = create_logs_service_request();
         let mut bytes = vec![];
         req.encode(&mut bytes).expect("encode");
 
-        let mut pdata =
-            decode_logs_payload(&bytes, MessageFormat::OtlpProto).expect("should decode");
-        let proto: OtlpProtoBytes = pdata
-            .take_payload()
-            .try_into_with_default()
-            .expect("to OtlpProtoBytes");
-        assert!(matches!(proto, OtlpProtoBytes::ExportLogsRequest(_)));
+        let pdata = decode_logs_payload(&bytes, MessageFormat::OtlpProto).expect("should decode");
+        let PayloadData::Encoded(encoded) = pdata.payload_ref().data() else {
+            panic!("Kafka OTLP input must remain encoded");
+        };
+        assert_eq!(encoded.codec(), ResolvedCodec::OTLP);
+        assert_eq!(encoded.signal_type(), SignalType::Logs);
+        assert_eq!(encoded.bytes().as_ref(), bytes.as_slice());
     }
 
     /// Scenario (routing and payload correctness): OTAP-Arrow traces bytes are decoded.
@@ -6082,7 +6099,10 @@ mod tests {
         assert!(
             matches!(
                 payload.into_data(),
-                PayloadData::OtapArrowRecords(OtapArrowRecords::Traces(_))
+                PayloadData::OtapArrowRecords {
+                    records: OtapArrowRecords::Traces(_),
+                    ..
+                }
             ),
             "expected OtapArrowRecords::Traces"
         );
@@ -6101,7 +6121,10 @@ mod tests {
         assert!(
             matches!(
                 payload.into_data(),
-                PayloadData::OtapArrowRecords(OtapArrowRecords::Metrics(_))
+                PayloadData::OtapArrowRecords {
+                    records: OtapArrowRecords::Metrics(_),
+                    ..
+                }
             ),
             "expected OtapArrowRecords::Metrics"
         );
@@ -6120,7 +6143,10 @@ mod tests {
         assert!(
             matches!(
                 payload.into_data(),
-                PayloadData::OtapArrowRecords(OtapArrowRecords::Logs(_))
+                PayloadData::OtapArrowRecords {
+                    records: OtapArrowRecords::Logs(_),
+                    ..
+                }
             ),
             "expected OtapArrowRecords::Logs"
         );
@@ -6136,28 +6162,27 @@ mod tests {
         assert!(result.is_err());
     }
 
-    /// Scenario (routing and payload correctness): OTLP-proto traces bytes are decoded and
+    /// Scenario: OTLP-proto traces bytes are decoded and
     /// then re-extracted.
     /// Guarantees: the bytes round-trip byte-for-byte, so the zero-copy OTLP path does not
     /// mutate the payload.
+    /// Received OTLP remains encoded with the expected codec and signal.
     #[test]
     fn decode_traces_payload_otlp_preserves_bytes() {
         let req = create_traces_with_spans();
         let mut bytes = vec![];
         req.encode(&mut bytes).expect("encode");
 
-        let mut pdata = decode_traces_payload(&bytes, MessageFormat::OtlpProto).expect("decode");
-        let proto: OtlpProtoBytes = pdata
-            .take_payload()
-            .try_into_with_default()
-            .expect("convert");
-        assert_eq!(proto.as_bytes(), &bytes);
+        let pdata = decode_traces_payload(&bytes, MessageFormat::OtlpProto).expect("decode");
+        let proto = encoded_otlp(&pdata, SignalType::Traces);
+        assert_eq!(proto, &bytes);
     }
 
-    /// Scenario (routing and payload correctness): OTLP-proto trace records produced to a Kafka topic are consumed
+    /// Scenario: OTLP-proto trace records produced to a Kafka topic are consumed
     /// by an auto-commit receiver.
     /// Guarantees: each delivered pdata decodes to an `ExportTracesRequest` whose
     /// bytes are byte-for-byte identical to what was produced (lossless round-trip).
+    /// Received OTLP remains encoded with the expected codec and signal.
     #[tokio::test]
     async fn test_kafka_receiver_traces() {
         const TOPIC: &str = "test-traces-proto";
@@ -6189,13 +6214,10 @@ mod tests {
                 let mut receiver = KafkaReceiverHarness::start(&cluster, cfg);
 
                 for _ in 0..3 {
-                    let mut pdata = receiver.recv_pdata().await;
-                    let proto: OtlpProtoBytes = pdata
-                        .take_payload()
-                        .try_into_with_default()
-                        .expect("to OtlpProtoBytes");
-                    assert!(matches!(proto, OtlpProtoBytes::ExportTracesRequest(_)));
-                    assert_eq!(proto.as_bytes(), &bytes);
+                    let pdata = receiver.recv_pdata().await;
+                    let proto = encoded_otlp(&pdata, SignalType::Traces);
+
+                    assert_eq!(proto, &bytes);
                 }
 
                 receiver.shutdown(Duration::from_secs(5));
@@ -6205,10 +6227,11 @@ mod tests {
         .await;
     }
 
-    /// Scenario (routing and payload correctness): OTLP-proto log records produced to a Kafka topic are consumed
+    /// Scenario: OTLP-proto log records produced to a Kafka topic are consumed
     /// by an auto-commit receiver.
     /// Guarantees: each delivered pdata decodes to an `ExportLogsRequest` whose
     /// bytes are byte-for-byte identical to what was produced.
+    /// Received OTLP remains encoded with the expected codec and signal.
     #[tokio::test]
     async fn test_kafka_receiver_logs() {
         const TOPIC: &str = "test-logs-proto";
@@ -6240,13 +6263,10 @@ mod tests {
                 let mut receiver = KafkaReceiverHarness::start(&cluster, cfg);
 
                 for _ in 0..3 {
-                    let mut pdata = receiver.recv_pdata().await;
-                    let proto: OtlpProtoBytes = pdata
-                        .take_payload()
-                        .try_into_with_default()
-                        .expect("to OtlpProtoBytes");
-                    assert!(matches!(proto, OtlpProtoBytes::ExportLogsRequest(_)));
-                    assert_eq!(proto.as_bytes(), &bytes);
+                    let pdata = receiver.recv_pdata().await;
+                    let proto = encoded_otlp(&pdata, SignalType::Logs);
+
+                    assert_eq!(proto, &bytes);
                 }
 
                 receiver.shutdown(Duration::from_secs(5));
@@ -6256,10 +6276,11 @@ mod tests {
         .await;
     }
 
-    /// Scenario (routing and payload correctness): OTLP-proto metric records produced to a Kafka topic are consumed
+    /// Scenario: OTLP-proto metric records produced to a Kafka topic are consumed
     /// by an auto-commit receiver.
     /// Guarantees: each delivered pdata decodes to an `ExportMetricsRequest` whose
     /// bytes are byte-for-byte identical to what was produced.
+    /// Received OTLP remains encoded with the expected codec and signal.
     #[tokio::test]
     async fn test_kafka_receiver_metrics() {
         const TOPIC: &str = "test-metrics-proto";
@@ -6291,13 +6312,10 @@ mod tests {
                 let mut receiver = KafkaReceiverHarness::start(&cluster, cfg);
 
                 for _ in 0..3 {
-                    let mut pdata = receiver.recv_pdata().await;
-                    let proto: OtlpProtoBytes = pdata
-                        .take_payload()
-                        .try_into_with_default()
-                        .expect("to OtlpProtoBytes");
-                    assert!(matches!(proto, OtlpProtoBytes::ExportMetricsRequest(_)));
-                    assert_eq!(proto.as_bytes(), &bytes);
+                    let pdata = receiver.recv_pdata().await;
+                    let proto = encoded_otlp(&pdata, SignalType::Metrics);
+
+                    assert_eq!(proto, &bytes);
                 }
 
                 receiver.shutdown(Duration::from_secs(5));
@@ -6344,7 +6362,10 @@ mod tests {
                     assert!(
                         matches!(
                             payload.into_data(),
-                            PayloadData::OtapArrowRecords(OtapArrowRecords::Traces(_))
+                            PayloadData::OtapArrowRecords {
+                                records: OtapArrowRecords::Traces(_),
+                                ..
+                            }
                         ),
                         "Expected OtapArrowRecords::Traces for message {i}"
                     );
@@ -6361,6 +6382,8 @@ mod tests {
     /// by an auto-commit receiver configured for the OTAP format.
     /// Guarantees: each delivered pdata is an `OtapArrowRecords::Metrics` payload
     /// equal to the produced default metrics records.
+    /// Scenario: Kafka carries an OTAP metrics batch.
+    /// Guarantees: The receiver forwards native metrics records with the expected contents.
     #[tokio::test]
     async fn test_kafka_receiver_metrics_otap() {
         const TOPIC: &str = "test-metrics-otap";
@@ -6392,7 +6415,11 @@ mod tests {
                 for i in 0..3 {
                     let mut pdata = receiver.recv_pdata().await;
                     let payload: OtapPayload = pdata.take_payload();
-                    if let PayloadData::OtapArrowRecords(arrow_records) = payload.into_data() {
+                    if let PayloadData::OtapArrowRecords {
+                        records: arrow_records,
+                        ..
+                    } = payload.into_data()
+                    {
                         let expected = OtapArrowRecords::Metrics(Metrics::default());
                         assert_eq!(expected, arrow_records);
                     } else {
@@ -6411,6 +6438,8 @@ mod tests {
     /// by an auto-commit receiver configured for the OTAP format.
     /// Guarantees: each delivered pdata is an `OtapArrowRecords::Logs` payload
     /// equal to the produced default logs records.
+    /// Scenario: Kafka carries an OTAP logs batch.
+    /// Guarantees: The receiver forwards native log records with the expected contents.
     #[tokio::test]
     async fn test_kafka_receiver_logs_otap() {
         const TOPIC: &str = "test-logs-otap";
@@ -6442,7 +6471,11 @@ mod tests {
                 for i in 0..3 {
                     let mut pdata = receiver.recv_pdata().await;
                     let payload: OtapPayload = pdata.take_payload();
-                    if let PayloadData::OtapArrowRecords(arrow_records) = payload.into_data() {
+                    if let PayloadData::OtapArrowRecords {
+                        records: arrow_records,
+                        ..
+                    } = payload.into_data()
+                    {
                         let expected = OtapArrowRecords::Logs(Logs::default());
                         assert_eq!(expected, arrow_records);
                     } else {
@@ -6510,7 +6543,10 @@ mod tests {
                     assert!(
                         matches!(
                             payload.into_data(),
-                            PayloadData::OtapArrowRecords(OtapArrowRecords::Traces(_))
+                            PayloadData::OtapArrowRecords {
+                                records: OtapArrowRecords::Traces(_),
+                                ..
+                            }
                         ),
                         "message {i}: MessageFormat=otap header must override the \
                          OtlpProto per-signal default and decode via the OTAP path",
@@ -6524,11 +6560,12 @@ mod tests {
         .await;
     }
 
-    /// Scenario (routing and payload correctness): an OTLP-proto trace record carries a Kafka header `x-tenant-id`
+    /// Scenario: an OTLP-proto trace record carries a Kafka header `x-tenant-id`
     /// while the receiver is configured to map that header to a resource
     /// attribute `tenant.id`.
     /// Guarantees: every resource gains a `tenant.id` string attribute equal to
     /// the header value, and no span-level `tenant.id` attribute is added.
+    /// Received OTLP remains encoded with the expected codec and signal.
     #[tokio::test]
     async fn test_kafka_receiver_traces_header_extraction() {
         const TOPIC: &str = "test-traces-headers";
@@ -6579,13 +6616,9 @@ mod tests {
                 let mut receiver = KafkaReceiverHarness::start(&cluster, cfg);
 
                 for i in 0..3 {
-                    let mut pdata = receiver.recv_pdata().await;
-                    let proto: OtlpProtoBytes = pdata
-                        .take_payload()
-                        .try_into_with_default()
-                        .expect("to OtlpProtoBytes");
-                    let result =
-                        ExportTraceServiceRequest::decode(proto.as_bytes()).expect("decode result");
+                    let pdata = receiver.recv_pdata().await;
+                    let proto = encoded_otlp(&pdata, SignalType::Traces);
+                    let result = ExportTraceServiceRequest::decode(proto).expect("decode result");
 
                     // Every resource should have the injected tenant.id attribute.
                     for rs in &result.resource_spans {
@@ -6899,11 +6932,12 @@ mod tests {
         .await;
     }
 
-    /// Scenario (routing and payload correctness): a record carries `X-Tenant-Id` (captured to a transport header)
+    /// Scenario: a record carries `X-Tenant-Id` (captured to a transport header)
     /// and `x-env` (mapped to a resource attribute) while both the capture policy
     /// and resource-attribute-from-header extraction are configured.
     /// Guarantees: the transport header and the injected resource attribute are
     /// produced independently and simultaneously from the same record.
+    /// Received OTLP remains encoded with the expected codec and signal.
     #[tokio::test]
     async fn test_kafka_receiver_capture_policy_coexists_with_resource_attrs_from_headers() {
         const TOPIC: &str = "test-capture-and-extract";
@@ -6959,7 +6993,7 @@ mod tests {
                 let mut receiver =
                     KafkaReceiverHarness::start_with_capture(&cluster, cfg, Some(capture_policy));
 
-                let mut pdata = receiver.recv_pdata().await;
+                let pdata = receiver.recv_pdata().await;
 
                 // 1. Verify transport headers were captured (capture policy).
                 let transport_headers = pdata
@@ -6970,12 +7004,8 @@ mod tests {
                 assert_eq!(tenant_headers[0].value_as_str(), Some("acme-corp"));
 
                 // 2. Verify resource attributes were injected (resource_attrs_from_headers).
-                let proto: OtlpProtoBytes = pdata
-                    .take_payload()
-                    .try_into_with_default()
-                    .expect("to OtlpProtoBytes");
-                let result =
-                    ExportTraceServiceRequest::decode(proto.as_bytes()).expect("decode result");
+                let proto = encoded_otlp(&pdata, SignalType::Traces);
+                let result = ExportTraceServiceRequest::decode(proto).expect("decode result");
                 for rs in &result.resource_spans {
                     let resource = rs.resource.as_ref().expect("should have resource");
                     let env_attr = resource
@@ -7337,7 +7367,7 @@ mod tests {
         assert_eq!(generation, 0);
     }
 
-    /// Scenario (routing and payload correctness): a single receiver subscribes
+    /// Scenario: a single receiver subscribes
     /// simultaneously to a distinct traces topic, metrics topic, and logs topic
     /// (disjoint across signals), and one OTLP-proto record is produced to each.
     /// Guarantees: each record is routed to the decoder for its own signal --
@@ -7345,6 +7375,7 @@ mod tests {
     /// `ExportMetricsRequest`, and the logs topic an `ExportLogsRequest` -- so
     /// concurrent multi-signal topic routing dispatches every topic to the
     /// correct signal without cross-contamination.
+    /// Received OTLP remains encoded with the expected codec and signal.
     #[tokio::test]
     async fn multi_signal_topics_route_to_correct_decoders() {
         const TRACES_TOPIC: &str = "route-multi-traces";
@@ -7393,28 +7424,25 @@ mod tests {
                 );
                 let mut receiver = KafkaReceiverHarness::start(&cluster, cfg);
 
-                // Records may arrive in any order; classify each by its decoded
+                // Records may arrive in any order; classify each by its admitted
                 // signal type and assert all three signals are represented.
                 let mut saw_traces = false;
                 let mut saw_metrics = false;
                 let mut saw_logs = false;
                 for _ in 0..3 {
-                    let mut pdata = receiver.recv_pdata().await;
-                    let proto: OtlpProtoBytes = pdata
-                        .take_payload()
-                        .try_into_with_default()
-                        .expect("to OtlpProtoBytes");
-                    match proto {
-                        OtlpProtoBytes::ExportTracesRequest(ref b) => {
-                            assert_eq!(b.as_ref(), &traces_bytes, "traces payload preserved");
+                    let pdata = receiver.recv_pdata().await;
+                    let proto = encoded_otlp(&pdata, pdata.signal_type());
+                    match pdata.signal_type() {
+                        SignalType::Traces => {
+                            assert_eq!(proto, &traces_bytes, "traces payload preserved");
                             saw_traces = true;
                         }
-                        OtlpProtoBytes::ExportMetricsRequest(ref b) => {
-                            assert_eq!(b.as_ref(), &metrics_bytes, "metrics payload preserved");
+                        SignalType::Metrics => {
+                            assert_eq!(proto, &metrics_bytes, "metrics payload preserved");
                             saw_metrics = true;
                         }
-                        OtlpProtoBytes::ExportLogsRequest(ref b) => {
-                            assert_eq!(b.as_ref(), &logs_bytes, "logs payload preserved");
+                        SignalType::Logs => {
+                            assert_eq!(proto, &logs_bytes, "logs payload preserved");
                             saw_logs = true;
                         }
                     }
@@ -7432,13 +7460,14 @@ mod tests {
         .await;
     }
 
-    /// Scenario (routing and payload correctness): a receiver's traces signal is
+    /// Scenario: a receiver's traces signal is
     /// configured with a single `^`-prefixed regex subscription (`^route-regex-.*`)
     /// and records are produced to three independently-created broker topics
     /// that all match the pattern.
     /// Guarantees: the receiver consumes records from every topic matching the
     /// regex subscription -- not just a literal topic name -- so pattern-based
     /// subscription delivers from all matching topics.
+    /// Received OTLP remains encoded with the expected codec and signal.
     #[tokio::test]
     async fn regex_topic_subscription_consumes_all_matching_topics() {
         const TOPIC_A: &str = "route-regex-alpha";
@@ -7478,13 +7507,10 @@ mod tests {
                 // topic) are delivered and their payloads round-trip.
                 let mut delivered = 0;
                 for _ in 0..3 {
-                    let mut pdata = receiver.recv_pdata().await;
-                    let proto: OtlpProtoBytes = pdata
-                        .take_payload()
-                        .try_into_with_default()
-                        .expect("to OtlpProtoBytes");
-                    assert!(matches!(proto, OtlpProtoBytes::ExportTracesRequest(_)));
-                    assert_eq!(proto.as_bytes(), &bytes, "payload preserved");
+                    let pdata = receiver.recv_pdata().await;
+                    let proto = encoded_otlp(&pdata, SignalType::Traces);
+
+                    assert_eq!(proto, &bytes, "payload preserved");
                     delivered += 1;
                 }
                 assert_eq!(

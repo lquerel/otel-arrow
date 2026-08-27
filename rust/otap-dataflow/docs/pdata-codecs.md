@@ -1,151 +1,202 @@
 # Pdata codec extensions
 
-Pipelines carry native OTAP records or independently encoded batches. Codecs
-convert encoded batches to and from OTAP; OTAP remains the common intermediate
-representation. This implements the extension model in
+Receivers identify the incoming codec; pdata owns representation-specific
+conversion, measurement, and batching. Processors own scheduling and delivery
+tracking, and exporters request their required output representation. This
+implements the extension model in
 [issue #3452](https://github.com/open-telemetry/otel-arrow/issues/3452).
 
-The built-in `otlp-bytes` codec supports logs, metrics, and traces using the
-existing OTLP conversion routines. This change does not implement syslog batch,
-Parquet, or an independent OTAP byte encoding. OTAP gRPC stream dictionaries
-remain transport state owned by the existing receiver/exporter.
+The built-in `otlp-bytes` codec supports logs, metrics, and traces. Native OTAP
+is the common intermediate representation, not an artificial byte encoding.
+OTAP gRPC dictionaries remain stream-local transport state. Syslog batches,
+Parquet codecs, and new wire protocols are future work.
 
-## Representation and passthrough
+## Receiver admission and lazy decoding
 
-`EncodedPdata` carries a `PdataEncoding`, a signal, a `bytes::Bytes` buffer,
-and an optional item count. `OtapPdata` keeps transport headers, peer address,
-and delivery context outside that envelope.
+`codec::resolve(encoding, signal, CodecDirection::Decode)` returns an immutable
+`ResolvedCodec`. A receiver with a fixed input codec can resolve it at startup
+and reuse the handle. A receiver with message-specific codec names must resolve
+them before enqueueing a message and translate failures into producer-facing
+protocol errors when supported.
 
-Use `OtapPayload::from_encoded` to wrap an encoded batch. OTLP is stored in the
-existing `PayloadData::OtlpBytes` variant so current protobuf views and byte
-batching keep their fast paths. All other encodings use
-`PayloadData::Encoded`. Both expose their identity through `encoding()`.
-Native `OtapArrowRecords` have no byte encoding identity. Extension envelopes
-are shared through `Arc`, keeping the payload enum as compact as its built-in
-representations and avoiding envelope allocation when forwarding or cloning.
+`ResolvedCodec::admit(signal, bytes)` creates an `EncodedPdata` only if the codec
+supports that signal and has a decoder. `EncodedPdata::new` provides the same
+checks when starting from a name. Unknown and encode-only codecs cannot enter
+the pipeline. Admission does not parse the bytes: malformed data can still fail
+later when a consumer requires decoding. Existing OTLP receivers use the known
+built-in handle; they do not add a codec-name header to OTLP.
 
-Routing, retry, fan-out, and topic delivery can forward or clone the payload
-without looking up a codec, decoding, or copying its byte buffer. Exporting to
-the current encoding also needs no codec, including for an unknown encoding.
+The envelope carries the resolved handle, signal, shared `Bytes`, and an
+optional known item count. Headers, peer address, and Ack/Nack context remain
+outside it in `OtapPdata`. Storage variants are private to pdata; test builds
+expose them for introspection. All byte representations, including OTLP, use
+inline encoded envelopes. Only
+native OTAP uses record storage. Encoded item counts live in the envelope;
+logical Arrow size caches live beside the records, so caches do not enlarge
+every queued representation. Cloning shares the bytes without allocating an
+additional envelope.
 
-## Registration and ownership
+Forwarding, routing, retry, and fan-out neither resolve nor instantiate codecs.
+Matching encoded output shares the original bytes, even when the input codec
+has no encoder: no conversion is needed in that case. Unknown codecs cannot
+reach this path because admission has already failed.
 
-Codec extensions are compiled into the binary and register immutable factories
-in `PDATA_CODEC_FACTORIES` using `linkme`, like the engine's component factories.
-Registration is process-wide; mutable codec state is not. There is no dynamic
-loader, mutable global registry, pipeline YAML entry, background task, or control
-channel. Codec extensions are distinct from the capability-based service
-extensions described in [Extension System Architecture](extension-system-architecture.md).
+## Registration and consumer-local state
 
-Each registration advertises:
+Extensions register immutable `PdataCodecRegistration` factories in the
+`linkme` distributed slice `PDATA_CODEC_FACTORIES`. Registration is process-wide;
+mutable state is not. There is no dynamic loader, mutable global registry,
+background task, or codec control channel. Codecs are distinct from the service
+extensions in [Extension System Architecture](extension-system-architecture.md).
 
-- A stable encoding name and supported signals.
-- Encoder and decoder availability.
-- Optional informational format version and intrinsic compression.
+Each registration advertises its canonical encoding name, supported signals,
+encoder/decoder availability, optional format version and intrinsic compression,
+and optional native batching capabilities and default profile.
 
-Built-in names are reserved. Other authors should use a vendor-prefixed name.
 Names use lowercase ASCII letters, digits, periods, underscores, hyphens, or
-colons. Incompatible versions or compression variants require distinct encoding
-identities. Transport compression, such as HTTP gzip, is outside the identity.
+colons. `otap`, `otlp`, and `preserve` are reserved configuration names;
+`otlp-bytes` identifies the built-in codec. Use vendor prefixes for extensions.
+Incompatible versions and intrinsic compression variants need distinct names.
+HTTP/gRPC transport compression is separate from codec identity.
 
-A factory creates a `Box<dyn PdataCodec>`. Codec implementations may contain
-`Rc`, reusable buffers, or other state that is neither `Send` nor `Sync`.
-Instances belong to the consumer on the calling core, never to a payload.
-The convenience conversion methods create an instance only when converting;
-components that repeatedly convert can resolve a factory once and retain their
-own codec. The built-in OTLP conversion path calls its concrete codec directly.
+Production consumers own a `CodecContext` for their lifetime. It lazily creates
+and reuses at most one instance per used codec, including OTLP. Conversion,
+prepared output, views, and native batching all use that same instance.
+Codec implementations
+can own `Rc`, scratch buffers, and other state that is neither `Send` nor `Sync`.
+Create and use contexts on the consuming core; do not attach them to messages,
+share them through locks, or construct one for every input. State is dropped
+with its owner. Convenience conversions remain available for cold paths.
 
-Codecs must produce independent batches. A decoder cannot require dictionaries
-or frames from a previous message because batches can be retried, reordered,
-fanned out, or sent across pipeline boundaries. Codecs must preserve signal type,
-honor applicable conversion options, validate input, and bound format-specific
-allocation and decompression. The interface adds no new worker tasks or queues.
+Codecs consume and produce complete independent batches. They cannot rely on a
+previous message's dictionary or framing state. They must preserve signal type,
+honor conversion options, bound decompression and scratch allocation, and remain
+usable after a failed operation.
 
-## Component contracts
+## Consumer operations
 
-| Component behavior | Interface and responsibility |
+| Consumer | Pdata operation |
 | --- | --- |
-| Encoded receiver | Wrap bytes with the correct identity and signal. Supply the item count when known. |
-| Passthrough processor | Forward or clone pdata unchanged; no codec is required. |
-| Record processor | Use `materialize_otap(options)` or the existing `TryIntoWithOptions<OtapArrowRecords>` conversion. |
-| Read-only record consumer | Use `view(options)` to borrow OTLP/native OTAP or decode another encoding into an owned OTAP view. |
-| Encoded exporter | Request its target with `into_encoded(encoding, options)`; matching input returns original bytes directly. |
-| Factory with known codec requirements | Call `codec::resolve(encoding, signal, CodecDirection)` during construction. |
+| Record processor | `materialize_otap_with` retains decoded records. |
+| Native record owner | `into_otap_with` consumes the payload. |
+| Read-only consumer | `view_with` borrows or asks the codec for a view. |
+| Encoded exporter | `prepare_encoded` shares bytes or reuses encoder state. |
+| Representation conversion | `convert_encoding_with` replaces after success. |
+| Batch processor | `BatchPlan` prepares, measures, batches, and finishes. |
 
-Output representation is chosen explicitly by the consumer. There is no
-automatic negotiation or inference across arbitrary pipeline graphs. Existing
-OTLP exporters request OTLP; existing OTAP exporters request native OTAP.
+`EncodedOutput::as_ref()` lets HTTP compression consume encoder scratch directly.
+`copy_into_bytes()` retains scratch capacity, copying only scratch-backed output.
+`into_bytes()` detaches encoded storage for an asynchronous send without copying.
+The borrow prevents reuse while an output still references scratch storage.
+`PdataCodec::prepare_encode` defaults to owned output; codecs may override it
+to return `EncodedOutput::buffer` borrowing their own bounded scratch storage.
+OTLP owns its encoder state inside the registered codec, initialized only when
+encoding is requested. Its scratch buffers grow independently for logs, metrics,
+and traces, so a large
+batch of one signal does not inflate detached allocations for the others.
 
-Batching preserves its OTLP byte-batching path. Other encodings decode to OTAP
-and use the configured native or OTLP batcher. Durable buffering currently
-preserves opaque OTLP bytes only; other encodings decode to its Arrow storage
-format. Generalized opaque disk storage is not part of this change.
+Existing exporters retain their wire protocols: OTLP exporters request OTLP
+bytes, while the OTAP exporter requests native records for its stream encoder.
+There is no automatic graph-wide format negotiation. Durable storage retains
+its existing opaque OTLP and native Arrow formats; arbitrary opaque disk storage
+is not introduced here.
 
-## Errors, fan-out, and accounting
+## Batching contract
 
-Pipeline construction rejects invalid or duplicate registrations. Resolution
-rejects missing codecs, unsupported signals, and unavailable encoder/decoder
-directions. When a format is known only at runtime, conversion reports the
-failure then; opaque passthrough remains valid without a decoder.
+`BatchPlan` resolves capabilities before buffering. OTLP uses its existing
+protobuf byte-batching implementation, and OTAP uses native item batching.
+Extensions may implement `PdataCodec::batch` and advertise supported sizing
+modes through `BatchingSupport`. `measure` can be overridden for an efficient
+native item count; its default item implementation decodes.
 
-`materialize_otap` and `convert_encoding` change the payload only after
-success. Failure leaves the original payload and measurement cache intact.
-Their `OtapPdata` counterparts also leave headers and the Ack/Nack stack
-untouched. Consuming conversion methods still require the caller to retain the
-original when needed for Nack/retry, as with the existing conversion traits.
+Without a suitable native batcher, item-based batching materializes OTAP.
+Under the default `preserve` policy this fallback emits OTAP, allowing later
+processors to use those records directly. An explicit output codec requires an
+encoder and re-encodes only emitted batches. Retained tails stay in the working
+representation. Byte sizing requires native byte-batching support; the framework
+does not approximate byte limits by counting items. Request sizing is reserved
+and currently unsupported.
 
-Clones initially share byte buffers. Materializing one branch does not modify
-another branch. Successful in-place materialization retains OTAP for later use
-on that branch; there is no cross-branch decoded cache. Read-only `view` calls
-do not replace the source representation.
+Native batching must preserve input order and return output ownership weights
+that partition the input units exactly. Byte splitting can duplicate wrapper
+bytes, so output length and ownership weight can differ. The framework checks
+the total weight, and the processor uses ownership to track each input across
+all its output fragments. Codecs must honor fragment, wrapper-overhead, and
+per-flush split budgets; indivisible or over-budget entries remain whole and
+contribute to the split-budget fallback count.
 
-Encoded logical and retained size estimates use the byte length. As with OTLP,
-a `Bytes` slice may pin a larger allocation whose capacity is not exposed.
-Unknown item counts report zero to existing item metrics, never force a decode,
-and do not make a nonempty byte buffer empty. Receivers should supply accurate
-counts when available. Native OTAP keeps its existing logical/retained memory
-accounting and lazy measurement caches. The transient input plus decoded output
-during a conversion must be included in a component's resource planning.
+The processor owns timers, bounded inbound/outbound completion slots, and
+Ack/Nack delivery. Buffer and timer identities come from a finite set of
+resolved plans, not arbitrary names received from producers. Completion tokens
+identify the owning buffer even if downstream changes payload representation.
+Equivalent fallback plans share a buffer.
 
-## Future flat Parquet example
+See [Batch Processor](../crates/core-nodes/src/processors/batch_processor/README.md)
+for compatible aliases and the codec-name-based configuration.
 
-A future implementation can provide a codec with metadata such as
-`example-flat-parquet-v1-zstd` and register its factory:
+## Failure, fan-out, and measurements
+
+Registration validation rejects invalid names, duplicate identities, and
+inconsistent capabilities. Admission rejects missing decoders and unsupported
+signals. Conversion validates the requested target before decoding its source.
+Data failures use the component's existing error/Nack path rather than silently
+turning a failed conversion into an empty batch.
+
+In-place materialization and representation conversion retain the original
+payload and measurement cache on failure, with delivery context untouched.
+Consuming conversions require the caller to retain input when needed for retry.
+Clones share bytes; materializing one branch does not modify another. Read-only
+views do not replace the source representation or create a cross-branch cache.
+
+`known_item_count()` reads existing metadata without parsing and distinguishes
+an absent count from zero. Registrations can supply a stateless `count_items`
+hook for metrics; OTLP uses its existing protobuf scan. The result is cached
+locally to that payload branch. This neither instantiates a codec nor decodes
+to OTAP. Codecs without a counter retain unknown counts until supplied by the
+receiver or measured during processing. Batching prepares and measures its input
+before testing for emptiness. Existing optional item
+metrics still report zero for unknown counts without forcing a decode; receivers
+should supply accurate counts when available. Encoded memory estimates use byte
+length; a `Bytes` slice can pin a larger allocation whose capacity is not exposed.
+Account for both input and decoded output during conversion, as well as retained
+consumer-local codec buffers.
+
+## Registering a future codec
+
+A future independently decodable format can opt into OTAP fallback batching:
 
 ```rust,ignore
+use otel_arrow_dfe_config::SignalType;
 use otel_arrow_dfe_pdata::codec::{
     PdataCodecMetadata, PdataCodecRegistration, PdataEncoding, PDATA_CODEC_FACTORIES,
 };
-use otel_arrow_dfe_config::SignalType;
 
-// FlatParquetCodec is a future implementation of PdataCodec.
 static METADATA: PdataCodecMetadata = PdataCodecMetadata {
-    encoding: PdataEncoding::new("example-flat-parquet-v1-zstd"),
+    encoding: PdataEncoding::new("example-format-v1"),
     signals: &[SignalType::Logs],
     format_version: Some("1"),
-    compression: Some("zstd"),
+    compression: None,
     can_decode: true,
     can_encode: true,
+    batching: None,
 };
 
 #[allow(unsafe_code)]
 #[linkme::distributed_slice(PDATA_CODEC_FACTORIES)]
 static FACTORY: PdataCodecRegistration = PdataCodecRegistration {
     metadata: &METADATA,
-    create: || Box::new(FlatParquetCodec::new()),
+    create: || Box::new(ExampleCodec::new()),
+    count_items: None,
 };
 ```
 
-The deployment can then be:
+The corresponding receiver must recognize that format and admit it with the
+resolved decoder. Existing processors require no new representation branches.
+A compatible exporter can forward matching bytes or request encoding from OTAP.
+`PdataCodec::view` defaults to decoding OTAP. OTLP overrides it with a borrowed
+signal-and-byte view; existing read-only consumers can retain their direct
+protobuf paths without inspecting payload storage. Views borrow the input, not
+codec state, and do not replace the original representation.
 
-```text
-OTLP/OTAP -> record processing -> flat Parquet encoder -> transport
-transport -> encoded receiver -> route/retry/topic -> compatible encoded exporter
-```
-
-The first pipeline needs the encoder. The downstream receiver must preserve
-the encoding identity, signal, and relevant request metadata in its transport
-envelope. Its routing and retry path can run without that codec and export the
-same bytes through a compatible exporter. Adding record processing downstream
-would require the decoder. Such a transport, exporter, and Parquet schema are
-future work, not capabilities of the existing OTLP/OTAP network protocols.
+Such receivers and exporters are not capabilities of the current OTLP/OTAP
+network protocols.

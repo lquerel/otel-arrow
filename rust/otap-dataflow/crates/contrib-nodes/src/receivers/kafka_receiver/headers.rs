@@ -9,10 +9,11 @@
 
 use super::config::{AttributeValueType, HeaderExtraction};
 use bytes::Bytes;
+use otel_arrow_dfe_config::SignalType;
 use otel_arrow_dfe_engine::error::Error as EngineError;
 use otel_arrow_dfe_otap::pdata::{Context, OtapPdata};
 use otel_arrow_dfe_pdata::Consumer as PdataConsumer;
-use otel_arrow_dfe_pdata::OtlpProtoBytes;
+use otel_arrow_dfe_pdata::codec::ResolvedCodec;
 use otel_arrow_dfe_pdata::otap::transform::{
     AttributesTransform, LiteralValue, UpsertTransform, apply_attribute_transform,
 };
@@ -166,7 +167,12 @@ impl HeaderExtractions {
 
         Ok(OtapPdata::new(
             Context::default(),
-            OtlpProtoBytes::ExportTracesRequest(Bytes::from(buf)).into(),
+            ResolvedCodec::OTLP
+                .admit(SignalType::Traces, Bytes::from(buf))
+                .map_err(|error| EngineError::PdataConversionError {
+                    error: error.to_string(),
+                })?
+                .into(),
         ))
     }
 
@@ -206,7 +212,12 @@ impl HeaderExtractions {
 
         Ok(OtapPdata::new(
             Context::default(),
-            OtlpProtoBytes::ExportMetricsRequest(Bytes::from(buf)).into(),
+            ResolvedCodec::OTLP
+                .admit(SignalType::Metrics, Bytes::from(buf))
+                .map_err(|error| EngineError::PdataConversionError {
+                    error: error.to_string(),
+                })?
+                .into(),
         ))
     }
 
@@ -244,7 +255,12 @@ impl HeaderExtractions {
 
         Ok(OtapPdata::new(
             Context::default(),
-            OtlpProtoBytes::ExportLogsRequest(Bytes::from(buf)).into(),
+            ResolvedCodec::OTLP
+                .admit(SignalType::Logs, Bytes::from(buf))
+                .map_err(|error| EngineError::PdataConversionError {
+                    error: error.to_string(),
+                })?
+                .into(),
         ))
     }
 
@@ -477,6 +493,7 @@ fn parse_literal_value(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::receivers::kafka_receiver::encoded_otlp;
     use bytes::Bytes;
     use otel_arrow_dfe_pdata::otap::transform::UpsertTransform;
     use otel_arrow_dfe_pdata::otap::{OtapArrowRecords, Traces};
@@ -595,7 +612,10 @@ mod tests {
         let mut buf = Vec::new();
         request.encode(&mut buf).expect("encode OTLP request");
 
-        let payload: OtapPayload = OtlpProtoBytes::ExportTracesRequest(Bytes::from(buf)).into();
+        let payload: OtapPayload = ResolvedCodec::OTLP
+            .admit(SignalType::Traces, Bytes::from(buf))
+            .expect("admit OTLP traces")
+            .into();
         let mut otap_records: OtapArrowRecords = payload
             .try_into_with_default()
             .expect("convert OTLP to OTAP Arrow");
@@ -626,10 +646,11 @@ mod tests {
 
     // ---- Routing and payload correctness: header extraction ----
 
-    /// Scenario (routing and payload correctness): a single header-derived attribute is
+    /// Scenario: a single header-derived attribute is
     /// applied to an OTLP traces request.
     /// Guarantees: the attribute is added to every resource (and not to spans), so
     /// header-to-resource extraction works for OTLP traces.
+    /// Received OTLP remains encoded with the expected codec and signal.
     #[test]
     fn apply_otlp_traces_attribute_added_to_resource() {
         let request = create_traces_with_spans();
@@ -641,15 +662,12 @@ mod tests {
             otap_attributes: None,
         };
 
-        let mut pdata = extractions
+        let pdata = extractions
             .apply_otlp_traces(&bytes)
             .expect("should succeed");
 
-        let proto: OtlpProtoBytes = pdata
-            .take_payload()
-            .try_into_with_default()
-            .expect("to OtlpProtoBytes");
-        let result = ExportTraceServiceRequest::decode(proto.as_bytes()).expect("decode result");
+        let proto = encoded_otlp(&pdata, SignalType::Traces);
+        let result = ExportTraceServiceRequest::decode(proto).expect("decode result");
 
         for rs in &result.resource_spans {
             let resource = rs.resource.as_ref().expect("should have resource");
@@ -692,10 +710,11 @@ mod tests {
         );
     }
 
-    /// Scenario (routing and payload correctness): several header-derived attributes are
+    /// Scenario: several header-derived attributes are
     /// applied to an OTLP traces request.
     /// Guarantees: all attributes are added to every resource, so multi-attribute header
     /// extraction works for OTLP traces.
+    /// Received OTLP remains encoded with the expected codec and signal.
     #[test]
     fn apply_otlp_traces_multiple_attributes() {
         let request = create_traces_with_spans();
@@ -710,15 +729,12 @@ mod tests {
             otap_attributes: None,
         };
 
-        let mut pdata = extractions
+        let pdata = extractions
             .apply_otlp_traces(&bytes)
             .expect("should succeed");
 
-        let proto: OtlpProtoBytes = pdata
-            .take_payload()
-            .try_into_with_default()
-            .expect("to OtlpProtoBytes");
-        let result = ExportTraceServiceRequest::decode(proto.as_bytes()).expect("decode result");
+        let proto = encoded_otlp(&pdata, SignalType::Traces);
+        let result = ExportTraceServiceRequest::decode(proto).expect("decode result");
 
         for rs in &result.resource_spans {
             let resource = rs.resource.as_ref().expect("should have resource");
@@ -727,10 +743,11 @@ mod tests {
         }
     }
 
-    /// Scenario (routing and payload correctness): a header-derived attribute collides with
+    /// Scenario: a header-derived attribute collides with
     /// an existing resource attribute in an OTLP traces request.
     /// Guarantees: the existing value is upserted (replaced), so header extraction
     /// overrides rather than duplicates a resource attribute.
+    /// Received OTLP remains encoded with the expected codec and signal.
     #[test]
     fn apply_otlp_traces_upserts_existing_resource_attribute() {
         let request = create_traces_with_spans();
@@ -743,15 +760,12 @@ mod tests {
             otap_attributes: None,
         };
 
-        let mut pdata = extractions
+        let pdata = extractions
             .apply_otlp_traces(&bytes)
             .expect("should succeed");
 
-        let proto: OtlpProtoBytes = pdata
-            .take_payload()
-            .try_into_with_default()
-            .expect("to OtlpProtoBytes");
-        let result = ExportTraceServiceRequest::decode(proto.as_bytes()).expect("decode result");
+        let proto = encoded_otlp(&pdata, SignalType::Traces);
+        let result = ExportTraceServiceRequest::decode(proto).expect("decode result");
 
         let resource = result.resource_spans[0]
             .resource
@@ -791,10 +805,11 @@ mod tests {
         assert!(result.is_ok(), "should succeed even with empty request");
     }
 
-    /// Scenario (routing and payload correctness): a header-derived attribute is applied to
+    /// Scenario: a header-derived attribute is applied to
     /// an OTLP metrics request.
     /// Guarantees: the attribute is added to every resource, so header-to-resource
     /// extraction works for OTLP metrics.
+    /// Received OTLP remains encoded with the expected codec and signal.
     #[test]
     fn apply_otlp_metrics_attribute_added_to_resource() {
         let request = create_metrics_request();
@@ -806,15 +821,12 @@ mod tests {
             otap_attributes: None,
         };
 
-        let mut pdata = extractions
+        let pdata = extractions
             .apply_otlp_metrics(&bytes)
             .expect("should succeed");
 
-        let proto: OtlpProtoBytes = pdata
-            .take_payload()
-            .try_into_with_default()
-            .expect("to OtlpProtoBytes");
-        let result = ExportMetricsServiceRequest::decode(proto.as_bytes()).expect("decode result");
+        let proto = encoded_otlp(&pdata, SignalType::Metrics);
+        let result = ExportMetricsServiceRequest::decode(proto).expect("decode result");
 
         for rm in &result.resource_metrics {
             let resource = rm.resource.as_ref().expect("should have resource");
@@ -832,10 +844,11 @@ mod tests {
         }
     }
 
-    /// Scenario (routing and payload correctness): a header-derived attribute is applied to
+    /// Scenario: a header-derived attribute is applied to
     /// an OTLP logs request.
     /// Guarantees: the attribute is added to every resource, so header-to-resource
     /// extraction works for OTLP logs.
+    /// Received OTLP remains encoded with the expected codec and signal.
     #[test]
     fn apply_otlp_logs_attribute_added_to_resource() {
         let request = create_logs_request();
@@ -847,13 +860,10 @@ mod tests {
             otap_attributes: None,
         };
 
-        let mut pdata = extractions.apply_otlp_logs(&bytes).expect("should succeed");
+        let pdata = extractions.apply_otlp_logs(&bytes).expect("should succeed");
 
-        let proto: OtlpProtoBytes = pdata
-            .take_payload()
-            .try_into_with_default()
-            .expect("to OtlpProtoBytes");
-        let result = ExportLogsServiceRequest::decode(proto.as_bytes()).expect("decode result");
+        let proto = encoded_otlp(&pdata, SignalType::Logs);
+        let result = ExportLogsServiceRequest::decode(proto).expect("decode result");
 
         for rl in &result.resource_logs {
             let resource = rl.resource.as_ref().expect("should have resource");

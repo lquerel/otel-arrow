@@ -69,6 +69,7 @@ use otel_arrow_dfe_pdata::PayloadView;
 use otel_arrow_dfe_pdata::TryFromWithOptions;
 #[cfg(test)]
 use otel_arrow_dfe_pdata::TryIntoWithOptions;
+use otel_arrow_dfe_pdata::codec::CodecContext;
 use otel_arrow_dfe_pdata::otlp::OtlpProtoBytes;
 use otel_arrow_dfe_pdata::views::otap::OtapLogsView;
 use otel_arrow_dfe_pdata::views::otlp::bytes::logs::RawLogsData;
@@ -145,6 +146,7 @@ impl std::fmt::Display for ValidationFailure {
 /// - `source_mode`: Determines where allowed values come from
 /// - `get_allowed_values()`: Extension point for per-request allowed values
 pub struct ResourceValidatorProcessor {
+    codecs: CodecContext,
     /// The attribute key to validate
     required_attribute_key: String,
     /// Pre-normalized allowed values (used as-is for Static, as fallback for Dynamic)
@@ -204,6 +206,7 @@ impl ResourceValidatorProcessor {
         config.validate()?;
 
         Ok(Self {
+            codecs: CodecContext::default(),
             required_attribute_key: config.required_attribute_key.clone(),
             allowed_values: config.allowed_values_set(),
             source_mode: AllowedValuesSource::Static,
@@ -223,6 +226,7 @@ impl ResourceValidatorProcessor {
     ) -> Self {
         let metrics = pipeline_ctx.register_metrics::<ResourceValidatorMetrics>();
         Self {
+            codecs: CodecContext::default(),
             required_attribute_key,
             allowed_values,
             source_mode: AllowedValuesSource::Static,
@@ -488,11 +492,11 @@ impl local::Processor<OtapPdata> for ResourceValidatorProcessor {
             Message::PData(mut pdata) => {
                 let signal_type = pdata.signal_type();
 
-                // Get allowed values (extension point for future dynamic auth)
-                let allowed_values = self.get_allowed_values(&pdata);
-
                 // Validate based on payload type
-                let view = match pdata.payload_ref().view(Default::default()) {
+                let view = match pdata
+                    .payload_ref()
+                    .view_with(&mut self.codecs, Default::default())
+                {
                     Ok(view) => view,
                     Err(error) => {
                         let failure = ValidationFailure::ConversionError;
@@ -505,24 +509,21 @@ impl local::Processor<OtapPdata> for ResourceValidatorProcessor {
                         return Ok(());
                     }
                 };
+                // Get allowed values (extension point for future dynamic auth)
+                let allowed_values = self.get_allowed_values(&pdata);
                 let validation_result = match view {
-                    PayloadView::OtlpBytes(otlp_bytes) => match (signal_type, otlp_bytes) {
-                        (SignalType::Logs, OtlpProtoBytes::ExportLogsRequest(bytes)) => {
-                            let logs_data = RawLogsData::new(bytes.as_ref());
+                    PayloadView::OtlpBytes { signal, bytes } => match signal {
+                        SignalType::Logs => {
+                            let logs_data = RawLogsData::new(bytes);
                             self.validate_logs(&logs_data, &allowed_values)
                         }
-                        (SignalType::Metrics, OtlpProtoBytes::ExportMetricsRequest(bytes)) => {
-                            let metrics_data = RawMetricsData::new(bytes.as_ref());
+                        SignalType::Metrics => {
+                            let metrics_data = RawMetricsData::new(bytes);
                             self.validate_metrics(&metrics_data, &allowed_values)
                         }
-                        (SignalType::Traces, OtlpProtoBytes::ExportTracesRequest(bytes)) => {
-                            let trace_data = RawTraceData::new(bytes.as_ref());
+                        SignalType::Traces => {
+                            let trace_data = RawTraceData::new(bytes);
                             self.validate_traces(&trace_data, &allowed_values)
-                        }
-                        _ => {
-                            // Signal type doesn't match payload type - this shouldn't happen
-                            // but pass through rather than fail
-                            Ok(())
                         }
                     },
                     PayloadView::OtapArrowRecords(arrow_records) => match signal_type {

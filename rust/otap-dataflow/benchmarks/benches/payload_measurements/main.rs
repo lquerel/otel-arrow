@@ -10,6 +10,7 @@ use std::hint::black_box;
 
 use otel_arrow_dfe_otap::pdata::{Context, OtapPdata};
 use otel_arrow_dfe_pdata::OtapPayload;
+use otel_arrow_dfe_pdata::codec::CodecContext;
 use otel_arrow_dfe_pdata::otap::OtapArrowRecords;
 use otel_arrow_dfe_pdata::otlp::OtlpProtoBytes;
 use otel_arrow_dfe_pdata::proto::OtlpProtoMessage;
@@ -179,10 +180,67 @@ fn measure_payload_size(c: &mut Criterion) {
     group.finish();
 }
 
+fn convert_native_payload(c: &mut Criterion) {
+    let mut group = c.benchmark_group("PData native conversion");
+
+    for record_count in [10, 100, 1_000] {
+        let message = OtlpProtoMessage::Logs(create_logs_data(record_count));
+        let otap_records: OtapArrowRecords = otlp_to_otap(&message);
+
+        let mut direct_codecs = CodecContext::default();
+        _ = group.bench_function(BenchmarkId::new("payload/direct", record_count), |b| {
+            b.iter_batched(
+                || OtapPayload::from(otap_records.clone()),
+                |payload| {
+                    black_box(
+                        payload
+                            .try_into_otap_with(&mut direct_codecs, Default::default())
+                            .expect("native payload conversion"),
+                    )
+                },
+                BatchSize::SmallInput,
+            )
+        });
+
+        let mut split_codecs = CodecContext::default();
+        _ = group.bench_function(BenchmarkId::new("pdata/split_direct", record_count), |b| {
+            b.iter_batched(
+                || OtapPdata::new(Context::default(), OtapPayload::from(otap_records.clone())),
+                |pdata| {
+                    let (context, payload) = pdata.into_parts();
+                    let records = payload
+                        .try_into_otap_with(&mut split_codecs, Default::default())
+                        .expect("native payload conversion");
+                    black_box((context, records))
+                },
+                BatchSize::SmallInput,
+            )
+        });
+
+        let mut capability_codecs = CodecContext::default();
+        _ = group.bench_function(BenchmarkId::new("pdata/capability", record_count), |b| {
+            b.iter_batched(
+                || OtapPdata::new(Context::default(), OtapPayload::from(otap_records.clone())),
+                |pdata| {
+                    black_box(
+                        pdata
+                            .try_into_otap_with(&mut capability_codecs, Default::default())
+                            .expect("native pdata conversion"),
+                    )
+                },
+                BatchSize::SmallInput,
+            )
+        });
+    }
+
+    group.finish();
+}
+
 criterion_group!(
     payload_measurements,
     count_logs,
     count_payload_items,
-    measure_payload_size
+    measure_payload_size,
+    convert_native_payload
 );
 criterion_main!(payload_measurements);
