@@ -12,11 +12,11 @@ use bytes::Bytes;
 use otel_arrow_dfe_config::{ConversionOptions, SignalType};
 use serde::{Deserialize, Serialize};
 
+use crate::OtapPayload;
 use crate::codec::{
     self, CodecContext, CodecDirection, EncodedPdata, PdataEncoding, ResolvedCodec,
 };
 use crate::error::Error;
-use crate::{OtapPayload, PayloadData};
 
 /// Unit used for flush thresholds, splitting, and input ownership attribution.
 #[derive(Clone, Copy, Debug, Deserialize, Serialize, PartialEq, Eq)]
@@ -337,9 +337,10 @@ impl BatchPlan {
             None => {
                 let records = inputs
                     .into_iter()
-                    .map(|input| match input.into_data() {
-                        PayloadData::OtapArrowRecords { records, .. } => records,
-                        _ => unreachable!("checked working format"),
+                    .map(|input| {
+                        input
+                            .try_into_otap_with(context, ConversionOptions::default())
+                            .expect("checked native OTAP working format")
                     })
                     .collect();
                 let limit = self

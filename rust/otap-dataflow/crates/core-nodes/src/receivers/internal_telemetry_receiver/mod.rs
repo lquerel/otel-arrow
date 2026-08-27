@@ -581,7 +581,6 @@ mod tests {
     use otel_arrow_dfe_engine::local::receiver::Receiver as _;
     use otel_arrow_dfe_engine::message::{Receiver as EngineReceiver, Sender as EngineSender};
     use otel_arrow_dfe_engine::testing::{create_not_send_channel, setup_test_runtime, test_node};
-    use otel_arrow_dfe_pdata::PayloadData;
     use otel_arrow_dfe_pdata::proto::opentelemetry::collector::metrics::v1::ExportMetricsServiceRequest;
     use otel_arrow_dfe_pdata::proto::opentelemetry::logs::v1::ResourceLogs;
     use otel_arrow_dfe_pdata::proto::opentelemetry::metrics::v1::{metric, number_data_point};
@@ -604,13 +603,17 @@ mod tests {
     }
 
     fn decode_metric_value(pdata: OtapPdata) -> i64 {
-        let PayloadData::Encoded(encoded) = pdata.payload().into_data() else {
-            panic!("internal telemetry receiver emitted a non-metrics payload")
-        };
-        assert_eq!(encoded.codec(), ResolvedCodec::OTLP);
-        assert_eq!(encoded.signal_type(), SignalType::Metrics);
-        let request = ExportMetricsServiceRequest::decode(encoded.into_bytes())
-            .expect("valid OTLP metrics request");
+        assert_eq!(
+            pdata.payload_ref().format(),
+            otel_arrow_dfe_pdata::batching::PdataFormat::OTLP
+        );
+        assert_eq!(pdata.signal_type(), SignalType::Metrics);
+        let bytes = pdata
+            .payload()
+            .into_encoded_bytes()
+            .expect("internal telemetry receiver emitted a non-metrics payload");
+        let request =
+            ExportMetricsServiceRequest::decode(bytes).expect("valid OTLP metrics request");
         let [resource_metrics] = request.resource_metrics.as_slice() else {
             panic!("expected one resource metrics message")
         };

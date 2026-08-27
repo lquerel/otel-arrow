@@ -38,8 +38,6 @@ use otel_arrow_dfe_engine::{ConsumerEffectHandlerExtension, Interests};
 use otel_arrow_dfe_otap::OTAP_PROCESSOR_FACTORIES;
 use otel_arrow_dfe_otap::accessory::slots::{Key as SlotKey, State as SlotState};
 use otel_arrow_dfe_otap::pdata::{Context, OtapPdata, PeerAddrMerger};
-#[cfg(test)]
-use otel_arrow_dfe_pdata::PayloadData;
 use otel_arrow_dfe_pdata::otap::OtapArrowRecords;
 use otel_arrow_dfe_pdata::views::otap::OtapMetricsView;
 use otel_arrow_dfe_pdata::views::otlp::bytes::metrics::RawMetricsData;
@@ -2503,10 +2501,10 @@ mod tests {
             assert_eq!(output.len(), 1);
             // Both streams should be present: verify by converting the output
             // to OTLP and checking we have 2 resource_metrics entries.
-            let actual = match output[0].payload_ref().data() {
-                PayloadData::OtapArrowRecords { records: r, .. } => r,
-                _ => panic!("expected OtapArrowRecords payload"),
-            };
+            let actual = output[0]
+                .payload_ref()
+                .otap_ref()
+                .expect("expected native OTAP payload");
             let otlp = otap_to_otlp(actual);
             let md = match otlp {
                 otel_arrow_dfe_pdata::proto::OtlpProtoMessage::Metrics(md) => md,
@@ -3157,7 +3155,7 @@ mod tests {
             // Full passthrough forwards original OTLP bytes unchanged -
             // just verify something was emitted, the payload format is preserved.
             assert!(
-                matches!(output[0].payload_ref().data(), PayloadData::Encoded(_)),
+                output[0].payload_ref().encoded_bytes().is_some(),
                 "full passthrough should preserve OTLP bytes payload"
             );
         });

@@ -275,7 +275,6 @@ mod tests {
     use otel_arrow_dfe_engine::testing::test_node;
     use otel_arrow_dfe_otap::pdata::Context;
     use otel_arrow_dfe_otap::testing::TestCallData;
-    use otel_arrow_dfe_pdata::PayloadData;
     use otel_arrow_dfe_pdata::encode::{encode_logs_otap_batch, encode_spans_otap_batch};
     use otel_arrow_dfe_pdata::otap::OtapBatchStore;
     use otel_arrow_dfe_pdata::proto::OtlpProtoMessage;
@@ -431,15 +430,12 @@ mod tests {
                 assert_eq!(msgs[0].num_items(), 2);
 
                 let output_payload = msgs[0].clone().into_parts().1.take_payload();
-                let output_otap = match output_payload.into_data() {
-                    PayloadData::Encoded(_) => {
-                        panic!("Unexpected otlp bytes")
-                    }
-                    PayloadData::OtapArrowRecords {
-                        records: otap_arrow_records,
-                        ..
-                    } => otap_arrow_records,
-                };
+                let output_otap = output_payload
+                    .try_into_otap_with(
+                        &mut otel_arrow_dfe_pdata::codec::CodecContext::default(),
+                        Default::default(),
+                    )
+                    .expect("expected native OTAP output");
 
                 let output_attrs = output_otap.get(ArrowPayloadType::LogAttrs).unwrap();
                 // Make sure we only have two attributes in the output

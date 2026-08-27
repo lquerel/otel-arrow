@@ -8,9 +8,11 @@
 use criterion::{BatchSize, BenchmarkId, Criterion, criterion_group, criterion_main};
 use std::hint::black_box;
 
+use otel_arrow_dfe_config::SignalType;
 use otel_arrow_dfe_otap::pdata::{Context, OtapPdata};
 use otel_arrow_dfe_pdata::OtapPayload;
-use otel_arrow_dfe_pdata::codec::CodecContext;
+use otel_arrow_dfe_pdata::batching::{BatchPlan, PdataFormat};
+use otel_arrow_dfe_pdata::codec::{CodecContext, ResolvedCodec};
 use otel_arrow_dfe_pdata::otap::OtapArrowRecords;
 use otel_arrow_dfe_pdata::otlp::OtlpProtoBytes;
 use otel_arrow_dfe_pdata::proto::OtlpProtoMessage;
@@ -236,11 +238,123 @@ fn convert_native_payload(c: &mut Criterion) {
     group.finish();
 }
 
+fn exercise_codec_paths(c: &mut Criterion) {
+    let mut group = c.benchmark_group("PData codec paths");
+
+    for record_count in [10, 100, 1_000] {
+        let message = OtlpProtoMessage::Logs(create_logs_data(record_count));
+        let otlp_bytes: OtlpProtoBytes = otlp_message_to_bytes(&message);
+        let otap_records: OtapArrowRecords = otlp_to_otap(&message);
+
+        let mut forward_codecs = CodecContext::default();
+        _ = group.bench_function(BenchmarkId::new("OTLP/forward", record_count), |b| {
+            b.iter_batched(
+                || OtapPayload::from(otlp_bytes.clone()),
+                |payload| {
+                    black_box(
+                        payload
+                            .into_encoded_with(
+                                &mut forward_codecs,
+                                ResolvedCodec::OTLP,
+                                Default::default(),
+                            )
+                            .expect("matching-codec forwarding"),
+                    )
+                },
+                BatchSize::SmallInput,
+            )
+        });
+
+        let mut decode_codecs = CodecContext::default();
+        _ = group.bench_function(BenchmarkId::new("OTLP/decode", record_count), |b| {
+            b.iter_batched(
+                || OtapPayload::from(otlp_bytes.clone()),
+                |payload| {
+                    black_box(
+                        payload
+                            .try_into_otap_with(&mut decode_codecs, Default::default())
+                            .expect("OTLP decode"),
+                    )
+                },
+                BatchSize::SmallInput,
+            )
+        });
+
+        let mut encode_codecs = CodecContext::default();
+        _ = group.bench_function(BenchmarkId::new("OTAP/encode_otlp", record_count), |b| {
+            b.iter_batched(
+                || OtapPayload::from(otap_records.clone()),
+                |payload| {
+                    black_box(
+                        payload
+                            .into_encoded_with(
+                                &mut encode_codecs,
+                                ResolvedCodec::OTLP,
+                                Default::default(),
+                            )
+                            .expect("OTLP encode"),
+                    )
+                },
+                BatchSize::SmallInput,
+            )
+        });
+
+        let native_plan =
+            BatchPlan::new(PdataFormat::OTAP, PdataFormat::OTAP.default_profile(), true)
+                .expect("native batching plan");
+        let mut native_batch_codecs = CodecContext::default();
+        _ = group.bench_function(BenchmarkId::new("OTAP/batch", record_count), |b| {
+            b.iter_batched(
+                || {
+                    vec![
+                        OtapPayload::from(otap_records.clone()),
+                        OtapPayload::from(otap_records.clone()),
+                    ]
+                },
+                |payloads| {
+                    black_box(
+                        native_plan
+                            .batch(SignalType::Logs, payloads, &mut native_batch_codecs)
+                            .expect("native OTAP batch"),
+                    )
+                },
+                BatchSize::SmallInput,
+            )
+        });
+
+        let encoded_plan =
+            BatchPlan::new(PdataFormat::OTLP, PdataFormat::OTLP.default_profile(), true)
+                .expect("encoded batching plan");
+        let mut encoded_batch_codecs = CodecContext::default();
+        _ = group.bench_function(BenchmarkId::new("OTLP/batch", record_count), |b| {
+            b.iter_batched(
+                || {
+                    vec![
+                        OtapPayload::from(otlp_bytes.clone()),
+                        OtapPayload::from(otlp_bytes.clone()),
+                    ]
+                },
+                |payloads| {
+                    black_box(
+                        encoded_plan
+                            .batch(SignalType::Logs, payloads, &mut encoded_batch_codecs)
+                            .expect("encoded OTLP batch"),
+                    )
+                },
+                BatchSize::SmallInput,
+            )
+        });
+    }
+
+    group.finish();
+}
+
 criterion_group!(
     payload_measurements,
     count_logs,
     count_payload_items,
     measure_payload_size,
-    convert_native_payload
+    convert_native_payload,
+    exercise_codec_paths
 );
 criterion_main!(payload_measurements);

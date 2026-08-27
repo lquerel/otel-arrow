@@ -1728,7 +1728,7 @@ mod tests {
     use otel_arrow_dfe_pdata::proto::opentelemetry::metrics::v1::{ResourceMetrics, ScopeMetrics};
     use otel_arrow_dfe_pdata::proto::opentelemetry::resource::v1::Resource;
     use otel_arrow_dfe_pdata::proto::opentelemetry::trace::v1::{ResourceSpans, ScopeSpans, Span};
-    use otel_arrow_dfe_pdata::{OtapArrowRecords, OtapPayload, PayloadData, TryIntoWithOptions};
+    use otel_arrow_dfe_pdata::{OtapArrowRecords, OtapPayload, TryIntoWithOptions};
     use otel_arrow_dfe_telemetry::registry::TelemetryRegistryHandle;
     use prost::Message;
     use rdkafka::ClientConfig;
@@ -1737,6 +1737,15 @@ mod tests {
     use rdkafka::types::RDKafkaRespErr;
     use std::collections::HashMap;
     use std::time::Duration;
+
+    fn into_otap(payload: OtapPayload) -> OtapArrowRecords {
+        payload
+            .try_into_otap_with(
+                &mut otel_arrow_dfe_pdata::codec::CodecContext::default(),
+                Default::default(),
+            )
+            .expect("expected native OTAP payload")
+    }
 
     /// Number of partitions provisioned for the rebalance integration tests.
     const REBALANCE_TEST_PARTITIONS: i32 = 2;
@@ -1876,9 +1885,7 @@ mod tests {
             .admit(SignalType::Traces, Bytes::from(buf))
             .expect("admit OTLP traces")
             .into();
-        let mut otap_records: OtapArrowRecords = payload
-            .try_into_with_default()
-            .expect("convert OTLP to OTAP Arrow");
+        let mut otap_records = into_otap(payload);
 
         // Serialize to BatchArrowRecords wire bytes (as the Kafka receiver expects)
         arrow_records_to_bytes(&mut otap_records)
@@ -6043,12 +6050,7 @@ mod tests {
         req.encode(&mut bytes).expect("encode");
 
         let pdata = decode_traces_payload(&bytes, MessageFormat::OtlpProto).expect("should decode");
-        let PayloadData::Encoded(encoded) = pdata.payload_ref().data() else {
-            panic!("Kafka OTLP input must remain encoded");
-        };
-        assert_eq!(encoded.codec(), ResolvedCodec::OTLP);
-        assert_eq!(encoded.signal_type(), SignalType::Traces);
-        assert_eq!(encoded.bytes().as_ref(), bytes.as_slice());
+        assert_eq!(encoded_otlp(&pdata, SignalType::Traces), bytes.as_slice());
     }
 
     /// Scenario: Kafka admits an OTLP protobuf metrics request.
@@ -6061,12 +6063,7 @@ mod tests {
 
         let pdata =
             decode_metrics_payload(&bytes, MessageFormat::OtlpProto).expect("should decode");
-        let PayloadData::Encoded(encoded) = pdata.payload_ref().data() else {
-            panic!("Kafka OTLP input must remain encoded");
-        };
-        assert_eq!(encoded.codec(), ResolvedCodec::OTLP);
-        assert_eq!(encoded.signal_type(), SignalType::Metrics);
-        assert_eq!(encoded.bytes().as_ref(), bytes.as_slice());
+        assert_eq!(encoded_otlp(&pdata, SignalType::Metrics), bytes.as_slice());
     }
 
     /// Scenario: Kafka admits an OTLP protobuf logs request.
@@ -6078,12 +6075,7 @@ mod tests {
         req.encode(&mut bytes).expect("encode");
 
         let pdata = decode_logs_payload(&bytes, MessageFormat::OtlpProto).expect("should decode");
-        let PayloadData::Encoded(encoded) = pdata.payload_ref().data() else {
-            panic!("Kafka OTLP input must remain encoded");
-        };
-        assert_eq!(encoded.codec(), ResolvedCodec::OTLP);
-        assert_eq!(encoded.signal_type(), SignalType::Logs);
-        assert_eq!(encoded.bytes().as_ref(), bytes.as_slice());
+        assert_eq!(encoded_otlp(&pdata, SignalType::Logs), bytes.as_slice());
     }
 
     /// Scenario (routing and payload correctness): OTAP-Arrow traces bytes are decoded.
@@ -6097,13 +6089,7 @@ mod tests {
             decode_traces_payload(&bytes, MessageFormat::OtapProto).expect("should decode");
         let payload: OtapPayload = pdata.take_payload();
         assert!(
-            matches!(
-                payload.into_data(),
-                PayloadData::OtapArrowRecords {
-                    records: OtapArrowRecords::Traces(_),
-                    ..
-                }
-            ),
+            matches!(into_otap(payload), OtapArrowRecords::Traces(_)),
             "expected OtapArrowRecords::Traces"
         );
     }
@@ -6119,13 +6105,7 @@ mod tests {
             decode_metrics_payload(&bytes, MessageFormat::OtapProto).expect("should decode");
         let payload: OtapPayload = pdata.take_payload();
         assert!(
-            matches!(
-                payload.into_data(),
-                PayloadData::OtapArrowRecords {
-                    records: OtapArrowRecords::Metrics(_),
-                    ..
-                }
-            ),
+            matches!(into_otap(payload), OtapArrowRecords::Metrics(_)),
             "expected OtapArrowRecords::Metrics"
         );
     }
@@ -6141,13 +6121,7 @@ mod tests {
             decode_logs_payload(&bytes, MessageFormat::OtapProto).expect("should decode");
         let payload: OtapPayload = pdata.take_payload();
         assert!(
-            matches!(
-                payload.into_data(),
-                PayloadData::OtapArrowRecords {
-                    records: OtapArrowRecords::Logs(_),
-                    ..
-                }
-            ),
+            matches!(into_otap(payload), OtapArrowRecords::Logs(_)),
             "expected OtapArrowRecords::Logs"
         );
     }
@@ -6360,13 +6334,7 @@ mod tests {
                     let mut pdata = receiver.recv_pdata().await;
                     let payload: OtapPayload = pdata.take_payload();
                     assert!(
-                        matches!(
-                            payload.into_data(),
-                            PayloadData::OtapArrowRecords {
-                                records: OtapArrowRecords::Traces(_),
-                                ..
-                            }
-                        ),
+                        matches!(into_otap(payload), OtapArrowRecords::Traces(_)),
                         "Expected OtapArrowRecords::Traces for message {i}"
                     );
                 }
@@ -6415,16 +6383,9 @@ mod tests {
                 for i in 0..3 {
                     let mut pdata = receiver.recv_pdata().await;
                     let payload: OtapPayload = pdata.take_payload();
-                    if let PayloadData::OtapArrowRecords {
-                        records: arrow_records,
-                        ..
-                    } = payload.into_data()
-                    {
-                        let expected = OtapArrowRecords::Metrics(Metrics::default());
-                        assert_eq!(expected, arrow_records);
-                    } else {
-                        panic!("Expected OtapArrowRecords::Metrics for message {i}");
-                    }
+                    let arrow_records = into_otap(payload);
+                    let expected = OtapArrowRecords::Metrics(Metrics::default());
+                    assert_eq!(expected, arrow_records, "unexpected metrics message {i}");
                 }
 
                 receiver.shutdown(Duration::from_secs(5));
@@ -6471,16 +6432,9 @@ mod tests {
                 for i in 0..3 {
                     let mut pdata = receiver.recv_pdata().await;
                     let payload: OtapPayload = pdata.take_payload();
-                    if let PayloadData::OtapArrowRecords {
-                        records: arrow_records,
-                        ..
-                    } = payload.into_data()
-                    {
-                        let expected = OtapArrowRecords::Logs(Logs::default());
-                        assert_eq!(expected, arrow_records);
-                    } else {
-                        panic!("Expected OtapArrowRecords::Logs for message {i}");
-                    }
+                    let arrow_records = into_otap(payload);
+                    let expected = OtapArrowRecords::Logs(Logs::default());
+                    assert_eq!(expected, arrow_records, "unexpected logs message {i}");
                 }
 
                 receiver.shutdown(Duration::from_secs(5));
@@ -6541,13 +6495,7 @@ mod tests {
                     let mut pdata = receiver.recv_pdata().await;
                     let payload: OtapPayload = pdata.take_payload();
                     assert!(
-                        matches!(
-                            payload.into_data(),
-                            PayloadData::OtapArrowRecords {
-                                records: OtapArrowRecords::Traces(_),
-                                ..
-                            }
-                        ),
+                        matches!(into_otap(payload), OtapArrowRecords::Traces(_)),
                         "message {i}: MessageFormat=otap header must override the \
                          OtlpProto per-signal default and decode via the OTAP path",
                     );

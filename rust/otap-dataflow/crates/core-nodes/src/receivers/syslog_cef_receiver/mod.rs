@@ -1298,7 +1298,16 @@ impl Config {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use otel_arrow_dfe_pdata::PayloadData;
+    use otel_arrow_dfe_pdata::{OtapArrowRecords, OtapPayload};
+
+    fn into_otap(payload: OtapPayload) -> OtapArrowRecords {
+        payload
+            .try_into_otap_with(
+                &mut otel_arrow_dfe_pdata::codec::CodecContext::default(),
+                Default::default(),
+            )
+            .expect("expected native OTAP receiver output")
+    }
 
     // Test-only constructor, not compiled in production
     impl SyslogCefReceiver {
@@ -1526,13 +1535,7 @@ mod tests {
                     .payload();
 
                 // Extract arrow_records for further validation
-                let PayloadData::OtapArrowRecords {
-                    records: arrow_records,
-                    ..
-                } = message1_received.into_data()
-                else {
-                    panic!("Expected OtapArrowRecords::Logs variant")
-                };
+                let arrow_records = into_otap(message1_received);
 
                 // Check that the ArrowRecords contains the expected payload types
                 let logs_record_batch = arrow_records
@@ -1600,13 +1603,7 @@ mod tests {
                     .payload();
 
                 // Extract arrow_records for further validation
-                let PayloadData::OtapArrowRecords {
-                    records: arrow_records,
-                    ..
-                } = message1_received.into_data()
-                else {
-                    panic!("Expected OtapArrowRecords::Logs variant")
-                };
+                let arrow_records = into_otap(message1_received);
 
                 // Check that the ArrowRecords contains the expected payload types
                 let logs_record_batch = arrow_records
@@ -1674,13 +1671,7 @@ mod tests {
                 while total_records < 2 {
                     match timeout(Duration::from_secs(3), ctx.recv()).await {
                         Ok(Ok(message)) => {
-                            let PayloadData::OtapArrowRecords {
-                                records: arrow_records,
-                                ..
-                            } = message.payload().into_data()
-                            else {
-                                panic!("Expected OtapArrowRecords variant")
-                            };
+                            let arrow_records = into_otap(message.payload());
 
                             let logs_record_batch = arrow_records
                                 .get(ArrowPayloadType::Logs)
@@ -1889,13 +1880,7 @@ mod tests {
                 loop {
                     match timeout(Duration::from_secs(3), ctx.recv()).await {
                         Ok(Ok(message)) => {
-                            let PayloadData::OtapArrowRecords {
-                                records: arrow_records,
-                                ..
-                            } = message.payload().into_data()
-                            else {
-                                panic!("Expected OtapArrowRecords variant");
-                            };
+                            let arrow_records = into_otap(message.payload());
 
                             let logs_batch = arrow_records
                                 .get(ArrowPayloadType::Logs)

@@ -35,9 +35,9 @@ otel_arrow_dfe_telemetry::otel_component_scope!(
 use async_trait::async_trait;
 use futures::future::LocalBoxFuture;
 use linkme::distributed_slice;
+use otel_arrow_dfe_config::SignalType;
 use otel_arrow_dfe_config::node::NodeUserConfig;
 use otel_arrow_dfe_config::validation::validate_typed_config;
-use otel_arrow_dfe_config::{SignalFormat, SignalType};
 use otel_arrow_dfe_engine::config::ExporterConfig;
 use otel_arrow_dfe_engine::context::PipelineContext;
 use otel_arrow_dfe_engine::control::{AckMsg, NackMsg, NodeControlMsg};
@@ -360,7 +360,7 @@ impl Exporter<OtapPdata> for ClickhouseExporter {
                 Message::PData(pdata) => {
                     let export_started_at = Instant::now();
                     let signal_type = pdata.signal_type();
-                    let signal_format = pdata.signal_format();
+                    let input_was_native_otap = pdata.payload_ref().otap_ref().is_some();
 
                     if is_unsupported_non_empty_signal(&pdata) {
                         let reason =
@@ -472,26 +472,25 @@ impl Exporter<OtapPdata> for ClickhouseExporter {
                             continue;
                         }
 
-                        let transform_result = if signal_type == SignalType::Logs
-                            && signal_format == SignalFormat::OtapRecords
-                        {
-                            match logs_fast_transformer.try_apply(&arrow_records) {
-                                Ok(LogsFastTransform::Applied(batch)) => {
-                                    self.ch_metrics.record_log_fast_path();
-                                    Ok(HashMap::from([(ArrowPayloadType::Logs, batch)]))
+                        let transform_result =
+                            if signal_type == SignalType::Logs && input_was_native_otap {
+                                match logs_fast_transformer.try_apply(&arrow_records) {
+                                    Ok(LogsFastTransform::Applied(batch)) => {
+                                        self.ch_metrics.record_log_fast_path();
+                                        Ok(HashMap::from([(ArrowPayloadType::Logs, batch)]))
+                                    }
+                                    Ok(LogsFastTransform::NotApplicable(_)) => {
+                                        self.ch_metrics.record_log_transform_fallback();
+                                        batch_transformer.apply_plan(arrow_records)
+                                    }
+                                    Err(error) => Err(error),
                                 }
-                                Ok(LogsFastTransform::NotApplicable(_)) => {
+                            } else {
+                                if signal_type == SignalType::Logs {
                                     self.ch_metrics.record_log_transform_fallback();
-                                    batch_transformer.apply_plan(arrow_records)
                                 }
-                                Err(error) => Err(error),
-                            }
-                        } else {
-                            if signal_type == SignalType::Logs {
-                                self.ch_metrics.record_log_transform_fallback();
-                            }
-                            batch_transformer.apply_plan(arrow_records)
-                        };
+                                batch_transformer.apply_plan(arrow_records)
+                            };
 
                         match transform_result {
                             Ok(batches) => batches,

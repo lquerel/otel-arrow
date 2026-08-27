@@ -27,13 +27,13 @@ fn encoded_otlp(
     pdata: &otel_arrow_dfe_otap::pdata::OtapPdata,
     signal: otel_arrow_dfe_config::SignalType,
 ) -> &[u8] {
-    use otel_arrow_dfe_pdata::PayloadData;
-    use otel_arrow_dfe_pdata::codec::ResolvedCodec;
+    use otel_arrow_dfe_pdata::batching::PdataFormat;
 
-    let PayloadData::Encoded(encoded) = pdata.payload_ref().data() else {
-        panic!("OTLP receiver output must remain encoded");
-    };
-    assert_eq!(encoded.codec(), ResolvedCodec::OTLP);
-    assert_eq!(encoded.signal_type(), signal);
-    encoded.bytes().as_ref()
+    assert_eq!(pdata.payload_ref().format(), PdataFormat::OTLP);
+    assert_eq!(pdata.signal_type(), signal);
+    pdata
+        .payload_ref()
+        .encoded_bytes()
+        .expect("OTLP receiver output must remain encoded")
+        .as_ref()
 }

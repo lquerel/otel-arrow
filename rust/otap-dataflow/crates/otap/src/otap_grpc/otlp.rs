@@ -26,20 +26,23 @@ where
         + 'static,
 {
     use bytes::Bytes;
-    use otel_arrow_dfe_pdata::PayloadData;
-    use otel_arrow_dfe_pdata::codec::ResolvedCodec;
+    use otel_arrow_dfe_pdata::batching::PdataFormat;
 
     // Valid gRPC framing around deliberately malformed protobuf proves that
     // admission leaves protobuf interpretation to the eventual consumer.
     let body = http_body_util::Full::new(Bytes::from_static(&[0, 0, 0, 0, 2, 0xff, 0x80]));
     let mut stream = tonic::Streaming::new_request(decoder, body, None, None);
     let pdata = stream.message().await.unwrap().unwrap();
-    let PayloadData::Encoded(encoded) = pdata.payload_ref().data() else {
-        panic!("OTLP decoder must admit encoded pdata");
-    };
-    assert_eq!(encoded.codec(), ResolvedCodec::OTLP);
-    assert_eq!(encoded.signal_type(), signal);
-    assert_eq!(encoded.bytes().as_ref(), &[0xff, 0x80]);
-    assert_eq!(encoded.item_count(), None);
+    assert_eq!(pdata.payload_ref().format(), PdataFormat::OTLP);
+    assert_eq!(pdata.signal_type(), signal);
+    assert_eq!(
+        pdata
+            .payload_ref()
+            .encoded_bytes()
+            .expect("OTLP decoder must admit encoded pdata")
+            .as_ref(),
+        &[0xff, 0x80]
+    );
+    assert_eq!(pdata.payload_ref().known_item_count(), None);
     assert!(stream.message().await.unwrap().is_none());
 }

@@ -44,8 +44,6 @@ use otel_arrow_dfe_otap::transport_headers::ValueKind;
 use otel_arrow_dfe_pdata::OtapPayload;
 #[cfg(test)]
 use otel_arrow_dfe_pdata::OtlpProtoBytes;
-#[cfg(test)]
-use otel_arrow_dfe_pdata::PayloadData;
 use serde::Deserialize;
 use std::collections::VecDeque;
 use std::future::Future;
@@ -1921,14 +1919,13 @@ mod tests {
                                 nack.reason
                             );
                             let (_context, payload) = (*nack.refused).into_parts();
-                            match payload.into_data() {
-                                PayloadData::Encoded(encoded) => assert_eq!(
-                                    encoded.bytes(),
-                                    &expected_bytes,
-                                    "the refused batch must be returned intact so it can be retried"
-                                ),
-                                other => panic!("unexpected refused payload: {other:?}"),
-                            }
+                            assert_eq!(
+                                payload
+                                    .encoded_bytes()
+                                    .expect("expected encoded refused payload"),
+                                &expected_bytes,
+                                "the refused batch must be returned intact so it can be retried"
+                            );
                         }
                         PipelineCompletionMsg::DeliverAck { .. } => {
                             panic!("unexpected Ack: no request should have been sent")

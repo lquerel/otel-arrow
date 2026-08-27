@@ -42,8 +42,6 @@ use otel_arrow_dfe_engine::wiring_contract::WiringContract;
 use otel_arrow_dfe_engine::{ConsumerEffectHandlerExtension, ExporterFactory};
 use otel_arrow_dfe_pdata::OtapPayload;
 #[cfg(test)]
-use otel_arrow_dfe_pdata::PayloadData;
-#[cfg(test)]
 use otel_arrow_dfe_pdata::TryIntoWithOptions;
 use otel_arrow_dfe_pdata::proto::opentelemetry::collector::logs::v1::{
     ExportLogsPartialSuccess, ExportLogsServiceResponse,
@@ -3004,21 +3002,19 @@ mod test {
                             PipelineCompletionMsg::DeliverNack { nack } => {
                                 ack_count += 1;
 
-                                match nack.refused.payload().into_data() {
-                                    PayloadData::OtapArrowRecords { records: otap_batch, .. } => {
-                                        let logs_batch = otap_batch.get(ArrowPayloadType::Logs).unwrap();
-                                        assert!(
-                                            logs_batch.num_rows() > 0,
-                                            "expected record batches to be returned in Nack, but it was empty"
-                                        );
-                                    }
-                                    other_payload => {
-                                        panic!(
-                                            "received unexpected payload type in Nack: {:?}",
-                                            other_payload
-                                        );
-                                    }
-                                }
+                                let otap_batch = nack
+                                    .refused
+                                    .payload()
+                                    .try_into_otap_with(
+                                        &mut otel_arrow_dfe_pdata::codec::CodecContext::default(),
+                                        Default::default(),
+                                    )
+                                    .expect("expected native OTAP payload in Nack");
+                                let logs_batch = otap_batch.get(ArrowPayloadType::Logs).unwrap();
+                                assert!(
+                                    logs_batch.num_rows() > 0,
+                                    "expected record batches to be returned in Nack, but it was empty"
+                                );
 
                                 if ack_count >= num_expected_nacks {
                                     break;
@@ -3093,20 +3089,14 @@ mod test {
                             PipelineCompletionMsg::DeliverNack { nack } => {
                                 ack_count += 1;
 
-                                match nack.refused.payload().into_data() {
-                                    PayloadData::Encoded(encoded) => {
-                                        assert!(
-                                            !encoded.bytes().is_empty(),
-                                            "expected payload bytes to be returned in Nack, but it was empty"
-                                        );
-                                    }
-                                    other_payload => {
-                                        panic!(
-                                            "received unexpected payload type in Nack: {:?}",
-                                            other_payload
-                                        );
-                                    }
-                                }
+                                let payload = nack.refused.payload();
+                                assert!(
+                                    !payload
+                                        .encoded_bytes()
+                                        .expect("expected encoded payload in Nack")
+                                        .is_empty(),
+                                    "expected payload bytes to be returned in Nack, but it was empty"
+                                );
 
                                 if ack_count >= num_expected_nacks {
                                     break;

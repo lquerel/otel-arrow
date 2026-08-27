@@ -116,7 +116,7 @@ mod tests {
 
     use crate::otap::{Logs, OtapArrowRecords};
     use crate::otlp::OtlpProtoBytes;
-    use crate::payload::{OtapPayload, OtapPayloadHelpers, PayloadData};
+    use crate::payload::{OtapPayload, OtapPayloadHelpers};
     use crate::proto::OtlpProtoMessage;
     use crate::proto::opentelemetry::arrow::v1::ArrowPayloadType;
     use crate::proto::opentelemetry::common::v1::{AnyValue, InstrumentationScope, KeyValue};
@@ -405,10 +405,10 @@ mod tests {
         let arrow_payload: OtapPayload = OtapArrowRecords::Logs(Logs::default()).into();
 
         assert_eq!(
-            match arrow_payload.into_data() {
-                PayloadData::OtapArrowRecords { records, .. } => records.root_payload_type(),
-                PayloadData::Encoded(_) => unreachable!(),
-            },
+            arrow_payload
+                .otap_ref()
+                .expect("native OTAP payload")
+                .root_payload_type(),
             ArrowPayloadType::Logs
         );
     }

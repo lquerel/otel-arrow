@@ -26,10 +26,6 @@ pub(crate) mod payload;
 
 pub use otap::OtapArrowRecords;
 pub use otlp::OtlpProtoBytes;
-#[cfg(any(test, feature = "test-internals"))]
-pub use payload::PayloadData;
-#[cfg(not(any(test, feature = "test-internals")))]
-pub(crate) use payload::PayloadData;
 pub use payload::{OtapPayload, OtapPayloadDecodeError, OtapPayloadHelpers, PayloadView};
 
 /// Testing support

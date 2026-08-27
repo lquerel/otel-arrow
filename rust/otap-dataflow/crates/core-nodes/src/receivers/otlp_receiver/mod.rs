@@ -889,7 +889,6 @@ mod tests {
     use otel_arrow_dfe_otap::otlp_http::RpcStatus;
     use otel_arrow_dfe_otap::testing::{next_ack, next_nack};
     use otel_arrow_dfe_pdata::codec::ResolvedCodec;
-    use otel_arrow_dfe_pdata::PayloadData;
     use otel_arrow_dfe_pdata::proto::opentelemetry::collector::logs::v1::logs_service_client::LogsServiceClient;
     use otel_arrow_dfe_pdata::proto::opentelemetry::collector::logs::v1::{
         ExportLogsServiceRequest, ExportLogsServiceResponse,
@@ -1092,12 +1091,15 @@ mod tests {
     }
 
     fn encoded_request(pdata: &OtapPdata, signal: SignalType) -> &[u8] {
-        let PayloadData::Encoded(encoded) = pdata.payload_ref().data() else {
-            panic!("OTLP receiver must preserve encoded storage");
-        };
-        assert_eq!(encoded.codec(), ResolvedCodec::OTLP);
-        assert_eq!(encoded.signal_type(), signal);
-        encoded.bytes()
+        assert_eq!(
+            pdata.payload_ref().format(),
+            otel_arrow_dfe_pdata::batching::PdataFormat::OTLP
+        );
+        assert_eq!(pdata.signal_type(), signal);
+        pdata
+            .payload_ref()
+            .encoded_bytes()
+            .expect("OTLP receiver must preserve encoded storage")
     }
 
     fn create_logs_pdata() -> OtapPdata {

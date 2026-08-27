@@ -66,15 +66,6 @@ pub enum SignalType {
     Logs,
 }
 
-/// Signal formats
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
-pub enum SignalFormat {
-    /// OTel-Arrow records
-    OtapRecords,
-    /// Encoded bytes identified by a pdata codec, including OTLP protobuf.
-    Encoded,
-}
-
 /// The id of a pipeline group.
 pub type PipelineGroupId = Cow<'static, str>;
 

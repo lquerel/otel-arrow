@@ -27,8 +27,7 @@ use otel_arrow_dfe_engine::terminal_state::TerminalState;
 use otel_arrow_dfe_engine::{ConsumerEffectHandlerExtension, ExporterFactory};
 use otel_arrow_dfe_otap::pdata::OtapPdata;
 use otel_arrow_dfe_otap::{OTAP_EXPORTER_FACTORIES, OTAP_PIPELINE_FACTORY};
-use otel_arrow_dfe_pdata::PayloadData;
-use otel_arrow_dfe_pdata::codec::ResolvedCodec;
+use otel_arrow_dfe_pdata::batching::PdataFormat;
 use otel_arrow_dfe_pdata::proto::opentelemetry::collector::metrics::v1::ExportMetricsServiceRequest;
 use otel_arrow_dfe_pdata::proto::opentelemetry::metrics::v1::{
     AggregationTemporality, metric, number_data_point,
@@ -67,10 +66,10 @@ impl Exporter<OtapPdata> for CaptureExporter {
             match inbox.recv().await? {
                 Message::Control(NodeControlMsg::Shutdown { .. }) => break,
                 Message::PData(data) => {
-                    if let PayloadData::Encoded(encoded) = data.payload_ref().data() {
-                        assert_eq!(encoded.codec(), ResolvedCodec::OTLP);
-                        assert_eq!(encoded.signal_type(), SignalType::Metrics);
-                        let _ = self.sender.try_send(encoded.bytes().to_vec());
+                    if let Some(bytes) = data.payload_ref().encoded_bytes() {
+                        assert_eq!(data.payload_ref().format(), PdataFormat::OTLP);
+                        assert_eq!(data.signal_type(), SignalType::Metrics);
+                        let _ = self.sender.try_send(bytes.to_vec());
                     }
                     effect_handler.notify_ack(AckMsg::new(data)).await?;
                 }

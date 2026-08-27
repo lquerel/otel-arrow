@@ -614,6 +614,7 @@ mod tests {
     use otel_arrow_dfe_engine::message::Message;
     use otel_arrow_dfe_engine::testing::{node::test_node, processor::TestRuntime};
     use otel_arrow_dfe_otap::pdata::OtapPdata;
+    use otel_arrow_dfe_pdata::OtlpProtoBytes;
     use otel_arrow_dfe_pdata::proto::opentelemetry::metrics::v1::metric::Data;
     use otel_arrow_dfe_pdata::proto::opentelemetry::metrics::v1::{
         Metric, MetricsData, NumberDataPoint, ResourceMetrics, ScopeMetrics, Sum,
@@ -624,7 +625,6 @@ mod tests {
         logs::v1::{LogRecord, ResourceLogs, ScopeLogs, SeverityNumber},
         resource::v1::Resource,
     };
-    use otel_arrow_dfe_pdata::{OtlpProtoBytes, PayloadData};
     use otel_arrow_dfe_telemetry::registry::TelemetryRegistryHandle;
     use prost::Message as _;
     use serde_json::json;
@@ -2254,13 +2254,12 @@ mod tests {
                 let out = ctx.drain_pdata().await;
                 let first = out.into_iter().next().expect("one output").payload();
 
-                let otap_batch = match first.into_data() {
-                    PayloadData::OtapArrowRecords {
-                        records: otap_batch,
-                        ..
-                    } => otap_batch,
-                    _ => panic!("unexpected output payload type"),
-                };
+                let otap_batch = first
+                    .try_into_otap_with(
+                        &mut otel_arrow_dfe_pdata::codec::CodecContext::default(),
+                        Default::default(),
+                    )
+                    .expect("expected native OTAP output");
 
                 assert!(
                     otap_batch.get(ArrowPayloadType::LogAttrs).is_none(),

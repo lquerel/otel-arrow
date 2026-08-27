@@ -55,8 +55,8 @@ workspace = true
 [features]
 bench = []
 testing = []
-# Storage introspection and registered fake codecs for consumer tests only.
-# Keep separate from fixtures used by production dev-tools.
+# Registered fake codecs for consumer tests only. Keep separate from fixtures
+# used by production dev-tools.
 test-internals = ["testing"]
 
 [[bench]]

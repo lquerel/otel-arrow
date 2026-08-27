@@ -77,12 +77,18 @@ usable after a failed operation.
 
 | Consumer | Pdata operation |
 | --- | --- |
-| Record processor | `materialize_otap_with` retains decoded records. |
-| Native record owner | `into_otap_with` consumes the payload. |
+| Record processor | `OtapPdata::try_into_otap_with` returns native pdata. |
+| Native record owner | `OtapPayload::try_into_otap_with` consumes it. |
 | Read-only consumer | `view_with` borrows or asks the codec for a view. |
 | Encoded exporter | `prepare_encoded` shares bytes or reuses encoder state. |
 | Representation conversion | `convert_encoding_with` replaces after success. |
 | Batch processor | `BatchPlan` prepares, measures, batches, and finishes. |
+
+The concrete encoded/native storage enum is private. Components use
+`PdataFormat` for identity and the operations above for access, so adding a byte
+codec cannot introduce new representation matches in receivers, processors, or
+exporters. A failed typed native conversion owns the original pdata and its
+delivery context for Nack or retry.
 
 `EncodedOutput::as_ref()` lets HTTP compression consume encoder scratch directly.
 `copy_into_bytes()` retains scratch capacity, copying only scratch-backed output.

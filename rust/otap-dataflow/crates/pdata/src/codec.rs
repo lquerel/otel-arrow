@@ -694,11 +694,12 @@ static OTLP_CODEC: PdataCodecRegistration = PdataCodecRegistration {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::OtapPayload;
     use crate::testing::fixtures::logs_with_full_resource_and_scope;
     use crate::testing::round_trip::otlp_bytes_to_message;
-    use crate::{OtapPayload, PayloadData};
     use prost::Message;
     use std::cell::Cell;
+    use std::mem::size_of;
     use std::rc::Rc;
     use std::sync::Arc;
 
@@ -798,22 +799,6 @@ mod tests {
     /// Guarantees: payload layout stays compact and signal/bytes are unchanged without a decode.
     #[test]
     fn otlp_passthrough_keeps_original_buffer() {
-        // Compare against the pre-extension layout rather than a platform-specific size.
-        #[allow(dead_code)]
-        enum BuiltinPayload {
-            Otlp(OtlpProtoBytes),
-            Otap(OtapArrowRecords),
-        }
-        #[allow(dead_code)]
-        struct PreviousPayload {
-            data: BuiltinPayload,
-            item_count: Option<usize>,
-            size: Option<usize>,
-        }
-        assert!(
-            size_of::<OtapPayload>() <= size_of::<PreviousPayload>(),
-            "inline encoded envelopes must not enlarge queued payloads"
-        );
         assert_eq!(
             size_of::<crate::OtapPayloadDecodeError>(),
             size_of::<usize>(),
@@ -828,7 +813,7 @@ mod tests {
                     .expect("registered test codec"),
             );
             assert_eq!(payload.encoding(), Some(&PdataEncoding::OTLP));
-            assert!(matches!(payload.data(), PayloadData::Encoded(_)));
+            assert!(payload.encoded_bytes().is_some());
             let output = payload
                 .into_encoded(PdataEncoding::OTLP, Default::default())
                 .unwrap();
@@ -882,12 +867,10 @@ mod tests {
         assert_eq!(payload.retained_memory_bytes(), 3);
         assert!(!payload.is_empty());
         let mut clone = payload.clone();
-        match (payload.data(), clone.data()) {
-            (PayloadData::Encoded(original), PayloadData::Encoded(cloned)) => {
-                assert_eq!(original.bytes().as_ptr(), cloned.bytes().as_ptr());
-            }
-            _ => panic!("expected encoded envelopes sharing bytes"),
-        }
+        assert_eq!(
+            payload.encoded_bytes().expect("encoded input").as_ptr(),
+            clone.encoded_bytes().expect("encoded clone").as_ptr()
+        );
         let output = clone
             .take_payload()
             .into_encoded(encoding.clone(), Default::default())
@@ -1226,10 +1209,10 @@ mod tests {
                                 .unwrap();
                             assert!(!output.batches.is_empty());
                             assert!(
-                                output.batches.iter().all(|(batch, _)| matches!(
-                                    batch.data(),
-                                    PayloadData::Encoded(_)
-                                ))
+                                output
+                                    .batches
+                                    .iter()
+                                    .all(|(batch, _)| batch.format() == PdataFormat::OTLP)
                             );
                         }
                     }

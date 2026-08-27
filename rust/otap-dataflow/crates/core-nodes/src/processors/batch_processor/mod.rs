@@ -37,8 +37,6 @@ use async_trait::async_trait;
 #[cfg(test)]
 use bytes::Bytes;
 use linkme::distributed_slice;
-#[cfg(test)]
-use otel_arrow_dfe_config::SignalFormat;
 use otel_arrow_dfe_config::SignalType;
 use otel_arrow_dfe_config::error::Error as ConfigError;
 use otel_arrow_dfe_config::node::NodeUserConfig;
@@ -3413,12 +3411,11 @@ mod tests {
                 let mut has_otap = false;
                 let mut has_otlp = false;
                 for output in &outputs {
-                    match output.signal_format() {
-                        SignalFormat::OtapRecords => has_otap = true,
-                        SignalFormat::Encoded => {
-                            assert_eq!(output.payload_ref().format(), PdataFormat::OTLP);
-                            has_otlp = true;
-                        }
+                    if output.payload_ref().format() == PdataFormat::OTAP {
+                        has_otap = true;
+                    } else {
+                        assert_eq!(output.payload_ref().format(), PdataFormat::OTLP);
+                        has_otlp = true;
                     }
                 }
 
