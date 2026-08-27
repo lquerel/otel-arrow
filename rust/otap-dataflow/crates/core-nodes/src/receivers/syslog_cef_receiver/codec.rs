@@ -370,6 +370,73 @@ static SYSLOG_CEF_CODEC: PdataCodecRegistration = PdataCodecRegistration {
     count_items: Some(count_items),
 };
 
+/// Helpers exposing the receiver codec path to the workspace benchmarks.
+#[cfg(feature = "bench")]
+pub mod bench_support {
+    use chrono::Utc;
+    use otel_arrow_dfe_pdata::codec::{CodecContext, CodecDirection, ResolvedCodec, resolve};
+    use otel_arrow_dfe_pdata::{OtapArrowRecords, OtapPayload};
+
+    use super::*;
+
+    /// Reusable codec state matching one pipeline runtime's effect-handler state.
+    pub struct SyslogCodecBench {
+        codec: ResolvedCodec,
+        context: CodecContext,
+    }
+
+    impl Default for SyslogCodecBench {
+        fn default() -> Self {
+            Self::new()
+        }
+    }
+
+    impl SyslogCodecBench {
+        /// Resolves the syslog codec without creating its mutable instance.
+        #[must_use]
+        pub fn new() -> Self {
+            let codec = resolve(
+                &SYSLOG_CEF_ENCODING,
+                SignalType::Logs,
+                CodecDirection::Decode,
+            )
+            .expect("syslog codec must be registered for benchmark");
+            Self {
+                codec,
+                context: CodecContext::default(),
+            }
+        }
+
+        /// Runs receiver framing and lazy encoded admission for one message batch.
+        #[must_use]
+        pub fn admit(&self, messages: &[&[u8]]) -> OtapPayload {
+            let mut builder = SyslogBatchBuilder::new();
+            for message in messages {
+                builder
+                    .append(message)
+                    .expect("benchmark message must fit syslog framing");
+            }
+            let observed_time = Utc::now().timestamp_nanos_opt().unwrap_or(0);
+            let (bytes, item_count) = builder
+                .finish(observed_time)
+                .expect("benchmark batch must not be empty");
+            self.codec
+                .admit(SignalType::Logs, bytes)
+                .expect("benchmark bytes must be admitted")
+                .with_item_count(item_count)
+                .into()
+        }
+
+        /// Runs receiver admission followed by consumer-local lazy OTAP conversion.
+        #[must_use]
+        pub fn admit_and_materialize(&mut self, messages: &[&[u8]]) -> OtapArrowRecords {
+            self.admit(messages)
+                .try_into_otap_with(&mut self.context, Default::default())
+                .expect("benchmark syslog batch must decode")
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use arrow::array::TimestampNanosecondArray;
