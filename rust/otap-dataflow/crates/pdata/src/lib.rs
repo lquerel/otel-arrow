@@ -40,33 +40,33 @@ mod validation;
 pub use decode::decoder::Consumer;
 pub use encode::producer::Producer;
 
-use otel_arrow_dfe_config::ConversionOptions;
+use otel_arrow_dfe_config::EncodeOptions;
 
-/// Try to convert with options, including limits.
+/// Try to convert into an encoded output with options, including limits.
 pub trait TryFromWithOptions<T>: Sized {
     /// The error type.
     type Error;
 
     /// Performs the conversion
-    fn try_from_with_options(value: T, opts: ConversionOptions) -> Result<Self, Self::Error>;
+    fn try_from_with_options(value: T, opts: EncodeOptions) -> Result<Self, Self::Error>;
 
     /// Performs a default conversion
     fn try_from_with_default(value: T) -> Result<Self, Self::Error> {
-        TryFromWithOptions::<T>::try_from_with_options(value, ConversionOptions::default())
+        TryFromWithOptions::<T>::try_from_with_options(value, EncodeOptions::default())
     }
 }
 
-/// Try to convert with options, including limits.
+/// Try to convert into an encoded output with options, including limits.
 pub trait TryIntoWithOptions<T>: Sized {
     /// The error type.
     type Error;
 
     /// Performs the conversion
-    fn try_into_with_options(self, opts: ConversionOptions) -> Result<T, Self::Error>;
+    fn try_into_with_options(self, opts: EncodeOptions) -> Result<T, Self::Error>;
 
     /// Performs a default conversion
     fn try_into_with_default(self) -> Result<T, Self::Error> {
-        self.try_into_with_options(ConversionOptions::default())
+        self.try_into_with_options(EncodeOptions::default())
     }
 }
 
@@ -77,7 +77,7 @@ where
     type Error = U::Error;
 
     #[inline]
-    fn try_into_with_options(self, opts: ConversionOptions) -> Result<U, Self::Error> {
+    fn try_into_with_options(self, opts: EncodeOptions) -> Result<U, Self::Error> {
         U::try_from_with_options(self, opts)
     }
 }

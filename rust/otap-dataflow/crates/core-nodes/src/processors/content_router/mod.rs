@@ -571,10 +571,7 @@ impl ContentRouter {
     ) -> RouteResolution {
         let signal_type = pdata.signal_type();
 
-        let view = match effect_handler
-            .view(pdata.payload_ref(), Default::default())
-            .await
-        {
+        let view = match effect_handler.view(pdata.payload_ref()).await {
             Ok(view) => view,
             Err(_) => return RouteResolution::ConversionError,
         };

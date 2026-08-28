@@ -24,7 +24,6 @@ use otel_arrow_dfe_engine::testing::{node::test_node, processor::TestRuntime};
 use otel_arrow_dfe_otap::OTAP_PROCESSOR_FACTORIES;
 use otel_arrow_dfe_otap::pdata::{Context, OtapPdata};
 use otel_arrow_dfe_pdata::OtapArrowRecords;
-use otel_arrow_dfe_pdata::TryIntoWithOptions;
 use otel_arrow_dfe_pdata::otap::Logs;
 use otel_arrow_dfe_pdata::proto::opentelemetry::arrow::v1::ArrowPayloadType;
 use otel_arrow_dfe_telemetry::registry::TelemetryRegistryHandle;
@@ -80,7 +79,7 @@ fn logs_with_severities(severities: &[&str]) -> OtapPdata {
 fn severities_of(pdata: OtapPdata) -> Vec<String> {
     let (_ctx, payload) = pdata.into_parts();
     let records: OtapArrowRecords = payload
-        .try_into_with_default()
+        .try_into_otap(&mut otel_arrow_dfe_pdata::codec::CodecState::default())
         .expect("convert payload to otap records");
     let batch = records
         .get(ArrowPayloadType::Logs)

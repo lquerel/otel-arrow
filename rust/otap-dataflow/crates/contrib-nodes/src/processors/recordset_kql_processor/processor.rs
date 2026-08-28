@@ -3,7 +3,7 @@
 
 use super::config::RecordsetKqlProcessorConfig;
 use super::create_recordset_kql_processor;
-use otel_arrow_dfe_otap::pdata::OtapPdata;
+use otel_arrow_dfe_otap::pdata::{OtapPdata, PdataEffectHandlerExtension};
 
 use super::otlp_bridge::{
     BridgeDiagnosticOptions, BridgeError, BridgeOptions, BridgePipeline,
@@ -25,7 +25,9 @@ use otel_arrow_dfe_engine::{
     process_duration::ComputeDuration,
     processor::ProcessorRuntimeRequirements,
 };
+#[cfg(test)]
 use otel_arrow_dfe_pdata::TryIntoWithOptions;
+use otel_arrow_dfe_pdata::codec::EncodingPlan;
 use otel_arrow_dfe_pdata::{OtapPayload, OtlpProtoBytes};
 
 /// URN identifier for the processor
@@ -147,20 +149,22 @@ impl RecordsetKqlProcessor {
         let signal = data.signal_type();
         let input_items = data.num_items() as u64;
 
-        // Extract context and payload, convert to OTLP bytes
-        let (ctx, payload) = data.into_parts();
-        let otlp_bytes: OtlpProtoBytes = payload.try_into_with_default()?;
+        // Extract context and payload, then encode through runtime-owned codec state.
+        let (ctx, mut payload) = data.into_parts();
+        let otlp_bytes = effect_handler
+            .encode_owned(&mut payload, &EncodingPlan::OTLP)
+            .await?;
 
         // Process based on signal type (timed).
-        let result = effect_handler.timed(&self.compute_duration, || match otlp_bytes {
-            OtlpProtoBytes::ExportLogsRequest(bytes) => {
+        let result = effect_handler.timed(&self.compute_duration, || match signal {
+            SignalType::Logs => {
                 otel_debug!("recordset_kql_processor.processing_logs", input_items);
-                self.process_logs(bytes, signal)
+                self.process_logs(otlp_bytes, signal)
             }
-            OtlpProtoBytes::ExportMetricsRequest(_bytes) => Err(Error::InternalError {
+            SignalType::Metrics => Err(Error::InternalError {
                 message: "Metrics processing not yet implemented in KQL bridge".to_string(),
             }),
-            OtlpProtoBytes::ExportTracesRequest(_bytes) => Err(Error::InternalError {
+            SignalType::Traces => Err(Error::InternalError {
                 message: "Traces processing not yet implemented in KQL bridge".to_string(),
             }),
         });

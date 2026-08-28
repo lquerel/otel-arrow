@@ -519,8 +519,7 @@ impl Exporter<OtapPdata> for OTLPExporter {
                     let bytes = match effect_handler
                         .encode_owned(
                             &mut payload,
-                            otel_arrow_dfe_pdata::codec::ResolvedCodec::OTLP,
-                            Default::default(),
+                            &otel_arrow_dfe_pdata::codec::EncodingPlan::OTLP,
                         )
                         .await
                     {

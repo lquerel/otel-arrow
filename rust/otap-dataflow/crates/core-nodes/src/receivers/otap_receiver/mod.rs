@@ -814,7 +814,7 @@ mod tests {
     use otel_arrow_dfe_otap::pdata::OtapPdata;
     use otel_arrow_dfe_otap::testing::{next_ack, next_nack};
     use otel_arrow_dfe_pdata::Producer;
-    use otel_arrow_dfe_pdata::codec::CodecContext;
+    use otel_arrow_dfe_pdata::codec::CodecState;
     use otel_arrow_dfe_pdata::otap::OtapArrowRecords;
     use otel_arrow_dfe_pdata::proto::opentelemetry::arrow::v1::{
         ArrowPayloadType, arrow_logs_service_client::ArrowLogsServiceClient,
@@ -834,7 +834,7 @@ mod tests {
 
     fn pdata_to_otap(pdata: OtapPdata) -> OtapArrowRecords {
         pdata
-            .try_into_otap_with(&mut CodecContext::default(), Default::default())
+            .try_into_otap(&mut CodecState::default())
             .expect("convert pdata to OTAP")
             .into_parts()
             .1

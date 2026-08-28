@@ -59,29 +59,29 @@ colons. `otap`, `otlp`, and `preserve` are reserved configuration names;
 Incompatible versions and intrinsic compression variants need distinct names.
 HTTP/gRPC transport compression is separate from codec identity.
 
-Production consumers own a `CodecContext` for their lifetime. It lazily creates
+Each pipeline runtime owns a `CodecState` for its lifetime. It lazily creates
 and reuses at most one instance per used codec, including OTLP. Conversion,
 prepared output, views, and native batching all use that same instance.
-Codec implementations
-can own `Rc`, scratch buffers, and other state that is neither `Send` nor `Sync`.
-Create and use contexts on the consuming core; do not attach them to messages,
-share them through locks, or construct one for every input. State is dropped
-with its owner. Convenience conversions remain available for cold paths.
+Codec implementations can own scratch buffers and other mutable state. They must
+be `Send` so the shared executor can own them, but they do not need to be `Sync`.
+The pipeline runtime injects codec state through effect handlers; nodes do not
+store it or construct one for each input. Runtime-local nodes use lock-free
+state, while shared nodes use the sendable executor selected by the runtime.
 
 Codecs consume and produce complete independent batches. They cannot rely on a
 previous message's dictionary or framing state. They must preserve signal type,
-honor conversion options, bound decompression and scratch allocation, and remain
+honor output encoding options, bound decompression and scratch allocation, and remain
 usable after a failed operation.
 
 ## Consumer operations
 
 | Consumer | Pdata operation |
 | --- | --- |
-| Record processor | `OtapPdata::try_into_otap_with` returns native pdata. |
-| Native record owner | `OtapPayload::try_into_otap_with` consumes it. |
-| Read-only consumer | `view_with` borrows or asks the codec for a view. |
-| Encoded exporter | `prepare_encoded` shares bytes or reuses encoder state. |
-| Representation conversion | `convert_encoding_with` replaces after success. |
+| Record processor | Effect-handler `try_into_otap` returns native pdata. |
+| Native record owner | `OtapPayload::try_into_otap` consumes it with `CodecState`. |
+| Read-only consumer | Effect-handler `view` borrows or asks the codec for a view. |
+| Encoded exporter | An `EncodingPlan` and effect-handler encoding share bytes or reuse scratch. |
+| Representation conversion | `convert_encoding` replaces data after success. |
 | Batch processor | `BatchPlan` prepares, measures, batches, and finishes. |
 
 The concrete encoded/native storage enum is private. Components use

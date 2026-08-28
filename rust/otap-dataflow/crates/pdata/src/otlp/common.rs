@@ -22,7 +22,7 @@ use arrow::array::{
     StructArray, UInt8Array, UInt16Array, UInt32Array,
 };
 use arrow::datatypes::{DataType, Field, Fields};
-use otel_arrow_dfe_config::ConversionOptions;
+use otel_arrow_dfe_config::EncodeOptions;
 
 use bytes::Bytes;
 use std::cmp::Ordering;
@@ -745,9 +745,9 @@ impl Default for ProtoBuffer {
 }
 
 impl ProtoBuffer {
-    /// Construct a new buffer applying [`ConversionOptions`].
+    /// Construct a new buffer applying [`EncodeOptions`].
     #[must_use]
-    pub fn new(opts: ConversionOptions) -> Self {
+    pub fn new(opts: EncodeOptions) -> Self {
         let mut s = Self::default();
         if let Some(limit) = opts.otlp_size_limit {
             s.limit = MAX_OTLP_SIZE_LIMIT.min(limit.get());
@@ -827,6 +827,14 @@ impl ProtoBuffer {
     pub fn ensure_capacity(&mut self, capacity: usize) {
         if capacity > self.buffer.capacity() {
             self.buffer.reserve(capacity - self.buffer.capacity());
+        }
+    }
+
+    /// Clears the buffer and bounds the allocation retained for later encodes.
+    pub fn retain_capacity(&mut self, maximum: usize) {
+        self.buffer.clear();
+        if self.buffer.capacity() > maximum {
+            self.buffer = Vec::with_capacity(maximum.min(self.limit));
         }
     }
 }

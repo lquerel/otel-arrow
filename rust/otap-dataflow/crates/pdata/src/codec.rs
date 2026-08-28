@@ -15,8 +15,10 @@ use std::rc::Rc;
 use std::sync::{Arc, Mutex, MutexGuard};
 
 use bytes::Bytes;
-use otel_arrow_dfe_config::{ConversionOptions, SignalType};
+use otel_arrow_dfe_config::{EncodeOptions, SignalType};
 
+#[cfg(test)]
+use crate::TryIntoWithOptions;
 use crate::batching::{BatchProfile, BatchSizer, BatchingSupport, CodecBatches};
 use crate::error::Error;
 use crate::otap::OtapArrowRecords;
@@ -24,10 +26,7 @@ use crate::otlp::logs::LogsProtoBytesEncoder;
 use crate::otlp::metrics::MetricsProtoBytesEncoder;
 use crate::otlp::traces::TracesProtoBytesEncoder;
 use crate::otlp::{BoundedBuf, ProtoBuffer, ProtoBytesEncoder};
-use crate::{
-    OtapPayload, OtapPayloadDecodeError, OtapPayloadHelpers, OtlpProtoBytes, PayloadView,
-    TryIntoWithOptions,
-};
+use crate::{OtapPayload, OtapPayloadDecodeError, OtapPayloadHelpers, OtlpProtoBytes, PayloadView};
 
 /// Stable identity of an independently decodable byte representation.
 ///
@@ -175,7 +174,7 @@ pub struct PdataCodecMetadata {
 ///
 /// Each call must process/produce a complete independent batch: stream-relative
 /// dictionary deltas are not an independent encoded representation. Implementors
-/// must validate input, respect conversion options, and preserve the signal.
+/// must validate input and preserve the signal.
 pub trait PdataCodec: Send {
     /// Converts a borrowed complete encoded batch to native OTAP. Borrowing lets
     /// the caller retain the exact input for recovery without cloning its buffer.
@@ -183,22 +182,18 @@ pub trait PdataCodec: Send {
         &mut self,
         signal: SignalType,
         bytes: &Bytes,
-        options: ConversionOptions,
     ) -> Result<OtapArrowRecords, crate::encode::Error>;
 
     /// Converts native OTAP to a complete independently decodable encoded batch.
-    fn encode(
-        &mut self,
-        records: OtapArrowRecords,
-        options: ConversionOptions,
-    ) -> Result<Bytes, Error>;
+    fn encode(&mut self, records: OtapArrowRecords, options: EncodeOptions)
+    -> Result<Bytes, Error>;
 
     /// Prepares output that may borrow reusable encoder storage. The default
     /// supports codecs returning owned bytes; codecs with scratch can override it.
     fn prepare_encode<'a>(
         &'a mut self,
         records: &mut OtapArrowRecords,
-        options: ConversionOptions,
+        options: EncodeOptions,
     ) -> Result<EncodedOutput<'a>, Error> {
         self.encode(records.clone(), options)
             .map(EncodedOutput::bytes)
@@ -210,9 +205,8 @@ pub trait PdataCodec: Send {
         &mut self,
         signal: SignalType,
         bytes: &'a Bytes,
-        options: ConversionOptions,
     ) -> Result<PayloadView<'a>, crate::encode::Error> {
-        self.decode(signal, bytes, options)
+        self.decode(signal, bytes)
             .map(|records| PayloadView::OtapArrowRecords(Cow::Owned(records)))
     }
 
@@ -227,11 +221,9 @@ pub trait PdataCodec: Send {
         match sizer {
             BatchSizer::Bytes => Ok(bytes.len()),
             BatchSizer::Items => {
-                let records = self
-                    .decode(signal, &bytes, ConversionOptions::default())
-                    .map_err(|error| Error::Format {
-                        error: error.to_string(),
-                    })?;
+                let records = self.decode(signal, &bytes).map_err(|error| Error::Format {
+                    error: error.to_string(),
+                })?;
                 if records.signal_type() != signal {
                     return Err(Error::Format {
                         error: "decoder changed the signal type".into(),
@@ -335,6 +327,59 @@ impl ResolvedCodec {
     }
 }
 
+/// Startup-resolved output encoding and its output-specific options.
+///
+/// Nodes construct this once and reuse it for every payload. Signal support is
+/// checked when a concrete payload is encoded because pipelines may carry more
+/// than one signal.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub struct EncodingPlan {
+    codec: ResolvedCodec,
+    options: EncodeOptions,
+}
+
+impl EncodingPlan {
+    /// Default OTLP protobuf output.
+    pub const OTLP: Self = Self {
+        codec: ResolvedCodec::OTLP,
+        options: EncodeOptions {
+            otlp_size_limit: None,
+        },
+    };
+
+    /// Builds a plan from an already-resolved codec.
+    pub fn new(codec: ResolvedCodec, options: EncodeOptions) -> Result<Self, Error> {
+        if !codec.metadata().can_encode {
+            return Err(codec_error(
+                &codec.metadata().encoding,
+                "encoder unavailable",
+            ));
+        }
+        Ok(Self { codec, options })
+    }
+
+    /// Resolves an encoding name once while constructing a node.
+    pub fn resolve(encoding: &PdataEncoding, options: EncodeOptions) -> Result<Self, Error> {
+        Self::new(find(encoding)?, options)
+    }
+
+    /// Resolved codec used by this plan.
+    #[must_use]
+    pub const fn codec(self) -> ResolvedCodec {
+        self.codec
+    }
+
+    /// Output-specific options used by this plan.
+    #[must_use]
+    pub const fn options(self) -> EncodeOptions {
+        self.options
+    }
+
+    pub(crate) fn require(self, signal: SignalType) -> Result<(), Error> {
+        self.codec.require(signal, CodecDirection::Encode)
+    }
+}
+
 /// Finds a unique codec without selecting a signal or conversion direction.
 pub fn find(encoding: &PdataEncoding) -> Result<ResolvedCodec, Error> {
     let mut matches = PDATA_CODEC_FACTORIES
@@ -357,7 +402,7 @@ pub fn registered_codecs() -> impl Iterator<Item = ResolvedCodec> {
 /// Reusable synchronous codec state owned by a pipeline runtime.
 /// Neither payloads nor the immutable registry own these instances.
 #[derive(Default)]
-pub struct CodecContext {
+pub struct CodecState {
     codecs: Vec<(ResolvedCodec, Box<dyn PdataCodec>)>,
 }
 
@@ -368,14 +413,14 @@ pub struct CodecContext {
 /// an async suspension point.
 #[derive(Clone, Default)]
 pub struct LocalCodecExecutor {
-    context: Rc<RefCell<CodecContext>>,
+    state: Rc<RefCell<CodecState>>,
 }
 
 /// Scoped access implemented by runtime-local and sendable codec handles.
 #[doc(hidden)]
 pub trait CodecExecutor {
     /// Runs one synchronous operation without allowing codec state to escape.
-    fn execute<R>(&self, operation: impl FnOnce(&mut CodecContext) -> R) -> R;
+    fn execute<R>(&self, operation: impl FnOnce(&mut CodecState) -> R) -> R;
 }
 
 impl LocalCodecExecutor {
@@ -384,38 +429,35 @@ impl LocalCodecExecutor {
     /// This is an implementation hook for pdata-aware effect handlers. Node
     /// implementations should use those higher-level capabilities instead.
     #[doc(hidden)]
-    pub fn execute<R>(&self, operation: impl FnOnce(&mut CodecContext) -> R) -> R {
-        operation(&mut self.context.borrow_mut())
+    pub fn execute<R>(&self, operation: impl FnOnce(&mut CodecState) -> R) -> R {
+        operation(&mut self.state.borrow_mut())
     }
 
     /// Extracts or decodes native records while retaining failed input.
     pub fn try_into_otap(
         &self,
         payload: OtapPayload,
-        options: ConversionOptions,
     ) -> Result<OtapArrowRecords, OtapPayloadDecodeError> {
-        self.execute(|context| payload.try_into_otap_with(context, options))
+        self.execute(|state| payload.try_into_otap(state))
     }
 
     /// Borrows a representation-independent view of a payload.
     pub fn view<'a>(
         &self,
         payload: &'a OtapPayload,
-        options: ConversionOptions,
     ) -> Result<PayloadView<'a>, crate::encode::Error> {
-        self.execute(|context| payload.view_with(context, options))
+        self.execute(|state| payload.view(state))
     }
 
     /// Encodes inside a scope that cannot outlive reusable codec storage.
     pub fn with_encoded<R>(
         &self,
         payload: &mut OtapPayload,
-        codec: ResolvedCodec,
-        options: ConversionOptions,
+        plan: &EncodingPlan,
         consume: impl FnOnce(&[u8]) -> R,
     ) -> Result<R, Error> {
-        self.execute(|context| {
-            let output = payload.prepare_encoded(context, codec, options)?;
+        self.execute(|state| {
+            let output = payload.prepare_encoded(state, plan)?;
             Ok(consume(output.as_ref()))
         })
     }
@@ -424,12 +466,11 @@ impl LocalCodecExecutor {
     pub fn encode_owned(
         &self,
         payload: &mut OtapPayload,
-        codec: ResolvedCodec,
-        options: ConversionOptions,
+        plan: &EncodingPlan,
     ) -> Result<Bytes, Error> {
-        self.execute(|context| {
+        self.execute(|state| {
             payload
-                .prepare_encoded(context, codec, options)
+                .prepare_encoded(state, plan)
                 .map(EncodedOutput::into_bytes)
         })
     }
@@ -437,12 +478,12 @@ impl LocalCodecExecutor {
     /// Returns whether two handles address the same runtime-owned state.
     #[must_use]
     pub fn shares_state_with(&self, other: &Self) -> bool {
-        Rc::ptr_eq(&self.context, &other.context)
+        Rc::ptr_eq(&self.state, &other.state)
     }
 }
 
 impl CodecExecutor for LocalCodecExecutor {
-    fn execute<R>(&self, operation: impl FnOnce(&mut CodecContext) -> R) -> R {
+    fn execute<R>(&self, operation: impl FnOnce(&mut CodecState) -> R) -> R {
         Self::execute(self, operation)
     }
 }
@@ -454,12 +495,12 @@ impl CodecExecutor for LocalCodecExecutor {
 /// pools can replace the implementation without changing node-facing APIs.
 #[derive(Clone, Default)]
 pub struct SharedCodecExecutor {
-    context: Arc<Mutex<CodecContext>>,
+    state: Arc<Mutex<CodecState>>,
 }
 
 impl SharedCodecExecutor {
-    fn lock(&self) -> MutexGuard<'_, CodecContext> {
-        self.context
+    fn lock(&self) -> MutexGuard<'_, CodecState> {
+        self.state
             .lock()
             .unwrap_or_else(std::sync::PoisonError::into_inner)
     }
@@ -469,7 +510,7 @@ impl SharedCodecExecutor {
     /// This is an implementation hook for pdata-aware effect handlers. Node
     /// implementations should use those higher-level capabilities instead.
     #[doc(hidden)]
-    pub fn execute<R>(&self, operation: impl FnOnce(&mut CodecContext) -> R) -> R {
+    pub fn execute<R>(&self, operation: impl FnOnce(&mut CodecState) -> R) -> R {
         operation(&mut self.lock())
     }
 
@@ -477,30 +518,27 @@ impl SharedCodecExecutor {
     pub fn try_into_otap(
         &self,
         payload: OtapPayload,
-        options: ConversionOptions,
     ) -> Result<OtapArrowRecords, OtapPayloadDecodeError> {
-        self.execute(|context| payload.try_into_otap_with(context, options))
+        self.execute(|state| payload.try_into_otap(state))
     }
 
     /// Borrows a representation-independent view of a payload.
     pub fn view<'a>(
         &self,
         payload: &'a OtapPayload,
-        options: ConversionOptions,
     ) -> Result<PayloadView<'a>, crate::encode::Error> {
-        self.execute(|context| payload.view_with(context, options))
+        self.execute(|state| payload.view(state))
     }
 
     /// Encodes inside a scope that cannot outlive reusable codec storage.
     pub fn with_encoded<R>(
         &self,
         payload: &mut OtapPayload,
-        codec: ResolvedCodec,
-        options: ConversionOptions,
+        plan: &EncodingPlan,
         consume: impl FnOnce(&[u8]) -> R,
     ) -> Result<R, Error> {
-        self.execute(|context| {
-            let output = payload.prepare_encoded(context, codec, options)?;
+        self.execute(|state| {
+            let output = payload.prepare_encoded(state, plan)?;
             Ok(consume(output.as_ref()))
         })
     }
@@ -509,12 +547,11 @@ impl SharedCodecExecutor {
     pub fn encode_owned(
         &self,
         payload: &mut OtapPayload,
-        codec: ResolvedCodec,
-        options: ConversionOptions,
+        plan: &EncodingPlan,
     ) -> Result<Bytes, Error> {
-        self.execute(|context| {
+        self.execute(|state| {
             payload
-                .prepare_encoded(context, codec, options)
+                .prepare_encoded(state, plan)
                 .map(EncodedOutput::into_bytes)
         })
     }
@@ -522,12 +559,12 @@ impl SharedCodecExecutor {
     /// Returns whether two handles address the same runtime-owned state.
     #[must_use]
     pub fn shares_state_with(&self, other: &Self) -> bool {
-        Arc::ptr_eq(&self.context, &other.context)
+        Arc::ptr_eq(&self.state, &other.state)
     }
 }
 
 impl CodecExecutor for SharedCodecExecutor {
-    fn execute<R>(&self, operation: impl FnOnce(&mut CodecContext) -> R) -> R {
+    fn execute<R>(&self, operation: impl FnOnce(&mut CodecState) -> R) -> R {
         Self::execute(self, operation)
     }
 }
@@ -541,7 +578,7 @@ pub struct CodecExecutors {
     pub shared: SharedCodecExecutor,
 }
 
-impl CodecContext {
+impl CodecState {
     pub(crate) fn instance(&mut self, codec: ResolvedCodec) -> &mut dyn PdataCodec {
         let index = match self.codecs.iter().position(|(key, _)| *key == codec) {
             Some(index) => index,
@@ -558,13 +595,12 @@ impl CodecContext {
     pub fn decode(
         &mut self,
         encoded: &EncodedPdata,
-        options: ConversionOptions,
     ) -> Result<OtapArrowRecords, crate::encode::Error> {
         let codec = encoded.codec;
         let signal = encoded.signal;
         let records = self
             .instance(codec)
-            .decode(signal, &encoded.bytes, options)
+            .decode(signal, &encoded.bytes)
             .map_err(|error| codec_error(&codec.metadata().encoding, error.to_string()))?;
         if records.signal_type() != signal {
             return Err(codec_error(
@@ -580,12 +616,11 @@ impl CodecContext {
     pub fn view<'a>(
         &mut self,
         encoded: &'a EncodedPdata,
-        options: ConversionOptions,
     ) -> Result<PayloadView<'a>, crate::encode::Error> {
         let codec = encoded.codec;
         let view = self
             .instance(codec)
-            .view(encoded.signal, &encoded.bytes, options)
+            .view(encoded.signal, &encoded.bytes)
             .map_err(|error| codec_error(&codec.metadata().encoding, error.to_string()))?;
         if view.signal_type() != encoded.signal {
             return Err(
@@ -598,41 +633,52 @@ impl CodecContext {
     pub(crate) fn encode_records<'a>(
         &'a mut self,
         records: &mut OtapArrowRecords,
-        codec: ResolvedCodec,
-        options: ConversionOptions,
+        plan: &EncodingPlan,
     ) -> Result<EncodedOutput<'a>, Error> {
-        codec.require(records.signal_type(), CodecDirection::Encode)?;
-        self.instance(codec).prepare_encode(records, options)
+        plan.require(records.signal_type())?;
+        self.instance(plan.codec())
+            .prepare_encode(records, plan.options())
     }
 }
 
-struct OtlpEncoderState {
-    logs: LogsProtoBytesEncoder,
-    metrics: MetricsProtoBytesEncoder,
-    traces: TracesProtoBytesEncoder,
-    logs_buffer: ProtoBuffer,
-    metrics_buffer: ProtoBuffer,
-    traces_buffer: ProtoBuffer,
+const OTLP_INITIAL_BUFFER_CAPACITY: usize = 8 * 1024;
+const OTLP_MAX_RETAINED_BUFFER_CAPACITY: usize = 256 * 1024;
+
+struct OtlpSignalEncoder<E> {
+    encoder: E,
+    buffer: ProtoBuffer,
 }
 
-impl Default for OtlpEncoderState {
+impl<E: Default> Default for OtlpSignalEncoder<E> {
     fn default() -> Self {
         Self {
-            logs: LogsProtoBytesEncoder::default(),
-            metrics: MetricsProtoBytesEncoder::default(),
-            traces: TracesProtoBytesEncoder::default(),
-            // Preserve gRPC buffer growth and keep large batches in one signal
-            // from inflating detached allocations for the other signals.
-            logs_buffer: ProtoBuffer::with_capacity(8 * 1024),
-            metrics_buffer: ProtoBuffer::with_capacity(8 * 1024),
-            traces_buffer: ProtoBuffer::with_capacity(8 * 1024),
+            encoder: E::default(),
+            buffer: ProtoBuffer::with_capacity(OTLP_INITIAL_BUFFER_CAPACITY),
         }
+    }
+}
+
+#[derive(Default)]
+struct OtlpEncoderState {
+    logs: Option<Box<OtlpSignalEncoder<LogsProtoBytesEncoder>>>,
+    metrics: Option<Box<OtlpSignalEncoder<MetricsProtoBytesEncoder>>>,
+    traces: Option<Box<OtlpSignalEncoder<TracesProtoBytesEncoder>>>,
+}
+
+struct BufferOutput<'a> {
+    buffer: &'a mut ProtoBuffer,
+    max_retained_capacity: usize,
+}
+
+impl Drop for BufferOutput<'_> {
+    fn drop(&mut self) {
+        self.buffer.retain_capacity(self.max_retained_capacity);
     }
 }
 
 enum OutputStorage<'a> {
     Bytes(Bytes),
-    Buffer(&'a mut ProtoBuffer),
+    Buffer(BufferOutput<'a>),
 }
 
 /// Prepared output, either original shared bytes or reusable encoder storage.
@@ -646,8 +692,11 @@ impl<'a> EncodedOutput<'a> {
     }
 
     /// Borrows a bounded encoder buffer until the output is consumed or dropped.
-    pub fn buffer(buffer: &'a mut ProtoBuffer) -> Self {
-        Self(OutputStorage::Buffer(buffer))
+    pub fn buffer(buffer: &'a mut ProtoBuffer, max_retained_capacity: usize) -> Self {
+        Self(OutputStorage::Buffer(BufferOutput {
+            buffer,
+            max_retained_capacity,
+        }))
     }
 
     /// Detaches an encoder buffer without copying and replenishes its capacity.
@@ -655,9 +704,11 @@ impl<'a> EncodedOutput<'a> {
     pub fn into_bytes(self) -> Bytes {
         match self.0 {
             OutputStorage::Bytes(bytes) => bytes,
-            OutputStorage::Buffer(buffer) => {
-                let (bytes, capacity) = buffer.take_into_bytes();
-                buffer.ensure_capacity(capacity);
+            OutputStorage::Buffer(output) => {
+                let (bytes, capacity) = output.buffer.take_into_bytes();
+                output
+                    .buffer
+                    .ensure_capacity(capacity.min(output.max_retained_capacity));
                 bytes
             }
         }
@@ -668,7 +719,7 @@ impl<'a> EncodedOutput<'a> {
     pub fn copy_into_bytes(self) -> Bytes {
         match self.0 {
             OutputStorage::Bytes(bytes) => bytes,
-            OutputStorage::Buffer(buffer) => Bytes::copy_from_slice(buffer.as_ref()),
+            OutputStorage::Buffer(output) => Bytes::copy_from_slice(output.buffer.as_ref()),
         }
     }
 }
@@ -677,7 +728,7 @@ impl AsRef<[u8]> for EncodedOutput<'_> {
     fn as_ref(&self) -> &[u8] {
         match &self.0 {
             OutputStorage::Bytes(bytes) => bytes.as_ref(),
-            OutputStorage::Buffer(buffer) => buffer.as_ref(),
+            OutputStorage::Buffer(output) => output.buffer.as_ref(),
         }
     }
 }
@@ -768,20 +819,98 @@ pub struct OtlpCodec {
     encoder: Option<Box<OtlpEncoderState>>,
 }
 
+impl OtlpCodec {
+    fn output_limit(options: EncodeOptions) -> usize {
+        options
+            .otlp_size_limit
+            .map_or(crate::otlp::common::MAX_OTLP_SIZE_LIMIT, |limit| {
+                limit.get().min(crate::otlp::common::MAX_OTLP_SIZE_LIMIT)
+            })
+    }
+
+    #[inline(never)]
+    fn prepare_logs<'a>(
+        state: &'a mut OtlpEncoderState,
+        records: &mut OtapArrowRecords,
+        options: EncodeOptions,
+    ) -> Result<EncodedOutput<'a>, Error> {
+        let state = state
+            .logs
+            .get_or_insert_with(|| Box::new(OtlpSignalEncoder::default()));
+        state.buffer.clear();
+        state.buffer.set_limit(Self::output_limit(options));
+        if let Err(error) = state.encoder.encode(records, &mut state.buffer) {
+            state
+                .buffer
+                .retain_capacity(OTLP_MAX_RETAINED_BUFFER_CAPACITY);
+            return Err(error);
+        }
+        Ok(EncodedOutput::buffer(
+            &mut state.buffer,
+            OTLP_MAX_RETAINED_BUFFER_CAPACITY,
+        ))
+    }
+
+    #[inline(never)]
+    fn prepare_metrics<'a>(
+        state: &'a mut OtlpEncoderState,
+        records: &mut OtapArrowRecords,
+        options: EncodeOptions,
+    ) -> Result<EncodedOutput<'a>, Error> {
+        let state = state
+            .metrics
+            .get_or_insert_with(|| Box::new(OtlpSignalEncoder::default()));
+        state.buffer.clear();
+        state.buffer.set_limit(Self::output_limit(options));
+        if let Err(error) = state.encoder.encode(records, &mut state.buffer) {
+            state
+                .buffer
+                .retain_capacity(OTLP_MAX_RETAINED_BUFFER_CAPACITY);
+            return Err(error);
+        }
+        Ok(EncodedOutput::buffer(
+            &mut state.buffer,
+            OTLP_MAX_RETAINED_BUFFER_CAPACITY,
+        ))
+    }
+
+    #[inline(never)]
+    fn prepare_traces<'a>(
+        state: &'a mut OtlpEncoderState,
+        records: &mut OtapArrowRecords,
+        options: EncodeOptions,
+    ) -> Result<EncodedOutput<'a>, Error> {
+        let state = state
+            .traces
+            .get_or_insert_with(|| Box::new(OtlpSignalEncoder::default()));
+        state.buffer.clear();
+        state.buffer.set_limit(Self::output_limit(options));
+        if let Err(error) = state.encoder.encode(records, &mut state.buffer) {
+            state
+                .buffer
+                .retain_capacity(OTLP_MAX_RETAINED_BUFFER_CAPACITY);
+            return Err(error);
+        }
+        Ok(EncodedOutput::buffer(
+            &mut state.buffer,
+            OTLP_MAX_RETAINED_BUFFER_CAPACITY,
+        ))
+    }
+}
+
 impl PdataCodec for OtlpCodec {
     fn decode(
         &mut self,
         signal: SignalType,
         bytes: &Bytes,
-        options: ConversionOptions,
     ) -> Result<OtapArrowRecords, crate::encode::Error> {
-        OtlpProtoBytes::new_from_bytes(signal, bytes.clone()).try_into_with_options(options)
+        OtapArrowRecords::try_from(OtlpProtoBytes::new_from_bytes(signal, bytes.clone()))
     }
 
     fn encode(
         &mut self,
         mut records: OtapArrowRecords,
-        options: ConversionOptions,
+        options: EncodeOptions,
     ) -> Result<Bytes, Error> {
         Ok(self.prepare_encode(&mut records, options)?.into_bytes())
     }
@@ -789,38 +918,22 @@ impl PdataCodec for OtlpCodec {
     fn prepare_encode<'a>(
         &'a mut self,
         records: &mut OtapArrowRecords,
-        options: ConversionOptions,
+        options: EncodeOptions,
     ) -> Result<EncodedOutput<'a>, Error> {
         let state = self
             .encoder
             .get_or_insert_with(|| Box::new(OtlpEncoderState::default()));
-        let signal = records.signal_type();
-        let buffer = match signal {
-            SignalType::Logs => &mut state.logs_buffer,
-            SignalType::Metrics => &mut state.metrics_buffer,
-            SignalType::Traces => &mut state.traces_buffer,
-        };
-        buffer.clear();
-        buffer.set_limit(
-            options
-                .otlp_size_limit
-                .map_or(crate::otlp::common::MAX_OTLP_SIZE_LIMIT, |limit| {
-                    limit.get().min(crate::otlp::common::MAX_OTLP_SIZE_LIMIT)
-                }),
-        );
-        match signal {
-            SignalType::Logs => state.logs.encode(records, buffer)?,
-            SignalType::Metrics => state.metrics.encode(records, buffer)?,
-            SignalType::Traces => state.traces.encode(records, buffer)?,
+        match records.signal_type() {
+            SignalType::Logs => Self::prepare_logs(state, records, options),
+            SignalType::Metrics => Self::prepare_metrics(state, records, options),
+            SignalType::Traces => Self::prepare_traces(state, records, options),
         }
-        Ok(EncodedOutput::buffer(buffer))
     }
 
     fn view<'a>(
         &mut self,
         signal: SignalType,
         bytes: &'a Bytes,
-        _options: ConversionOptions,
     ) -> Result<PayloadView<'a>, crate::encode::Error> {
         Ok(PayloadView::OtlpBytes { signal, bytes })
     }
@@ -918,7 +1031,6 @@ mod tests {
             &mut self,
             signal: SignalType,
             bytes: &Bytes,
-            options: ConversionOptions,
         ) -> Result<OtapArrowRecords, crate::encode::Error> {
             DECODES.with(|count| count.set(count.get() + 1));
             self.calls.set(self.calls.get() + 1);
@@ -928,13 +1040,13 @@ mod tests {
             if bytes.first() != Some(&1) {
                 return Err(codec_error(&TEST_ENCODING, "invalid test frame").into());
             }
-            self.otlp.decode(signal, &bytes.slice(1..), options)
+            self.otlp.decode(signal, &bytes.slice(1..))
         }
 
         fn encode(
             &mut self,
             records: OtapArrowRecords,
-            options: ConversionOptions,
+            options: EncodeOptions,
         ) -> Result<Bytes, Error> {
             let bytes = self.otlp.encode(records, options)?;
             let mut frame = Vec::with_capacity(bytes.len() + 1);
@@ -954,6 +1066,61 @@ mod tests {
             Box::<TestCodec>::default()
         },
     };
+
+    /// Scenario: the built-in OTLP codec is checked by the reusable conformance harness.
+    /// Guarantees: OTLP preserves signals and counts and forwards matching encoded bytes
+    /// without copying them while retaining its permissive protobuf compatibility behavior.
+    #[test]
+    fn otlp_codec_conforms_to_registered_codec_contract() {
+        crate::testing::codec_conformance::assert_decode_conformance(
+            crate::testing::codec_conformance::DecodeConformanceCase {
+                codec: ResolvedCodec::OTLP,
+                signal: SignalType::Logs,
+                valid: logs_with_full_resource_and_scope().encode_to_vec().into(),
+                malformed: None,
+                expected_items: 4,
+            },
+        );
+    }
+
+    /// Scenario: a runtime exports only one telemetry signal through OTLP.
+    /// Guarantees: encoder state and its initial scratch allocation are created only for
+    /// the signal that is actually encoded.
+    #[test]
+    fn otlp_encoder_state_is_lazy_per_signal() {
+        let mut records = logs_payload()
+            .try_into_otap(&mut CodecState::default())
+            .unwrap();
+        let mut codec = OtlpCodec::default();
+        assert!(codec.encoder.is_none());
+
+        let output = codec
+            .prepare_encode(&mut records, EncodeOptions::default())
+            .unwrap();
+        drop(output);
+
+        let state = codec.encoder.as_deref().expect("encoder state");
+        assert!(state.logs.is_some());
+        assert!(state.metrics.is_none());
+        assert!(state.traces.is_none());
+    }
+
+    /// Scenario: one encoded batch grows the OTLP scratch allocation far beyond normal use.
+    /// Guarantees: detaching the bytes stays zero-copy while replenished scratch capacity is
+    /// bounded by the retained-buffer policy.
+    #[test]
+    fn prepared_output_caps_retained_scratch_after_outlier() {
+        let mut buffer = ProtoBuffer::with_capacity(OTLP_MAX_RETAINED_BUFFER_CAPACITY * 2);
+        buffer.try_extend(b"payload").unwrap();
+        let pointer = buffer.as_ref().as_ptr();
+
+        let bytes =
+            EncodedOutput::buffer(&mut buffer, OTLP_MAX_RETAINED_BUFFER_CAPACITY).into_bytes();
+
+        assert_eq!(bytes.as_ptr(), pointer);
+        assert_eq!(bytes.as_ref(), b"payload");
+        assert!(buffer.capacity() <= OTLP_MAX_RETAINED_BUFFER_CAPACITY);
+    }
 
     static DECODE_ONLY_METADATA: PdataCodecMetadata = PdataCodecMetadata {
         encoding: PdataEncoding::new("test-decode-only"),
@@ -998,12 +1165,8 @@ mod tests {
         let second = first.clone();
         assert!(first.shares_state_with(&second));
 
-        _ = first
-            .try_into_otap(framed_logs_payload(), Default::default())
-            .unwrap();
-        _ = second
-            .try_into_otap(framed_logs_payload(), Default::default())
-            .unwrap();
+        _ = first.try_into_otap(framed_logs_payload()).unwrap();
+        _ = second.try_into_otap(framed_logs_payload()).unwrap();
 
         CREATES.with(|count| assert_eq!(count.get(), 1));
     }
@@ -1020,12 +1183,8 @@ mod tests {
         let second = first.clone();
         assert!(first.shares_state_with(&second));
 
-        _ = first
-            .try_into_otap(framed_logs_payload(), Default::default())
-            .unwrap();
-        _ = second
-            .try_into_otap(framed_logs_payload(), Default::default())
-            .unwrap();
+        _ = first.try_into_otap(framed_logs_payload()).unwrap();
+        _ = second.try_into_otap(framed_logs_payload()).unwrap();
 
         CREATES.with(|count| assert_eq!(count.get(), 1));
     }
@@ -1050,7 +1209,7 @@ mod tests {
             assert_eq!(payload.encoding(), Some(&PdataEncoding::OTLP));
             assert!(payload.encoded_bytes().is_some());
             let output = payload
-                .into_encoded(PdataEncoding::OTLP, Default::default())
+                .into_encoded_for_test(PdataEncoding::OTLP, Default::default())
                 .unwrap();
             assert_eq!(output.signal_type(), signal);
             assert_eq!(output.bytes().as_ptr(), pointer);
@@ -1063,7 +1222,7 @@ mod tests {
     #[test]
     fn native_recoverable_conversion_moves_without_codec() {
         let records = logs_payload()
-            .try_into_otap_with(&mut CodecContext::default(), Default::default())
+            .try_into_otap(&mut CodecState::default())
             .unwrap();
         let column = records
             .root_record_batch()
@@ -1071,9 +1230,9 @@ mod tests {
             .column(0)
             .clone();
         let pointer = Arc::as_ptr(&column) as *const ();
-        let mut context = CodecContext::default();
+        let mut context = CodecState::default();
         let output = OtapPayload::from(records)
-            .try_into_otap_with(&mut context, Default::default())
+            .try_into_otap(&mut context)
             .unwrap();
         let output_pointer = Arc::as_ptr(
             output
@@ -1108,7 +1267,7 @@ mod tests {
         );
         let output = clone
             .take_payload()
-            .into_encoded(encoding.clone(), Default::default())
+            .into_encoded_for_test(encoding.clone(), Default::default())
             .unwrap();
         assert_eq!(output.bytes().as_ptr(), pointer);
         assert_eq!(output.item_count(), Some(7));
@@ -1116,7 +1275,9 @@ mod tests {
         assert_eq!(clone.num_items(), 0);
         assert_eq!(clone.num_bytes(), Some(0));
         assert!(clone.is_empty());
-        let output = payload.into_encoded(encoding, Default::default()).unwrap();
+        let output = payload
+            .into_encoded_for_test(encoding, Default::default())
+            .unwrap();
         assert_eq!(output.bytes().as_ptr(), pointer);
     }
 
@@ -1128,17 +1289,17 @@ mod tests {
         let original = logs_payload();
         let encoded = original
             .clone()
-            .into_encoded(TEST_ENCODING, Default::default())
+            .into_encoded_for_test(TEST_ENCODING, Default::default())
             .unwrap();
         let mut decoded = OtapPayload::from_encoded(encoded);
         let passthrough = decoded.clone();
         assert_eq!(decoded.num_items(), original.clone().num_items());
         assert_eq!(DECODES.with(Cell::get), 0);
         decoded
-            .materialize_otap_with(&mut CodecContext::default(), Default::default())
+            .materialize_otap(&mut CodecState::default())
             .unwrap();
         decoded
-            .materialize_otap_with(&mut CodecContext::default(), Default::default())
+            .materialize_otap(&mut CodecState::default())
             .unwrap();
         assert_eq!(DECODES.with(Cell::get), 1);
         assert_eq!(decoded.encoding(), None);
@@ -1168,18 +1329,20 @@ mod tests {
                     .with_item_count(5),
             );
             let error = payload
-                .try_into_otap_with(&mut CodecContext::default(), Default::default())
+                .try_into_otap(&mut CodecState::default())
                 .unwrap_err();
             assert!(error.error().to_string().contains(encoding.as_str()));
             let (_error, mut payload) = error.into_parts();
             let error = payload
-                .convert_encoding(PdataEncoding::new("missing-output"), Default::default())
+                .convert_encoding_for_test(PdataEncoding::new("missing-output"), Default::default())
                 .unwrap_err();
             assert!(error.to_string().contains("missing-output"));
             assert_eq!(payload.encoding(), Some(&encoding));
             assert_eq!(payload.num_items(), 5);
             assert_eq!(payload.signal_type(), SignalType::Logs);
-            let output = payload.into_encoded(encoding, Default::default()).unwrap();
+            let output = payload
+                .into_encoded_for_test(encoding, Default::default())
+                .unwrap();
             assert_eq!(output.bytes().as_ptr(), pointer);
         }
     }
@@ -1239,49 +1402,48 @@ mod tests {
     }
 
     /// Scenario: an extension encoder encounters the configured OTLP output limit.
-    /// Guarantees: conversion options reach the codec and a failed encode retains native input.
+    /// Guarantees: encode options reach the codec and a failed encode retains native input.
     #[test]
-    fn conversion_options_reach_extension_encoder() {
+    fn encode_options_reach_extension_encoder() {
         let mut payload = logs_payload();
         payload
-            .materialize_otap_with(&mut CodecContext::default(), Default::default())
+            .materialize_otap(&mut CodecState::default())
             .unwrap();
         let original = payload
             .clone()
-            .try_into_otap_with(&mut CodecContext::default(), Default::default())
+            .try_into_otap(&mut CodecState::default())
             .unwrap();
-        let options = ConversionOptions {
+        let options = EncodeOptions {
             otlp_size_limit: std::num::NonZeroUsize::new(1),
         };
-        assert!(payload.convert_encoding(TEST_ENCODING, options).is_err());
+        assert!(
+            payload
+                .convert_encoding_for_test(TEST_ENCODING, options)
+                .is_err()
+        );
         assert_eq!(payload.encoding(), None);
         assert_eq!(
-            payload
-                .try_into_otap_with(&mut CodecContext::default(), Default::default())
-                .unwrap(),
+            payload.try_into_otap(&mut CodecState::default()).unwrap(),
             original
         );
 
         let encoded = logs_payload()
-            .into_encoded(TEST_ENCODING, Default::default())
+            .into_encoded_for_test(TEST_ENCODING, Default::default())
             .unwrap();
         let mut payload: OtapPayload =
             EncodedPdata::new(TEST_ENCODING, SignalType::Logs, encoded.bytes().clone())
                 .unwrap()
                 .into();
-        let mut context = CodecContext::default();
+        let mut context = CodecState::default();
+        let plan = EncodingPlan::new(
+            ResolvedCodec::OTLP,
+            EncodeOptions {
+                otlp_size_limit: std::num::NonZeroUsize::new(1),
+            },
+        )
+        .unwrap();
         assert!(payload.known_item_count().is_none());
-        assert!(
-            payload
-                .prepare_encoded(
-                    &mut context,
-                    ResolvedCodec::OTLP,
-                    ConversionOptions {
-                        otlp_size_limit: std::num::NonZeroUsize::new(1),
-                    }
-                )
-                .is_err()
-        );
+        assert!(payload.prepare_encoded(&mut context, &plan).is_err());
         assert!(payload.known_item_count().is_none());
         assert_eq!(
             payload.encoded_bytes().unwrap().as_ptr(),
@@ -1299,7 +1461,7 @@ mod tests {
         );
         assert!(
             payload
-                .materialize_otap_with(&mut CodecContext::default(), Default::default())
+                .materialize_otap(&mut CodecState::default())
                 .unwrap_err()
                 .to_string()
                 .contains("decoder changed the signal type")
@@ -1355,25 +1517,25 @@ mod tests {
     #[test]
     fn consumer_context_reuses_and_isolates_codec_instances() {
         let input = logs_payload()
-            .into_encoded(TEST_ENCODING, Default::default())
+            .into_encoded_for_test(TEST_ENCODING, Default::default())
             .unwrap();
         CREATES.with(|count| count.set(0));
-        let mut first = CodecContext::default();
-        let mut second = CodecContext::default();
-        _ = first.decode(&input, Default::default()).unwrap();
-        _ = first.decode(&input, Default::default()).unwrap();
+        let mut first = CodecState::default();
+        let mut second = CodecState::default();
+        _ = first.decode(&input).unwrap();
+        _ = first.decode(&input).unwrap();
         let bad = input
             .codec()
             .admit(SignalType::Logs, Bytes::from_static(&[0]))
             .unwrap();
-        assert!(first.decode(&bad, Default::default()).is_err());
-        _ = first.decode(&input, Default::default()).unwrap();
+        assert!(first.decode(&bad).is_err());
+        _ = first.decode(&input).unwrap();
         assert_eq!(CREATES.with(Cell::get), 1);
-        _ = second.decode(&input, Default::default()).unwrap();
+        _ = second.decode(&input).unwrap();
         assert_eq!(CREATES.with(Cell::get), 2);
     }
 
-    /// Scenario: each OTLP operation is the first use of a consumer's codec context.
+    /// Scenario: each OTLP operation is the first use of a consumer's codec state.
     /// Guarantees: decode, encode, views and native batching all instantiate the
     /// registered codec once and reuse it on subsequent calls for every signal.
     #[test]
@@ -1398,27 +1560,20 @@ mod tests {
             let original = OtapPayload::from(encoded.clone());
             let records = original
                 .clone()
-                .try_into_otap_with(&mut CodecContext::default(), Default::default())
+                .try_into_otap(&mut CodecState::default())
                 .unwrap();
             for operation in 0..4 {
-                let mut context = CodecContext::default();
+                let mut context = CodecState::default();
                 for _ in 0..2 {
                     match operation {
                         0 => {
-                            let result = original
-                                .clone()
-                                .try_into_otap_with(&mut context, Default::default())
-                                .unwrap();
+                            let result = original.clone().try_into_otap(&mut context).unwrap();
                             assert_eq!(result.signal_type(), signal);
                         }
                         1 => {
                             let mut payload = OtapPayload::from(records.clone());
                             let output = payload
-                                .prepare_encoded(
-                                    &mut context,
-                                    ResolvedCodec::OTLP,
-                                    Default::default(),
-                                )
+                                .prepare_encoded(&mut context, &EncodingPlan::OTLP)
                                 .unwrap();
                             assert!(!output.as_ref().is_empty());
                         }
@@ -1426,9 +1581,7 @@ mod tests {
                             let PayloadView::OtlpBytes {
                                 signal: viewed_signal,
                                 bytes: viewed_bytes,
-                            } = original
-                                .view_with(&mut context, Default::default())
-                                .unwrap()
+                            } = original.view(&mut context).unwrap()
                             else {
                                 panic!("OTLP codec must supply a borrowed protobuf view");
                             };
@@ -1492,30 +1645,30 @@ mod tests {
         let mut after = payload.clone();
         assert_eq!(after.num_items(), 4);
         assert_eq!(COUNTS.with(Cell::get), 2);
-        let mut context = CodecContext::default();
-        let output = payload
-            .prepare_encoded(&mut context, codec, Default::default())
-            .unwrap();
+        let mut context = CodecState::default();
+        let plan = EncodingPlan::new(codec, Default::default()).unwrap();
+        let output = payload.prepare_encoded(&mut context, &plan).unwrap();
         assert_eq!(
             output.as_ref().as_ptr(),
             before.encoded_bytes().unwrap().as_ptr()
         );
+        drop(output);
         assert!(context.codecs.is_empty());
     }
 
     /// Scenario: an exporter borrows OTLP scratch for compression, interleaves
     /// signals, detaches it for gRPC, and encounters a temporary size limit.
     /// Guarantees: each signal reuses separate scratch, zero-copy detachment
-    /// survives errors, and conversion options reset for the next request.
+    /// survives errors, and encode options reset for the next request.
     #[test]
     fn prepared_output_reuses_scratch_and_detaches_without_copying() {
         let mut payload = logs_payload();
         payload
-            .materialize_otap_with(&mut CodecContext::default(), Default::default())
+            .materialize_otap(&mut CodecState::default())
             .unwrap();
-        let mut context = CodecContext::default();
+        let mut context = CodecState::default();
         let output = payload
-            .prepare_encoded(&mut context, ResolvedCodec::OTLP, Default::default())
+            .prepare_encoded(&mut context, &EncodingPlan::OTLP)
             .unwrap();
         let pointer = output.as_ref().as_ptr();
         let expected = output.copy_into_bytes();
@@ -1532,39 +1685,38 @@ mod tests {
             ),
         ] {
             let mut other = OtapPayload::from(OtlpProtoBytes::new_from_bytes(signal, bytes));
-            other
-                .materialize_otap_with(&mut CodecContext::default(), Default::default())
-                .unwrap();
+            other.materialize_otap(&mut CodecState::default()).unwrap();
             let output = other
-                .prepare_encoded(&mut context, ResolvedCodec::OTLP, Default::default())
+                .prepare_encoded(&mut context, &EncodingPlan::OTLP)
                 .unwrap();
             let other_pointer = output.as_ref().as_ptr();
             assert!(!pointers.contains(&other_pointer));
             pointers.push(other_pointer);
             let expected_other = output.copy_into_bytes();
             let output = other
-                .prepare_encoded(&mut context, ResolvedCodec::OTLP, Default::default())
+                .prepare_encoded(&mut context, &EncodingPlan::OTLP)
                 .unwrap();
             assert_eq!(output.as_ref().as_ptr(), other_pointer);
             assert_eq!(output.as_ref(), expected_other.as_ref());
         }
         let output = payload
-            .prepare_encoded(&mut context, ResolvedCodec::OTLP, Default::default())
+            .prepare_encoded(&mut context, &EncodingPlan::OTLP)
             .unwrap();
         assert_eq!(output.as_ref().as_ptr(), pointer);
         let detached = output.into_bytes();
         assert_eq!(detached.as_ptr(), pointer);
         assert_eq!(detached, expected);
-        let options = ConversionOptions {
+        let options = EncodeOptions {
             otlp_size_limit: std::num::NonZeroUsize::new(1),
         };
+        let limited_plan = EncodingPlan::new(ResolvedCodec::OTLP, options).unwrap();
         assert!(
             payload
-                .prepare_encoded(&mut context, ResolvedCodec::OTLP, options)
+                .prepare_encoded(&mut context, &limited_plan)
                 .is_err()
         );
         let output = payload
-            .prepare_encoded(&mut context, ResolvedCodec::OTLP, Default::default())
+            .prepare_encoded(&mut context, &EncodingPlan::OTLP)
             .unwrap();
         assert_eq!(output.as_ref(), expected.as_ref());
     }
@@ -1597,7 +1749,7 @@ mod tests {
                 None
             };
             let plan = BatchPlan::new(format, profile, preserve).unwrap();
-            let mut context = CodecContext::default();
+            let mut context = CodecState::default();
             let mut inputs: Vec<OtapPayload> = (0..2)
                 .map(|_| codec.admit(SignalType::Logs, bytes.clone()).unwrap().into())
                 .collect();
@@ -1655,14 +1807,13 @@ mod tests {
                 &mut self,
                 signal: SignalType,
                 bytes: &Bytes,
-                options: ConversionOptions,
             ) -> Result<OtapArrowRecords, crate::encode::Error> {
-                OtlpCodec::default().decode(signal, bytes, options)
+                OtlpCodec::default().decode(signal, bytes)
             }
             fn encode(
                 &mut self,
                 records: OtapArrowRecords,
-                options: ConversionOptions,
+                options: EncodeOptions,
             ) -> Result<Bytes, Error> {
                 OtlpCodec::default().encode(records, options)
             }
@@ -1703,7 +1854,7 @@ mod tests {
         };
         let codec = ResolvedCodec(&REGISTRATION);
         let plan = BatchPlan::new(PdataFormat::encoded(codec), BatchProfile::otlp(), true).unwrap();
-        let mut context = CodecContext::default();
+        let mut context = CodecState::default();
         for bytes in [b"\0", b"\x01", b"\x02"] {
             let payload = codec
                 .admit(SignalType::Logs, Bytes::from_static(bytes))

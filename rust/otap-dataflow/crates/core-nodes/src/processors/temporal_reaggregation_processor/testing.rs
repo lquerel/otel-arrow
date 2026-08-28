@@ -347,10 +347,7 @@ pub(super) fn create_test_pipeline_context() -> PipelineContext {
 fn payload_to_otlp(payload: &OtapPayload) -> otel_arrow_dfe_pdata::proto::OtlpProtoMessage {
     let records = payload
         .clone()
-        .try_into_otap_with(
-            &mut otel_arrow_dfe_pdata::codec::CodecContext::default(),
-            Default::default(),
-        )
+        .try_into_otap(&mut otel_arrow_dfe_pdata::codec::CodecState::default())
         .unwrap();
     otap_to_otlp(&records)
 }

@@ -728,7 +728,7 @@ impl local::Exporter<OtapPdata> for OTAPExporter {
                         };
 
                         let message: OtapArrowRecords = match effect_handler
-                            .try_payload_into_otap(payload, Default::default())
+                            .try_payload_into_otap(payload)
                             .await
                         {
                             Ok(m) => m,
@@ -1389,7 +1389,7 @@ mod tests {
     };
     use otel_arrow_dfe_otap::compression::CompressionMethod;
     use otel_arrow_dfe_pdata::OtapPayload;
-    use otel_arrow_dfe_pdata::codec::CodecContext;
+    use otel_arrow_dfe_pdata::codec::CodecState;
     use otel_arrow_dfe_pdata::otap::OtapArrowRecords;
     use otel_arrow_dfe_pdata::proto::opentelemetry::arrow::v1::{
         ArrowPayloadType, BatchArrowRecords, BatchStatus, StatusCode,
@@ -1421,7 +1421,7 @@ mod tests {
 
     fn payload_to_otap(payload: OtapPayload) -> OtapArrowRecords {
         payload
-            .try_into_otap_with(&mut CodecContext::default(), Default::default())
+            .try_into_otap(&mut CodecState::default())
             .expect("convert payload to OTAP")
     }
 
@@ -1779,7 +1779,7 @@ mod tests {
                                     .refused
                                     .into_parts()
                                     .1
-                                    .into_encoded(encoding, Default::default())
+                                    .into_encoded_for_test(encoding, Default::default())
                                     .unwrap();
                                 assert_eq!(output.bytes().as_ptr(), bytes.as_ptr());
                                 assert_eq!(output.bytes(), &bytes);

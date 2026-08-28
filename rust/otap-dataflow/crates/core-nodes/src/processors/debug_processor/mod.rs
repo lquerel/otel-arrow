@@ -353,8 +353,7 @@ impl local::Processor<OtapPdata> for DebugProcessor {
                 let bytes = effect_handler
                     .encode_owned(
                         &mut payload,
-                        otel_arrow_dfe_pdata::codec::ResolvedCodec::OTLP,
-                        Default::default(),
+                        &otel_arrow_dfe_pdata::codec::EncodingPlan::OTLP,
                     )
                     .await?;
                 let otlp_bytes = OtlpProtoBytes::new_from_bytes(signal, bytes);

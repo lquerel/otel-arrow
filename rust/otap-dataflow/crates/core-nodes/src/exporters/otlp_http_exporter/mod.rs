@@ -481,8 +481,7 @@ impl Exporter<OtapPdata> for OtlpHttpExporter {
                         match effect_handler
                             .with_encoded(
                                 &mut payload,
-                                otel_arrow_dfe_pdata::codec::ResolvedCodec::OTLP,
-                                Default::default(),
+                                &otel_arrow_dfe_pdata::codec::EncodingPlan::OTLP,
                                 |encoded| {
                                     method.encode(encoded, &mut compressed_buffer)?;
                                     Ok::<Bytes, std::io::Error>(Bytes::copy_from_slice(
@@ -526,8 +525,7 @@ impl Exporter<OtapPdata> for OtlpHttpExporter {
                         match effect_handler
                             .encode_owned(
                                 &mut payload,
-                                otel_arrow_dfe_pdata::codec::ResolvedCodec::OTLP,
-                                Default::default(),
+                                &otel_arrow_dfe_pdata::codec::EncodingPlan::OTLP,
                             )
                             .await
                         {
@@ -2143,7 +2141,7 @@ mod test {
                                 .refused
                                 .into_parts()
                                 .1
-                                .into_encoded(encoding, Default::default())
+                                .into_encoded_for_test(encoding, Default::default())
                                 .unwrap();
                             assert_eq!(output.bytes().as_ptr(), expected.as_ptr());
                             assert_eq!(output.bytes(), &expected);
@@ -3033,10 +3031,7 @@ mod test {
                                 let otap_batch = nack
                                     .refused
                                     .payload()
-                                    .try_into_otap_with(
-                                        &mut otel_arrow_dfe_pdata::codec::CodecContext::default(),
-                                        Default::default(),
-                                    )
+                                    .try_into_otap(&mut otel_arrow_dfe_pdata::codec::CodecState::default())
                                     .expect("expected native OTAP payload in Nack");
                                 let logs_batch = otap_batch.get(ArrowPayloadType::Logs).unwrap();
                                 assert!(

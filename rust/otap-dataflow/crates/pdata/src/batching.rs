@@ -9,12 +9,13 @@
 use std::num::{NonZeroU64, NonZeroUsize};
 
 use bytes::Bytes;
-use otel_arrow_dfe_config::{ConversionOptions, SignalType};
+use otel_arrow_dfe_config::{EncodeOptions, SignalType};
 use serde::{Deserialize, Serialize};
 
 use crate::OtapPayload;
 use crate::codec::{
-    self, CodecContext, CodecDirection, CodecExecutor, EncodedPdata, PdataEncoding, ResolvedCodec,
+    self, CodecDirection, CodecExecutor, CodecState, EncodedPdata, EncodingPlan, PdataEncoding,
+    ResolvedCodec,
 };
 use crate::error::Error;
 
@@ -207,14 +208,24 @@ impl PdataFormat {
     pub fn materialize(
         self,
         payload: &mut OtapPayload,
-        context: &mut CodecContext,
+        context: &mut CodecState,
+        encoding: Option<&EncodingPlan>,
     ) -> Result<(), Error> {
+        if payload.format() == self {
+            return Ok(());
+        }
         match self.0 {
             None => payload
-                .materialize_otap_with(context, ConversionOptions::default())
+                .materialize_otap(context)
                 .map_err(|error| format_error(error.to_string())),
             Some(codec) => {
-                payload.convert_encoding_with(context, codec, ConversionOptions::default())
+                let plan = encoding.ok_or_else(|| {
+                    format_error(format!(
+                        "missing startup encoding plan for {}",
+                        codec.metadata().encoding
+                    ))
+                })?;
+                payload.convert_encoding(context, plan)
             }
         }
     }
@@ -226,6 +237,7 @@ impl PdataFormat {
 pub struct BatchPlan {
     working: PdataFormat,
     output: PdataFormat,
+    encoding: Option<EncodingPlan>,
     profile: BatchProfile,
 }
 
@@ -260,9 +272,18 @@ impl BatchPlan {
         }
         let working = if native { format } else { PdataFormat::OTAP };
         let output = if preserve { working } else { format };
+        let encoding = if preserve {
+            None
+        } else {
+            format
+                .0
+                .map(|codec| EncodingPlan::new(codec, EncodeOptions::default()))
+                .transpose()?
+        };
         Ok(Self {
             working,
             output,
+            encoding,
             profile,
         })
     }
@@ -283,7 +304,7 @@ impl BatchPlan {
     pub fn prepare(
         &self,
         payload: &mut OtapPayload,
-        context: &mut CodecContext,
+        context: &mut CodecState,
     ) -> Result<(), Error> {
         if !self.output.signals().contains(&payload.signal_type()) {
             return Err(format_error(format!(
@@ -292,7 +313,8 @@ impl BatchPlan {
                 payload.signal_type()
             )));
         }
-        self.working.materialize(payload, context)?;
+        self.working
+            .materialize(payload, context, self.encoding.as_ref())?;
         if self.profile.sizer == BatchSizer::Items && payload.known_item_count().is_none() {
             let codec = self.working.0.expect("native OTAP has known item counts");
             let bytes = payload
@@ -319,12 +341,9 @@ impl BatchPlan {
 
     /// Finishes a flushed output. Retained tails stay in the working format so
     /// their ownership units and measured sizes do not change between flushes.
-    pub fn finish(
-        &self,
-        payload: &mut OtapPayload,
-        context: &mut CodecContext,
-    ) -> Result<(), Error> {
-        self.output.materialize(payload, context)
+    pub fn finish(&self, payload: &mut OtapPayload, context: &mut CodecState) -> Result<(), Error> {
+        self.output
+            .materialize(payload, context, self.encoding.as_ref())
     }
 
     /// Finishes a flushed output using pipeline-runtime codec state.
@@ -341,7 +360,7 @@ impl BatchPlan {
         &self,
         signal: SignalType,
         inputs: Vec<OtapPayload>,
-        context: &mut CodecContext,
+        context: &mut CodecState,
     ) -> Result<BatchingOutput, Error> {
         let total = inputs.iter().try_fold(0usize, |total, input| {
             if input.format() != self.working || input.signal_type() != signal {
@@ -357,7 +376,7 @@ impl BatchPlan {
                     .into_iter()
                     .map(|input| {
                         input
-                            .try_into_otap_with(context, ConversionOptions::default())
+                            .try_into_otap(context)
                             .expect("checked native OTAP working format")
                     })
                     .collect();

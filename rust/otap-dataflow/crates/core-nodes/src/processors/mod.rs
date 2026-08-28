@@ -132,7 +132,7 @@ mod tests {
                                 .refused
                                 .into_parts()
                                 .1
-                                .into_encoded(encoding, Default::default())
+                                .into_encoded_for_test(encoding, Default::default())
                                 .unwrap();
                             assert_eq!(output.bytes().as_ptr(), bytes.as_ptr(), "{urn}");
                             assert_eq!(output.bytes(), &bytes, "{urn}");

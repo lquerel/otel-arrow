@@ -11,7 +11,7 @@
 use arrow::array::RecordBatch;
 use bytes::Bytes;
 use otel_arrow_dfe_pdata::proto::opentelemetry::arrow::v1::ArrowPayloadType;
-use otel_arrow_dfe_pdata::{OtapArrowRecords, OtapPayload, OtlpProtoBytes, TryIntoWithOptions};
+use otel_arrow_dfe_pdata::{OtapArrowRecords, OtapPayload, OtlpProtoBytes};
 
 use super::transform::logs_fast::{LogsFastTransform, LogsFastTransformer};
 use super::transform::logs_otlp::OtlpLogsTransformer;
@@ -56,7 +56,7 @@ impl LogsTransformBenchmark {
     pub fn transform_otlp_legacy(&mut self, request: Bytes) -> RecordBatch {
         let payload: OtapPayload = OtlpProtoBytes::ExportLogsRequest(request).into();
         let mut records: OtapArrowRecords = payload
-            .try_into_with_default()
+            .try_into_otap(&mut otel_arrow_dfe_pdata::codec::CodecState::default())
             .expect("convert benchmark OTLP logs to OTAP Arrow");
         records
             .decode_transport_optimized_ids()

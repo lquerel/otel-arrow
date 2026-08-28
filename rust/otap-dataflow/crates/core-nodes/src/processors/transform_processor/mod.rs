@@ -566,10 +566,7 @@ impl Processor<OtapPdata> for TransformProcessor {
                 // batch.
                 self.execution_state.reset_counters();
 
-                let arrow_pdata = match effect_handler
-                    .try_into_otap(pdata, Default::default())
-                    .await
-                {
+                let arrow_pdata = match effect_handler.try_into_otap(pdata).await {
                     Ok(arrow_pdata) => arrow_pdata,
                     Err(error) => {
                         self.metrics.record_failure(
@@ -725,10 +722,7 @@ mod test {
 
     fn pdata_to_otap(pdata: OtapPdata) -> OtapArrowRecords {
         pdata
-            .try_into_otap_with(
-                &mut otel_arrow_dfe_pdata::codec::CodecContext::default(),
-                Default::default(),
-            )
+            .try_into_otap(&mut otel_arrow_dfe_pdata::codec::CodecState::default())
             .expect("convert pdata to OTAP")
             .into_parts()
             .1
@@ -736,10 +730,7 @@ mod test {
 
     fn payload_to_otap(payload: OtapPayload) -> OtapArrowRecords {
         payload
-            .try_into_otap_with(
-                &mut otel_arrow_dfe_pdata::codec::CodecContext::default(),
-                Default::default(),
-            )
+            .try_into_otap(&mut otel_arrow_dfe_pdata::codec::CodecState::default())
             .expect("convert payload to OTAP")
     }
 
@@ -1419,7 +1410,7 @@ mod test {
                     .unwrap()
                     .into_parts()
                     .1
-                    .into_encoded(encoding, Default::default())
+                    .into_encoded_for_test(encoding, Default::default())
                     .unwrap();
                 assert_eq!(encoded.bytes().as_ptr(), bytes.as_ptr());
 

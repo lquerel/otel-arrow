@@ -36,7 +36,7 @@ use otel_arrow_dfe_engine::process_duration::ComputeDuration;
 use otel_arrow_dfe_engine::processor::ProcessorWrapper;
 use otel_arrow_dfe_pdata::TryIntoWithOptions;
 #[cfg(test)]
-use otel_arrow_dfe_pdata::codec::CodecContext;
+use otel_arrow_dfe_pdata::codec::CodecState;
 use otel_arrow_dfe_pdata::encode::record::attributes::StrKeysAttributesRecordBatchBuilder;
 use otel_arrow_dfe_pdata::otlp::attributes::AttributeValueType;
 use otel_arrow_dfe_pdata::proto::opentelemetry::arrow::v1::ArrowPayloadType;
@@ -655,10 +655,7 @@ impl local::Processor<OtapPdata> for CondenseAttributesProcessor {
                     OtapPayload::empty(signal)
                 };
 
-                let arrow_pdata = match effect_handler
-                    .try_into_otap(pdata, Default::default())
-                    .await
-                {
+                let arrow_pdata = match effect_handler.try_into_otap(pdata).await {
                     Ok(arrow_pdata) => arrow_pdata,
                     Err(error) => {
                         let (error, pdata) = error.into_parts();
@@ -1004,7 +1001,7 @@ mod condense_tests {
         input.encode(&mut bytes).expect("encode input");
         let payload: OtapPayload = OtlpProtoBytes::ExportLogsRequest(bytes.freeze()).into();
         let mut records = payload
-            .try_into_otap_with(&mut CodecContext::default(), Default::default())
+            .try_into_otap(&mut CodecState::default())
             .expect("convert to records");
 
         let before_batch = records

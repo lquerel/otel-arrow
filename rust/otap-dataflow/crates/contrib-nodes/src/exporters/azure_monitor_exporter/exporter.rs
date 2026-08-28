@@ -457,7 +457,7 @@ impl AzureMonitorExporter {
                 *msg_id += 1;
                 let (context, payload) = pdata.into_parts();
 
-                let view = match effect_handler.view(&payload, Default::default()).await {
+                let view = match effect_handler.view(&payload).await {
                     Ok(view) => view,
                     Err(error) => {
                         effect_handler

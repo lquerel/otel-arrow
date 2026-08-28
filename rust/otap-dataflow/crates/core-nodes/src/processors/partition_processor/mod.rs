@@ -235,10 +235,7 @@ impl Processor<OtapPdata> for PartitionProcessor {
                     pdata.add_flow_compute(flow);
                 }
 
-                let arrow_pdata = match effect_handler
-                    .try_into_otap(pdata, Default::default())
-                    .await
-                {
+                let arrow_pdata = match effect_handler.try_into_otap(pdata).await {
                     Ok(arrow_pdata) => arrow_pdata,
                     Err(error) => {
                         let (error, pdata) = error.into_parts();

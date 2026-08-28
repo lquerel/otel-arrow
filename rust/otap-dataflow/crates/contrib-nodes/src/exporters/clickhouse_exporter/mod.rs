@@ -430,7 +430,7 @@ impl Exporter<OtapPdata> for ClickhouseExporter {
                         batches
                     } else {
                         let mut arrow_records: OtapArrowRecords = match effect_handler
-                            .try_payload_into_otap(payload, Default::default())
+                            .try_payload_into_otap(payload)
                             .await
                         {
                             Ok(arrow_records) => arrow_records,

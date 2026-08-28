@@ -15,7 +15,7 @@ use crate::proto::opentelemetry::collector::trace::v1::ExportTraceServiceRequest
 use arrow::array::RecordBatch;
 use arrow::error::ArrowError;
 use arrow::ipc::reader::StreamReader;
-use otel_arrow_dfe_config::ConversionOptions;
+use otel_arrow_dfe_config::EncodeOptions;
 use prost::Message;
 use std::collections::HashMap;
 use std::io::Cursor;
@@ -56,9 +56,9 @@ pub struct Consumer {
 }
 
 impl Consumer {
-    /// Construct a consumer with conversion options.
+    /// Construct a consumer with OTLP output encoding options.
     #[must_use]
-    pub fn with_options(opts: ConversionOptions) -> Self {
+    pub fn with_options(opts: EncodeOptions) -> Self {
         Self {
             proto_buffer: ProtoBuffer::new(opts),
             ..Self::default()

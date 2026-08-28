@@ -39,7 +39,7 @@ use otel_arrow_dfe_otap::pdata::{OtapPdata, PdataEffectHandlerExtension};
 #[cfg(test)]
 use otel_arrow_dfe_pdata::OtapPayload;
 #[cfg(test)]
-use otel_arrow_dfe_pdata::codec::CodecContext;
+use otel_arrow_dfe_pdata::codec::CodecState;
 use otel_arrow_dfe_pdata::views::otap::{OtapLogsView, OtapMetricsView, OtapTracesView};
 use otel_arrow_dfe_pdata::views::otlp::bytes::logs::RawLogsData;
 use otel_arrow_dfe_pdata::views::otlp::bytes::metrics::RawMetricsData;
@@ -166,7 +166,7 @@ impl FileExporter {
         }
         self.frame.clear();
         let view = effect_handler
-            .view(pdata.payload_ref(), Default::default())
+            .view(pdata.payload_ref())
             .await
             .map_err(|error| EncodeFailure::View(error.to_string()));
         if let Err(error) =
@@ -429,7 +429,7 @@ fn encode_payload_for_test(
 ) -> Result<(), EncodeFailure> {
     frame.clear();
     let view = payload
-        .view_with(&mut CodecContext::default(), Default::default())
+        .view(&mut CodecState::default())
         .map_err(|error| EncodeFailure::View(error.to_string()))?;
     encode_payload(view, frame, max_frame_bytes)
 }

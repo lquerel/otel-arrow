@@ -48,7 +48,7 @@ use otel_arrow_dfe_engine::local::exporter::{EffectHandler, Exporter};
 use otel_arrow_dfe_engine::message::{ExporterInbox, Message};
 use otel_arrow_dfe_engine::node::NodeId;
 use otel_arrow_dfe_engine::terminal_state::TerminalState;
-use otel_arrow_dfe_pdata::TryIntoWithOptions;
+use otel_arrow_dfe_pdata::codec::EncodingPlan;
 use otel_arrow_dfe_pdata::otlp::OtlpProtoBytes;
 use otel_arrow_dfe_pdata::views::otap::OtapLogsView;
 use otel_arrow_dfe_pdata::views::otlp::bytes::logs::RawLogsData;
@@ -1397,7 +1397,7 @@ impl GenevaExporter {
 
         if payload.format() != otel_arrow_dfe_pdata::batching::PdataFormat::OTLP {
             let otap_records = effect_handler
-                .try_payload_into_otap(payload, Default::default())
+                .try_payload_into_otap(payload)
                 .await
                 .map_err(|error| {
                     self.metrics.conversion_errors.inc();
@@ -1451,18 +1451,15 @@ impl GenevaExporter {
                         message = "Converting OTAP traces to OTLP bytes (fallback path)"
                     );
 
-                    let otlp_bytes: OtlpProtoBytes =
-                        OtapPayload::from(OtapArrowRecords::Traces(otap_records))
-                            .try_into_with_default()
-                            .map_err(|e| {
-                                self.metrics.conversion_errors.inc();
-                                format!("Failed to convert OTAP to OTLP: {:?}", e)
-                            })?;
-
-                    let OtlpProtoBytes::ExportTracesRequest(bytes) = otlp_bytes else {
-                        self.metrics.conversion_errors.inc();
-                        return Err("Expected traces but got different signal type".to_string());
-                    };
+                    let mut trace_payload =
+                        OtapPayload::from(OtapArrowRecords::Traces(otap_records));
+                    let bytes = effect_handler
+                        .encode_owned(&mut trace_payload, &EncodingPlan::OTLP)
+                        .await
+                        .map_err(|e| {
+                            self.metrics.conversion_errors.inc();
+                            format!("Failed to convert OTAP to OTLP: {e:?}")
+                        })?;
 
                     // Decode OTLP bytes to ResourceSpans
                     let traces_request =

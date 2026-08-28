@@ -1032,10 +1032,7 @@ mod realistic_otap_tests {
         request.encode(&mut buf).expect("encode OTLP logs request");
         let payload: OtapPayload = OtlpProtoBytes::ExportLogsRequest(Bytes::from(buf)).into();
         payload
-            .try_into_otap_with(
-                &mut otel_arrow_dfe_pdata::codec::CodecContext::default(),
-                Default::default(),
-            )
+            .try_into_otap(&mut otel_arrow_dfe_pdata::codec::CodecState::default())
             .expect("convert OTLP logs to OTAP Arrow")
     }
 
@@ -1046,10 +1043,7 @@ mod realistic_otap_tests {
             .expect("encode OTLP traces request");
         let payload: OtapPayload = OtlpProtoBytes::ExportTracesRequest(Bytes::from(buf)).into();
         payload
-            .try_into_otap_with(
-                &mut otel_arrow_dfe_pdata::codec::CodecContext::default(),
-                Default::default(),
-            )
+            .try_into_otap(&mut otel_arrow_dfe_pdata::codec::CodecState::default())
             .expect("convert OTLP traces to OTAP Arrow")
     }
 

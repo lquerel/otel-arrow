@@ -58,7 +58,7 @@ use otel_arrow_dfe_otap::pdata::{Context, OtapPdata, PdataEffectHandlerExtension
 pub use otel_arrow_dfe_pdata::batching::BatchSizer as Sizer;
 use otel_arrow_dfe_pdata::batching::{BatchPlan, BatchProfile, BatchingOutput, PdataFormat};
 #[cfg(test)]
-use otel_arrow_dfe_pdata::codec::CodecContext;
+use otel_arrow_dfe_pdata::codec::CodecState;
 use otel_arrow_dfe_pdata::codec::registered_codecs;
 use otel_arrow_dfe_pdata::{OtapPayload, error::Error as PDataError};
 #[cfg(test)]
@@ -1801,7 +1801,7 @@ mod tests {
                     // Both replies use a representation different from the emitted one.
                     let returned = if index == 0 {
                         output
-                            .try_into_otap_with(&mut CodecContext::default(), Default::default())
+                            .try_into_otap(&mut CodecState::default())
                             .unwrap()
                             .into_pdata()
                     } else {
@@ -1809,7 +1809,7 @@ mod tests {
                         OtapPdata::new(
                             context,
                             payload
-                                .into_encoded(PdataEncoding::OTLP, Default::default())
+                                .into_encoded_for_test(PdataEncoding::OTLP, Default::default())
                                 .unwrap()
                                 .into(),
                         )
@@ -1976,7 +1976,7 @@ mod tests {
     fn otap_pdata_to_message(data: &OtapPdata) -> OtlpProtoMessage {
         let rec = data
             .clone()
-            .try_into_otap_with(&mut CodecContext::default(), Default::default())
+            .try_into_otap(&mut CodecState::default())
             .unwrap();
         otap_to_otlp(rec.records())
     }

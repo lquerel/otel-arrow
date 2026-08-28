@@ -425,10 +425,7 @@ impl local::Processor<OtapPdata> for AttributesProcessor {
                     return res;
                 }
 
-                let arrow_pdata = match effect_handler
-                    .try_into_otap(pdata, Default::default())
-                    .await
-                {
+                let arrow_pdata = match effect_handler.try_into_otap(pdata).await {
                     Ok(arrow_pdata) => arrow_pdata,
                     Err(error) => {
                         let (error, pdata) = error.into_parts();
@@ -2257,10 +2254,7 @@ mod tests {
                 let first = out.into_iter().next().expect("one output").payload();
 
                 let otap_batch = first
-                    .try_into_otap_with(
-                        &mut otel_arrow_dfe_pdata::codec::CodecContext::default(),
-                        Default::default(),
-                    )
+                    .try_into_otap(&mut otel_arrow_dfe_pdata::codec::CodecState::default())
                     .expect("expected native OTAP output");
 
                 assert!(

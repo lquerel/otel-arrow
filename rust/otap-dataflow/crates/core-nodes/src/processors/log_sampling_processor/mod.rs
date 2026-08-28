@@ -113,10 +113,7 @@ impl LogSamplingProcessor {
     ) -> Result<(), EngineError> {
         // Materialize before counting: an encoded envelope may have no item count.
         // Failed decoding must leave the original bytes available for the Nack.
-        let arrow_pdata = match effect_handler
-            .try_into_otap(pdata, Default::default())
-            .await
-        {
+        let arrow_pdata = match effect_handler.try_into_otap(pdata).await {
             Ok(arrow_pdata) => arrow_pdata,
             Err(error) => {
                 let (error, pdata) = error.into_parts();
@@ -324,7 +321,7 @@ mod tests {
                     let encoded = make_log_pdata_arrow(100)
                         .into_parts()
                         .1
-                        .into_encoded(TEST_ENCODING, Default::default())
+                        .into_encoded_for_test(TEST_ENCODING, Default::default())
                         .unwrap();
                     let mut pdata = OtapPdata::new_default(
                         EncodedPdata::new(TEST_ENCODING, SignalType::Logs, encoded.into_bytes())
@@ -373,7 +370,7 @@ mod tests {
                                 .refused
                                 .into_parts()
                                 .1
-                                .into_encoded(encoding, Default::default())
+                                .into_encoded_for_test(encoding, Default::default())
                                 .unwrap();
                             assert_eq!(output.bytes().as_ptr(), bytes.as_ptr());
                             assert_eq!(output.bytes(), &bytes);
@@ -432,10 +429,7 @@ mod tests {
 
                 let output_payload = msgs[0].clone().into_parts().1.take_payload();
                 let output_otap = output_payload
-                    .try_into_otap_with(
-                        &mut otel_arrow_dfe_pdata::codec::CodecContext::default(),
-                        Default::default(),
-                    )
+                    .try_into_otap(&mut otel_arrow_dfe_pdata::codec::CodecState::default())
                     .expect("expected native OTAP output");
 
                 let output_attrs = output_otap.get(ArrowPayloadType::LogAttrs).unwrap();

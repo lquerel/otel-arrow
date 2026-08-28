@@ -536,7 +536,7 @@ impl InstrumentationScopeView for RawInstrumentationScope<'_> {
 
 #[cfg(test)]
 mod test {
-    use otel_arrow_dfe_config::ConversionOptions;
+    use otel_arrow_dfe_config::EncodeOptions;
     use otel_arrow_dfe_pdata_views::views::common::AttributeView;
 
     use crate::{
@@ -550,7 +550,7 @@ mod test {
 
     #[test]
     fn test_kv_handles_invalid_key_range() {
-        let mut protobuf = ProtoBuffer::new(ConversionOptions::default());
+        let mut protobuf = ProtoBuffer::new(EncodeOptions::default());
         protobuf
             .encode_field_tag(KEY_VALUE_KEY, wire_types::LEN)
             .unwrap();
@@ -565,7 +565,7 @@ mod test {
 
     #[test]
     fn test_kv_handles_invalid_value_range() {
-        let mut protobuf = ProtoBuffer::new(ConversionOptions::default());
+        let mut protobuf = ProtoBuffer::new(EncodeOptions::default());
         protobuf.encode_string(KEY_VALUE_KEY, "my-key").unwrap();
 
         protobuf

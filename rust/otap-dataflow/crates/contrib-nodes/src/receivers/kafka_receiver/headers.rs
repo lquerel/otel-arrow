@@ -617,10 +617,7 @@ mod tests {
             .expect("admit OTLP traces")
             .into();
         let mut otap_records = payload
-            .try_into_otap_with(
-                &mut otel_arrow_dfe_pdata::codec::CodecContext::default(),
-                Default::default(),
-            )
+            .try_into_otap(&mut otel_arrow_dfe_pdata::codec::CodecState::default())
             .expect("convert OTLP to OTAP Arrow");
 
         arrow_records_to_bytes(&mut otap_records)

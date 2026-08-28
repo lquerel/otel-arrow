@@ -328,10 +328,7 @@ impl Exporter<OtapPdata> for ParquetExporter {
                     // Capture signal type before moving pdata into try_from
                     let signal_type = pdata.signal_type();
 
-                    let arrow_pdata = match effect_handler
-                        .try_into_otap(pdata, Default::default())
-                        .await
-                    {
+                    let arrow_pdata = match effect_handler.try_into_otap(pdata).await {
                         Ok(arrow_pdata) => arrow_pdata,
                         Err(error) => {
                             if let Some(metrics) = self.pdata_metrics.as_mut() {
@@ -569,7 +566,7 @@ mod test {
     use otel_arrow_dfe_otap::object_store;
     use otel_arrow_dfe_pdata::Consumer;
     use otel_arrow_dfe_pdata::OtapPayload;
-    use otel_arrow_dfe_pdata::codec::CodecContext;
+    use otel_arrow_dfe_pdata::codec::CodecState;
     use otel_arrow_dfe_pdata::otap::from_record_messages;
     use otel_arrow_dfe_pdata::proto::opentelemetry::arrow::v1::ArrowPayloadType;
     use otel_arrow_dfe_pdata::proto::opentelemetry::common::v1::{
@@ -582,7 +579,7 @@ mod test {
 
     fn payload_to_otap(payload: OtapPayload) -> OtapArrowRecords {
         payload
-            .try_into_otap_with(&mut CodecContext::default(), Default::default())
+            .try_into_otap(&mut CodecState::default())
             .expect("convert payload to OTAP")
     }
 

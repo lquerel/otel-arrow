@@ -780,7 +780,9 @@ mod tests {
                 let forwarded = ctx.drain_pdata().await;
                 assert_eq!(forwarded.len(), 1);
                 let (_, payload) = forwarded.into_iter().next().unwrap().into_parts();
-                let output = payload.into_encoded(encoding, Default::default()).unwrap();
+                let output = payload
+                    .into_encoded_for_test(encoding, Default::default())
+                    .unwrap();
                 assert_eq!(output.bytes().as_ptr(), bytes.as_ptr());
                 assert_eq!(output.bytes(), &bytes);
             })

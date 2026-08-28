@@ -80,10 +80,7 @@ mod tests {
 
     fn severities_of(pdata: OtapPdata) -> Vec<String> {
         let arrow_pdata = pdata
-            .try_into_otap_with(
-                &mut otel_arrow_dfe_pdata::codec::CodecContext::default(),
-                Default::default(),
-            )
+            .try_into_otap(&mut otel_arrow_dfe_pdata::codec::CodecState::default())
             .expect("convert payload to otap records");
         let records = arrow_pdata.records();
         let batch = records
@@ -116,10 +113,7 @@ mod tests {
         .expect("empty payload should be forwarded, not dropped");
 
         let records = output
-            .try_into_otap_with(
-                &mut otel_arrow_dfe_pdata::codec::CodecContext::default(),
-                Default::default(),
-            )
+            .try_into_otap(&mut otel_arrow_dfe_pdata::codec::CodecState::default())
             .expect("convert payload to otap records");
         assert!(
             records.records().get(ArrowPayloadType::Logs).is_none(),
@@ -188,10 +182,7 @@ mod tests {
             .expect("payload is not dropped");
 
         let records = output
-            .try_into_otap_with(
-                &mut otel_arrow_dfe_pdata::codec::CodecContext::default(),
-                Default::default(),
-            )
+            .try_into_otap(&mut otel_arrow_dfe_pdata::codec::CodecState::default())
             .expect("convert payload to otap records");
         let otlp = otap_to_otlp(records.records());
 

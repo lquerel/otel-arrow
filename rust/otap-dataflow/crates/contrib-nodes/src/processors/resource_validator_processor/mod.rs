@@ -489,10 +489,7 @@ impl local::Processor<OtapPdata> for ResourceValidatorProcessor {
                 let signal_type = pdata.signal_type();
 
                 // Validate based on payload type
-                let view = match effect_handler
-                    .view(pdata.payload_ref(), Default::default())
-                    .await
-                {
+                let view = match effect_handler.view(pdata.payload_ref()).await {
                     Ok(view) => view,
                     Err(error) => {
                         let failure = ValidationFailure::ConversionError;

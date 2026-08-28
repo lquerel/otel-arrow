@@ -27,7 +27,7 @@
 //!     resource::v1::Resource
 //! };
 //! # use otel_arrow_dfe_pdata::OtapPayload;
-//! # use otel_arrow_dfe_pdata::codec::{CodecContext, ResolvedCodec};
+//! # use otel_arrow_dfe_pdata::codec::{CodecState, ResolvedCodec};
 //! # use otel_arrow_dfe_config::SignalType;
 //! # use prost::Message;
 //! # use bytes::Bytes;
@@ -58,7 +58,7 @@
 //!
 //! // Convert to OTAP records
 //! let otap_arrow_records: OtapArrowRecords = payload
-//!     .try_into_otap_with(&mut CodecContext::default(), Default::default())
+//!     .try_into_otap(&mut CodecState::default())
 //!     .unwrap();
 //! ```
 //!
@@ -93,7 +93,7 @@ use crate::TryFromWithOptions;
 use crate::TryIntoWithOptions;
 use crate::batching::PdataFormat;
 use crate::codec::{
-    self, CodecContext, CodecDirection, EncodedOutput, EncodedPdata, PdataEncoding, ResolvedCodec,
+    self, CodecState, EncodedOutput, EncodedPdata, EncodingPlan, PdataEncoding, ResolvedCodec,
 };
 use crate::encode::{encode_logs_otap_batch, encode_metrics_otap_batch, encode_spans_otap_batch};
 use crate::error::Error;
@@ -107,7 +107,7 @@ use crate::views::otlp::bytes::logs::RawLogsData;
 use crate::views::otlp::bytes::metrics::RawMetricsData;
 use crate::views::otlp::bytes::traces::RawTraceData;
 use bytes::{Bytes, BytesMut};
-use otel_arrow_dfe_config::{ConversionOptions, SignalType};
+use otel_arrow_dfe_config::{EncodeOptions, SignalType};
 use prost::{EncodeError, Message};
 use std::borrow::Cow;
 use std::sync::Arc;
@@ -215,7 +215,7 @@ impl PayloadStorage {
 ///   payload version it contains.
 ///
 /// Concrete storage remains private. Consumers obtain typed access through
-/// [`Self::try_into_otap_with`] or the representation-independent view and
+/// [`Self::try_into_otap`] or the representation-independent view and
 /// encoding operations, so cache invalidation stays inside this wrapper.
 #[derive(Clone, Debug)]
 pub struct OtapPayload {
@@ -362,14 +362,13 @@ impl OtapPayload {
     ///
     /// Native records move directly. Encoded input is retained with shared bytes
     /// until decoding succeeds so callers can recover the original payload on error.
-    pub fn try_into_otap_with(
+    pub fn try_into_otap(
         self,
-        context: &mut CodecContext,
-        options: ConversionOptions,
+        state: &mut CodecState,
     ) -> Result<OtapArrowRecords, OtapPayloadDecodeError> {
         match self.storage {
             PayloadStorage::OtapArrowRecords { records, .. } => Ok(records),
-            PayloadStorage::Encoded(encoded) => match context.decode(&encoded, options) {
+            PayloadStorage::Encoded(encoded) => match state.decode(&encoded) {
                 Ok(records) => Ok(records),
                 Err(source) => Err(OtapPayloadDecodeError(Box::new(
                     OtapPayloadDecodeErrorInner {
@@ -382,42 +381,42 @@ impl OtapPayload {
     }
 
     /// Materializes once on success, retaining the original payload on failure.
-    pub(crate) fn materialize_otap_with(
+    pub(crate) fn materialize_otap(
         &mut self,
-        context: &mut CodecContext,
-        options: ConversionOptions,
+        state: &mut CodecState,
     ) -> Result<(), crate::encode::Error> {
         if !matches!(self.storage, PayloadStorage::OtapArrowRecords { .. }) {
             let records = self
                 .clone()
-                .try_into_otap_with(context, options)
+                .try_into_otap(state)
                 .map_err(OtapPayloadDecodeError::into_error)?;
             *self = records.into();
         }
         Ok(())
     }
 
-    /// Converts to a target encoding through OTAP, or returns compatible bytes
-    /// directly. Admission has already validated the source codec.
-    pub fn into_encoded(
+    /// Test and compatibility helper that performs a one-shot conversion.
+    /// Runtime nodes should reuse injected codec state and a startup plan.
+    #[cfg(any(test, feature = "testing"))]
+    #[doc(hidden)]
+    pub fn into_encoded_for_test(
         self,
         encoding: PdataEncoding,
-        options: ConversionOptions,
+        options: EncodeOptions,
     ) -> Result<EncodedPdata, Error> {
-        let codec = codec::resolve(&encoding, self.signal_type(), CodecDirection::Decode)?;
-        self.into_encoded_with(&mut CodecContext::default(), codec, options)
+        let plan = EncodingPlan::resolve(&encoding, options)?;
+        self.into_encoded(&mut CodecState::default(), &plan)
     }
 
     /// Converts to an admitted encoded representation using reusable codec state.
-    pub fn into_encoded_with(
+    pub fn into_encoded(
         mut self,
-        context: &mut CodecContext,
-        codec: ResolvedCodec,
-        options: ConversionOptions,
+        state: &mut CodecState,
+        plan: &EncodingPlan,
     ) -> Result<EncodedPdata, Error> {
         let signal = self.signal_type();
-        codec.require(signal, CodecDirection::Decode)?;
-        if self.format() == PdataFormat::encoded(codec) {
+        plan.require(signal)?;
+        if self.format() == PdataFormat::encoded(plan.codec()) {
             return Ok(match self.storage {
                 PayloadStorage::Encoded(encoded) => encoded,
                 PayloadStorage::OtapArrowRecords { .. } => {
@@ -425,8 +424,8 @@ impl OtapPayload {
                 }
             });
         }
-        let bytes = self.prepare_encoded(context, codec, options)?.into_bytes();
-        let mut encoded = EncodedPdata::from_resolved(codec, signal, bytes);
+        let bytes = self.prepare_encoded(state, plan)?.into_bytes();
+        let mut encoded = EncodedPdata::from_resolved(plan.codec(), signal, bytes);
         if let Some(count) = self.known_item_count() {
             encoded = encoded.with_item_count(count);
         }
@@ -437,83 +436,66 @@ impl OtapPayload {
     /// Native encoding reuses scratch buffers; unchanged bytes remain shared.
     pub fn prepare_encoded<'a>(
         &mut self,
-        context: &'a mut CodecContext,
-        codec: ResolvedCodec,
-        options: ConversionOptions,
+        state: &'a mut CodecState,
+        plan: &EncodingPlan,
     ) -> Result<EncodedOutput<'a>, Error> {
-        if self.format() == PdataFormat::encoded(codec) {
+        if self.format() == PdataFormat::encoded(plan.codec()) {
             return Ok(EncodedOutput::bytes(
                 self.encoded_bytes()
                     .expect("encoded representation")
                     .clone(),
             ));
         }
-        codec.require(self.signal_type(), CodecDirection::Encode)?;
+        plan.require(self.signal_type())?;
         if let PayloadStorage::OtapArrowRecords { records, size } = &mut self.storage {
             *size = None;
-            return context.encode_records(records, codec, options);
+            return state.encode_records(records, plan);
         }
-        let mut records = self
-            .clone()
-            .try_into_otap_with(context, options.clone())
-            .map_err(|error| {
-                codec::codec_error(
-                    &codec.metadata().encoding,
-                    format!("source decode failed: {error}"),
-                )
-            })?;
+        let mut records = self.clone().try_into_otap(state).map_err(|error| {
+            codec::codec_error(
+                &plan.codec().metadata().encoding,
+                format!("source decode failed: {error}"),
+            )
+        })?;
         let count = records.num_items();
-        let output = context.encode_records(&mut records, codec, options)?;
+        let output = state.encode_records(&mut records, plan)?;
         self.set_item_count(count);
         Ok(output)
     }
 
     /// Atomically replaces the stored representation after successful encoding.
-    pub fn convert_encoding_with(
-        &mut self,
-        context: &mut CodecContext,
-        codec: ResolvedCodec,
-        options: ConversionOptions,
-    ) -> Result<(), Error> {
-        if self.format() != PdataFormat::encoded(codec) {
-            *self = Self::from_encoded(self.clone().into_encoded_with(context, codec, options)?);
-        }
-        Ok(())
-    }
-
-    /// Changes the byte representation only after a successful conversion.
-    ///
-    /// The original payload is retained on error so callers can Nack or retry it.
     pub fn convert_encoding(
         &mut self,
-        encoding: PdataEncoding,
-        options: ConversionOptions,
+        state: &mut CodecState,
+        plan: &EncodingPlan,
     ) -> Result<(), Error> {
-        if self.encoding() != Some(&encoding) {
-            *self = Self::from_encoded(self.clone().into_encoded(encoding, options)?);
+        if self.format() != PdataFormat::encoded(plan.codec()) {
+            *self = Self::from_encoded(self.clone().into_encoded(state, plan)?);
         }
         Ok(())
     }
 
-    /// Borrows an existing representation or decodes an extension for record views.
-    pub fn view(
-        &self,
-        options: ConversionOptions,
-    ) -> Result<PayloadView<'_>, crate::encode::Error> {
-        self.view_with(&mut CodecContext::default(), options)
+    /// Test helper for one-shot representation conversion.
+    #[cfg(any(test, feature = "testing"))]
+    #[doc(hidden)]
+    pub fn convert_encoding_for_test(
+        &mut self,
+        encoding: PdataEncoding,
+        options: EncodeOptions,
+    ) -> Result<(), Error> {
+        if self.encoding() != Some(&encoding) {
+            *self = Self::from_encoded(self.clone().into_encoded_for_test(encoding, options)?);
+        }
+        Ok(())
     }
 
     /// Borrows native views or decodes once using consumer-local codec state.
-    pub fn view_with(
-        &self,
-        context: &mut CodecContext,
-        options: ConversionOptions,
-    ) -> Result<PayloadView<'_>, crate::encode::Error> {
+    pub fn view(&self, state: &mut CodecState) -> Result<PayloadView<'_>, crate::encode::Error> {
         match &self.storage {
             PayloadStorage::OtapArrowRecords { records, .. } => {
                 Ok(PayloadView::OtapArrowRecords(Cow::Borrowed(records)))
             }
-            PayloadStorage::Encoded(encoded) => context.view(encoded, options),
+            PayloadStorage::Encoded(encoded) => state.view(encoded),
         }
     }
 
@@ -815,15 +797,14 @@ impl From<Arc<EncodedPdata>> for OtapPayload {
     }
 }
 
+#[cfg(any(test, feature = "testing"))]
 impl TryFromWithOptions<OtapPayload> for OtlpProtoBytes {
     type Error = Error;
 
-    fn try_from_with_options(
-        value: OtapPayload,
-        opts: ConversionOptions,
-    ) -> Result<Self, Self::Error> {
+    fn try_from_with_options(value: OtapPayload, opts: EncodeOptions) -> Result<Self, Self::Error> {
         let signal = value.signal_type();
-        let encoded = value.into_encoded(PdataEncoding::OTLP, opts)?;
+        let plan = EncodingPlan::new(ResolvedCodec::OTLP, opts)?;
+        let encoded = value.into_encoded(&mut CodecState::default(), &plan)?;
         Ok(OtlpProtoBytes::new_from_bytes(signal, encoded.into_bytes()))
     }
 }
@@ -833,7 +814,7 @@ impl TryFromWithOptions<OtapArrowRecords> for OtlpProtoBytes {
 
     fn try_from_with_options(
         mut value: OtapArrowRecords,
-        opts: ConversionOptions,
+        opts: EncodeOptions,
     ) -> Result<Self, Self::Error> {
         match value {
             OtapArrowRecords::Logs(_) => {
@@ -862,13 +843,10 @@ impl TryFromWithOptions<OtapArrowRecords> for OtlpProtoBytes {
     }
 }
 
-impl TryFromWithOptions<OtlpProtoBytes> for OtapArrowRecords {
+impl TryFrom<OtlpProtoBytes> for OtapArrowRecords {
     type Error = crate::encode::Error;
 
-    fn try_from_with_options(
-        value: OtlpProtoBytes,
-        _opts: ConversionOptions,
-    ) -> Result<Self, Self::Error> {
+    fn try_from(value: OtlpProtoBytes) -> Result<Self, Self::Error> {
         match value {
             OtlpProtoBytes::ExportLogsRequest(bytes) => {
                 let logs_data_view = RawLogsData::new(bytes.as_ref());
@@ -960,9 +938,7 @@ mod test {
     }
 
     fn into_otap(payload: OtapPayload) -> OtapArrowRecords {
-        payload
-            .try_into_otap_with(&mut CodecContext::default(), Default::default())
-            .unwrap()
+        payload.try_into_otap(&mut CodecState::default()).unwrap()
     }
 
     #[test]

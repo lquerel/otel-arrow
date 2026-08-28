@@ -5,6 +5,7 @@
 
 #[cfg(any(test, feature = "test-internals"))]
 pub mod codec;
+pub mod codec_conformance;
 pub mod equiv;
 pub mod fixtures;
 pub mod record_batch;

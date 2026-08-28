@@ -17,13 +17,16 @@ use std::net::SocketAddr;
 use std::num::NonZeroU64;
 
 use async_trait::async_trait;
-use otel_arrow_dfe_config::{ConversionOptions, PortName, SignalType};
+#[cfg(any(test, feature = "test-utils"))]
+use otel_arrow_dfe_config::EncodeOptions;
+use otel_arrow_dfe_config::{PortName, SignalType};
 use otel_arrow_dfe_engine::_private::AckNackRouting;
 use otel_arrow_dfe_engine::control::{
-    AckMsg, CallData, Frame, NackMsg, RouteData, nanos_since_birth,
+    AckMsg, CallData, Frame, NackMsg, NodeControlMsg, RouteData, nanos_since_birth,
 };
 use otel_arrow_dfe_engine::error::{Error, TypedError};
 use otel_arrow_dfe_engine::flow_metrics::FlowMetricInterests;
+use otel_arrow_dfe_engine::processor::ProcessorRuntimeRequirements;
 use otel_arrow_dfe_engine::processor::{FlowMetricEffectHandler, FlowMetricHook};
 use otel_arrow_dfe_engine::{
     ConsumerEffectHandlerExtension, FlowMetricAccumulation, Interests,
@@ -31,7 +34,7 @@ use otel_arrow_dfe_engine::{
     ProducerEffectHandlerExtension,
 };
 use otel_arrow_dfe_pdata::batching::{BatchPlan, BatchingOutput};
-use otel_arrow_dfe_pdata::codec::{CodecContext, ResolvedCodec};
+use otel_arrow_dfe_pdata::codec::{CodecState, EncodingPlan};
 use otel_arrow_dfe_pdata::{OtapArrowRecords, OtapPayload, OtapPayloadHelpers, PayloadView};
 
 use crate::transport_headers::TransportHeaders;
@@ -748,13 +751,12 @@ impl OtapPdata {
     /// On failure, the returned error owns the original message, including its
     /// delivery context and encoded bytes, so the caller can Nack or retry it.
     #[inline]
-    pub fn try_into_otap_with(
+    pub fn try_into_otap(
         self,
-        codecs: &mut CodecContext,
-        options: ConversionOptions,
+        state: &mut CodecState,
     ) -> Result<OtapArrowPdata, OtapPdataDecodeError> {
         let (context, payload) = self.into_parts();
-        match payload.try_into_otap_with(codecs, options) {
+        match payload.try_into_otap(state) {
             Ok(records) => Ok(OtapArrowPdata::new(context, records)),
             Err(error) => {
                 let (source, payload) = error.into_parts();
@@ -766,14 +768,16 @@ impl OtapPdata {
         }
     }
 
-    /// Converts encoded representations without changing context or failed input.
-    pub fn convert_encoding(
+    /// Test helper for one-shot encoded representation conversion.
+    #[cfg(any(test, feature = "test-utils"))]
+    #[doc(hidden)]
+    pub fn convert_encoding_for_test(
         &mut self,
         encoding: otel_arrow_dfe_pdata::codec::PdataEncoding,
-        options: ConversionOptions,
+        options: EncodeOptions,
     ) -> Result<(), Error> {
         self.payload
-            .convert_encoding(encoding, options)
+            .convert_encoding_for_test(encoding, options)
             .map_err(Error::from)
     }
 
@@ -1006,32 +1010,26 @@ impl OtapPdata {
 #[allow(async_fn_in_trait)]
 pub trait PdataEffectHandlerExtension {
     /// Moves native records or decodes encoded pdata with recoverable failure.
-    async fn try_into_otap(
-        &self,
-        pdata: OtapPdata,
-        options: ConversionOptions,
-    ) -> Result<OtapArrowPdata, OtapPdataDecodeError>;
+    async fn try_into_otap(&self, pdata: OtapPdata)
+    -> Result<OtapArrowPdata, OtapPdataDecodeError>;
 
     /// Moves native records or decodes a payload with recoverable failure.
     async fn try_payload_into_otap(
         &self,
         payload: OtapPayload,
-        options: ConversionOptions,
     ) -> Result<OtapArrowRecords, otel_arrow_dfe_pdata::OtapPayloadDecodeError>;
 
     /// Borrows a read-only view through runtime-owned codec state.
     async fn view<'a>(
         &self,
         payload: &'a OtapPayload,
-        options: ConversionOptions,
     ) -> Result<PayloadView<'a>, otel_arrow_dfe_pdata::encode::Error>;
 
     /// Encodes inside a synchronous scope that cannot cross an await point.
     async fn with_encoded<R>(
         &self,
         payload: &mut OtapPayload,
-        codec: ResolvedCodec,
-        options: ConversionOptions,
+        plan: &EncodingPlan,
         consume: impl FnOnce(&[u8]) -> R,
     ) -> Result<R, otel_arrow_dfe_pdata::error::Error>;
 
@@ -1039,8 +1037,7 @@ pub trait PdataEffectHandlerExtension {
     async fn encode_owned(
         &self,
         payload: &mut OtapPayload,
-        codec: ResolvedCodec,
-        options: ConversionOptions,
+        plan: &EncodingPlan,
     ) -> Result<bytes::Bytes, otel_arrow_dfe_pdata::error::Error>;
 
     /// Prepares one payload for a resolved batching plan.
@@ -1066,16 +1063,73 @@ pub trait PdataEffectHandlerExtension {
     ) -> Result<(), otel_arrow_dfe_pdata::error::Error>;
 }
 
+/// Processor capability for algorithms that always require mutable native OTAP.
+///
+/// Implementors receive only typed Arrow pdata. The adapter owns representation
+/// conversion and the permanent Nack policy for malformed encoded input.
+#[async_trait(?Send)]
+pub trait NativePdataProcessor {
+    /// Processes one successfully materialized native batch.
+    async fn process_native(
+        &mut self,
+        pdata: OtapArrowPdata,
+        effect_handler: &mut otel_arrow_dfe_engine::local::processor::EffectHandler<OtapPdata>,
+    ) -> Result<(), Error>;
+
+    /// Processes a control message without forcing pdata conversion.
+    async fn process_control(
+        &mut self,
+        _control: NodeControlMsg<OtapPdata>,
+        _effect_handler: &mut otel_arrow_dfe_engine::local::processor::EffectHandler<OtapPdata>,
+    ) -> Result<(), Error> {
+        Ok(())
+    }
+
+    /// Declares runtime services required by the native processor.
+    fn runtime_requirements(&self) -> ProcessorRuntimeRequirements {
+        ProcessorRuntimeRequirements::none()
+    }
+}
+
+/// Runs a [`NativePdataProcessor`] behind the engine's dynamic pdata boundary.
+pub struct NativeProcessorAdapter;
+
+impl NativeProcessorAdapter {
+    /// Converts pdata, applies the standard permanent-Nack policy on codec
+    /// failure, and invokes the processor only with native Arrow pdata.
+    pub async fn process<P: NativePdataProcessor>(
+        processor: &mut P,
+        msg: otel_arrow_dfe_engine::message::Message<OtapPdata>,
+        effect_handler: &mut otel_arrow_dfe_engine::local::processor::EffectHandler<OtapPdata>,
+    ) -> Result<(), Error> {
+        match msg {
+            otel_arrow_dfe_engine::message::Message::Control(control) => {
+                processor.process_control(control, effect_handler).await
+            }
+            otel_arrow_dfe_engine::message::Message::PData(pdata) => {
+                match effect_handler.try_into_otap(pdata).await {
+                    Ok(pdata) => processor.process_native(pdata, effect_handler).await,
+                    Err(error) => {
+                        let (error, pdata) = error.into_parts();
+                        effect_handler
+                            .notify_nack(NackMsg::new_permanent(error.to_string(), pdata))
+                            .await
+                    }
+                }
+            }
+        }
+    }
+}
+
 macro_rules! impl_pdata_effect_handler_ext {
     ($handler:ty) => {
         impl PdataEffectHandlerExtension for $handler {
             async fn try_into_otap(
                 &self,
                 pdata: OtapPdata,
-                options: ConversionOptions,
             ) -> Result<OtapArrowPdata, OtapPdataDecodeError> {
                 let (context, payload) = pdata.into_parts();
-                match self.codec_executor().try_into_otap(payload, options) {
+                match self.codec_executor().try_into_otap(payload) {
                     Ok(records) => Ok(OtapArrowPdata::new(context, records)),
                     Err(error) => {
                         let (source, payload) = error.into_parts();
@@ -1090,37 +1144,32 @@ macro_rules! impl_pdata_effect_handler_ext {
             async fn view<'a>(
                 &self,
                 payload: &'a OtapPayload,
-                options: ConversionOptions,
             ) -> Result<PayloadView<'a>, otel_arrow_dfe_pdata::encode::Error> {
-                self.codec_executor().view(payload, options)
+                self.codec_executor().view(payload)
             }
 
             async fn try_payload_into_otap(
                 &self,
                 payload: OtapPayload,
-                options: ConversionOptions,
             ) -> Result<OtapArrowRecords, otel_arrow_dfe_pdata::OtapPayloadDecodeError> {
-                self.codec_executor().try_into_otap(payload, options)
+                self.codec_executor().try_into_otap(payload)
             }
 
             async fn with_encoded<R>(
                 &self,
                 payload: &mut OtapPayload,
-                codec: ResolvedCodec,
-                options: ConversionOptions,
+                plan: &EncodingPlan,
                 consume: impl FnOnce(&[u8]) -> R,
             ) -> Result<R, otel_arrow_dfe_pdata::error::Error> {
-                self.codec_executor()
-                    .with_encoded(payload, codec, options, consume)
+                self.codec_executor().with_encoded(payload, plan, consume)
             }
 
             async fn encode_owned(
                 &self,
                 payload: &mut OtapPayload,
-                codec: ResolvedCodec,
-                options: ConversionOptions,
+                plan: &EncodingPlan,
             ) -> Result<bytes::Bytes, otel_arrow_dfe_pdata::error::Error> {
-                self.codec_executor().encode_owned(payload, codec, options)
+                self.codec_executor().encode_owned(payload, plan)
             }
 
             async fn prepare_batch(
@@ -1472,7 +1521,7 @@ mod test {
 
     fn create_test_otap_pdata() -> OtapPdata {
         create_test_pdata()
-            .try_into_otap_with(&mut CodecContext::default(), Default::default())
+            .try_into_otap(&mut CodecState::default())
             .expect("OTAP conversion")
             .into_pdata()
     }
@@ -1507,7 +1556,7 @@ mod test {
         let pdata = OtapPdata::new_default(payload);
 
         let error = handler
-            .try_into_otap(pdata, Default::default())
+            .try_into_otap(pdata)
             .await
             .expect_err("malformed protobuf must fail");
         let (_source, pdata) = error.into_parts();
@@ -2765,13 +2814,11 @@ mod test {
         let output = detached
             .into_parts()
             .1
-            .into_encoded(encoding.clone(), Default::default())
+            .into_encoded_for_test(encoding.clone(), Default::default())
             .unwrap();
         assert_eq!(output.bytes().as_ptr(), bytes.as_ptr());
 
-        let error = pdata
-            .try_into_otap_with(&mut CodecContext::default(), Default::default())
-            .unwrap_err();
+        let error = pdata.try_into_otap(&mut CodecState::default()).unwrap_err();
         let (error, pdata) = error.into_parts();
         let nack = NackMsg::new_permanent(error.to_string(), pdata);
         let (node_id, nack) = next_nack(nack).unwrap();
@@ -2783,7 +2830,7 @@ mod test {
             .refused
             .into_parts()
             .1
-            .into_encoded(encoding, Default::default())
+            .into_encoded_for_test(encoding, Default::default())
             .unwrap();
         assert_eq!(output.bytes().as_ptr(), bytes.as_ptr());
     }
@@ -2799,7 +2846,7 @@ mod test {
         };
         use prost::Message as _;
 
-        let mut codecs = CodecContext::default();
+        let mut codecs = CodecState::default();
         for (signal, bytes) in [
             (SignalType::Logs, log_with_no_scope().encode_to_vec()),
             (
@@ -2818,7 +2865,7 @@ mod test {
                     .into(),
             );
             let arrow_pdata = pdata
-                .try_into_otap_with(&mut codecs, Default::default())
+                .try_into_otap(&mut codecs)
                 .expect("convert OTLP to native records");
             assert_eq!(arrow_pdata.signal_type(), signal);
             assert_eq!(arrow_pdata.records().signal_type(), signal);
@@ -3113,6 +3160,72 @@ mod test {
         let (completion_tx, completion_rx) = pipeline_completion_msg_channel(4);
         eh.set_pipeline_completion_msg_sender(completion_tx);
         (eh, completion_rx)
+    }
+
+    struct NativeProbe {
+        processed: usize,
+    }
+
+    #[async_trait(?Send)]
+    impl NativePdataProcessor for NativeProbe {
+        async fn process_native(
+            &mut self,
+            _pdata: OtapArrowPdata,
+            _effect_handler: &mut LocalProcessorEffectHandler<OtapPdata>,
+        ) -> Result<(), Error> {
+            self.processed += 1;
+            Ok(())
+        }
+    }
+
+    /// Scenario: a native processor receives malformed encoded pdata.
+    /// Guarantees: the adapter permanently Nacks the exact recoverable message and never
+    /// invokes the native algorithm with an invalid or partially decoded capability.
+    #[tokio::test]
+    async fn native_processor_adapter_owns_decode_failure_policy() {
+        let (mut effect_handler, mut completion_rx) =
+            create_local_processor_with_completion_channel();
+        let bytes = bytes::Bytes::from_static(&[0x0a, 0x05, 0x01]);
+        let pointer = bytes.as_ptr();
+        let pdata = OtapPdata::new_default(
+            otel_arrow_dfe_pdata::codec::EncodedPdata::new(
+                otel_arrow_dfe_pdata::testing::codec::TEST_ENCODING,
+                SignalType::Logs,
+                bytes,
+            )
+            .unwrap()
+            .into(),
+        )
+        .test_subscribe_to(
+            Interests::NACKS | Interests::RETURN_DATA,
+            CallData::default(),
+            42,
+        );
+        let mut processor = NativeProbe { processed: 0 };
+
+        NativeProcessorAdapter::process(
+            &mut processor,
+            otel_arrow_dfe_engine::message::Message::PData(pdata),
+            &mut effect_handler,
+        )
+        .await
+        .unwrap();
+
+        assert_eq!(processor.processed, 0);
+        let PipelineCompletionMsg::DeliverNack { nack } =
+            completion_rx.recv().await.expect("completion Nack")
+        else {
+            panic!("expected permanent Nack");
+        };
+        assert!(nack.permanent);
+        assert_eq!(
+            nack.refused
+                .payload_ref()
+                .encoded_bytes()
+                .expect("recoverable bytes")
+                .as_ptr(),
+            pointer
+        );
     }
 
     /// Helper: build a local exporter EffectHandler wired to a completion channel.

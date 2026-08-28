@@ -310,13 +310,10 @@ impl ConsoleExporter {
         payload: &OtapPayload,
         effect_handler: &EffectHandler<OtapPdata>,
     ) -> Result<(), ConsoleExportErrorType> {
-        match effect_handler
-            .view(payload, Default::default())
-            .await
-            .map_err(|error| {
-                otel_error!("console.pdata.decode_failed", error = %error);
-                ConsoleExportErrorType::OtapViewCreation
-            })? {
+        match effect_handler.view(payload).await.map_err(|error| {
+            otel_error!("console.pdata.decode_failed", error = %error);
+            ConsoleExportErrorType::OtapViewCreation
+        })? {
             PayloadView::OtlpBytes { bytes, .. } => match RawLogsData::try_new(bytes) {
                 Ok(logs_view) => self.formatter.print_logs_data(&logs_view).await,
                 Err(e) => {
@@ -345,13 +342,10 @@ impl ConsoleExporter {
             return self.unsupported_signal("metrics");
         }
 
-        match effect_handler
-            .view(payload, Default::default())
-            .await
-            .map_err(|error| {
-                otel_error!("console.pdata.decode_failed", error = %error);
-                ConsoleExportErrorType::OtapViewCreation
-            })? {
+        match effect_handler.view(payload).await.map_err(|error| {
+            otel_error!("console.pdata.decode_failed", error = %error);
+            ConsoleExportErrorType::OtapViewCreation
+        })? {
             PayloadView::OtlpBytes { bytes, .. } => match RawMetricsData::try_new(bytes) {
                 Ok(metrics_view) => self.formatter.print_metrics_data(&metrics_view).await,
                 Err(e) => {

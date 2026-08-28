@@ -11,7 +11,7 @@ use crate::codec::{
 };
 use crate::{OtapArrowRecords, error::Error};
 use bytes::Bytes;
-use otel_arrow_dfe_config::{ConversionOptions, SignalType};
+use otel_arrow_dfe_config::{EncodeOptions, SignalType};
 
 // The native OTLP conversion uses trusted byte views. Test extensions validate
 // their input so malformed test messages exercise the generic codec error path.
@@ -23,7 +23,6 @@ impl PdataCodec for TestCodec {
         &mut self,
         signal: SignalType,
         bytes: &Bytes,
-        options: ConversionOptions,
     ) -> Result<OtapArrowRecords, crate::encode::Error> {
         use crate::views::otlp::bytes::{
             logs::RawLogsData, metrics::RawMetricsData, traces::RawTraceData,
@@ -36,13 +35,13 @@ impl PdataCodec for TestCodec {
         .map_err(|error| Error::Format {
             error: error.to_string(),
         })?;
-        self.0.decode(signal, bytes, options)
+        self.0.decode(signal, bytes)
     }
 
     fn encode(
         &mut self,
         records: OtapArrowRecords,
-        options: ConversionOptions,
+        options: EncodeOptions,
     ) -> Result<Bytes, Error> {
         self.0.encode(records, options)
     }

@@ -1307,10 +1307,7 @@ mod tests {
     fn legacy_batch(bytes: &Bytes) -> Option<RecordBatch> {
         let payload: OtapPayload = OtlpProtoBytes::ExportLogsRequest(bytes.clone()).into();
         let mut records: OtapArrowRecords = payload
-            .try_into_otap_with(
-                &mut otel_arrow_dfe_pdata::codec::CodecContext::default(),
-                Default::default(),
-            )
+            .try_into_otap(&mut otel_arrow_dfe_pdata::codec::CodecState::default())
             .expect("convert raw OTLP logs through OTAP Arrow");
         records
             .decode_transport_optimized_ids()

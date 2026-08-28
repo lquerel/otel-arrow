@@ -623,10 +623,7 @@ impl TemporalReaggregationProcessor {
         effect_handler: &mut local::EffectHandler<OtapPdata>,
         pdata: OtapPdata,
     ) -> Result<(), Error> {
-        let view = match effect_handler
-            .view(pdata.payload_ref(), Default::default())
-            .await
-        {
+        let view = match effect_handler.view(pdata.payload_ref()).await {
             Ok(view) => view,
             Err(error) => {
                 self.metrics.batches_rejected.inc();

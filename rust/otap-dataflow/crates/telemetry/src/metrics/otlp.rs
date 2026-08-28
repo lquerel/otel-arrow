@@ -1243,7 +1243,7 @@ mod tests {
         MetricsDescriptor,
     };
     use crate::entity::{EntityAttributeSet, EntityRegistry};
-    use otel_arrow_dfe_pdata::codec::CodecContext;
+    use otel_arrow_dfe_pdata::codec::CodecState;
     use otel_arrow_dfe_pdata::proto::opentelemetry::collector::metrics::v1::ExportMetricsServiceRequest;
     use otel_arrow_dfe_pdata::proto::opentelemetry::common::v1::{
         AnyValue, KeyValue, KeyValueList, any_value,
@@ -3000,7 +3000,7 @@ mod tests {
         let payload: OtapPayload = encoded.into();
 
         let records: OtapArrowRecords = payload
-            .try_into_otap_with(&mut CodecContext::default(), Default::default())
+            .try_into_otap(&mut CodecState::default())
             .expect("OTAP exporter can convert bridge output to Arrow records");
         assert!(matches!(records, OtapArrowRecords::Metrics(_)));
 

@@ -18,7 +18,7 @@ use std::num::NonZeroUsize;
 
 use bytes::{BufMut, Bytes, BytesMut};
 use linkme::distributed_slice;
-use otel_arrow_dfe_config::{ConversionOptions, SignalType};
+use otel_arrow_dfe_config::{EncodeOptions, SignalType};
 use otel_arrow_dfe_pdata::OtapArrowRecords;
 use otel_arrow_dfe_pdata::batching::{BatchProfile, BatchSizer, BatchingSupport, CodecBatches};
 use otel_arrow_dfe_pdata::codec::{
@@ -278,7 +278,6 @@ impl PdataCodec for SyslogCefCodec {
         &mut self,
         signal: SignalType,
         bytes: &Bytes,
-        _options: ConversionOptions,
     ) -> Result<OtapArrowRecords, otel_arrow_dfe_pdata::encode::Error> {
         if signal != SignalType::Logs {
             return Err(format_error(format!("unsupported signal {signal:?}")).into());
@@ -300,7 +299,7 @@ impl PdataCodec for SyslogCefCodec {
     fn encode(
         &mut self,
         _records: OtapArrowRecords,
-        _options: ConversionOptions,
+        _options: EncodeOptions,
     ) -> Result<Bytes, Error> {
         Err(format_error(
             "encoding native OTAP as original syslog is unsupported",
@@ -432,7 +431,7 @@ static SYSLOG_CEF_CODEC: PdataCodecRegistration = PdataCodecRegistration {
 #[cfg(feature = "bench")]
 pub mod bench_support {
     use chrono::Utc;
-    use otel_arrow_dfe_pdata::codec::{CodecContext, CodecDirection, ResolvedCodec, resolve};
+    use otel_arrow_dfe_pdata::codec::{CodecDirection, CodecState, ResolvedCodec, resolve};
     use otel_arrow_dfe_pdata::{OtapArrowRecords, OtapPayload};
 
     use super::*;
@@ -440,7 +439,7 @@ pub mod bench_support {
     /// Reusable codec state matching one pipeline runtime's effect-handler state.
     pub struct SyslogCodecBench {
         codec: ResolvedCodec,
-        context: CodecContext,
+        context: CodecState,
     }
 
     impl Default for SyslogCodecBench {
@@ -461,7 +460,7 @@ pub mod bench_support {
             .expect("syslog codec must be registered for benchmark");
             Self {
                 codec,
-                context: CodecContext::default(),
+                context: CodecState::default(),
             }
         }
 
@@ -502,7 +501,7 @@ pub mod bench_support {
         #[must_use]
         pub fn materialize_framed(&mut self, bytes: &Bytes, item_count: usize) -> OtapArrowRecords {
             self.admit_framed(bytes.clone(), item_count)
-                .try_into_otap_with(&mut self.context, Default::default())
+                .try_into_otap(&mut self.context)
                 .expect("benchmark syslog batch must decode")
         }
 
@@ -510,7 +509,7 @@ pub mod bench_support {
         #[must_use]
         pub fn admit_and_materialize(&mut self, messages: &[&[u8]]) -> OtapArrowRecords {
             self.admit(messages)
-                .try_into_otap_with(&mut self.context, Default::default())
+                .try_into_otap(&mut self.context)
                 .expect("benchmark syslog batch must decode")
         }
     }
@@ -531,6 +530,34 @@ mod tests {
             builder.append(message).expect("append test message");
         }
         builder.finish(observed_time).expect("seal test batch").0
+    }
+
+    /// Scenario: the syslog receiver codec is checked by the shared codec harness.
+    /// Guarantees: framed syslog preserves signal and item semantics and malformed
+    /// input remains recoverable across repeated decode failures.
+    #[test]
+    fn syslog_codec_conforms_to_registered_codec_contract() {
+        let codec = resolve(
+            &SYSLOG_CEF_ENCODING,
+            SignalType::Logs,
+            CodecDirection::Decode,
+        )
+        .unwrap();
+        otel_arrow_dfe_pdata::testing::codec_conformance::assert_decode_conformance(
+            otel_arrow_dfe_pdata::testing::codec_conformance::DecodeConformanceCase {
+                codec,
+                signal: SignalType::Logs,
+                valid: batch(
+                    &[
+                        b"<34>1 2024-01-01T00:00:00Z host app - - - first",
+                        b"second",
+                    ],
+                    42,
+                ),
+                malformed: Some(Bytes::from_static(b"invalid-frame")),
+                expected_items: 2,
+            },
+        );
     }
 
     /// Scenario: A receiver seals multiple original messages into one encoded batch.
@@ -597,7 +624,7 @@ mod tests {
             123,
         );
         let records = SyslogCefCodec
-            .decode(SignalType::Logs, &bytes, Default::default())
+            .decode(SignalType::Logs, &bytes)
             .expect("decode mixed batch");
         let logs = records
             .get(ArrowPayloadType::Logs)
