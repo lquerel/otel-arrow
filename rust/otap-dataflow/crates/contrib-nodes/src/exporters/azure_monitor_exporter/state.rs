@@ -145,7 +145,6 @@ mod tests {
     use bytes::Bytes;
     use otel_arrow_dfe_otap::pdata::Context;
     use otel_arrow_dfe_pdata::otlp::OtlpProtoBytes;
-    use otel_arrow_dfe_pdata_codec::PayloadData;
 
     /// Helper to create a test OtapPayload from bytes
     fn test_payload(data: &'static [u8]) -> OtapPayload {

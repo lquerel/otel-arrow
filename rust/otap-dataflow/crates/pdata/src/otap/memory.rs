@@ -110,13 +110,9 @@ mod tests {
         UInt32Array, UInt32Builder,
     };
     use arrow::datatypes::{DataType, Field, Int32Type, Schema, UInt8Type};
-    use bytes::Bytes;
 
     use crate::otap::{Logs, OtapArrowRecords};
-    use crate::otlp::OtlpProtoBytes;
-    use crate::payload::OtapPayloadHelpers;
     use crate::proto::OtlpProtoMessage;
-    use crate::proto::opentelemetry::arrow::v1::ArrowPayloadType;
     use crate::proto::opentelemetry::common::v1::{AnyValue, InstrumentationScope, KeyValue};
     use crate::proto::opentelemetry::logs::v1::{
         LogRecord, LogsData, ResourceLogs, ScopeLogs, SeverityNumber,
