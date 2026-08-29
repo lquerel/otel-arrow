@@ -587,10 +587,10 @@ mod tests {
     use otel_arrow_dfe_engine::local::receiver::Receiver as _;
     use otel_arrow_dfe_engine::message::{Receiver as EngineReceiver, Sender as EngineSender};
     use otel_arrow_dfe_engine::testing::{create_not_send_channel, setup_test_runtime, test_node};
-    use otel_arrow_dfe_pdata_codec::PayloadData;
     use otel_arrow_dfe_pdata::proto::opentelemetry::collector::metrics::v1::ExportMetricsServiceRequest;
     use otel_arrow_dfe_pdata::proto::opentelemetry::logs::v1::ResourceLogs;
     use otel_arrow_dfe_pdata::proto::opentelemetry::metrics::v1::{metric, number_data_point};
+    use otel_arrow_dfe_pdata_codec::PayloadData;
     use otel_arrow_dfe_telemetry::instrument::Counter;
     use otel_arrow_dfe_telemetry::reporter::MetricsReporter;
     use otel_arrow_dfe_telemetry::testing::EmptyAttributes;

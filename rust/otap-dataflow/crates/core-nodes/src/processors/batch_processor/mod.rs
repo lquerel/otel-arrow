@@ -56,7 +56,8 @@ use otel_arrow_dfe_otap::accessory::slots::{Key as SlotKey, State as SlotState};
 use otel_arrow_dfe_otap::pdata::{Context, OtapPdata, PeerAddrMerger};
 use otel_arrow_dfe_pdata::TryIntoWithOptions;
 use otel_arrow_dfe_pdata::{
-    OtapArrowRecords, OtapPayloadHelpers, OtlpProtoBytes, error::Error as PDataError,
+    OtapArrowRecords, OtapPayloadHelpers, OtlpProtoBytes,
+    error::Error as PDataError,
     otap::batching::make_item_batches,
     otlp::batching::{BytesBatches, make_bytes_batches_owned},
 };
@@ -946,7 +947,7 @@ impl Batcher<OtlpProtoBytes> for SignalBuffer<OtlpProtoBytes> {
     }
 }
 
-impl<'a, T: OtapPayloadHelpers> BatchProcessorSignal<'a, T>
+impl<'a, T: OtapPayloadHelpers + Into<OtapPayload>> BatchProcessorSignal<'a, T>
 where
     SignalBuffer<T>: Batcher<T>,
 {
