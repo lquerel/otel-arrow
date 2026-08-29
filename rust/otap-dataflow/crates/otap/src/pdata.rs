@@ -18,7 +18,7 @@ use std::num::NonZeroU64;
 
 use async_trait::async_trait;
 use otel_arrow_dfe_config::PortName;
-use otel_arrow_dfe_config::{SignalFormat, SignalType};
+use otel_arrow_dfe_config::SignalType;
 use otel_arrow_dfe_engine::_private::AckNackRouting;
 use otel_arrow_dfe_engine::control::{
     AckMsg, CallData, Frame, NackMsg, NodeControlMsg, RouteData, nanos_since_birth,
@@ -760,12 +760,6 @@ impl OtapPdata {
     #[must_use]
     pub fn signal_type(&self) -> SignalType {
         self.payload.signal_type()
-    }
-
-    /// Returns the format of signal represented by this `OtapPdata` instance.
-    #[must_use]
-    pub const fn signal_format(&self) -> SignalFormat {
-        self.payload.signal_format()
     }
 
     /// True if the payload is empty. By definition, we can skip sending an
@@ -1580,10 +1574,12 @@ mod test {
     }
 
     fn create_test_otap_pdata() -> OtapPdata {
-        use otel_arrow_dfe_pdata::{OtapArrowRecords, TryIntoWithOptions};
+        use otel_arrow_dfe_pdata_codec::CodecService;
 
         let payload = create_test_pdata().into_parts().1;
-        let records: OtapArrowRecords = payload.try_into_with_default().expect("OTAP conversion");
+        let records = payload
+            .try_into_otap(&CodecService::new().expect("valid codec registry"))
+            .expect("OTAP conversion");
         OtapPdata::new_default(records.into())
     }
 

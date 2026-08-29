@@ -39,6 +39,7 @@ otel-arrow-dfe-pdata = { workspace = true, features = ["testing"] }
 sha1-hash = ["dep:sha1"]
 
 [dev-dependencies]
+otel-arrow-dfe-pdata-codec = { workspace = true, features = ["testing"] }
 criterion = { workspace = true, features = ["async_tokio"] }
 otel-arrow-contrib-data-engine-kql-parser = { workspace = true }
 otel-arrow-contrib-data-engine-parser-abstractions = { workspace = true }

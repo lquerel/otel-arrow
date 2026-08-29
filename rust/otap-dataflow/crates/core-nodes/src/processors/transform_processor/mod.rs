@@ -73,8 +73,6 @@ use otel_arrow_dfe_pdata::{
     OtapArrowRecords, OtapPayloadHelpers, otap::transform::sanitize::sanitize_otap_batch,
 };
 use otel_arrow_dfe_pdata_codec::OtapPayload;
-#[cfg(test)]
-use otel_arrow_dfe_pdata_codec::PayloadData;
 use otel_arrow_dfe_query_engine::{
     parser::default_parser_options,
     pipeline::{
@@ -1785,12 +1783,9 @@ mod test {
                 }
                 assert_eq!(routed.len(), 1);
                 let (_context, payload) = routed.pop().unwrap().into_parts();
-                match payload.into_data() {
-                    PayloadData::OtapArrowRecords(result) => {
-                        assert_eq!(result, input)
-                    }
-                    _ => panic!("unexpected payload type"),
-                }
+                let result = OtapArrowRecords::try_from_with_default(payload)
+                    .expect("expected native OTAP output");
+                assert_eq!(result, input);
                 // TODO when we support Ack/Nack here assert on routed context
             })
             .validate(|_ctx| async move {})
@@ -2247,26 +2242,22 @@ mod test {
                 }
                 assert_eq!(routed.len(), 1);
                 let (_context, payload) = routed.pop().unwrap().into_parts();
-                match payload.into_data() {
-                    PayloadData::OtapArrowRecords(result) => {
-                        // ensure the routed record was "sanitized"
-                        let logs_batch = result.get(ArrowPayloadType::Logs).unwrap();
-                        let severity_text_col = logs_batch
-                            .column_by_name(consts::SEVERITY_TEXT)
-                            .unwrap()
-                            .as_any()
-                            .downcast_ref::<DictionaryArray<UInt8Type>>()
-                            .unwrap();
-                        let eq_filtered_val =
-                            eq(severity_text_col.values(), &StringArray::new_scalar("INFO"))
-                                .unwrap();
-                        assert_eq!(eq_filtered_val.true_count(), 0);
+                let result = OtapArrowRecords::try_from_with_default(payload)
+                    .expect("expected native OTAP output");
+                // ensure the routed record was "sanitized"
+                let logs_batch = result.get(ArrowPayloadType::Logs).unwrap();
+                let severity_text_col = logs_batch
+                    .column_by_name(consts::SEVERITY_TEXT)
+                    .unwrap()
+                    .as_any()
+                    .downcast_ref::<DictionaryArray<UInt8Type>>()
+                    .unwrap();
+                let eq_filtered_val =
+                    eq(severity_text_col.values(), &StringArray::new_scalar("INFO")).unwrap();
+                assert_eq!(eq_filtered_val.true_count(), 0);
 
-                        // ensure the routed record equals what was expected
-                        assert_logs_records_equal(result, error_log_record);
-                    }
-                    _ => panic!("unexpected payload type"),
-                }
+                // ensure the routed record equals what was expected
+                assert_logs_records_equal(result, error_log_record);
 
                 // check info log record got routed to correct out port
                 let mut routed = Vec::new();
@@ -2275,12 +2266,9 @@ mod test {
                 }
                 assert_eq!(routed.len(), 1);
                 let (_context, payload) = routed.pop().unwrap().into_parts();
-                match payload.into_data() {
-                    PayloadData::OtapArrowRecords(result) => {
-                        assert_logs_records_equal(result, info_log_record);
-                    }
-                    _ => panic!("unexpected payload type"),
-                }
+                let result = OtapArrowRecords::try_from_with_default(payload)
+                    .expect("expected native OTAP output");
+                assert_logs_records_equal(result, info_log_record);
             })
             .validate(|_ctx| async move {})
     }
@@ -3376,23 +3364,19 @@ mod test {
                 }
                 assert_eq!(routed.len(), 1);
                 let (_context, payload) = routed.pop().unwrap().into_parts();
-                match payload.into_data() {
-                    PayloadData::OtapArrowRecords(result) => {
-                        // check sanitization was skipped on routed record
-                        let logs_batch = result.get(ArrowPayloadType::Logs).unwrap();
-                        let severity_text_col = logs_batch
-                            .column_by_name(consts::SEVERITY_TEXT)
-                            .unwrap()
-                            .as_any()
-                            .downcast_ref::<DictionaryArray<UInt8Type>>()
-                            .unwrap();
-                        let eq_filtered_val =
-                            eq(severity_text_col.values(), &StringArray::new_scalar("INFO"))
-                                .unwrap();
-                        assert_eq!(eq_filtered_val.true_count(), 1);
-                    }
-                    _ => panic!("unexpected payload type"),
-                }
+                let result = OtapArrowRecords::try_from_with_default(payload)
+                    .expect("expected native OTAP output");
+                // check sanitization was skipped on routed record
+                let logs_batch = result.get(ArrowPayloadType::Logs).unwrap();
+                let severity_text_col = logs_batch
+                    .column_by_name(consts::SEVERITY_TEXT)
+                    .unwrap()
+                    .as_any()
+                    .downcast_ref::<DictionaryArray<UInt8Type>>()
+                    .unwrap();
+                let eq_filtered_val =
+                    eq(severity_text_col.values(), &StringArray::new_scalar("INFO")).unwrap();
+                assert_eq!(eq_filtered_val.true_count(), 1);
             })
             .validate(|_ctx| async move {})
     }

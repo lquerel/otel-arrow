@@ -1851,7 +1851,7 @@ mod tests {
     use otel_arrow_dfe_pdata::proto::opentelemetry::resource::v1::Resource;
     use otel_arrow_dfe_pdata::proto::opentelemetry::trace::v1::{ResourceSpans, ScopeSpans, Span};
     use otel_arrow_dfe_pdata::{OtapArrowRecords, TryIntoWithOptions};
-    use otel_arrow_dfe_pdata_codec::{OtapPayload, PayloadData};
+    use otel_arrow_dfe_pdata_codec::OtapPayload;
     use otel_arrow_dfe_telemetry::registry::TelemetryRegistryHandle;
     use prost::Message;
     use rdkafka::ClientConfig;
@@ -6139,10 +6139,7 @@ mod tests {
             decode_traces_payload(&bytes, MessageFormat::OtapProto).expect("should decode");
         let payload: OtapPayload = pdata.take_payload();
         assert!(
-            matches!(
-                payload.into_data(),
-                PayloadData::OtapArrowRecords(OtapArrowRecords::Traces(_))
-            ),
+            matches!(payload.otap_ref(), Some(OtapArrowRecords::Traces(_))),
             "expected OtapArrowRecords::Traces"
         );
     }
@@ -6158,10 +6155,7 @@ mod tests {
             decode_metrics_payload(&bytes, MessageFormat::OtapProto).expect("should decode");
         let payload: OtapPayload = pdata.take_payload();
         assert!(
-            matches!(
-                payload.into_data(),
-                PayloadData::OtapArrowRecords(OtapArrowRecords::Metrics(_))
-            ),
+            matches!(payload.otap_ref(), Some(OtapArrowRecords::Metrics(_))),
             "expected OtapArrowRecords::Metrics"
         );
     }
@@ -6177,10 +6171,7 @@ mod tests {
             decode_logs_payload(&bytes, MessageFormat::OtapProto).expect("should decode");
         let payload: OtapPayload = pdata.take_payload();
         assert!(
-            matches!(
-                payload.into_data(),
-                PayloadData::OtapArrowRecords(OtapArrowRecords::Logs(_))
-            ),
+            matches!(payload.otap_ref(), Some(OtapArrowRecords::Logs(_))),
             "expected OtapArrowRecords::Logs"
         );
     }
@@ -6401,10 +6392,7 @@ mod tests {
                     let mut pdata = receiver.recv_pdata().await;
                     let payload: OtapPayload = pdata.take_payload();
                     assert!(
-                        matches!(
-                            payload.into_data(),
-                            PayloadData::OtapArrowRecords(OtapArrowRecords::Traces(_))
-                        ),
+                        matches!(payload.otap_ref(), Some(OtapArrowRecords::Traces(_))),
                         "Expected OtapArrowRecords::Traces for message {i}"
                     );
                 }
@@ -6451,12 +6439,11 @@ mod tests {
                 for i in 0..3 {
                     let mut pdata = receiver.recv_pdata().await;
                     let payload: OtapPayload = pdata.take_payload();
-                    if let PayloadData::OtapArrowRecords(arrow_records) = payload.into_data() {
-                        let expected = OtapArrowRecords::Metrics(Metrics::default());
-                        assert_eq!(expected, arrow_records);
-                    } else {
-                        panic!("Expected OtapArrowRecords::Metrics for message {i}");
-                    }
+                    let arrow_records = payload
+                        .otap_ref()
+                        .unwrap_or_else(|| panic!("Expected native OTAP metrics for message {i}"));
+                    let expected = OtapArrowRecords::Metrics(Metrics::default());
+                    assert_eq!(&expected, arrow_records);
                 }
 
                 receiver.shutdown(Duration::from_secs(5));
@@ -6501,12 +6488,11 @@ mod tests {
                 for i in 0..3 {
                     let mut pdata = receiver.recv_pdata().await;
                     let payload: OtapPayload = pdata.take_payload();
-                    if let PayloadData::OtapArrowRecords(arrow_records) = payload.into_data() {
-                        let expected = OtapArrowRecords::Logs(Logs::default());
-                        assert_eq!(expected, arrow_records);
-                    } else {
-                        panic!("Expected OtapArrowRecords::Logs for message {i}");
-                    }
+                    let arrow_records = payload
+                        .otap_ref()
+                        .unwrap_or_else(|| panic!("Expected native OTAP logs for message {i}"));
+                    let expected = OtapArrowRecords::Logs(Logs::default());
+                    assert_eq!(&expected, arrow_records);
                 }
 
                 receiver.shutdown(Duration::from_secs(5));
@@ -6567,10 +6553,7 @@ mod tests {
                     let mut pdata = receiver.recv_pdata().await;
                     let payload: OtapPayload = pdata.take_payload();
                     assert!(
-                        matches!(
-                            payload.into_data(),
-                            PayloadData::OtapArrowRecords(OtapArrowRecords::Traces(_))
-                        ),
+                        matches!(payload.otap_ref(), Some(OtapArrowRecords::Traces(_))),
                         "message {i}: MessageFormat=otap header must override the \
                          OtlpProto per-signal default and decode via the OTAP path",
                     );

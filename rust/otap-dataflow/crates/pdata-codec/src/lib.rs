@@ -24,9 +24,7 @@ pub use decoder::PdataDecoder;
 pub use encoder::{EncodeOutput, PdataEncoder};
 pub use error::{CodecError, CodecOperation, RegistryError};
 pub use identity::{EncodedPdata, PdataEncoding};
-pub use payload::{
-    OtapPayload, PayloadData, PayloadStorage, PdataFormat, PdataPayload, PdataPayloadDecodeError,
-};
+pub use payload::{OtapPayload, PdataFormat, PdataPayload, PdataPayloadDecodeError};
 pub use plan::{EncodePolicy, EncodingPlan, ViewPlan};
 pub use registry::{
     BatcherFactory, CodecBatcherRegistration, CodecMetadata, CodecRegistration, CodecRegistry,

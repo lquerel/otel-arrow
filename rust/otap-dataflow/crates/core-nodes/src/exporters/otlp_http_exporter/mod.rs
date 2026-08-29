@@ -51,8 +51,6 @@ use otel_arrow_dfe_pdata::proto::opentelemetry::collector::metrics::v1::{
 use otel_arrow_dfe_pdata::proto::opentelemetry::collector::trace::v1::{
     ExportTracePartialSuccess, ExportTraceServiceResponse,
 };
-#[cfg(test)]
-use otel_arrow_dfe_pdata_codec::PayloadData;
 use otel_arrow_dfe_pdata_codec::{EncodePolicy, OtapPayload, PdataEncoding};
 use prost::Message as _;
 use reqwest::{Client, Response};
@@ -3214,21 +3212,15 @@ mod test {
                             PipelineCompletionMsg::DeliverNack { nack } => {
                                 ack_count += 1;
 
-                                match nack.refused.payload().into_data() {
-                                    PayloadData::OtapArrowRecords(otap_batch) => {
-                                        let logs_batch = otap_batch.get(ArrowPayloadType::Logs).unwrap();
-                                        assert!(
-                                            logs_batch.num_rows() > 0,
-                                            "expected record batches to be returned in Nack, but it was empty"
-                                        );
-                                    }
-                                    other_payload => {
-                                        panic!(
-                                            "received unexpected payload type in Nack: {:?}",
-                                            other_payload
-                                        );
-                                    }
-                                }
+                                let payload = nack.refused.payload();
+                                let otap_batch = payload
+                                    .otap_ref()
+                                    .expect("expected native OTAP payload in Nack");
+                                let logs_batch = otap_batch.get(ArrowPayloadType::Logs).unwrap();
+                                assert!(
+                                    logs_batch.num_rows() > 0,
+                                    "expected record batches to be returned in Nack, but it was empty"
+                                );
 
                                 if ack_count >= num_expected_nacks {
                                     break;

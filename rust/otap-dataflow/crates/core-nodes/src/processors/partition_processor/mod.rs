@@ -522,7 +522,7 @@ mod test {
         testing::{TestCallData, next_ack, next_nack},
     };
     use otel_arrow_dfe_pdata::{
-        OtlpProtoBytes, TryFromWithOptions,
+        OtlpProtoBytes,
         otap::Logs,
         proto::{
             OtlpProtoMessage,
@@ -534,8 +534,16 @@ mod test {
         },
         testing::round_trip::otlp_to_otap,
     };
+    use otel_arrow_dfe_pdata_codec::{OtapPayload, PdataEncoding};
     use otel_arrow_dfe_telemetry::registry::TelemetryRegistryHandle;
     use prost::Message as _;
+
+    fn into_otlp(payload: OtapPayload) -> OtlpProtoBytes {
+        let encoded = payload
+            .into_encoded_for_test(PdataEncoding::OTLP, Default::default())
+            .expect("OTLP conversion");
+        OtlpProtoBytes::new_from_bytes(encoded.signal_type(), encoded.into_bytes())
+    }
 
     fn create_processor_with_config(
         config: Value,
@@ -719,7 +727,7 @@ mod test {
                     );
                     outbound_contexts.push(context);
 
-                    let proto_bytes = OtlpProtoBytes::try_from_with_default(payload).unwrap();
+                    let proto_bytes = into_otlp(payload);
                     assert_eq!(
                         LogsData::decode(proto_bytes.as_bytes()).unwrap(),
                         LogsData {
@@ -847,7 +855,7 @@ mod test {
                     }
                 );
 
-                let proto_bytes = OtlpProtoBytes::try_from_with_default(payload).unwrap();
+                let proto_bytes = into_otlp(payload);
                 assert_eq!(
                     LogsData::decode(proto_bytes.as_bytes()).unwrap(),
                     LogsData {

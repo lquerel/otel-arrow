@@ -814,13 +814,13 @@ mod tests {
     use otel_arrow_dfe_otap::pdata::OtapPdata;
     use otel_arrow_dfe_otap::testing::{next_ack, next_nack};
     use otel_arrow_dfe_pdata::Producer;
-    use otel_arrow_dfe_pdata::TryIntoWithOptions;
     use otel_arrow_dfe_pdata::otap::OtapArrowRecords;
     use otel_arrow_dfe_pdata::proto::opentelemetry::arrow::v1::{
         ArrowPayloadType, arrow_logs_service_client::ArrowLogsServiceClient,
         arrow_metrics_service_client::ArrowMetricsServiceClient,
         arrow_traces_service_client::ArrowTracesServiceClient,
     };
+    use otel_arrow_dfe_pdata_codec::{CodecService, OtapPayload};
     use otel_arrow_dfe_telemetry::common_attributes::{Outcome, ReceiverRejectionErrorType};
     use otel_arrow_dfe_telemetry::metrics::MetricSetSnapshot;
     use otel_arrow_dfe_telemetry::reporter::MetricsReporter;
@@ -831,6 +831,12 @@ mod tests {
     use std::sync::Arc;
     use std::time::Instant;
     use tokio::time::{Duration, timeout};
+
+    fn into_otap(payload: OtapPayload) -> OtapArrowRecords {
+        payload
+            .try_into_otap(&CodecService::new().expect("valid codec registry"))
+            .expect("expected native OTAP payload")
+    }
 
     /// Test closure that simulates a typical receiver scenario.
     fn scenario(
@@ -950,11 +956,7 @@ mod tests {
                         .expect("No message received");
 
                     // Validate the payload
-                    let metrics_records: OtapArrowRecords = metrics_pdata
-                        .clone()
-                        .payload()
-                        .try_into_with_default()
-                        .expect("Could convert pdata to OTAPData");
+                    let metrics_records = into_otap(metrics_pdata.clone().payload());
 
                     // Assert that the message received is what the test client sent.
                     let _expected_metrics_message =
@@ -976,11 +978,7 @@ mod tests {
                         .expect("No message received");
 
                     // Validate the payload
-                    let logs_records: OtapArrowRecords = logs_pdata
-                        .clone()
-                        .payload()
-                        .try_into_with_default()
-                        .expect("Could convert pdata to OTAPData");
+                    let logs_records = into_otap(logs_pdata.clone().payload());
 
                     // Assert that the message received is what the test client sent.
                     let _expected_logs_message =
@@ -1002,11 +1000,7 @@ mod tests {
                         .expect("No message received");
 
                     // Validate the payload
-                    let traces_records: OtapArrowRecords = traces_pdata
-                        .clone()
-                        .payload()
-                        .try_into_with_default()
-                        .expect("Could convert pdata to OTAPData");
+                    let traces_records = into_otap(traces_pdata.clone().payload());
 
                     // Assert that the message received is what the test client sent.
                     let _expected_traces_message =
