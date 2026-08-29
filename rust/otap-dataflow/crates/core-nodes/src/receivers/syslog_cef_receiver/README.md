@@ -123,6 +123,12 @@ Syslog over TLS:
 
 ## Message Parsing
 
+The receiver validates transport framing and rejects zero-length messages, then
+forwards non-empty messages in the `syslog-cef-batch-v1` encoded pdata format.
+Format detection and parsing remain lazy until a downstream component requests
+native OTAP records. This keeps transparent forwarding and codec-native
+batching on the original message bytes.
+
 ### Automatic Format Detection
 
 The parser attempts to identify the message format using the following
@@ -376,15 +382,16 @@ connection handling within the same thread.
 
 ### Batching Strategy
 
-To optimize throughput and reduce per-message overhead, the receiver batches
-messages into Apache Arrow record batches before sending downstream:
+To optimize throughput and reduce per-message overhead, the receiver frames
+original messages into independently decodable pdata batches before sending
+downstream:
 
 ```text
 +-------------------------------------------------------------------+
 |                         Batching Logic                            |
 +-------------------------------------------------------------------+
 |                                                                   |
-|   Messages arrive  -->  ArrowRecordsBuilder  -->  Batch sent      |
+|   Messages arrive  -->  SyslogBatchBuilder  -->  Batch sent       |
 |                              |                                    |
 |   Flush conditions:          |                                    |
 |   +- Size: max_size messages +------------------------------->    |
@@ -434,10 +441,11 @@ keeps the connection open and emits at most one warning per connection. V1
 creates one bucket per receiver instance and does not provide scheduling
 fairness.
 
-### Arrow Columnar Format
+### Native OTAP Conversion
 
-The receiver converts syslog messages directly into Apache Arrow columnar
-format, which provides:
+When a processor or exporter requests native OTAP, the syslog codec parses the
+framed messages and converts them into Apache Arrow columnar format. This
+provides:
 
 - **Efficient compression**: Columnar layout enables better compression ratios
 - **Zero-copy processing**: Downstream processors can operate on Arrow buffers
@@ -480,7 +488,7 @@ never measurement attributes.
 | `syslog_cef_receiver.drain_ingress.timeout` | `warn` | Ingress drain timed out while connection tasks were still active. |
 | `syslog_cef_receiver.tls.handshake.success` | `debug` | TLS handshake completed for an incoming connection. |
 | `syslog_cef_receiver.tls.handshake.failed` | `warn` | TLS handshake failed and the connection was closed. |
-| `syslog_cef_receiver.arrow_records.build_failed` | `warn` | Arrow records could not be built from a parsed batch; the batch was dropped. |
+| `syslog_cef_receiver.batch.seal_failed` | `warn` | An encoded syslog batch could not be sealed or admitted; the batch was dropped. |
 | `syslog_cef_receiver.memory_pressure.disconnect` | `warn` | A TCP connection was closed because process-wide memory pressure was active. |
 | `syslog_cef_receiver.rate_limit.drop` | `warn` | Emitted once per TCP connection when pressure-aware rate throttling first drops an over-limit message on that connection. |
 
