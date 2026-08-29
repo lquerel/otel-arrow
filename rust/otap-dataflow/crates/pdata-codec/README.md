@@ -4,9 +4,9 @@ This crate defines the extension boundary between independently decodable byte
 formats and native OTAP Arrow records in the OTel Arrow Dataflow Engine.
 
 Codecs describe an encoded representation, register immutable factories at link
-time, and keep mutable decoder or encoder state inside one pipeline runtime. A
-payload carries only its encoding identity, signal, bytes, and cached metadata;
-it never owns a codec instance.
+time, and keep mutable decoder, encoder, or batcher state inside one pipeline
+runtime. A payload carries only its encoding identity, signal, bytes, and cached
+metadata; it never owns a codec instance.
 
 ## Design model
 
@@ -15,7 +15,7 @@ it never owns a codec instance.
   HTTP and gRPC compression remain transport properties.
 - `CodecMetadata` declares the signals supported by an encoding and optional
   descriptive metadata.
-- `CodecRegistration` supplies decoder, encoder, item-counter, and later
+- `CodecRegistration` supplies decoder, encoder, item-counter, and native
   batching capabilities. A codec may be decode-only or encode-only.
 - `CodecRegistry` validates the complete link-time registry once. Duplicate or
   invalid identities fail pipeline runtime construction deterministically.
@@ -38,6 +38,7 @@ flowchart LR
     service["Shared CodecService"]
     decoder["Lazy decoder state"]
     encoder["Lazy encoder state"]
+    batcher["Lazy batcher state"]
 
     extension -->|"register_pdata_codec!"| linked
     linked --> registry
@@ -45,6 +46,7 @@ flowchart LR
     services --> service
     service --> decoder
     service --> encoder
+    service --> batcher
 ```
 
 Receivers, processors, and exporters in one pipeline receive clones of the same
@@ -73,11 +75,12 @@ before `.await` to detach ownership from codec state.
 
 ## Execution and asynchronous ownership
 
-Codec decoder and encoder methods currently execute synchronously while the
-pipeline-local codec service has exclusive access to the selected instance.
-Prepared output may borrow an encoder's scratch buffer only during a synchronous
-callback. `EncodeOutput::into_bytes` detaches the output before an asynchronous
-transport send; it does not offload or make the encoder itself asynchronous.
+Codec decoder, encoder, and batcher methods currently execute synchronously
+while the pipeline-local codec service has exclusive access to the selected
+instance. Prepared output may borrow an encoder's scratch buffer only during a
+synchronous callback. `EncodeOutput::into_bytes` detaches the output before an
+asynchronous transport send; it does not offload or make the encoder itself
+asynchronous.
 
 The node-facing `PdataEffectHandlerExtension` operations are asynchronous so a
 future execution layer can offload work without changing every node API. Their
@@ -98,6 +101,9 @@ flowchart LR
     need -->|"Forward same encoding"| forward["Original Bytes"]
     need -->|"Accept encoded view"| view["Borrowed EncodedView"]
     need -->|"Require native records"| decode["Decode"]
+    need -->|"Batch"| plan["BatchPlan"]
+    plan -->|"Native codec support"| batches["Encoded batches"]
+    plan -->|"OTAP fallback"| decode
     decode --> otap["Native OTAP"]
     otap --> encode["Prepare encoded output"]
     encode -->|"Synchronous use"| scratch["Borrow scratch"]
@@ -146,6 +152,20 @@ An item counter is optional and must be stateless. Return `None` when the count
 cannot be determined; zero means the payload was inspected and contains no
 primary-signal items.
 
+## Add native batching
+
+Implement `PdataBatcher` only when encoded batches can be merged or split
+without first materializing OTAP records. Register it with
+`CodecBatcherRegistration::new` and `CodecRegistration::with_batcher`. Its
+`BatchingSupport` declares the supported sizing units and default bounded
+profile.
+
+A native batcher must preserve input order and produce independently decodable
+outputs. Output ownership weights must sum to the measured input total even
+when splitting duplicates representation wrappers. Codecs without native
+batching use the engine's OTAP fallback when the requested sizing policy permits
+it.
+
 ## Test a codec
 
 Enable the `testing` feature and run `assert_decode_conformance` with valid and
@@ -160,6 +180,7 @@ Add codec-specific tests for:
 - Independent decoding of every encoded output.
 - Bounded scratch, allocation, and decompression behavior.
 - Encoder recovery after limits or other failures.
+- Native batching order, ownership weights, split limits, and output decoding.
 
 From `rust/otap-dataflow`, validate changes with:
 
@@ -172,4 +193,4 @@ Run `cargo xtask check` before submitting a pull request.
 
 The built-in OTLP codec is the reference implementation for a codec supporting
 decoding, encoding, borrowed views, stateless item counting, reusable buffers,
-and all three telemetry signals.
+native batching, and all three telemetry signals.

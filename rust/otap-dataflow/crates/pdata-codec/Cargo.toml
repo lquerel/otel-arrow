@@ -16,6 +16,7 @@ otel-arrow-dfe-config.workspace = true
 otel-arrow-dfe-pdata.workspace = true
 otel-arrow-dfe-pdata-views.workspace = true
 prost.workspace = true
+serde.workspace = true
 thiserror.workspace = true
 
 [dev-dependencies]

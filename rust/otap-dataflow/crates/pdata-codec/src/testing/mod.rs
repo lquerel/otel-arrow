@@ -11,8 +11,12 @@
 //!
 //! Conformance checks do not replace codec-specific coverage. Implementations
 //! remain responsible for format edge cases, resource and decompression limits,
-//! conversion fidelity, output compatibility, and any later native batching
-//! contract they advertise.
+//! conversion fidelity, output compatibility, and any native batching contract
+//! they advertise.
+
+mod codecs;
+
+pub use codecs::{DECODE_ONLY_ENCODING, ENCODE_ONLY_ENCODING, NATIVE_ENCODING, TEST_ENCODING};
 
 use bytes::Bytes;
 use otel_arrow_dfe_config::SignalType;

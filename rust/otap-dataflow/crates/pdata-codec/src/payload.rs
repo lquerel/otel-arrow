@@ -327,6 +327,18 @@ impl PdataPayload {
         }
     }
 
+    /// Returns a cached byte measurement or measures the current representation.
+    #[must_use]
+    pub fn measured_bytes(&self) -> Option<usize> {
+        match &self.storage {
+            PayloadStorage::OtlpBytes(bytes) => Some(bytes.bytes().len()),
+            PayloadStorage::Encoded(encoded) => Some(encoded.bytes().len()),
+            PayloadStorage::OtapArrowRecords(records) => {
+                self.size.get().or_else(|| records.num_bytes())
+            }
+        }
+    }
+
     /// Returns the best available retained-memory estimate.
     #[must_use]
     pub fn retained_memory_bytes(&self) -> usize {
@@ -473,6 +485,24 @@ impl PdataPayload {
     #[must_use]
     pub fn test_has_cached_size(&self) -> bool {
         self.size.get().is_some()
+    }
+
+    /// Converts through a fresh service for compatibility-only tests.
+    #[cfg(any(test, feature = "testing"))]
+    pub fn into_encoded_for_test(
+        mut self,
+        encoding: PdataEncoding,
+        _options: otel_arrow_dfe_config::ConversionOptions,
+    ) -> Result<EncodedPdata, CodecError> {
+        let service = CodecService::new().map_err(CodecError::from)?;
+        let plan = EncodingPlan::resolve(
+            service.registry(),
+            &encoding,
+            crate::EncodePolicy::default(),
+        )?;
+        let signal = self.signal_type();
+        let bytes = self.encode_bytes(&service, &plan)?;
+        plan.codec().admit(signal, bytes)
     }
 }
 

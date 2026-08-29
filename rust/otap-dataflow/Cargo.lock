@@ -7838,6 +7838,7 @@ dependencies = [
  "otel-arrow-dfe-pdata",
  "otel-arrow-dfe-pdata-views",
  "prost 0.14.4",
+ "serde",
  "thiserror 2.0.20",
 ]
 

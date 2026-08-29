@@ -5,9 +5,9 @@
 //!
 //! [`CodecServiceBuilder`] combines an immutable validated registry with fresh
 //! runtime state. Cloned [`CodecService`] handles share that state within one
-//! pipeline, while decoder and encoder instances are created lazily and reused.
-//! Payload admission and matching-format forwarding therefore require neither
-//! codec construction nor mutable runtime access.
+//! pipeline, while decoder, encoder, and batcher instances are created lazily
+//! and reused. Payload admission and matching-format forwarding therefore
+//! require neither codec construction nor mutable runtime access.
 //!
 //! Codec trait calls are currently synchronous. The service holds its runtime
 //! lock for the duration of each codec operation and, for prepared output, for
@@ -24,8 +24,9 @@ use bytes::Bytes;
 use otel_arrow_dfe_pdata::{OtapArrowRecords, OtapPayloadHelpers};
 
 use crate::{
-    CodecError, CodecRegistry, EncodeOutput, EncodedPdata, EncodingPlan, PdataDecoder,
-    PdataEncoder, PdataView, RegistryError, ResolvedCodec, ViewPlan,
+    BatchProfile, CodecBatches, CodecError, CodecRegistry, EncodeOutput, EncodedPdata,
+    EncodingPlan, PdataBatcher, PdataDecoder, PdataEncoder, PdataView, RegistryError,
+    ResolvedCodec, ViewPlan,
 };
 
 struct DecoderInstance {
@@ -38,10 +39,16 @@ struct EncoderInstance {
     encoder: Box<dyn PdataEncoder>,
 }
 
+struct BatcherInstance {
+    codec: ResolvedCodec,
+    batcher: Box<dyn PdataBatcher>,
+}
+
 #[derive(Default)]
 struct CodecRuntime {
     decoders: Vec<DecoderInstance>,
     encoders: Vec<EncoderInstance>,
+    batchers: Vec<BatcherInstance>,
 }
 
 /// Builds a pipeline-local codec service from a validated registry.
@@ -182,6 +189,19 @@ impl CodecService {
         self.with_encoded_output(records, plan, |output| output.into_bytes())
     }
 
+    /// Re-batches independently decodable inputs with reused runtime-local state.
+    pub fn batch(
+        &self,
+        codec: ResolvedCodec,
+        signal: otel_arrow_dfe_config::SignalType,
+        profile: &BatchProfile,
+        inputs: Vec<Bytes>,
+    ) -> Result<CodecBatches, CodecError> {
+        codec.require_decoder(signal)?;
+        let mut runtime = self.lock();
+        runtime.batcher(codec)?.batch(signal, profile, inputs)
+    }
+
     /// Returns whether two handles address the same pipeline-owned state.
     #[must_use]
     pub fn shares_state_with(&self, other: &Self) -> bool {
@@ -193,7 +213,7 @@ impl CodecService {
     #[must_use]
     pub fn test_instance_count(&self) -> usize {
         let runtime = self.lock();
-        runtime.decoders.len() + runtime.encoders.len()
+        runtime.decoders.len() + runtime.encoders.len() + runtime.batchers.len()
     }
 }
 
@@ -234,5 +254,24 @@ impl CodecRuntime {
             }
         };
         Ok(self.encoders[index].encoder.as_mut())
+    }
+
+    fn batcher(&mut self, codec: ResolvedCodec) -> Result<&mut dyn PdataBatcher, CodecError> {
+        let index = match self
+            .batchers
+            .iter()
+            .position(|instance| instance.codec == codec)
+        {
+            Some(index) => index,
+            None => {
+                let index = self.batchers.len();
+                self.batchers.push(BatcherInstance {
+                    codec,
+                    batcher: codec.create_batcher()?,
+                });
+                index
+            }
+        };
+        Ok(self.batchers[index].batcher.as_mut())
     }
 }
