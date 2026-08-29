@@ -14,6 +14,8 @@
 //! scratch buffers so repeated output avoids reallocating while an unused
 //! signal consumes no buffer.
 
+use std::sync::LazyLock;
+
 use bytes::Bytes;
 use otel_arrow_dfe_config::SignalType;
 use otel_arrow_dfe_pdata::encode::{
@@ -37,11 +39,21 @@ use prost::Message;
 use crate::{
     BatchProfile, BatchSizer, BatchingSupport, CodecBatcherRegistration, CodecBatches, CodecError,
     CodecMetadata, CodecOperation, CodecRegistration, DecodePolicy, DecodeValidation, EncodeOutput,
-    EncodePolicy, PdataBatcher, PdataDecoder, PdataEncoder, PdataEncoding,
+    EncodePolicy, PdataBatcher, PdataDecoder, PdataEncoder, PdataEncoding, RegistryError,
+    ResolvedCodec,
 };
 
 /// Stable identity of uncompressed OTLP protobuf service-request bytes.
 pub const OTLP_ENCODING: PdataEncoding = PdataEncoding::OTLP;
+
+static RESOLVED_OTLP: LazyLock<Result<ResolvedCodec, RegistryError>> = LazyLock::new(|| {
+    crate::CodecRegistry::global().and_then(|registry| registry.resolve(&OTLP_ENCODING))
+});
+
+/// Returns the built-in OTLP identity after validated registry resolution.
+pub fn resolve_otlp() -> Result<ResolvedCodec, RegistryError> {
+    RESOLVED_OTLP.as_ref().copied().map_err(Clone::clone)
+}
 
 const INITIAL_BUFFER_CAPACITY: usize = 8 * 1024;
 const MAX_RETAINED_BUFFER_CAPACITY: usize = 256 * 1024;

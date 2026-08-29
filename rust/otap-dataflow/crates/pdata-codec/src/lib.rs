@@ -64,7 +64,9 @@ pub mod __private {
 
 /// Built-in codec identities and implementations.
 pub mod builtins {
-    pub use crate::codecs::otlp::{OTLP_ENCODING, OtlpBestEffortDecoder, OtlpEncoder};
+    pub use crate::codecs::otlp::{
+        OTLP_ENCODING, OtlpBestEffortDecoder, OtlpEncoder, resolve_otlp,
+    };
 }
 
 /// Reusable codec extension conformance checks.

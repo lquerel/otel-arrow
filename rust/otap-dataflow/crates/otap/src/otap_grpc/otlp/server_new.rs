@@ -34,7 +34,6 @@ use otel_arrow_dfe_engine::{
 };
 
 use crate::nack_status::classify_nack;
-use otel_arrow_dfe_pdata::OtlpProtoBytes;
 use otel_arrow_dfe_pdata::proto::opentelemetry::collector::logs::v1::ExportLogsServiceResponse;
 use otel_arrow_dfe_pdata::proto::opentelemetry::collector::metrics::v1::ExportMetricsServiceResponse;
 use otel_arrow_dfe_pdata::proto::opentelemetry::collector::trace::v1::ExportTraceServiceResponse;
@@ -298,11 +297,10 @@ impl Decoder for OtlpBytesDecoder {
         let len = src.remaining();
         // Use copy_to_bytes so accepted requests copy once while advancing the buffer.
         let bytes = src.copy_to_bytes(len);
-        let result = match self.signal {
-            SignalType::Logs => OtlpProtoBytes::ExportLogsRequest(bytes),
-            SignalType::Metrics => OtlpProtoBytes::ExportMetricsRequest(bytes),
-            SignalType::Traces => OtlpProtoBytes::ExportTracesRequest(bytes),
-        };
+        let result = otel_arrow_dfe_pdata_codec::builtins::resolve_otlp()
+            .expect("validated OTLP codec")
+            .admit(self.signal, bytes)
+            .map_err(|error| Status::invalid_argument(error.to_string()))?;
         let context = if self.preallocate_frame {
             // Pre-reserve a single frame since wait_for_result uses one slot.
             Context::with_capacity(1)
@@ -808,6 +806,21 @@ mod tests {
     use std::collections::HashMap;
     use tokio::sync::mpsc as tokio_mpsc;
     use tonic::Code;
+
+    /// Scenario: the current gRPC decoder receives all signals with or without Ack frame reservation.
+    /// Guarantees: both modes admit unchanged encoded OTLP without eager protobuf parsing.
+    #[tokio::test]
+    async fn decoder_admits_encoded_otlp_for_all_signals() {
+        for signal in [SignalType::Logs, SignalType::Metrics, SignalType::Traces] {
+            for preallocate in [false, true] {
+                super::super::assert_encoded_decoder(
+                    OtlpBytesDecoder::new(signal, preallocate),
+                    signal,
+                )
+                .await;
+            }
+        }
+    }
 
     fn new_test_metrics() -> Arc<Mutex<OtlpReceiverMetrics>> {
         let registry = TelemetryRegistryHandle::new();

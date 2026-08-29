@@ -3301,20 +3301,14 @@ mod test {
                             PipelineCompletionMsg::DeliverNack { nack } => {
                                 ack_count += 1;
 
-                                match nack.refused.payload().into_data() {
-                                    PayloadData::OtlpBytes(proto_bytes) => {
-                                        assert!(
-                                            !proto_bytes.as_bytes().is_empty(),
-                                            "expected payload bytes to be returned in Nack, but it was empty"
-                                        );
-                                    }
-                                    other_payload => {
-                                        panic!(
-                                            "received unexpected payload type in Nack: {:?}",
-                                            other_payload
-                                        );
-                                    }
-                                }
+                                let payload = nack.refused.payload();
+                                assert!(
+                                    !payload
+                                        .encoded_bytes()
+                                        .expect("expected encoded payload in Nack")
+                                        .is_empty(),
+                                    "expected payload bytes to be returned in Nack, but it was empty"
+                                );
 
                                 if ack_count >= num_expected_nacks {
                                     break;
