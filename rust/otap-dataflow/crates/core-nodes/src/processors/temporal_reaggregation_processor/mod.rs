@@ -3162,7 +3162,7 @@ mod tests {
             // Full passthrough forwards original OTLP bytes unchanged -
             // just verify something was emitted, the payload format is preserved.
             assert!(
-                matches!(output[0].payload_ref().data(), PayloadData::OtlpBytes(_)),
+                output[0].payload_ref().encoded_bytes().is_some(),
                 "full passthrough should preserve OTLP bytes payload"
             );
         });

@@ -36,6 +36,7 @@ otel_arrow_dfe_telemetry::otel_component_scope!(
 use async_trait::async_trait;
 use bytes::Bytes;
 use linkme::distributed_slice;
+use otel_arrow_dfe_config::SignalType;
 use otel_arrow_dfe_config::node::NodeUserConfig;
 use otel_arrow_dfe_config::pipeline::telemetry::AttributeValue as ConfigAttributeValue;
 use otel_arrow_dfe_engine::ReceiverFactory;
@@ -49,8 +50,8 @@ use otel_arrow_dfe_engine::receiver::ReceiverWrapper;
 use otel_arrow_dfe_engine::terminal_state::TerminalState;
 use otel_arrow_dfe_otap::OTAP_RECEIVER_FACTORIES;
 use otel_arrow_dfe_otap::pdata::{Context, OtapPdata};
-use otel_arrow_dfe_pdata::OtlpProtoBytes;
 use otel_arrow_dfe_pdata::otlp::ProtoBuffer;
+use otel_arrow_dfe_pdata_codec::builtins::resolve_otlp;
 use otel_arrow_dfe_telemetry::event::{LogEvent, ObservedEvent};
 use otel_arrow_dfe_telemetry::metrics::MetricSetSnapshot;
 use otel_arrow_dfe_telemetry::metrics::otlp::{
@@ -534,7 +535,7 @@ impl InternalTelemetryReceiver {
             let _ = export.commit();
             return Ok(());
         };
-        let Some(metrics) =
+        let Some(mut metrics) =
             encoder
                 .encode(export.batch())
                 .map_err(|error| Error::PdataConversionError {
@@ -545,8 +546,14 @@ impl InternalTelemetryReceiver {
             return Ok(());
         };
 
+        let encoded = resolve_otlp()
+            .expect("validated OTLP codec")
+            .admit(SignalType::Metrics, metrics.replace_bytes(Bytes::new()))
+            .map_err(|error| Error::PdataConversionError {
+                error: error.to_string(),
+            })?;
         effect_handler
-            .send_message(OtapPdata::new(Context::default(), metrics.into()))
+            .send_message(OtapPdata::new(Context::default(), encoded.into()))
             .await?;
         let _ = export.commit();
         Ok(())
@@ -565,7 +572,13 @@ impl InternalTelemetryReceiver {
 
         let pdata = OtapPdata::new(
             Context::default(),
-            OtlpProtoBytes::ExportLogsRequest(buf.into_bytes()).into(),
+            resolve_otlp()
+                .expect("validated OTLP codec")
+                .admit(SignalType::Logs, buf.into_bytes())
+                .map_err(|error| Error::PdataConversionError {
+                    error: error.to_string(),
+                })?
+                .into(),
         );
         effect_handler.send_message(pdata).await?;
         Ok(())
@@ -590,7 +603,7 @@ mod tests {
     use otel_arrow_dfe_pdata::proto::opentelemetry::collector::metrics::v1::ExportMetricsServiceRequest;
     use otel_arrow_dfe_pdata::proto::opentelemetry::logs::v1::ResourceLogs;
     use otel_arrow_dfe_pdata::proto::opentelemetry::metrics::v1::{metric, number_data_point};
-    use otel_arrow_dfe_pdata_codec::PayloadData;
+    use otel_arrow_dfe_pdata_codec::PdataEncoding;
     use otel_arrow_dfe_telemetry::instrument::Counter;
     use otel_arrow_dfe_telemetry::reporter::MetricsReporter;
     use otel_arrow_dfe_telemetry::testing::EmptyAttributes;
@@ -610,11 +623,12 @@ mod tests {
     }
 
     fn decode_metric_value(pdata: OtapPdata) -> i64 {
-        let PayloadData::OtlpBytes(OtlpProtoBytes::ExportMetricsRequest(bytes)) =
-            pdata.payload().into_data()
-        else {
-            panic!("internal telemetry receiver emitted a non-metrics payload")
-        };
+        assert_eq!(pdata.payload_ref().encoding(), Some(&PdataEncoding::OTLP));
+        assert_eq!(pdata.signal_type(), SignalType::Metrics);
+        let bytes = pdata
+            .payload()
+            .into_encoded_bytes()
+            .expect("internal telemetry receiver emitted a non-metrics payload");
         let request =
             ExportMetricsServiceRequest::decode(bytes).expect("valid OTLP metrics request");
         let [resource_metrics] = request.resource_metrics.as_slice() else {
@@ -944,7 +958,11 @@ mod tests {
             output_tx
                 .send(OtapPdata::new(
                     Context::default(),
-                    OtlpProtoBytes::ExportMetricsRequest(Bytes::new()).into(),
+                    resolve_otlp()
+                        .expect("validated OTLP codec")
+                        .admit(SignalType::Metrics, Bytes::new())
+                        .expect("admit OTLP metrics")
+                        .into(),
                 ))
                 .expect("downstream blocker should enqueue");
             let mut outputs = HashMap::new();
@@ -1026,7 +1044,11 @@ mod tests {
             output_tx
                 .send(OtapPdata::new(
                     Context::default(),
-                    OtlpProtoBytes::ExportLogsRequest(Bytes::new()).into(),
+                    resolve_otlp()
+                        .expect("validated OTLP codec")
+                        .admit(SignalType::Logs, Bytes::new())
+                        .expect("admit OTLP logs")
+                        .into(),
                 ))
                 .expect("downstream blocker should enqueue");
             let mut outputs = HashMap::new();

@@ -195,12 +195,13 @@ mod tests {
         assert!(removed.is_some());
         // Verify the payload matches
         let (_, payload) = removed.unwrap();
-        match payload.into_data() {
-            PayloadData::OtlpBytes(OtlpProtoBytes::ExportLogsRequest(bytes)) => {
-                assert_eq!(bytes.as_ref(), b"test");
-            }
-            _ => panic!("Expected OtlpBytes::ExportLogsRequest"),
-        }
+        assert_eq!(
+            payload
+                .encoded_bytes()
+                .expect("expected encoded logs payload")
+                .as_ref(),
+            b"test"
+        );
         assert!(!state.msg_to_data.contains_key(&msg_id));
 
         // Case 2: Message has batches (not orphaned)
@@ -222,12 +223,12 @@ mod tests {
         let removed = state.delete_msg_data_if_orphaned(msg_id);
         assert!(removed.is_some());
         let (_, payload) = removed.unwrap();
-        match payload.into_data() {
-            PayloadData::OtlpBytes(OtlpProtoBytes::ExportLogsRequest(bytes)) => {
-                assert!(bytes.is_empty());
-            }
-            _ => panic!("Expected OtlpBytes::ExportLogsRequest"),
-        }
+        assert!(
+            payload
+                .encoded_bytes()
+                .expect("expected encoded logs payload")
+                .is_empty()
+        );
     }
 
     #[test]
