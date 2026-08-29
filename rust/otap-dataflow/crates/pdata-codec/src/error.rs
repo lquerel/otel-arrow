@@ -66,6 +66,14 @@ pub enum CodecError {
     /// Registry validation or lookup failed.
     #[error(transparent)]
     Registry(#[from] RegistryError),
+    /// A registered codec does not implement the requested operation.
+    #[error("pdata codec `{encoding}` cannot {operation}")]
+    UnsupportedCodecOperation {
+        /// Codec identity.
+        encoding: PdataEncoding,
+        /// Requested operation.
+        operation: CodecOperation,
+    },
     /// A registered codec does not support an operation for this signal.
     #[error("pdata codec `{encoding}` cannot {operation} {signal:?}")]
     Unsupported {

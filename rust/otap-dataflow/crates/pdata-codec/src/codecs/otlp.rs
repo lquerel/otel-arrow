@@ -352,7 +352,6 @@ mod tests {
         let limited = EncodingPlan::resolve(
             &registry,
             &OTLP_ENCODING,
-            SignalType::Logs,
             EncodePolicy {
                 max_encoded_size: NonZeroUsize::new(1),
             },
@@ -363,13 +362,8 @@ mod tests {
                 .encode_bytes(&mut records.clone(), &limited)
                 .is_err()
         );
-        let normal = EncodingPlan::resolve(
-            &registry,
-            &OTLP_ENCODING,
-            SignalType::Logs,
-            EncodePolicy::default(),
-        )
-        .unwrap();
+        let normal =
+            EncodingPlan::resolve(&registry, &OTLP_ENCODING, EncodePolicy::default()).unwrap();
         assert!(
             !service
                 .encode_bytes(&mut records.clone(), &normal)

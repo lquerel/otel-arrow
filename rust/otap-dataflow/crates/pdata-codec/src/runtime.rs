@@ -104,11 +104,7 @@ impl CodecService {
 
     /// Decodes admitted bytes through a lazily reused decoder instance.
     pub fn decode(&self, encoded: &EncodedPdata) -> Result<OtapArrowRecords, CodecError> {
-        self.decode_parts(
-            encoded.codec(),
-            encoded.signal_type(),
-            encoded.bytes(),
-        )
+        self.decode_parts(encoded.codec(), encoded.signal_type(), encoded.bytes())
     }
 
     /// Decodes encoded parts without constructing an envelope.
