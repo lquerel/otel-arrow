@@ -15,11 +15,11 @@ linkme.workspace = true
 otel-arrow-dfe-config.workspace = true
 otel-arrow-dfe-pdata.workspace = true
 otel-arrow-dfe-pdata-views.workspace = true
+prost.workspace = true
 thiserror.workspace = true
 
 [dev-dependencies]
 otel-arrow-dfe-pdata = { workspace = true, features = ["testing"] }
-prost.workspace = true
 
 [features]
 testing = []
