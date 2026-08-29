@@ -194,3 +194,9 @@ Run `cargo xtask check` before submitting a pull request.
 The built-in OTLP codec is the reference implementation for a codec supporting
 decoding, encoding, borrowed views, stateless item counting, reusable buffers,
 native batching, and all three telemetry signals.
+
+The
+[syslog/CEF codec](../core-nodes/src/receivers/syslog_cef_receiver/codec.rs)
+is a decode-only example. Its receiver emits independently decodable framed
+batches, its decoder materializes native log records only when required, and
+its native batcher merges frames without parsing their syslog contents.
