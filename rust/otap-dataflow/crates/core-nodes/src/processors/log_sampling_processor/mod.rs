@@ -305,6 +305,9 @@ mod tests {
     #[allow(unsafe_code)]
     #[linkme::distributed_slice(PDATA_CODEC_FACTORIES)]
     static TEST_CODEC: PdataCodecRegistration = PdataCodecRegistration {
+        provider: otel_arrow_dfe_pdata::codec::CodecProviderId::new(
+            "org.opentelemetry.test.log-sampling",
+        ),
         count_items: None,
         metadata: &TEST_CODEC_METADATA,
         create: || Box::new(OtlpCodec::default()),

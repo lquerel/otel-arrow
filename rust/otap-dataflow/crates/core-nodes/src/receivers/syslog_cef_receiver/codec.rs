@@ -422,6 +422,9 @@ static SYSLOG_CEF_METADATA: PdataCodecMetadata = PdataCodecMetadata {
 #[allow(unsafe_code)]
 #[distributed_slice(PDATA_CODEC_FACTORIES)]
 static SYSLOG_CEF_CODEC: PdataCodecRegistration = PdataCodecRegistration {
+    provider: otel_arrow_dfe_pdata::codec::CodecProviderId::new(
+        "org.opentelemetry.syslog-cef.reference",
+    ),
     metadata: &SYSLOG_CEF_METADATA,
     create: || Box::<SyslogCefCodec>::default(),
     count_items: Some(count_items),

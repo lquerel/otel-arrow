@@ -49,6 +49,7 @@ pub static RECORDSET_KQL_PROCESSOR_FACTORY: ProcessorFactory<OtapPdata> = Proces
 /// KQL processor that applies KQL queries to telemetry data
 pub struct RecordsetKqlProcessor {
     config: RecordsetKqlProcessorConfig,
+    otlp_encoding: EncodingPlan,
     pipeline: BridgePipeline,
     compute_duration: ComputeDuration,
 }
@@ -81,6 +82,11 @@ impl RecordsetKqlProcessor {
 
         Ok(Self {
             config,
+            otlp_encoding: EncodingPlan::otlp().map_err(|error| {
+                ConfigError::InvalidUserConfig {
+                    error: error.to_string(),
+                }
+            })?,
             pipeline,
             compute_duration,
         })
@@ -152,7 +158,7 @@ impl RecordsetKqlProcessor {
         // Extract context and payload, then encode through runtime-owned codec state.
         let (ctx, mut payload) = data.into_parts();
         let otlp_bytes = effect_handler
-            .encode_owned(&mut payload, &EncodingPlan::OTLP)
+            .encode_owned(&mut payload, &self.otlp_encoding)
             .await?;
 
         // Process based on signal type (timed).

@@ -550,6 +550,7 @@ fn read_to_end_limited<R: std::io::Read>(
 
 #[derive(Clone)]
 struct HttpHandler {
+    codec: otel_arrow_dfe_pdata::codec::ResolvedCodec,
     effect_handler: EffectHandler<OtapPdata>,
     ack_registry: AckRegistry,
     metrics: Arc<Mutex<OtlpReceiverMetrics>>,
@@ -781,12 +782,10 @@ impl HttpHandler {
                 Context::default()
             };
 
-            let payload = otel_arrow_dfe_pdata::codec::ResolvedCodec::OTLP
-                .admit(signal, body)
-                .map_err(|_| {
-                    self.record_rejection(ReceiverRejectionErrorType::InvalidRequest);
-                    unsupported_media_type()
-                })?;
+            let payload = self.codec.admit(signal, body).map_err(|_| {
+                self.record_rejection(ReceiverRejectionErrorType::InvalidRequest);
+                unsupported_media_type()
+            })?;
 
             let mut pdata = OtapPdata::new(context, payload.into());
             pdata.set_peer_addr(self.peer_addr);
@@ -948,6 +947,8 @@ pub async fn serve(
     global_semaphore: Option<Arc<Semaphore>>,
     shutdown: CancellationToken,
 ) -> std::io::Result<()> {
+    let codec = otel_arrow_dfe_pdata::codec::ResolvedCodec::otlp()
+        .map_err(|error| std::io::Error::other(error.to_string()))?;
     let listener = effect_handler
         .tcp_listener(settings.listening_addr)
         .map_err(|e| std::io::Error::other(e.to_string()))?;
@@ -995,6 +996,7 @@ pub async fn serve(
                 };
 
                 let handler = HttpHandler {
+                    codec,
                     effect_handler: effect_handler.clone(),
                     ack_registry: ack_registry.clone(),
                     metrics: metrics.clone(),

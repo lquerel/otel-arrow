@@ -59,7 +59,7 @@ pub use otel_arrow_dfe_pdata::batching::BatchSizer as Sizer;
 use otel_arrow_dfe_pdata::batching::{BatchPlan, BatchProfile, BatchingOutput, PdataFormat};
 #[cfg(test)]
 use otel_arrow_dfe_pdata::codec::CodecState;
-use otel_arrow_dfe_pdata::codec::registered_codecs;
+use otel_arrow_dfe_pdata::codec::{PdataEncoding, registered_codecs};
 use otel_arrow_dfe_pdata::{OtapPayload, error::Error as PDataError};
 #[cfg(test)]
 use otel_arrow_dfe_pdata::{OtlpProtoBytes, TryIntoWithOptions};
@@ -247,7 +247,7 @@ impl TryFrom<ConfigInput> for Config {
             let format = PdataFormat::resolve(&name).map_err(|error| error.to_string())?;
             let canonical = format.name().to_owned();
             if (format == PdataFormat::OTAP && input.otap.is_some())
-                || (format == PdataFormat::OTLP && input.otlp.is_some())
+                || (format.name() == PdataEncoding::OTLP.as_str() && input.otlp.is_some())
                 || codecs.insert(canonical.clone(), profile).is_some()
             {
                 return Err(format!("duplicate batching profile for {canonical}"));
@@ -386,7 +386,7 @@ impl Config {
         if format == PdataFormat::OTAP {
             return (&self.otap).into();
         }
-        if format == PdataFormat::OTLP {
+        if format.name() == PdataEncoding::OTLP.as_str() {
             return (&self.otlp).into();
         }
         let mut default = format.default_profile();
@@ -407,11 +407,13 @@ impl Config {
 
     fn plans(&self) -> Result<Vec<(PdataFormat, BatchPlan)>, ConfigError> {
         let formats = if self.format == BatchingFormat::Preserve {
-            let mut formats = vec![PdataFormat::OTAP, PdataFormat::OTLP];
+            let otlp = PdataFormat::otlp().map_err(config_error)?;
+            let mut formats = vec![PdataFormat::OTAP, otlp];
             let mut extra: Vec<_> = registered_codecs()
+                .map_err(config_error)?
                 .filter(|codec| codec.metadata().can_decode)
                 .map(PdataFormat::encoded)
-                .filter(|format| *format != PdataFormat::OTLP)
+                .filter(|format| *format != otlp)
                 .collect();
             extra.sort_by_key(|format| format.name());
             formats.extend(extra);
@@ -419,7 +421,7 @@ impl Config {
         } else {
             vec![match &self.format {
                 BatchingFormat::Otap => PdataFormat::OTAP,
-                BatchingFormat::Otlp => PdataFormat::OTLP,
+                BatchingFormat::Otlp => PdataFormat::otlp().map_err(config_error)?,
                 BatchingFormat::Codec(name) => PdataFormat::resolve(name).map_err(config_error)?,
                 BatchingFormat::Preserve => unreachable!(),
             }]
@@ -680,7 +682,7 @@ impl BatchProcessor {
             let index = existing.unwrap_or_else(|| {
                 if source == PdataFormat::OTAP {
                     0
-                } else if source == PdataFormat::OTLP {
+                } else if source.name() == PdataEncoding::OTLP.as_str() {
                     1
                 } else {
                     formats.len()
@@ -3227,7 +3229,10 @@ mod tests {
                     1,
                     "byte min_size should trigger an immediate size flush"
                 );
-                assert_eq!(outputs[0].payload_ref().format(), PdataFormat::OTLP);
+                assert_eq!(
+                    outputs[0].payload_ref().format(),
+                    PdataFormat::otlp().expect("selected OTLP format")
+                );
 
                 let output_messages: Vec<_> = outputs.iter().map(otap_pdata_to_message).collect();
                 assert_equivalent(&[logs], &output_messages);
@@ -3410,7 +3415,10 @@ mod tests {
                     if output.payload_ref().format() == PdataFormat::OTAP {
                         has_otap = true;
                     } else {
-                        assert_eq!(output.payload_ref().format(), PdataFormat::OTLP);
+                        assert_eq!(
+                            output.payload_ref().format(),
+                            PdataFormat::otlp().expect("selected OTLP format")
+                        );
                         has_otlp = true;
                     }
                 }

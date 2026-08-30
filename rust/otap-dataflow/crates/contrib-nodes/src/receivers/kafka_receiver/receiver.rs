@@ -192,6 +192,7 @@ impl TopicRegistry {
 /// offset skipping when acknowledgements arrive out-of-order from the downstream pipeline.
 pub struct KafkaReceiver {
     config: KafkaReceiverConfig,
+    otlp_codec: ResolvedCodec,
     metrics: KafkaReceiverMetrics,
     /// Per-offset tracker. Only active when auto-commit is disabled.
     offset_tracker: OffsetTracker,
@@ -289,6 +290,9 @@ impl KafkaReceiver {
 
         Ok(Self {
             config,
+            otlp_codec: ResolvedCodec::otlp().map_err(|error| ConfigError::InvalidUserConfig {
+                error: error.to_string(),
+            })?,
             metrics,
             offset_tracker: OffsetTracker::new(),
             rebalance_state,
@@ -367,6 +371,7 @@ impl KafkaReceiver {
         })?;
 
         let extractors = self.config.resource_attrs_from_headers();
+        let otlp_codec = self.otlp_codec;
 
         // Route the topic to the correct signal decoder. Supports both literal
         // topic names and regex patterns (prefixed with `^`), exclude patterns,
@@ -383,9 +388,9 @@ impl KafkaReceiver {
                     extractors,
                     data,
                     message_format,
-                    HeaderExtractions::apply_otlp_traces,
+                    |extractions, data| extractions.apply_otlp_traces(data, otlp_codec),
                     HeaderExtractions::apply_otap_traces,
-                    decode_traces_payload,
+                    |data, format| decode_traces_payload(data, format, otlp_codec),
                 )
                 .map_err(KafkaReceiverError::TracesDecode)
             }
@@ -400,9 +405,9 @@ impl KafkaReceiver {
                     extractors,
                     data,
                     message_format,
-                    HeaderExtractions::apply_otlp_metrics,
+                    |extractions, data| extractions.apply_otlp_metrics(data, otlp_codec),
                     HeaderExtractions::apply_otap_metrics,
-                    decode_metrics_payload,
+                    |data, format| decode_metrics_payload(data, format, otlp_codec),
                 )
                 .map_err(KafkaReceiverError::MetricsDecode)
             }
@@ -417,9 +422,9 @@ impl KafkaReceiver {
                     extractors,
                     data,
                     message_format,
-                    HeaderExtractions::apply_otlp_logs,
+                    |extractions, data| extractions.apply_otlp_logs(data, otlp_codec),
                     HeaderExtractions::apply_otap_logs,
-                    decode_logs_payload,
+                    |data, format| decode_logs_payload(data, format, otlp_codec),
                 )
                 .map_err(KafkaReceiverError::LogsDecode)
             }
@@ -1485,11 +1490,12 @@ fn decode_calldata(calldata: &CallData) -> (u32, i32, i64, u64) {
 fn decode_traces_payload(
     data: &[u8],
     message_format: MessageFormat,
+    otlp_codec: ResolvedCodec,
 ) -> Result<OtapPdata, EngineError> {
     match message_format {
         MessageFormat::OtlpProto => Ok(OtapPdata::new(
             Context::default(),
-            ResolvedCodec::OTLP
+            otlp_codec
                 .admit(SignalType::Traces, Bytes::copy_from_slice(data))
                 .map_err(|error| EngineError::PdataConversionError {
                     error: error.to_string(),
@@ -1520,11 +1526,12 @@ fn decode_traces_payload(
 fn decode_metrics_payload(
     data: &[u8],
     message_format: MessageFormat,
+    otlp_codec: ResolvedCodec,
 ) -> Result<OtapPdata, EngineError> {
     match message_format {
         MessageFormat::OtlpProto => Ok(OtapPdata::new(
             Context::default(),
-            ResolvedCodec::OTLP
+            otlp_codec
                 .admit(SignalType::Metrics, Bytes::copy_from_slice(data))
                 .map_err(|error| EngineError::PdataConversionError {
                     error: error.to_string(),
@@ -1555,11 +1562,12 @@ fn decode_metrics_payload(
 fn decode_logs_payload(
     data: &[u8],
     message_format: MessageFormat,
+    otlp_codec: ResolvedCodec,
 ) -> Result<OtapPdata, EngineError> {
     match message_format {
         MessageFormat::OtlpProto => Ok(OtapPdata::new(
             Context::default(),
-            ResolvedCodec::OTLP
+            otlp_codec
                 .admit(SignalType::Logs, Bytes::copy_from_slice(data))
                 .map_err(|error| EngineError::PdataConversionError {
                     error: error.to_string(),
@@ -1594,15 +1602,20 @@ fn decode_logs_payload(
 /// used to decode **and** inject the attributes in a single pass. When no
 /// extractors are configured (or none matched) the plain `decode` function is
 /// used instead.
-fn decode_with_extractions(
+fn decode_with_extractions<ApplyOtlp, ApplyOtap, Decode>(
     kafka_message: &BorrowedMessage<'_>,
     extractors: &HashMap<String, HeaderExtraction>,
     data: &[u8],
     message_format: MessageFormat,
-    apply_otlp: fn(&HeaderExtractions, &[u8]) -> Result<OtapPdata, EngineError>,
-    apply_otap: fn(&HeaderExtractions, &[u8]) -> Result<OtapPdata, EngineError>,
-    decode: fn(&[u8], MessageFormat) -> Result<OtapPdata, EngineError>,
-) -> Result<OtapPdata, EngineError> {
+    apply_otlp: ApplyOtlp,
+    apply_otap: ApplyOtap,
+    decode: Decode,
+) -> Result<OtapPdata, EngineError>
+where
+    ApplyOtlp: FnOnce(&HeaderExtractions, &[u8]) -> Result<OtapPdata, EngineError>,
+    ApplyOtap: FnOnce(&HeaderExtractions, &[u8]) -> Result<OtapPdata, EngineError>,
+    Decode: FnOnce(&[u8], MessageFormat) -> Result<OtapPdata, EngineError>,
+{
     if !extractors.is_empty() {
         let extractions = match message_format {
             MessageFormat::OtlpProto => HeaderExtractions::otlp(kafka_message, extractors),
@@ -1878,7 +1891,8 @@ mod tests {
         request.encode(&mut buf).expect("encode OTLP request");
 
         // Convert OTLP bytes -> OtapPayload -> OtapArrowRecords
-        let payload: OtapPayload = ResolvedCodec::OTLP
+        let payload: OtapPayload = ResolvedCodec::otlp()
+            .unwrap()
             .admit(SignalType::Traces, Bytes::from(buf))
             .expect("admit OTLP traces")
             .into();
@@ -6046,7 +6060,12 @@ mod tests {
         let mut bytes = vec![];
         req.encode(&mut bytes).expect("encode");
 
-        let pdata = decode_traces_payload(&bytes, MessageFormat::OtlpProto).expect("should decode");
+        let pdata = decode_traces_payload(
+            &bytes,
+            MessageFormat::OtlpProto,
+            ResolvedCodec::otlp().expect("selected OTLP codec"),
+        )
+        .expect("should decode");
         assert_eq!(encoded_otlp(&pdata, SignalType::Traces), bytes.as_slice());
     }
 
@@ -6058,8 +6077,12 @@ mod tests {
         let mut bytes = vec![];
         req.encode(&mut bytes).expect("encode");
 
-        let pdata =
-            decode_metrics_payload(&bytes, MessageFormat::OtlpProto).expect("should decode");
+        let pdata = decode_metrics_payload(
+            &bytes,
+            MessageFormat::OtlpProto,
+            ResolvedCodec::otlp().expect("selected OTLP codec"),
+        )
+        .expect("should decode");
         assert_eq!(encoded_otlp(&pdata, SignalType::Metrics), bytes.as_slice());
     }
 
@@ -6071,7 +6094,12 @@ mod tests {
         let mut bytes = vec![];
         req.encode(&mut bytes).expect("encode");
 
-        let pdata = decode_logs_payload(&bytes, MessageFormat::OtlpProto).expect("should decode");
+        let pdata = decode_logs_payload(
+            &bytes,
+            MessageFormat::OtlpProto,
+            ResolvedCodec::otlp().expect("selected OTLP codec"),
+        )
+        .expect("should decode");
         assert_eq!(encoded_otlp(&pdata, SignalType::Logs), bytes.as_slice());
     }
 
@@ -6082,8 +6110,12 @@ mod tests {
     fn decode_traces_payload_otap_proto() {
         let bytes = create_traces_with_spans_otap_bytes();
 
-        let mut pdata =
-            decode_traces_payload(&bytes, MessageFormat::OtapProto).expect("should decode");
+        let mut pdata = decode_traces_payload(
+            &bytes,
+            MessageFormat::OtapProto,
+            ResolvedCodec::otlp().expect("selected OTLP codec"),
+        )
+        .expect("should decode");
         let payload: OtapPayload = pdata.take_payload();
         assert!(
             matches!(into_otap(payload), OtapArrowRecords::Traces(_)),
@@ -6098,8 +6130,12 @@ mod tests {
     fn decode_metrics_payload_otap_proto() {
         let bytes = create_metrics_otap_arrow_records_bytes();
 
-        let mut pdata =
-            decode_metrics_payload(&bytes, MessageFormat::OtapProto).expect("should decode");
+        let mut pdata = decode_metrics_payload(
+            &bytes,
+            MessageFormat::OtapProto,
+            ResolvedCodec::otlp().expect("selected OTLP codec"),
+        )
+        .expect("should decode");
         let payload: OtapPayload = pdata.take_payload();
         assert!(
             matches!(into_otap(payload), OtapArrowRecords::Metrics(_)),
@@ -6114,8 +6150,12 @@ mod tests {
     fn decode_logs_payload_otap_proto() {
         let bytes = create_logs_otap_arrow_records_bytes();
 
-        let mut pdata =
-            decode_logs_payload(&bytes, MessageFormat::OtapProto).expect("should decode");
+        let mut pdata = decode_logs_payload(
+            &bytes,
+            MessageFormat::OtapProto,
+            ResolvedCodec::otlp().expect("selected OTLP codec"),
+        )
+        .expect("should decode");
         let payload: OtapPayload = pdata.take_payload();
         assert!(
             matches!(into_otap(payload), OtapArrowRecords::Logs(_)),
@@ -6129,7 +6169,11 @@ mod tests {
     /// payload is a recoverable per-message error.
     #[test]
     fn decode_traces_payload_invalid_otap_bytes_returns_error() {
-        let result = decode_traces_payload(b"not valid protobuf", MessageFormat::OtapProto);
+        let result = decode_traces_payload(
+            b"not valid protobuf",
+            MessageFormat::OtapProto,
+            ResolvedCodec::otlp().expect("selected OTLP codec"),
+        );
         assert!(result.is_err());
     }
 
@@ -6144,7 +6188,12 @@ mod tests {
         let mut bytes = vec![];
         req.encode(&mut bytes).expect("encode");
 
-        let pdata = decode_traces_payload(&bytes, MessageFormat::OtlpProto).expect("decode");
+        let pdata = decode_traces_payload(
+            &bytes,
+            MessageFormat::OtlpProto,
+            ResolvedCodec::otlp().expect("selected OTLP codec"),
+        )
+        .expect("decode");
         let proto = encoded_otlp(&pdata, SignalType::Traces);
         assert_eq!(proto, &bytes);
     }

@@ -188,6 +188,7 @@ impl From<ViewConfig> for MetricView {
 /// A receiver that emits internal logs and metrics as OTLP data.
 pub struct InternalTelemetryReceiver {
     config: Config,
+    codec: ResolvedCodec,
     /// Internal telemetry settings obtained from the pipeline context during construction.
     /// Contains the logs receiver channel, pre-encoded resource bytes, and registry handle.
     internal_telemetry: otel_arrow_dfe_telemetry::InternalTelemetrySettings,
@@ -228,12 +229,13 @@ pub static INTERNAL_TELEMETRY_RECEIVER: ReceiverFactory<OtapPdata> = ReceiverFac
 impl InternalTelemetryReceiver {
     /// Create a new receiver with the given configuration and internal telemetry settings.
     #[must_use]
-    pub const fn new_with_telemetry(
+    pub fn new_with_telemetry(
         config: Config,
         internal_telemetry: otel_arrow_dfe_telemetry::InternalTelemetrySettings,
     ) -> Self {
         Self {
             config,
+            codec: ResolvedCodec::otlp().expect("the selected codec registry must contain OTLP"),
             internal_telemetry,
         }
     }
@@ -324,6 +326,7 @@ impl local::Receiver<OtapPdata> for InternalTelemetryReceiver {
         effect_handler: local::EffectHandler<OtapPdata>,
     ) -> Result<TerminalState, Error> {
         let internal = self.internal_telemetry.clone();
+        let codec = self.codec;
         let mut scope_cache = ScopeToBytesMap::new(internal.registry.clone());
         let logs_enabled = self.config.logs_enabled();
         let metrics_enabled = self.config.metrics_enabled();
@@ -369,6 +372,7 @@ impl local::Receiver<OtapPdata> for InternalTelemetryReceiver {
                                 logs_enabled,
                                 &mut scope_cache,
                                 metrics_encoder.as_ref(),
+                                codec,
                                 deadline,
                             ).await?;
                             effect_handler.notify_receiver_drained().await?;
@@ -382,6 +386,7 @@ impl local::Receiver<OtapPdata> for InternalTelemetryReceiver {
                                 logs_enabled,
                                 &mut scope_cache,
                                 metrics_encoder.as_ref(),
+                                codec,
                                 deadline,
                             ).await?;
                             return Ok(TerminalState::new::<[MetricSetSnapshot; 0]>(deadline, []));
@@ -415,6 +420,7 @@ impl local::Receiver<OtapPdata> for InternalTelemetryReceiver {
                         &effect_handler,
                         &internal.registry,
                         metrics_encoder.as_ref(),
+                        codec,
                     )));
                 }
 
@@ -430,6 +436,7 @@ impl local::Receiver<OtapPdata> for InternalTelemetryReceiver {
                                 log_event,
                                 &internal.resource_field_bytes,
                                 &mut scope_cache,
+                                codec,
                             ).await?;
                         }
                         Ok(ObservedEvent::Engine(_)) => {
@@ -453,6 +460,7 @@ impl InternalTelemetryReceiver {
         logs_enabled: bool,
         scope_cache: &mut ScopeToBytesMap,
         encoder: Option<&MetricsOtlpEncoder>,
+        codec: ResolvedCodec,
         deadline: std::time::Instant,
     ) -> Result<(), Error> {
         if logs_enabled {
@@ -466,14 +474,21 @@ impl InternalTelemetryReceiver {
                         log_event,
                         &internal.resource_field_bytes,
                         scope_cache,
+                        codec,
                     )
                     .await?;
                 }
             }
         }
 
-        Self::process_metric_batch_until(effect_handler, &internal.registry, encoder, deadline)
-            .await
+        Self::process_metric_batch_until(
+            effect_handler,
+            &internal.registry,
+            encoder,
+            codec,
+            deadline,
+        )
+        .await
     }
 
     /// Attempts one final metric drain within the pipeline shutdown deadline.
@@ -484,11 +499,12 @@ impl InternalTelemetryReceiver {
         effect_handler: &local::EffectHandler<OtapPdata>,
         registry: &TelemetryRegistryHandle,
         encoder: Option<&MetricsOtlpEncoder>,
+        codec: ResolvedCodec,
         deadline: std::time::Instant,
     ) -> Result<(), Error> {
         tokio::time::timeout_at(
             Instant::from_std(deadline),
-            Self::process_metric_batch(effect_handler, registry, encoder),
+            Self::process_metric_batch(effect_handler, registry, encoder, codec),
         )
         .await
         .map_err(|_| Error::InternalError {
@@ -506,6 +522,7 @@ impl InternalTelemetryReceiver {
         effect_handler: &local::EffectHandler<OtapPdata>,
         registry: &TelemetryRegistryHandle,
         encoder: Option<&MetricsOtlpEncoder>,
+        codec: ResolvedCodec,
     ) -> Result<(), Error> {
         registry
             .flush_pending_metrics()
@@ -529,7 +546,7 @@ impl InternalTelemetryReceiver {
             return Ok(());
         };
 
-        let encoded = ResolvedCodec::OTLP
+        let encoded = codec
             .admit(SignalType::Metrics, metrics.replace_bytes(Bytes::new()))
             .map_err(|error| Error::PdataConversionError {
                 error: error.to_string(),
@@ -547,6 +564,7 @@ impl InternalTelemetryReceiver {
         log_event: LogEvent,
         resource_field_bytes: &Bytes,
         scope_cache: &mut ScopeToBytesMap,
+        codec: ResolvedCodec,
     ) -> Result<(), Error> {
         let mut buf = ProtoBuffer::with_capacity(512);
 
@@ -554,7 +572,7 @@ impl InternalTelemetryReceiver {
 
         let pdata = OtapPdata::new(
             Context::default(),
-            ResolvedCodec::OTLP
+            codec
                 .admit(SignalType::Logs, buf.into_bytes())
                 .map_err(|error| Error::PdataConversionError {
                     error: error.to_string(),
@@ -605,7 +623,7 @@ mod tests {
     fn decode_metric_value(pdata: OtapPdata) -> i64 {
         assert_eq!(
             pdata.payload_ref().format(),
-            otel_arrow_dfe_pdata::batching::PdataFormat::OTLP
+            otel_arrow_dfe_pdata::batching::PdataFormat::otlp().expect("selected OTLP format")
         );
         assert_eq!(pdata.signal_type(), SignalType::Metrics);
         let bytes = pdata
@@ -840,6 +858,7 @@ mod tests {
                 &effect_handler,
                 &registry,
                 Some(&encoder),
+                ResolvedCodec::otlp().expect("selected OTLP codec"),
             )
             .await
             .expect_err("closed downstream must fail delivery");
@@ -882,9 +901,14 @@ mod tests {
                 metrics_reporter,
             );
 
-            InternalTelemetryReceiver::process_metric_batch(&effect_handler, &registry, None)
-                .await
-                .expect("disabled metrics must not access the closed downstream");
+            InternalTelemetryReceiver::process_metric_batch(
+                &effect_handler,
+                &registry,
+                None,
+                ResolvedCodec::otlp().expect("selected OTLP codec"),
+            )
+            .await
+            .expect("disabled metrics must not access the closed downstream");
             assert!(
                 registry.drain_metric_export_batch().is_empty(),
                 "disabled metric output must still commit the export accumulator"
@@ -939,7 +963,8 @@ mod tests {
             output_tx
                 .send(OtapPdata::new(
                     Context::default(),
-                    ResolvedCodec::OTLP
+                    ResolvedCodec::otlp()
+                        .unwrap()
                         .admit(SignalType::Metrics, Bytes::new())
                         .unwrap()
                         .into(),

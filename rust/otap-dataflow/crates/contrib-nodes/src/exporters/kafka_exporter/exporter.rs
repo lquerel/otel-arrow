@@ -302,6 +302,7 @@ impl InFlightSends {
 /// - The exporter does not currently fail or stop the pipeline on individual export errors.
 pub struct KafkaExporter {
     config: KafkaExporterConfig,
+    otlp_encoding: EncodingPlan,
     #[cfg(feature = "aws")]
     producer: ExporterFutureProducer<ProducerClientContext>,
     #[cfg(not(feature = "aws"))]
@@ -396,6 +397,8 @@ impl KafkaExporter {
 
         Ok(Self {
             config,
+            otlp_encoding: EncodingPlan::otlp()
+                .map_err(|error| KafkaExporterError::Configuration(error.to_string()))?,
             producer,
             pdata_producer: PdataProducer::default(),
             metrics: KafkaExporterMetrics::register(&pipeline_ctx),
@@ -646,7 +649,7 @@ impl KafkaExporter {
             (MessageFormat::OtlpProto, Some(effect_handler)) => {
                 let mut encoding_payload = payload.clone();
                 effect_handler
-                    .encode_owned(&mut encoding_payload, &EncodingPlan::OTLP)
+                    .encode_owned(&mut encoding_payload, &self.otlp_encoding)
                     .await
                     .map(|bytes| bytes.to_vec())
                     .map_err(|error| KafkaExporterError::OtlpConversion(error.to_string()))

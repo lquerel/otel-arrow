@@ -67,6 +67,7 @@ pub const DEBUG_PROCESSOR_URN: &str = "urn:otel:processor:debug";
 /// processor that outputs all data received to stdout
 pub struct DebugProcessor {
     config: Config,
+    encoding_plan: otel_arrow_dfe_pdata::codec::EncodingPlan,
     metrics: MeasurementMetricSet<DebugMetrics>,
     compute_duration: ComputeDuration,
     sampler: Sampler,
@@ -118,6 +119,8 @@ impl DebugProcessor {
         let sampler = Sampler::new(config.sampling());
         DebugProcessor {
             config,
+            encoding_plan: otel_arrow_dfe_pdata::codec::EncodingPlan::otlp()
+                .expect("the selected codec registry must contain an OTLP encoder"),
             metrics,
             compute_duration,
             sampler,
@@ -135,6 +138,11 @@ impl DebugProcessor {
         let sampler = Sampler::new(config.sampling());
         Ok(DebugProcessor {
             config,
+            encoding_plan: otel_arrow_dfe_pdata::codec::EncodingPlan::otlp().map_err(|error| {
+                ConfigError::InvalidUserConfig {
+                    error: error.to_string(),
+                }
+            })?,
             metrics,
             compute_duration,
             sampler,
@@ -351,10 +359,7 @@ impl local::Processor<OtapPdata> for DebugProcessor {
                 let (_context, mut payload) = pdata.into_parts();
                 let signal = payload.signal_type();
                 let bytes = effect_handler
-                    .encode_owned(
-                        &mut payload,
-                        &otel_arrow_dfe_pdata::codec::EncodingPlan::OTLP,
-                    )
+                    .encode_owned(&mut payload, &self.encoding_plan)
                     .await?;
                 let otlp_bytes = OtlpProtoBytes::new_from_bytes(signal, bytes);
 

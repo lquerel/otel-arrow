@@ -108,6 +108,7 @@ static ENCODE_METADATA: PdataCodecMetadata = PdataCodecMetadata {
 #[allow(unsafe_code)]
 #[linkme::distributed_slice(PDATA_CODEC_FACTORIES)]
 static FALLBACK: PdataCodecRegistration = PdataCodecRegistration {
+    provider: super::super::codec::CodecProviderId::new("org.opentelemetry.test.fallback"),
     count_items: None,
     metadata: &FALLBACK_METADATA,
     create: || Box::<TestCodec>::default(),
@@ -115,6 +116,7 @@ static FALLBACK: PdataCodecRegistration = PdataCodecRegistration {
 #[allow(unsafe_code)]
 #[linkme::distributed_slice(PDATA_CODEC_FACTORIES)]
 static DECODE: PdataCodecRegistration = PdataCodecRegistration {
+    provider: super::super::codec::CodecProviderId::new("org.opentelemetry.test.decode"),
     count_items: None,
     metadata: &DECODE_METADATA,
     create: || Box::<TestCodec>::default(),
@@ -122,6 +124,7 @@ static DECODE: PdataCodecRegistration = PdataCodecRegistration {
 #[allow(unsafe_code)]
 #[linkme::distributed_slice(PDATA_CODEC_FACTORIES)]
 static NATIVE: PdataCodecRegistration = PdataCodecRegistration {
+    provider: super::super::codec::CodecProviderId::new("org.opentelemetry.test.native"),
     count_items: None,
     metadata: &NATIVE_METADATA,
     create: || Box::<TestCodec>::default(),
@@ -129,6 +132,7 @@ static NATIVE: PdataCodecRegistration = PdataCodecRegistration {
 #[allow(unsafe_code)]
 #[linkme::distributed_slice(PDATA_CODEC_FACTORIES)]
 static ENCODE: PdataCodecRegistration = PdataCodecRegistration {
+    provider: super::super::codec::CodecProviderId::new("org.opentelemetry.test.encode"),
     count_items: None,
     metadata: &ENCODE_METADATA,
     create: || Box::<TestCodec>::default(),

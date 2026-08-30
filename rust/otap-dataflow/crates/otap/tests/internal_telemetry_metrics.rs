@@ -67,7 +67,10 @@ impl Exporter<OtapPdata> for CaptureExporter {
                 Message::Control(NodeControlMsg::Shutdown { .. }) => break,
                 Message::PData(data) => {
                     if let Some(bytes) = data.payload_ref().encoded_bytes() {
-                        assert_eq!(data.payload_ref().format(), PdataFormat::OTLP);
+                        assert_eq!(
+                            data.payload_ref().format(),
+                            PdataFormat::otlp().expect("selected OTLP format")
+                        );
                         assert_eq!(data.signal_type(), SignalType::Metrics);
                         let _ = self.sender.try_send(bytes.to_vec());
                     }

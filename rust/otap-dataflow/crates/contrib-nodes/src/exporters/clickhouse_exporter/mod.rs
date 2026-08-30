@@ -209,7 +209,7 @@ fn transform_raw_otlp_logs(
     transformer: &mut OtlpLogsTransformer,
 ) -> Option<Result<Option<arrow::array::RecordBatch>, error::ClickhouseExporterError>> {
     if payload.signal_type() == SignalType::Logs
-        && payload.format() == otel_arrow_dfe_pdata::batching::PdataFormat::OTLP
+        && payload.encoding() == Some(&otel_arrow_dfe_pdata::codec::PdataEncoding::OTLP)
     {
         Some(transformer.transform(payload.encoded_bytes().expect("OTLP view input")))
     } else {

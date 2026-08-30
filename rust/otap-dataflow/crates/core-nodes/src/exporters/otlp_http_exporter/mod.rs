@@ -89,6 +89,7 @@ const HTTP_BEARER_AUTH_EVENTS: BearerAuthEvents = BearerAuthEvents {
 /// Exporter that sends OTLP data via HTTP
 pub struct OtlpHttpExporter {
     config: Config,
+    encoding_plan: otel_arrow_dfe_pdata::codec::EncodingPlan,
     metrics: OtlpHttpExporterMetrics,
     /// Optional bearer token provider resolved from the
     /// `bearer_token_provider` capability. When bound, a fresh
@@ -230,6 +231,11 @@ impl OtlpHttpExporter {
 
         Ok(Self {
             config,
+            encoding_plan: otel_arrow_dfe_pdata::codec::EncodingPlan::otlp().map_err(|error| {
+                ConfigError::InvalidUserConfig {
+                    error: error.to_string(),
+                }
+            })?,
             metrics,
             token_provider,
         })
@@ -479,16 +485,12 @@ impl Exporter<OtapPdata> for OtlpHttpExporter {
 
                     let body = if let Some(method) = compression {
                         match effect_handler
-                            .with_encoded(
-                                &mut payload,
-                                &otel_arrow_dfe_pdata::codec::EncodingPlan::OTLP,
-                                |encoded| {
-                                    method.encode(encoded, &mut compressed_buffer)?;
-                                    Ok::<Bytes, std::io::Error>(Bytes::copy_from_slice(
-                                        &compressed_buffer,
-                                    ))
-                                },
-                            )
+                            .with_encoded(&mut payload, &self.encoding_plan, |encoded| {
+                                method.encode(encoded, &mut compressed_buffer)?;
+                                Ok::<Bytes, std::io::Error>(Bytes::copy_from_slice(
+                                    &compressed_buffer,
+                                ))
+                            })
                             .await
                         {
                             Ok(Ok(body)) => body,
@@ -523,10 +525,7 @@ impl Exporter<OtapPdata> for OtlpHttpExporter {
                         }
                     } else {
                         match effect_handler
-                            .encode_owned(
-                                &mut payload,
-                                &otel_arrow_dfe_pdata::codec::EncodingPlan::OTLP,
-                            )
+                            .encode_owned(&mut payload, &self.encoding_plan)
                             .await
                         {
                             Ok(body) => body,
@@ -1595,6 +1594,8 @@ mod test {
         ExporterWrapper::local(
             OtlpHttpExporter {
                 config,
+                encoding_plan: otel_arrow_dfe_pdata::codec::EncodingPlan::otlp()
+                    .expect("selected OTLP encoding plan"),
                 metrics: OtlpHttpExporterMetrics::register(&pipeline_ctx),
                 token_provider: Some(Box::new(provider)),
             },
@@ -2173,6 +2174,8 @@ mod test {
         let exporter = ExporterWrapper::local(
             OtlpHttpExporter {
                 config,
+                encoding_plan: otel_arrow_dfe_pdata::codec::EncodingPlan::otlp()
+                    .expect("selected OTLP encoding plan"),
                 metrics: OtlpHttpExporterMetrics::register(&pipeline_ctx),
                 token_provider: None,
             },

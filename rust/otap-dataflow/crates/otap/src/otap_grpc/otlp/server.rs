@@ -127,11 +127,12 @@ pub struct Settings {
 /// Tonic `Codec` implementation that returns the bytes of the serialized message
 struct OtlpBytesCodec {
     signal: SignalType,
+    codec: otel_arrow_dfe_pdata::codec::ResolvedCodec,
 }
 
 impl OtlpBytesCodec {
-    const fn new(signal: SignalType) -> Self {
-        Self { signal }
+    const fn new(signal: SignalType, codec: otel_arrow_dfe_pdata::codec::ResolvedCodec) -> Self {
+        Self { signal, codec }
     }
 }
 
@@ -147,7 +148,7 @@ impl Codec for OtlpBytesCodec {
     }
 
     fn decoder(&mut self) -> Self::Decoder {
-        OtlpBytesDecoder::new(self.signal)
+        OtlpBytesDecoder::new(self.signal, self.codec)
     }
 }
 
@@ -194,11 +195,12 @@ impl Encoder for OtlpResponseEncoder {
 /// Tonic codec `Decoder` implementation that decodes OtapBatch from protobuf request bytes
 struct OtlpBytesDecoder {
     signal: SignalType,
+    codec: otel_arrow_dfe_pdata::codec::ResolvedCodec,
 }
 
 impl OtlpBytesDecoder {
-    const fn new(signal: SignalType) -> Self {
-        Self { signal }
+    const fn new(signal: SignalType, codec: otel_arrow_dfe_pdata::codec::ResolvedCodec) -> Self {
+        Self { signal, codec }
     }
 }
 
@@ -210,7 +212,8 @@ impl Decoder for OtlpBytesDecoder {
     fn decode(&mut self, src: &mut DecodeBuf<'_>) -> Result<Option<Self::Item>, Self::Error> {
         let buf = src.chunk();
         let bytes = Bytes::copy_from_slice(buf);
-        let result = otel_arrow_dfe_pdata::codec::ResolvedCodec::OTLP
+        let result = self
+            .codec
             .admit(self.signal, bytes)
             .map_err(|error| Status::invalid_argument(error.to_string()))?;
         src.advance(buf.len());
@@ -222,8 +225,12 @@ impl Decoder for OtlpBytesDecoder {
 /// appropriate signal.  Note! This is an inexpensive call, called for
 /// each request instead of a Clone + Sync + Send trait binding that
 /// would require Arc<Mutex<_>>.
-fn new_grpc(signal: SignalType, settings: Settings) -> Grpc<OtlpBytesCodec> {
-    let codec = OtlpBytesCodec::new(signal);
+fn new_grpc(
+    signal: SignalType,
+    codec: otel_arrow_dfe_pdata::codec::ResolvedCodec,
+    settings: Settings,
+) -> Grpc<OtlpBytesCodec> {
+    let codec = OtlpBytesCodec::new(signal, codec);
     Grpc::new(codec).apply_compression_config(
         settings.request_compression_encodings,
         settings.response_compression_encodings,
@@ -355,6 +362,7 @@ fn unimplemented_resp() -> Response<Body> {
 /// common server functionality
 #[derive(Clone)]
 pub struct ServerCommon {
+    codec: otel_arrow_dfe_pdata::codec::ResolvedCodec,
     effect_handler: EffectHandler<OtapPdata>,
     state: Option<SharedState>,
     settings: Settings,
@@ -369,6 +377,8 @@ impl ServerCommon {
 
     fn new(effect_handler: EffectHandler<OtapPdata>, settings: &Settings) -> Self {
         Self {
+            codec: otel_arrow_dfe_pdata::codec::ResolvedCodec::otlp()
+                .expect("the selected codec registry must contain OTLP"),
             effect_handler,
             state: settings
                 .wait_for_result
@@ -404,7 +414,7 @@ impl tower_service::Service<Request<Body>> for LogsServiceServer {
         match req.uri().path() {
             super::LOGS_SERVICE_EXPORT_PATH => {
                 let common = self.common.clone();
-                let mut grpc = new_grpc(SignalType::Logs, common.settings);
+                let mut grpc = new_grpc(SignalType::Logs, common.codec, common.settings);
                 let service = OtapBatchService::new(common.effect_handler, common.state);
                 Box::pin(async move { Ok(grpc.unary(service, req).await) })
             }
@@ -447,7 +457,7 @@ impl tower_service::Service<Request<Body>> for MetricsServiceServer {
         match req.uri().path() {
             super::METRICS_SERVICE_EXPORT_PATH => {
                 let common = self.common.clone();
-                let mut grpc = new_grpc(SignalType::Metrics, common.settings);
+                let mut grpc = new_grpc(SignalType::Metrics, common.codec, common.settings);
                 let service = OtapBatchService::new(common.effect_handler, common.state);
                 Box::pin(async move { Ok(grpc.unary(service, req).await) })
             }
@@ -490,7 +500,7 @@ impl tower_service::Service<Request<Body>> for TraceServiceServer {
         match req.uri().path() {
             super::TRACE_SERVICE_EXPORT_PATH => {
                 let common = self.common.clone();
-                let mut grpc = new_grpc(SignalType::Traces, common.settings);
+                let mut grpc = new_grpc(SignalType::Traces, common.codec, common.settings);
                 let service = OtapBatchService::new(common.effect_handler, common.state);
                 Box::pin(async move { Ok(grpc.unary(service, req).await) })
             }
@@ -516,7 +526,15 @@ mod tests {
     #[tokio::test]
     async fn decoder_admits_encoded_otlp_for_all_signals() {
         for signal in [SignalType::Logs, SignalType::Metrics, SignalType::Traces] {
-            super::super::assert_encoded_decoder(OtlpBytesDecoder::new(signal), signal).await;
+            super::super::assert_encoded_decoder(
+                OtlpBytesDecoder::new(
+                    signal,
+                    otel_arrow_dfe_pdata::codec::ResolvedCodec::otlp()
+                        .expect("selected OTLP codec"),
+                ),
+                signal,
+            )
+            .await;
         }
     }
 }

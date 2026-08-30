@@ -53,7 +53,7 @@
 //! otlp_service_req.encode(&mut buf).unwrap();
 //!
 //! // Create a new OtapPayload from OTLP bytes
-//! let payload: OtapPayload = ResolvedCodec::OTLP
+//! let payload: OtapPayload = ResolvedCodec::otlp().expect("selected OTLP codec")
 //!     .admit(SignalType::Logs, Bytes::from(buf)).unwrap().into();
 //!
 //! // Convert to OTAP records
@@ -261,6 +261,10 @@ impl OtapPayloadDecodeError {
     }
 }
 
+fn selected_otlp() -> ResolvedCodec {
+    ResolvedCodec::otlp().expect("the selected codec registry must contain OTLP")
+}
+
 impl OtapPayload {
     /// Wraps payload data in a fresh `OtapPayload` with an uninitialized
     /// measurement cache.
@@ -272,7 +276,7 @@ impl OtapPayload {
     #[must_use]
     pub fn from_otlp(mut payload: OtlpProtoBytes) -> Self {
         Self::from_encoded(EncodedPdata::from_resolved(
-            ResolvedCodec::OTLP,
+            selected_otlp(),
             payload.signal_type(),
             payload.replace_bytes(Bytes::new()),
         ))
@@ -561,10 +565,10 @@ impl OtapPayload {
 
     /// Return an empty payload of a certain type.
     #[must_use]
-    pub const fn empty(signal: SignalType) -> Self {
+    pub fn empty(signal: SignalType) -> Self {
         Self {
             storage: PayloadStorage::Encoded(EncodedPdata::from_resolved(
-                ResolvedCodec::OTLP,
+                selected_otlp(),
                 signal,
                 Bytes::new(),
             )),
@@ -803,7 +807,7 @@ impl TryFromWithOptions<OtapPayload> for OtlpProtoBytes {
 
     fn try_from_with_options(value: OtapPayload, opts: EncodeOptions) -> Result<Self, Self::Error> {
         let signal = value.signal_type();
-        let plan = EncodingPlan::new(ResolvedCodec::OTLP, opts)?;
+        let plan = EncodingPlan::new(ResolvedCodec::otlp()?, opts)?;
         let encoded = value.into_encoded(&mut CodecState::default(), &plan)?;
         Ok(OtlpProtoBytes::new_from_bytes(signal, encoded.into_bytes()))
     }

@@ -223,13 +223,19 @@ struct OtlpBytesCodec {
     signal: SignalType,
     /// Whether to pre-reserve a context frame (when wait_for_result is on).
     preallocate_frame: bool,
+    codec: otel_arrow_dfe_pdata::codec::ResolvedCodec,
 }
 
 impl OtlpBytesCodec {
-    fn new(signal: SignalType, preallocate_frame: bool) -> Self {
+    fn new(
+        signal: SignalType,
+        preallocate_frame: bool,
+        codec: otel_arrow_dfe_pdata::codec::ResolvedCodec,
+    ) -> Self {
         Self {
             signal,
             preallocate_frame,
+            codec,
         }
     }
 }
@@ -246,7 +252,7 @@ impl Codec for OtlpBytesCodec {
     }
 
     fn decoder(&mut self) -> Self::Decoder {
-        OtlpBytesDecoder::new(self.signal, self.preallocate_frame)
+        OtlpBytesDecoder::new(self.signal, self.preallocate_frame, self.codec)
     }
 }
 
@@ -278,13 +284,19 @@ impl Encoder for OtlpResponseEncoder {
 struct OtlpBytesDecoder {
     signal: SignalType,
     preallocate_frame: bool,
+    codec: otel_arrow_dfe_pdata::codec::ResolvedCodec,
 }
 
 impl OtlpBytesDecoder {
-    fn new(signal: SignalType, preallocate_frame: bool) -> Self {
+    fn new(
+        signal: SignalType,
+        preallocate_frame: bool,
+        codec: otel_arrow_dfe_pdata::codec::ResolvedCodec,
+    ) -> Self {
         Self {
             signal,
             preallocate_frame,
+            codec,
         }
     }
 }
@@ -298,7 +310,8 @@ impl Decoder for OtlpBytesDecoder {
         let len = src.remaining();
         // Use copy_to_bytes so accepted requests copy once while advancing the buffer.
         let bytes = src.copy_to_bytes(len);
-        let result = otel_arrow_dfe_pdata::codec::ResolvedCodec::OTLP
+        let result = self
+            .codec
             .admit(self.signal, bytes)
             .map_err(|error| Status::invalid_argument(error.to_string()))?;
         let context = if self.preallocate_frame {
@@ -315,8 +328,12 @@ impl Decoder for OtlpBytesDecoder {
 /// appropriate signal.  Note! This is an inexpensive call, called for
 /// each request instead of a Clone + Sync + Send trait binding that
 /// would require Arc<Mutex<_>>.
-fn new_grpc(signal: SignalType, settings: OtlpServerSettings) -> Grpc<OtlpBytesCodec> {
-    let codec = OtlpBytesCodec::new(signal, settings.wait_for_result);
+fn new_grpc(
+    signal: SignalType,
+    codec: otel_arrow_dfe_pdata::codec::ResolvedCodec,
+    settings: OtlpServerSettings,
+) -> Grpc<OtlpBytesCodec> {
+    let codec = OtlpBytesCodec::new(signal, settings.wait_for_result, codec);
     let mut grpc = Grpc::new(codec);
     if let Some(limit) = settings.max_decoding_message_size {
         grpc = grpc.max_decoding_message_size(limit);
@@ -562,6 +579,7 @@ fn unimplemented_resp() -> Response<Body> {
 /// common server functionality
 #[derive(Clone)]
 pub struct ServerCommon {
+    codec: otel_arrow_dfe_pdata::codec::ResolvedCodec,
     effect_handler: EffectHandler<OtapPdata>,
     state: Option<AckSlot>,
     settings: OtlpServerSettings,
@@ -584,6 +602,8 @@ impl ServerCommon {
         state: Option<AckSlot>,
     ) -> Self {
         Self {
+            codec: otel_arrow_dfe_pdata::codec::ResolvedCodec::otlp()
+                .expect("the selected codec registry must contain OTLP"),
             effect_handler,
             state,
             settings: settings.clone(),
@@ -656,7 +676,7 @@ impl tower_service::Service<Request<Body>> for LogsServiceServer {
                 if let Some(response) = common.exhausted_rate_limit_response() {
                     return Box::pin(async move { Ok(response) });
                 }
-                let mut grpc = new_grpc(SignalType::Logs, common.settings.clone());
+                let mut grpc = new_grpc(SignalType::Logs, common.codec, common.settings.clone());
                 let rate_limit = common.grpc_rate_limit_context();
                 let service = OtapBatchService::new(
                     common.effect_handler,
@@ -715,7 +735,7 @@ impl tower_service::Service<Request<Body>> for MetricsServiceServer {
                 if let Some(response) = common.exhausted_rate_limit_response() {
                     return Box::pin(async move { Ok(response) });
                 }
-                let mut grpc = new_grpc(SignalType::Metrics, common.settings.clone());
+                let mut grpc = new_grpc(SignalType::Metrics, common.codec, common.settings.clone());
                 let rate_limit = common.grpc_rate_limit_context();
                 let service = OtapBatchService::new(
                     common.effect_handler,
@@ -774,7 +794,7 @@ impl tower_service::Service<Request<Body>> for TraceServiceServer {
                 if let Some(response) = common.exhausted_rate_limit_response() {
                     return Box::pin(async move { Ok(response) });
                 }
-                let mut grpc = new_grpc(SignalType::Traces, common.settings.clone());
+                let mut grpc = new_grpc(SignalType::Traces, common.codec, common.settings.clone());
                 let rate_limit = common.grpc_rate_limit_context();
                 let service = OtapBatchService::new(
                     common.effect_handler,
@@ -815,7 +835,11 @@ mod tests {
         for signal in [SignalType::Logs, SignalType::Metrics, SignalType::Traces] {
             for preallocate in [false, true] {
                 super::super::assert_encoded_decoder(
-                    OtlpBytesDecoder::new(signal, preallocate),
+                    OtlpBytesDecoder::new(
+                        signal,
+                        preallocate,
+                        ResolvedCodec::otlp().expect("selected OTLP codec"),
+                    ),
                     signal,
                 )
                 .await;
@@ -855,7 +879,8 @@ mod tests {
 
     fn make_nack(permanent: bool) -> NackMsg<OtapPdata> {
         let pdata = OtapPdata::new_default(
-            ResolvedCodec::OTLP
+            ResolvedCodec::otlp()
+                .unwrap()
                 .admit(SignalType::Logs, Bytes::new())
                 .expect("admit OTLP logs")
                 .into(),
@@ -930,7 +955,8 @@ mod tests {
         let payload = Bytes::from_static(b"grpc-payload");
         let payload_bytes = payload.len() as u64;
         let pdata = OtapPdata::new_default(
-            ResolvedCodec::OTLP
+            ResolvedCodec::otlp()
+                .unwrap()
                 .admit(SignalType::Logs, payload)
                 .expect("admit OTLP logs")
                 .into(),
@@ -955,7 +981,8 @@ mod tests {
         let (mut service, mut msg_rx) = new_test_service(Some(AckSlot::new(0)), metrics.clone());
         let payload = Bytes::from_static(b"grpc-rejected-payload");
         let pdata = OtapPdata::new_default(
-            ResolvedCodec::OTLP
+            ResolvedCodec::otlp()
+                .unwrap()
                 .admit(SignalType::Logs, payload)
                 .expect("admit OTLP logs")
                 .into(),

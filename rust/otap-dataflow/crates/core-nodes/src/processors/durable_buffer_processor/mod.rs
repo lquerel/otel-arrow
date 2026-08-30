@@ -987,7 +987,8 @@ impl DurableBuffer {
         // items for all formats.
         let (context, ingest_result, item_count): (_, Result<(), _>, u64) =
             if matches!(self.config.otlp_handling, OtlpHandling::PassThrough)
-                && data.payload_ref().format() == otel_arrow_dfe_pdata::batching::PdataFormat::OTLP
+                && data.payload_ref().encoding()
+                    == Some(&otel_arrow_dfe_pdata::codec::PdataEncoding::OTLP)
             {
                 let (context, payload) = data.into_parts();
                 let otlp_bytes = otel_arrow_dfe_pdata::OtlpProtoBytes::new_from_bytes(

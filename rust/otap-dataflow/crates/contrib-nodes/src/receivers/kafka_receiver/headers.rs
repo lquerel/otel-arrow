@@ -135,7 +135,11 @@ impl HeaderExtractions {
     ///
     /// Deserializes the `ExportTraceServiceRequest`, injects attributes into
     /// the resource attributes of each `ResourceSpans`, then re-serializes.
-    pub(crate) fn apply_otlp_traces(&self, data: &[u8]) -> Result<OtapPdata, EngineError> {
+    pub(crate) fn apply_otlp_traces(
+        &self,
+        data: &[u8],
+        codec: ResolvedCodec,
+    ) -> Result<OtapPdata, EngineError> {
         let mut request = ExportTraceServiceRequest::decode(data).map_err(|e| {
             EngineError::PdataConversionError {
                 error: format!(
@@ -167,7 +171,7 @@ impl HeaderExtractions {
 
         Ok(OtapPdata::new(
             Context::default(),
-            ResolvedCodec::OTLP
+            codec
                 .admit(SignalType::Traces, Bytes::from(buf))
                 .map_err(|error| EngineError::PdataConversionError {
                     error: error.to_string(),
@@ -180,7 +184,11 @@ impl HeaderExtractions {
     ///
     /// Deserializes the `ExportMetricsServiceRequest`, injects attributes into
     /// the resource attributes of each `ResourceMetrics`, then re-serializes.
-    pub(crate) fn apply_otlp_metrics(&self, data: &[u8]) -> Result<OtapPdata, EngineError> {
+    pub(crate) fn apply_otlp_metrics(
+        &self,
+        data: &[u8],
+        codec: ResolvedCodec,
+    ) -> Result<OtapPdata, EngineError> {
         let mut request = ExportMetricsServiceRequest::decode(data).map_err(|e| {
             EngineError::PdataConversionError {
                 error: format!(
@@ -212,7 +220,7 @@ impl HeaderExtractions {
 
         Ok(OtapPdata::new(
             Context::default(),
-            ResolvedCodec::OTLP
+            codec
                 .admit(SignalType::Metrics, Bytes::from(buf))
                 .map_err(|error| EngineError::PdataConversionError {
                     error: error.to_string(),
@@ -225,7 +233,11 @@ impl HeaderExtractions {
     ///
     /// Deserializes the `ExportLogsServiceRequest`, injects attributes into
     /// the resource attributes of each `ResourceLogs`, then re-serializes.
-    pub(crate) fn apply_otlp_logs(&self, data: &[u8]) -> Result<OtapPdata, EngineError> {
+    pub(crate) fn apply_otlp_logs(
+        &self,
+        data: &[u8],
+        codec: ResolvedCodec,
+    ) -> Result<OtapPdata, EngineError> {
         let mut request = ExportLogsServiceRequest::decode(data).map_err(|e| {
             EngineError::PdataConversionError {
                 error: format!(
@@ -255,7 +267,7 @@ impl HeaderExtractions {
 
         Ok(OtapPdata::new(
             Context::default(),
-            ResolvedCodec::OTLP
+            codec
                 .admit(SignalType::Logs, Bytes::from(buf))
                 .map_err(|error| EngineError::PdataConversionError {
                     error: error.to_string(),
@@ -612,7 +624,8 @@ mod tests {
         let mut buf = Vec::new();
         request.encode(&mut buf).expect("encode OTLP request");
 
-        let payload: OtapPayload = ResolvedCodec::OTLP
+        let payload: OtapPayload = ResolvedCodec::otlp()
+            .unwrap()
             .admit(SignalType::Traces, Bytes::from(buf))
             .expect("admit OTLP traces")
             .into();
@@ -663,7 +676,7 @@ mod tests {
         };
 
         let pdata = extractions
-            .apply_otlp_traces(&bytes)
+            .apply_otlp_traces(&bytes, ResolvedCodec::otlp().expect("selected OTLP codec"))
             .expect("should succeed");
 
         let proto = encoded_otlp(&pdata, SignalType::Traces);
@@ -730,7 +743,7 @@ mod tests {
         };
 
         let pdata = extractions
-            .apply_otlp_traces(&bytes)
+            .apply_otlp_traces(&bytes, ResolvedCodec::otlp().expect("selected OTLP codec"))
             .expect("should succeed");
 
         let proto = encoded_otlp(&pdata, SignalType::Traces);
@@ -761,7 +774,7 @@ mod tests {
         };
 
         let pdata = extractions
-            .apply_otlp_traces(&bytes)
+            .apply_otlp_traces(&bytes, ResolvedCodec::otlp().expect("selected OTLP codec"))
             .expect("should succeed");
 
         let proto = encoded_otlp(&pdata, SignalType::Traces);
@@ -801,7 +814,8 @@ mod tests {
             otap_attributes: None,
         };
 
-        let result = extractions.apply_otlp_traces(&bytes);
+        let result = extractions
+            .apply_otlp_traces(&bytes, ResolvedCodec::otlp().expect("selected OTLP codec"));
         assert!(result.is_ok(), "should succeed even with empty request");
     }
 
@@ -822,7 +836,7 @@ mod tests {
         };
 
         let pdata = extractions
-            .apply_otlp_metrics(&bytes)
+            .apply_otlp_metrics(&bytes, ResolvedCodec::otlp().expect("selected OTLP codec"))
             .expect("should succeed");
 
         let proto = encoded_otlp(&pdata, SignalType::Metrics);
@@ -860,7 +874,9 @@ mod tests {
             otap_attributes: None,
         };
 
-        let pdata = extractions.apply_otlp_logs(&bytes).expect("should succeed");
+        let pdata = extractions
+            .apply_otlp_logs(&bytes, ResolvedCodec::otlp().expect("selected OTLP codec"))
+            .expect("should succeed");
 
         let proto = encoded_otlp(&pdata, SignalType::Logs);
         let result = ExportLogsServiceRequest::decode(proto).expect("decode result");

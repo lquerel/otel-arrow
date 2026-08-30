@@ -20,6 +20,9 @@ pub type Result<T> = std::result::Result<T, Error>;
 #[derive(thiserror::Error, Debug)]
 #[allow(missing_docs)]
 pub enum Error {
+    #[error("Pdata codec registry: {reason}")]
+    PdataCodecRegistry { reason: String },
+
     #[error("Pdata codec '{encoding}': {reason}")]
     PdataCodec {
         encoding: crate::codec::PdataEncoding,

@@ -33,7 +33,10 @@ where
     let body = http_body_util::Full::new(Bytes::from_static(&[0, 0, 0, 0, 2, 0xff, 0x80]));
     let mut stream = tonic::Streaming::new_request(decoder, body, None, None);
     let pdata = stream.message().await.unwrap().unwrap();
-    assert_eq!(pdata.payload_ref().format(), PdataFormat::OTLP);
+    assert_eq!(
+        pdata.payload_ref().format(),
+        PdataFormat::otlp().expect("selected OTLP format")
+    );
     assert_eq!(pdata.signal_type(), signal);
     assert_eq!(
         pdata

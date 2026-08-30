@@ -1093,7 +1093,7 @@ mod tests {
     fn encoded_request(pdata: &OtapPdata, signal: SignalType) -> &[u8] {
         assert_eq!(
             pdata.payload_ref().format(),
-            otel_arrow_dfe_pdata::batching::PdataFormat::OTLP
+            otel_arrow_dfe_pdata::batching::PdataFormat::otlp().expect("selected OTLP format")
         );
         assert_eq!(pdata.signal_type(), signal);
         pdata
@@ -1109,7 +1109,8 @@ mod tests {
             .encode(&mut bytes)
             .expect("encode test OTLP request");
         OtapPdata::new_default(
-            ResolvedCodec::OTLP
+            ResolvedCodec::otlp()
+                .unwrap()
                 .admit(SignalType::Logs, Bytes::from(bytes))
                 .expect("admit OTLP logs")
                 .into(),

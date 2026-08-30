@@ -240,6 +240,8 @@ fn convert_native_payload(c: &mut Criterion) {
 
 fn exercise_codec_paths(c: &mut Criterion) {
     let mut group = c.benchmark_group("PData codec paths");
+    let otlp_encoding = EncodingPlan::otlp().expect("selected OTLP encoder");
+    let otlp_format = PdataFormat::otlp().expect("selected OTLP format");
 
     for record_count in [10, 100, 1_000] {
         let message = OtlpProtoMessage::Logs(create_logs_data(record_count));
@@ -253,7 +255,7 @@ fn exercise_codec_paths(c: &mut Criterion) {
                 |payload| {
                     black_box(
                         payload
-                            .into_encoded(&mut forward_codecs, &EncodingPlan::OTLP)
+                            .into_encoded(&mut forward_codecs, &otlp_encoding)
                             .expect("matching-codec forwarding"),
                     )
                 },
@@ -283,7 +285,7 @@ fn exercise_codec_paths(c: &mut Criterion) {
                 |payload| {
                     black_box(
                         payload
-                            .into_encoded(&mut encode_codecs, &EncodingPlan::OTLP)
+                            .into_encoded(&mut encode_codecs, &otlp_encoding)
                             .expect("OTLP encode"),
                     )
                 },
@@ -314,9 +316,8 @@ fn exercise_codec_paths(c: &mut Criterion) {
             )
         });
 
-        let encoded_plan =
-            BatchPlan::new(PdataFormat::OTLP, PdataFormat::OTLP.default_profile(), true)
-                .expect("encoded batching plan");
+        let encoded_plan = BatchPlan::new(otlp_format, otlp_format.default_profile(), true)
+            .expect("encoded batching plan");
         let mut encoded_batch_codecs = CodecState::default();
         _ = group.bench_function(BenchmarkId::new("OTLP/batch", record_count), |b| {
             b.iter_batched(

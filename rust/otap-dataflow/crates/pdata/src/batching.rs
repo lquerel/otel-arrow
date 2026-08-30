@@ -153,8 +153,11 @@ pub struct PdataFormat(Option<ResolvedCodec>);
 impl PdataFormat {
     /// Native OTAP Arrow records.
     pub const OTAP: Self = Self(None);
-    /// Independently encoded OTLP protobuf bytes.
-    pub const OTLP: Self = Self(Some(ResolvedCodec::OTLP));
+
+    /// Independently encoded OTLP protobuf bytes using the selected provider.
+    pub fn otlp() -> Result<Self, Error> {
+        ResolvedCodec::otlp().map(|codec| Self(Some(codec)))
+    }
 
     /// Wraps a registered codec identity, without creating its state.
     #[must_use]
@@ -166,7 +169,7 @@ impl PdataFormat {
     pub fn resolve(name: &str) -> Result<Self, Error> {
         match name {
             "otap" => Ok(Self::OTAP),
-            "otlp" => Ok(Self::OTLP),
+            "otlp" => Self::otlp(),
             name => codec::find(&PdataEncoding::from(name.to_owned())).map(Self::encoded),
         }
     }

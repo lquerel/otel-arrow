@@ -105,6 +105,7 @@ pub(crate) const fn default_num_connections() -> usize {
 /// Exporter that sends OTLP data via gRPC
 pub struct OTLPExporter {
     config: Config,
+    encoding_plan: otel_arrow_dfe_pdata::codec::EncodingPlan,
     metrics: OtlpGrpcExporterMetrics,
     /// Optional bearer token provider resolved from the
     /// `bearer_token_provider` capability. When bound, a fresh
@@ -179,6 +180,11 @@ impl OTLPExporter {
 
         Ok(Self {
             config,
+            encoding_plan: otel_arrow_dfe_pdata::codec::EncodingPlan::otlp().map_err(|error| {
+                otel_arrow_dfe_config::error::Error::InvalidUserConfig {
+                    error: error.to_string(),
+                }
+            })?,
             metrics,
             token_provider,
         })
@@ -517,10 +523,7 @@ impl Exporter<OtapPdata> for OTLPExporter {
                     };
 
                     let bytes = match effect_handler
-                        .encode_owned(
-                            &mut payload,
-                            &otel_arrow_dfe_pdata::codec::EncodingPlan::OTLP,
-                        )
+                        .encode_owned(&mut payload, &self.encoding_plan)
                         .await
                     {
                         Ok(bytes) => bytes,
@@ -1447,6 +1450,8 @@ mod tests {
 
         let exporter = ExporterWrapper::local(
             OTLPExporter {
+                encoding_plan: otel_arrow_dfe_pdata::codec::EncodingPlan::otlp()
+                    .expect("selected OTLP encoding plan"),
                 config: Config {
                     grpc: GrpcClientSettings {
                         grpc_endpoint: grpc_endpoint.clone(),
@@ -1571,6 +1576,8 @@ mod tests {
 
         let exporter = ExporterWrapper::local(
             OTLPExporter {
+                encoding_plan: otel_arrow_dfe_pdata::codec::EncodingPlan::otlp()
+                    .expect("selected OTLP encoding plan"),
                 config: Config {
                     grpc: GrpcClientSettings {
                         grpc_endpoint: grpc_endpoint.clone(),
@@ -1700,6 +1707,8 @@ mod tests {
 
         let exporter = ExporterWrapper::local(
             OTLPExporter {
+                encoding_plan: otel_arrow_dfe_pdata::codec::EncodingPlan::otlp()
+                    .expect("selected OTLP encoding plan"),
                 config: Config {
                     grpc: GrpcClientSettings {
                         grpc_endpoint: grpc_endpoint.clone(),
@@ -1851,6 +1860,8 @@ mod tests {
 
         let exporter = ExporterWrapper::local(
             OTLPExporter {
+                encoding_plan: otel_arrow_dfe_pdata::codec::EncodingPlan::otlp()
+                    .expect("selected OTLP encoding plan"),
                 config: Config {
                     grpc: GrpcClientSettings {
                         grpc_endpoint: grpc_endpoint.clone(),
@@ -1966,6 +1977,8 @@ mod tests {
             controller_ctx.pipeline_context_with("grp".into(), "pipeline".into(), 0, 1, 0);
         let mut exporter = ExporterWrapper::local(
             OTLPExporter {
+                encoding_plan: otel_arrow_dfe_pdata::codec::EncodingPlan::otlp()
+                    .expect("selected OTLP encoding plan"),
                 config: Config {
                     grpc: GrpcClientSettings {
                         grpc_endpoint: grpc_endpoint.clone(),
@@ -2551,6 +2564,8 @@ mod tests {
             controller_ctx.pipeline_context_with("grp".into(), "pipeline".into(), 0, 1, 0);
         let mut exporter = ExporterWrapper::local(
             OTLPExporter {
+                encoding_plan: otel_arrow_dfe_pdata::codec::EncodingPlan::otlp()
+                    .expect("selected OTLP encoding plan"),
                 config: Config {
                     grpc: GrpcClientSettings {
                         grpc_endpoint: grpc_endpoint.clone(),

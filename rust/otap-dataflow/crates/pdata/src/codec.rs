@@ -7,12 +7,19 @@
 //! private codec state owned by a pipeline runtime. Payloads contain identity,
 //! signal, bytes, and optional item counts, never codec state. Passing or cloning
 //! a payload does not consult the registry or materialize telemetry records.
+//!
+//! The distributed slice is a candidate catalog, not a conflict-resolution
+//! mechanism. The final binary resolves that catalog once into an immutable
+//! registry. Duplicate encoding names fail by default; a binary that links a
+//! replacement must explicitly select its namespaced provider ID before building
+//! any pipeline. Link order never participates in selection.
 
 use std::borrow::Cow;
 use std::cell::RefCell;
+use std::collections::BTreeMap;
 use std::fmt;
 use std::rc::Rc;
-use std::sync::{Arc, Mutex, MutexGuard};
+use std::sync::{Arc, Mutex, MutexGuard, OnceLock};
 
 use bytes::Bytes;
 use otel_arrow_dfe_config::{EncodeOptions, SignalType};
@@ -32,7 +39,7 @@ use crate::{OtapPayload, OtapPayloadDecodeError, OtapPayloadHelpers, OtlpProtoBy
 ///
 /// Names include any version or compression distinction needed to interpret the
 /// bytes. Built-in names are reserved; other authors should use a vendor prefix.
-#[derive(Clone, Debug, Eq, Hash, PartialEq)]
+#[derive(Clone, Debug, Eq, Hash, Ord, PartialEq, PartialOrd)]
 pub struct PdataEncoding(Cow<'static, str>);
 
 impl PdataEncoding {
@@ -154,7 +161,7 @@ impl EncodedPdata {
 /// Immutable representation metadata advertised by a codec extension.
 #[derive(Debug)]
 pub struct PdataCodecMetadata {
-    /// Globally stable name; duplicate registrations are rejected.
+    /// Globally stable wire name; duplicate providers require explicit selection.
     pub encoding: PdataEncoding,
     /// Signals understood by this codec.
     pub signals: &'static [SignalType],
@@ -255,9 +262,45 @@ pub trait PdataCodec: Send {
 /// Stateless optional item scan, used without allocating a codec instance.
 pub type ItemCounter = fn(SignalType, &[u8]) -> Option<usize>;
 
+/// Stable, namespaced identity of one codec implementation.
+///
+/// This differs from [`PdataEncoding`]: several providers may implement the
+/// same wire representation, while a provider ID identifies one implementation
+/// that the final binary can select explicitly.
+#[derive(Clone, Copy, Debug, Eq, Hash, Ord, PartialEq, PartialOrd)]
+pub struct CodecProviderId(&'static str);
+
+impl CodecProviderId {
+    /// Declares a compile-time provider identity.
+    #[must_use]
+    pub const fn new(id: &'static str) -> Self {
+        Self(id)
+    }
+
+    /// Returns the namespaced provider identity used in configuration and diagnostics.
+    #[must_use]
+    pub const fn as_str(self) -> &'static str {
+        self.0
+    }
+}
+
+impl fmt::Display for CodecProviderId {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.write_str(self.0)
+    }
+}
+
+impl From<CodecProviderId> for String {
+    fn from(provider: CodecProviderId) -> Self {
+        provider.as_str().to_owned()
+    }
+}
+
 /// Link-time codec extension registration. Only factories, not mutable state, are shared.
 #[derive(Debug)]
 pub struct PdataCodecRegistration {
+    /// Unique implementation identity. Replacements share an encoding but not a provider ID.
+    pub provider: CodecProviderId,
     /// Representation identity and capabilities.
     pub metadata: &'static PdataCodecMetadata,
     /// Creates independent state in the runtime codec service.
@@ -290,8 +333,16 @@ impl PartialEq for ResolvedCodec {
 impl Eq for ResolvedCodec {}
 
 impl ResolvedCodec {
-    /// The built-in OTLP representation, known without a registry lookup.
-    pub const OTLP: Self = Self(&OTLP_CODEC);
+    /// Resolves the provider selected by the final binary for OTLP.
+    pub fn otlp() -> Result<Self, Error> {
+        codec_registry()?.otlp()
+    }
+
+    /// Stable identity of the selected implementation.
+    #[must_use]
+    pub const fn provider(self) -> CodecProviderId {
+        self.0.provider
+    }
 
     /// Immutable capabilities and canonical encoding name.
     #[must_use]
@@ -339,13 +390,10 @@ pub struct EncodingPlan {
 }
 
 impl EncodingPlan {
-    /// Default OTLP protobuf output.
-    pub const OTLP: Self = Self {
-        codec: ResolvedCodec::OTLP,
-        options: EncodeOptions {
-            otlp_size_limit: None,
-        },
-    };
+    /// Resolves the provider selected by the final binary for default OTLP output.
+    pub fn otlp() -> Result<Self, Error> {
+        Self::new(ResolvedCodec::otlp()?, EncodeOptions::default())
+    }
 
     /// Builds a plan from an already-resolved codec.
     pub fn new(codec: ResolvedCodec, options: EncodeOptions) -> Result<Self, Error> {
@@ -380,23 +428,296 @@ impl EncodingPlan {
     }
 }
 
-/// Finds a unique codec without selecting a signal or conversion direction.
-pub fn find(encoding: &PdataEncoding) -> Result<ResolvedCodec, Error> {
-    let mut matches = PDATA_CODEC_FACTORIES
-        .iter()
-        .filter(|f| &f.metadata.encoding == encoding);
-    let factory = matches
-        .next()
-        .ok_or_else(|| codec_error(encoding, "no codec registered"))?;
-    if matches.next().is_some() {
-        return Err(codec_error(encoding, "duplicate encoding registration"));
-    }
-    Ok(ResolvedCodec(factory))
+/// Explicit provider choice made by the final binary for one wire encoding.
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct CodecSelection {
+    encoding: PdataEncoding,
+    provider: String,
 }
 
-/// Iterates the finite set of compiled-in codec identities, without instantiating them.
-pub fn registered_codecs() -> impl Iterator<Item = ResolvedCodec> {
-    PDATA_CODEC_FACTORIES.iter().map(ResolvedCodec)
+impl CodecSelection {
+    /// Selects one provider for an encoding that has multiple linked implementations.
+    #[must_use]
+    pub fn new(encoding: PdataEncoding, provider: impl Into<String>) -> Self {
+        Self {
+            encoding,
+            provider: provider.into(),
+        }
+    }
+
+    /// Encoding whose implementation is selected.
+    #[must_use]
+    pub fn encoding(&self) -> &PdataEncoding {
+        &self.encoding
+    }
+
+    /// Namespaced provider identity requested by the final binary.
+    #[must_use]
+    pub fn provider(&self) -> &str {
+        &self.provider
+    }
+}
+
+/// Startup configuration for the immutable process codec registry.
+///
+/// The default is deliberately strict: every encoding must have exactly one
+/// linked provider. A final binary may explicitly select a provider for an
+/// encoding with multiple implementations.
+#[derive(Clone, Debug, Default, Eq, PartialEq)]
+pub struct CodecRegistryOptions {
+    selections: Vec<CodecSelection>,
+}
+
+impl CodecRegistryOptions {
+    /// Builds startup options from explicit selections, typically loaded by the final binary.
+    #[must_use]
+    pub fn new(selections: impl IntoIterator<Item = CodecSelection>) -> Self {
+        Self {
+            selections: selections.into_iter().collect(),
+        }
+    }
+
+    /// Adds an explicit provider selection.
+    #[must_use]
+    pub fn select(mut self, encoding: PdataEncoding, provider: impl Into<String>) -> Self {
+        self.selections
+            .push(CodecSelection::new(encoding, provider));
+        self
+    }
+
+    /// Returns the requested selections before registry validation.
+    #[must_use]
+    pub fn selections(&self) -> &[CodecSelection] {
+        &self.selections
+    }
+}
+
+/// Why a provider was selected for an encoding.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum CodecSelectionReason {
+    /// The provider was the only linked implementation.
+    Unique,
+    /// The final binary explicitly selected this provider.
+    Explicit,
+}
+
+/// Diagnostic view of one resolved encoding and all linked candidates.
+#[derive(Clone, Debug)]
+pub struct CodecRegistryEntry {
+    encoding: PdataEncoding,
+    selected: ResolvedCodec,
+    candidates: Vec<CodecProviderId>,
+    reason: CodecSelectionReason,
+}
+
+impl CodecRegistryEntry {
+    /// Wire encoding represented by this entry.
+    #[must_use]
+    pub fn encoding(&self) -> &PdataEncoding {
+        &self.encoding
+    }
+
+    /// Provider selected for routine codec operations.
+    #[must_use]
+    pub const fn selected(&self) -> ResolvedCodec {
+        self.selected
+    }
+
+    /// All linked provider identities, sorted deterministically.
+    #[must_use]
+    pub fn candidates(&self) -> &[CodecProviderId] {
+        &self.candidates
+    }
+
+    /// Whether selection was implicit because the candidate was unique or explicit.
+    #[must_use]
+    pub const fn reason(&self) -> CodecSelectionReason {
+        self.reason
+    }
+}
+
+/// Immutable codec choices resolved once before pipeline construction.
+#[derive(Debug)]
+pub struct CodecRegistry {
+    entries: Vec<CodecRegistryEntry>,
+    otlp: Option<ResolvedCodec>,
+}
+
+impl CodecRegistry {
+    fn from_linked(options: CodecRegistryOptions) -> Result<Self, Error> {
+        Self::from_registrations(&PDATA_CODEC_FACTORIES, options)
+    }
+
+    fn from_registrations(
+        registrations: &'static [PdataCodecRegistration],
+        options: CodecRegistryOptions,
+    ) -> Result<Self, Error> {
+        validate_factories(registrations)?;
+
+        let mut requested = BTreeMap::new();
+        for selection in options.selections {
+            if requested
+                .insert(selection.encoding.clone(), selection.provider)
+                .is_some()
+            {
+                return Err(codec_error(
+                    &selection.encoding,
+                    "provider was selected more than once",
+                ));
+            }
+        }
+
+        let mut groups: BTreeMap<PdataEncoding, Vec<ResolvedCodec>> = BTreeMap::new();
+        for registration in registrations {
+            groups
+                .entry(registration.metadata.encoding.clone())
+                .or_default()
+                .push(ResolvedCodec(registration));
+        }
+
+        let mut entries = Vec::with_capacity(groups.len());
+        for (encoding, mut candidates) in groups {
+            candidates.sort_unstable_by_key(|codec| codec.provider());
+            if candidates
+                .windows(2)
+                .any(|pair| pair[0].provider() == pair[1].provider())
+            {
+                return Err(codec_error(
+                    &encoding,
+                    "the same provider registered this encoding more than once",
+                ));
+            }
+
+            let requested_provider = requested.remove(&encoding);
+            let (selected, reason) = match (candidates.as_slice(), requested_provider) {
+                ([only], None) => (*only, CodecSelectionReason::Unique),
+                (_, Some(provider)) => {
+                    let selected = candidates
+                        .iter()
+                        .copied()
+                        .find(|codec| codec.provider().as_str() == provider)
+                        .ok_or_else(|| {
+                            codec_error(
+                                &encoding,
+                                format!(
+                                    "selected provider '{provider}' is not linked; available providers: {}",
+                                    provider_list(&candidates)
+                                ),
+                            )
+                        })?;
+                    (selected, CodecSelectionReason::Explicit)
+                }
+                (_, None) => {
+                    return Err(codec_error(
+                        &encoding,
+                        format!(
+                            "multiple providers are linked; explicitly select one of: {}",
+                            provider_list(&candidates)
+                        ),
+                    ));
+                }
+            };
+            validate_replacement_compatibility(selected, &candidates)?;
+            let candidate_providers = candidates
+                .iter()
+                .map(|candidate| candidate.provider())
+                .collect();
+            entries.push(CodecRegistryEntry {
+                encoding,
+                selected,
+                candidates: candidate_providers,
+                reason,
+            });
+        }
+
+        if let Some((encoding, provider)) = requested.into_iter().next() {
+            return Err(codec_error(
+                &encoding,
+                format!("provider '{provider}' was selected for an encoding that is not linked"),
+            ));
+        }
+        let otlp = entries
+            .binary_search_by(|entry| entry.encoding.cmp(&PdataEncoding::OTLP))
+            .ok()
+            .map(|index| entries[index].selected);
+        Ok(Self { entries, otlp })
+    }
+
+    /// Finds the selected provider for a wire encoding.
+    pub fn find(&self, encoding: &PdataEncoding) -> Result<ResolvedCodec, Error> {
+        self.entries
+            .binary_search_by(|entry| entry.encoding.cmp(encoding))
+            .map(|index| self.entries[index].selected)
+            .map_err(|_| codec_error(encoding, "no codec registered"))
+    }
+
+    fn otlp(&self) -> Result<ResolvedCodec, Error> {
+        self.otlp
+            .ok_or_else(|| codec_error(&PdataEncoding::OTLP, "no codec registered"))
+    }
+
+    /// Iterates selected codecs in deterministic encoding-name order.
+    #[must_use]
+    pub fn codecs(&self) -> impl ExactSizeIterator<Item = ResolvedCodec> + '_ {
+        self.entries.iter().map(|entry| entry.selected)
+    }
+
+    /// Returns deterministic selection diagnostics, including shadowed providers.
+    #[must_use]
+    pub fn entries(&self) -> &[CodecRegistryEntry] {
+        &self.entries
+    }
+}
+
+static CODEC_REGISTRY: OnceLock<CodecRegistry> = OnceLock::new();
+
+/// Configures codec overrides exactly once, before any codec lookup or pipeline build.
+///
+/// Open-source binaries do not call this function and therefore retain strict
+/// duplicate rejection. A proprietary final binary calls it during startup with
+/// explicit encoding-to-provider selections.
+///
+/// ```no_run
+/// use otel_arrow_dfe_pdata::codec::{
+///     CodecRegistryOptions, PdataEncoding, configure_codec_registry,
+/// };
+///
+/// configure_codec_registry(
+///     CodecRegistryOptions::default()
+///         .select(PdataEncoding::OTLP, "com.example.telemetry.otlp-optimized"),
+/// )?;
+/// # Ok::<(), otel_arrow_dfe_pdata::error::Error>(())
+/// ```
+pub fn configure_codec_registry(options: CodecRegistryOptions) -> Result<(), Error> {
+    if CODEC_REGISTRY.get().is_some() {
+        return Err(registry_error("registry is already initialized"));
+    }
+    let registry = CodecRegistry::from_linked(options)?;
+    CODEC_REGISTRY
+        .set(registry)
+        .map_err(|_| registry_error("registry was initialized concurrently"))
+}
+
+/// Returns the immutable selected registry, applying the strict default on first use.
+pub fn codec_registry() -> Result<&'static CodecRegistry, Error> {
+    if let Some(registry) = CODEC_REGISTRY.get() {
+        return Ok(registry);
+    }
+    let registry = CodecRegistry::from_linked(CodecRegistryOptions::default())?;
+    let _ = CODEC_REGISTRY.set(registry);
+    CODEC_REGISTRY
+        .get()
+        .ok_or_else(|| registry_error("registry initialization failed"))
+}
+
+/// Finds the provider selected by the final binary for an encoding.
+pub fn find(encoding: &PdataEncoding) -> Result<ResolvedCodec, Error> {
+    codec_registry()?.find(encoding)
+}
+
+/// Iterates selected codecs without instantiating mutable codec state.
+pub fn registered_codecs() -> Result<impl ExactSizeIterator<Item = ResolvedCodec>, Error> {
+    Ok(codec_registry()?.codecs())
 }
 
 /// Reusable synchronous codec state owned by a pipeline runtime.
@@ -740,13 +1061,103 @@ pub(crate) fn codec_error(encoding: &PdataEncoding, reason: impl Into<String>) -
     }
 }
 
-/// Validates registration names and capabilities before a pipeline starts.
+fn registry_error(reason: impl Into<String>) -> Error {
+    Error::PdataCodecRegistry {
+        reason: reason.into(),
+    }
+}
+
+fn provider_list(candidates: &[ResolvedCodec]) -> String {
+    candidates
+        .iter()
+        .map(|codec| codec.provider().as_str())
+        .collect::<Vec<_>>()
+        .join(", ")
+}
+
+fn validate_replacement_compatibility(
+    selected: ResolvedCodec,
+    candidates: &[ResolvedCodec],
+) -> Result<(), Error> {
+    let selected_metadata = selected.metadata();
+    for candidate in candidates {
+        let candidate_metadata = candidate.metadata();
+        if selected_metadata.format_version != candidate_metadata.format_version
+            || selected_metadata.compression != candidate_metadata.compression
+        {
+            return Err(codec_error(
+                &selected_metadata.encoding,
+                format!(
+                    "selected provider '{}' has a different wire contract than provider '{}'",
+                    selected.provider(),
+                    candidate.provider()
+                ),
+            ));
+        }
+        if (candidate_metadata.can_decode && !selected_metadata.can_decode)
+            || (candidate_metadata.can_encode && !selected_metadata.can_encode)
+            || candidate_metadata
+                .signals
+                .iter()
+                .any(|signal| !selected_metadata.signals.contains(signal))
+        {
+            return Err(codec_error(
+                &selected_metadata.encoding,
+                format!(
+                    "selected provider '{}' does not preserve the capabilities of provider '{}'",
+                    selected.provider(),
+                    candidate.provider()
+                ),
+            ));
+        }
+        if let Some(candidate_batching) = candidate_metadata.batching.as_ref() {
+            let Some(selected_batching) = selected_metadata.batching.as_ref() else {
+                return Err(codec_error(
+                    &selected_metadata.encoding,
+                    format!(
+                        "selected provider '{}' does not preserve batching from provider '{}'",
+                        selected.provider(),
+                        candidate.provider()
+                    ),
+                ));
+            };
+            if candidate_batching
+                .sizers
+                .iter()
+                .any(|sizer| !selected_batching.sizers.contains(sizer))
+                || selected_batching.default_profile != candidate_batching.default_profile
+            {
+                return Err(codec_error(
+                    &selected_metadata.encoding,
+                    format!(
+                        "selected provider '{}' has incompatible batching metadata with provider '{}'",
+                        selected.provider(),
+                        candidate.provider()
+                    ),
+                ));
+            }
+        }
+        if candidate.0.count_items.is_some() && selected.0.count_items.is_none() {
+            return Err(codec_error(
+                &selected_metadata.encoding,
+                format!(
+                    "selected provider '{}' does not preserve item counting from provider '{}'",
+                    selected.provider(),
+                    candidate.provider()
+                ),
+            ));
+        }
+    }
+    Ok(())
+}
+
+/// Initializes and validates the selected registry before a pipeline starts.
 pub fn validate_registrations() -> Result<(), Error> {
-    validate_factories(&PDATA_CODEC_FACTORIES)
+    codec_registry().map(|_| ())
 }
 
 fn validate_factories(factories: &[PdataCodecRegistration]) -> Result<(), Error> {
-    for (index, factory) in factories.iter().enumerate() {
+    for factory in factories {
         let metadata = factory.metadata;
         let name = metadata.encoding.as_str();
         if ["otap", "otlp", "preserve"].contains(&name) {
@@ -760,6 +1171,20 @@ fn validate_factories(factories: &[PdataCodecRegistration]) -> Result<(), Error>
             return Err(codec_error(
                 &metadata.encoding,
                 "identity must use lowercase ASCII letters, digits, '.', '_', '-', or ':'",
+            ));
+        }
+        let provider = factory.provider.as_str();
+        if provider.is_empty()
+            || !provider.contains('.')
+            || !provider
+                .bytes()
+                .all(|b| b.is_ascii_lowercase() || b.is_ascii_digit() || b"._-:".contains(&b))
+        {
+            return Err(codec_error(
+                &metadata.encoding,
+                format!(
+                    "provider identity '{provider}' must be namespaced and use lowercase ASCII letters, digits, '.', '_', '-', or ':'"
+                ),
             ));
         }
         if metadata.signals.is_empty() || (!metadata.can_decode && !metadata.can_encode) {
@@ -776,15 +1201,6 @@ fn validate_factories(factories: &[PdataCodecRegistration]) -> Result<(), Error>
                     "native batching requires a decoder and a supported default sizer",
                 ));
             }
-        }
-        if factories[..index]
-            .iter()
-            .any(|other| other.metadata.encoding == metadata.encoding)
-        {
-            return Err(codec_error(
-                &metadata.encoding,
-                "duplicate encoding registration",
-            ));
         }
     }
     Ok(())
@@ -983,9 +1399,13 @@ pub static OTLP_METADATA: PdataCodecMetadata = PdataCodecMetadata {
     }),
 };
 
+/// Provider identity of the open-source OTLP implementation.
+pub const OTLP_PROVIDER: CodecProviderId = CodecProviderId::new("org.opentelemetry.otlp.reference");
+
 #[allow(unsafe_code)]
 #[linkme::distributed_slice(PDATA_CODEC_FACTORIES)]
 static OTLP_CODEC: PdataCodecRegistration = PdataCodecRegistration {
+    provider: OTLP_PROVIDER,
     metadata: &OTLP_METADATA,
     create: || Box::new(OtlpCodec::default()),
     count_items: Some(|signal, bytes| Some(crate::payload::count_otlp_items(signal, bytes))),
@@ -1059,6 +1479,7 @@ mod tests {
     #[allow(unsafe_code)]
     #[linkme::distributed_slice(PDATA_CODEC_FACTORIES)]
     static TEST_CODEC: PdataCodecRegistration = PdataCodecRegistration {
+        provider: CodecProviderId::new("org.opentelemetry.test.framed"),
         count_items: None,
         metadata: &TEST_METADATA,
         create: || {
@@ -1067,6 +1488,61 @@ mod tests {
         },
     };
 
+    const REFERENCE_PROVIDER: CodecProviderId =
+        CodecProviderId::new("org.opentelemetry.test.reference");
+    const OPTIMIZED_PROVIDER: CodecProviderId = CodecProviderId::new("com.example.test.optimized");
+    static DUPLICATE_REGISTRATIONS: [PdataCodecRegistration; 2] = [
+        PdataCodecRegistration {
+            provider: REFERENCE_PROVIDER,
+            count_items: None,
+            metadata: &TEST_METADATA,
+            create: || Box::<TestCodec>::default(),
+        },
+        PdataCodecRegistration {
+            provider: OPTIMIZED_PROVIDER,
+            count_items: None,
+            metadata: &TEST_METADATA,
+            create: || Box::<TestCodec>::default(),
+        },
+    ];
+    static REVERSED_DUPLICATE_REGISTRATIONS: [PdataCodecRegistration; 2] = [
+        PdataCodecRegistration {
+            provider: OPTIMIZED_PROVIDER,
+            count_items: None,
+            metadata: &TEST_METADATA,
+            create: || Box::<TestCodec>::default(),
+        },
+        PdataCodecRegistration {
+            provider: REFERENCE_PROVIDER,
+            count_items: None,
+            metadata: &TEST_METADATA,
+            create: || Box::<TestCodec>::default(),
+        },
+    ];
+    static INCOMPATIBLE_METADATA: PdataCodecMetadata = PdataCodecMetadata {
+        encoding: TEST_ENCODING,
+        signals: &[SignalType::Logs],
+        format_version: Some("2"),
+        compression: None,
+        can_decode: true,
+        can_encode: true,
+        batching: None,
+    };
+    static INCOMPATIBLE_REGISTRATIONS: [PdataCodecRegistration; 2] = [
+        PdataCodecRegistration {
+            provider: REFERENCE_PROVIDER,
+            count_items: None,
+            metadata: &TEST_METADATA,
+            create: || Box::<TestCodec>::default(),
+        },
+        PdataCodecRegistration {
+            provider: OPTIMIZED_PROVIDER,
+            count_items: None,
+            metadata: &INCOMPATIBLE_METADATA,
+            create: || Box::<TestCodec>::default(),
+        },
+    ];
+
     /// Scenario: the built-in OTLP codec is checked by the reusable conformance harness.
     /// Guarantees: OTLP preserves signals and counts and forwards matching encoded bytes
     /// without copying them while retaining its permissive protobuf compatibility behavior.
@@ -1074,7 +1550,7 @@ mod tests {
     fn otlp_codec_conforms_to_registered_codec_contract() {
         crate::testing::codec_conformance::assert_decode_conformance(
             crate::testing::codec_conformance::DecodeConformanceCase {
-                codec: ResolvedCodec::OTLP,
+                codec: ResolvedCodec::otlp().expect("selected OTLP codec"),
                 signal: SignalType::Logs,
                 valid: logs_with_full_resource_and_scope().encode_to_vec().into(),
                 malformed: None,
@@ -1135,6 +1611,7 @@ mod tests {
     #[allow(unsafe_code)]
     #[linkme::distributed_slice(PDATA_CODEC_FACTORIES)]
     static DECODE_ONLY: PdataCodecRegistration = PdataCodecRegistration {
+        provider: CodecProviderId::new("org.opentelemetry.test.decode-only"),
         count_items: None,
         metadata: &DECODE_ONLY_METADATA,
         create: || Box::<TestCodec>::default(),
@@ -1347,29 +1824,94 @@ mod tests {
         }
     }
 
-    /// Scenario: factories declare duplicate identities or a consumer requests absent capabilities.
-    /// Guarantees: ambiguity, missing codecs, unsupported signals and encode-only requests fail clearly.
+    /// Scenario: two linked providers implement the same encoding without an explicit choice.
+    /// Guarantees: the safe default rejects ambiguity and reports candidates in stable provider order.
+    #[test]
+    fn duplicate_providers_require_explicit_selection() {
+        let error = CodecRegistry::from_registrations(
+            &REVERSED_DUPLICATE_REGISTRATIONS,
+            CodecRegistryOptions::default(),
+        )
+        .unwrap_err()
+        .to_string();
+        assert!(error.contains("multiple providers"));
+        let optimized = error.find(OPTIMIZED_PROVIDER.as_str()).unwrap();
+        let reference = error.find(REFERENCE_PROVIDER.as_str()).unwrap();
+        assert!(optimized < reference);
+    }
+
+    /// Scenario: a final binary explicitly selects its replacement from duplicate providers.
+    /// Guarantees: resolution and diagnostics select the same provider regardless of link order.
+    #[test]
+    fn explicit_provider_selection_is_deterministic() {
+        for registrations in [&DUPLICATE_REGISTRATIONS, &REVERSED_DUPLICATE_REGISTRATIONS] {
+            let registry = CodecRegistry::from_registrations(
+                registrations,
+                CodecRegistryOptions::default().select(TEST_ENCODING, OPTIMIZED_PROVIDER),
+            )
+            .unwrap();
+            let selected = registry.find(&TEST_ENCODING).unwrap();
+            assert_eq!(selected.provider(), OPTIMIZED_PROVIDER);
+            let [entry] = registry.entries() else {
+                panic!("one encoding expected");
+            };
+            assert_eq!(entry.selected().provider(), OPTIMIZED_PROVIDER);
+            assert_eq!(entry.reason(), CodecSelectionReason::Explicit);
+            assert_eq!(
+                entry.candidates().to_vec(),
+                vec![OPTIMIZED_PROVIDER, REFERENCE_PROVIDER]
+            );
+        }
+    }
+
+    /// Scenario: admission and matching-format forwarding use an explicitly selected provider.
+    /// Guarantees: provider resolution stays at startup and the payload hot path creates no codec or byte copy.
+    #[test]
+    fn selected_provider_has_no_forwarding_overhead() {
+        let registry = CodecRegistry::from_registrations(
+            &DUPLICATE_REGISTRATIONS,
+            CodecRegistryOptions::default().select(TEST_ENCODING, OPTIMIZED_PROVIDER),
+        )
+        .unwrap();
+        let codec = registry.find(&TEST_ENCODING).unwrap();
+        let bytes = Bytes::from_static(&[1, 2, 3]);
+        let pointer = bytes.as_ptr();
+        let payload = OtapPayload::from(codec.admit(SignalType::Logs, bytes).unwrap());
+        let plan = EncodingPlan::new(codec, EncodeOptions::default()).unwrap();
+        let mut state = CodecState::default();
+
+        let forwarded = payload.into_encoded(&mut state, &plan).unwrap();
+
+        assert_eq!(forwarded.bytes().as_ptr(), pointer);
+        assert!(state.codecs.is_empty());
+    }
+
+    /// Scenario: an override names an absent provider or changes the wire contract.
+    /// Guarantees: startup fails before a pipeline can use an unintended or incompatible codec.
+    #[test]
+    fn invalid_provider_selection_fails_at_startup() {
+        let unknown = CodecRegistry::from_registrations(
+            &DUPLICATE_REGISTRATIONS,
+            CodecRegistryOptions::default().select(TEST_ENCODING, "com.example.test.not-linked"),
+        )
+        .unwrap_err()
+        .to_string();
+        assert!(unknown.contains("not linked"));
+
+        let incompatible = CodecRegistry::from_registrations(
+            &INCOMPATIBLE_REGISTRATIONS,
+            CodecRegistryOptions::default().select(TEST_ENCODING, OPTIMIZED_PROVIDER),
+        )
+        .unwrap_err()
+        .to_string();
+        assert!(incompatible.contains("different wire contract"));
+    }
+
+    /// Scenario: linked registrations and requested operations are validated before use.
+    /// Guarantees: the built-in registry, missing codecs, unsupported signals and directions fail clearly.
     #[test]
     fn registration_and_capabilities_are_validated() {
         validate_registrations().unwrap();
-        let factories = [
-            PdataCodecRegistration {
-                count_items: None,
-                metadata: &TEST_METADATA,
-                create: || Box::<TestCodec>::default(),
-            },
-            PdataCodecRegistration {
-                count_items: None,
-                metadata: &TEST_METADATA,
-                create: || Box::<TestCodec>::default(),
-            },
-        ];
-        assert!(
-            validate_factories(&factories)
-                .unwrap_err()
-                .to_string()
-                .contains("duplicate")
-        );
         assert!(
             resolve(
                 &PdataEncoding::new("missing"),
@@ -1436,7 +1978,7 @@ mod tests {
                 .into();
         let mut context = CodecState::default();
         let plan = EncodingPlan::new(
-            ResolvedCodec::OTLP,
+            ResolvedCodec::otlp().expect("selected OTLP codec"),
             EncodeOptions {
                 otlp_size_limit: std::num::NonZeroUsize::new(1),
             },
@@ -1556,7 +2098,10 @@ mod tests {
                 crate::testing::fixtures::traces_with_full_resource_and_scope().encode_to_vec(),
             ),
         ] {
-            let encoded = ResolvedCodec::OTLP.admit(signal, bytes.into()).unwrap();
+            let encoded = ResolvedCodec::otlp()
+                .unwrap()
+                .admit(signal, bytes.into())
+                .unwrap();
             let original = OtapPayload::from(encoded.clone());
             let records = original
                 .clone()
@@ -1573,7 +2118,10 @@ mod tests {
                         1 => {
                             let mut payload = OtapPayload::from(records.clone());
                             let output = payload
-                                .prepare_encoded(&mut context, &EncodingPlan::OTLP)
+                                .prepare_encoded(
+                                    &mut context,
+                                    &EncodingPlan::otlp().expect("selected OTLP encoding plan"),
+                                )
                                 .unwrap();
                             assert!(!output.as_ref().is_empty());
                         }
@@ -1589,23 +2137,25 @@ mod tests {
                             assert_eq!(viewed_bytes.as_ptr(), encoded.bytes().as_ptr());
                         }
                         _ => {
-                            let plan =
-                                BatchPlan::new(PdataFormat::OTLP, BatchProfile::otlp(), true)
-                                    .unwrap();
+                            let plan = BatchPlan::new(
+                                PdataFormat::otlp().expect("selected OTLP format"),
+                                BatchProfile::otlp(),
+                                true,
+                            )
+                            .unwrap();
                             let output = plan
                                 .batch(signal, vec![original.clone()], &mut context)
                                 .unwrap();
                             assert!(!output.batches.is_empty());
-                            assert!(
-                                output
-                                    .batches
-                                    .iter()
-                                    .all(|(batch, _)| batch.format() == PdataFormat::OTLP)
-                            );
+                            assert!(output.batches.iter().all(|(batch, _)| batch.format()
+                                == PdataFormat::otlp().expect("selected OTLP format")));
                         }
                     }
                     assert_eq!(context.codecs.len(), 1);
-                    assert_eq!(context.codecs[0].0, ResolvedCodec::OTLP);
+                    assert_eq!(
+                        context.codecs[0].0,
+                        ResolvedCodec::otlp().expect("selected OTLP codec")
+                    );
                 }
             }
         }
@@ -1621,6 +2171,7 @@ mod tests {
             static COUNTS: Cell<usize> = const { Cell::new(0) };
         }
         static REGISTRATION: PdataCodecRegistration = PdataCodecRegistration {
+            provider: CodecProviderId::new("org.opentelemetry.test.counter"),
             metadata: &TEST_METADATA,
             create: || panic!("counting and passthrough must not instantiate a codec"),
             count_items: Some(|_, bytes| {
@@ -1668,7 +2219,10 @@ mod tests {
             .unwrap();
         let mut context = CodecState::default();
         let output = payload
-            .prepare_encoded(&mut context, &EncodingPlan::OTLP)
+            .prepare_encoded(
+                &mut context,
+                &EncodingPlan::otlp().expect("selected OTLP encoding plan"),
+            )
             .unwrap();
         let pointer = output.as_ref().as_ptr();
         let expected = output.copy_into_bytes();
@@ -1687,20 +2241,29 @@ mod tests {
             let mut other = OtapPayload::from(OtlpProtoBytes::new_from_bytes(signal, bytes));
             other.materialize_otap(&mut CodecState::default()).unwrap();
             let output = other
-                .prepare_encoded(&mut context, &EncodingPlan::OTLP)
+                .prepare_encoded(
+                    &mut context,
+                    &EncodingPlan::otlp().expect("selected OTLP encoding plan"),
+                )
                 .unwrap();
             let other_pointer = output.as_ref().as_ptr();
             assert!(!pointers.contains(&other_pointer));
             pointers.push(other_pointer);
             let expected_other = output.copy_into_bytes();
             let output = other
-                .prepare_encoded(&mut context, &EncodingPlan::OTLP)
+                .prepare_encoded(
+                    &mut context,
+                    &EncodingPlan::otlp().expect("selected OTLP encoding plan"),
+                )
                 .unwrap();
             assert_eq!(output.as_ref().as_ptr(), other_pointer);
             assert_eq!(output.as_ref(), expected_other.as_ref());
         }
         let output = payload
-            .prepare_encoded(&mut context, &EncodingPlan::OTLP)
+            .prepare_encoded(
+                &mut context,
+                &EncodingPlan::otlp().expect("selected OTLP encoding plan"),
+            )
             .unwrap();
         assert_eq!(output.as_ref().as_ptr(), pointer);
         let detached = output.into_bytes();
@@ -1709,14 +2272,19 @@ mod tests {
         let options = EncodeOptions {
             otlp_size_limit: std::num::NonZeroUsize::new(1),
         };
-        let limited_plan = EncodingPlan::new(ResolvedCodec::OTLP, options).unwrap();
+        let limited_plan =
+            EncodingPlan::new(ResolvedCodec::otlp().expect("selected OTLP codec"), options)
+                .unwrap();
         assert!(
             payload
                 .prepare_encoded(&mut context, &limited_plan)
                 .is_err()
         );
         let output = payload
-            .prepare_encoded(&mut context, &EncodingPlan::OTLP)
+            .prepare_encoded(
+                &mut context,
+                &EncodingPlan::otlp().expect("selected OTLP encoding plan"),
+            )
             .unwrap();
         assert_eq!(output.as_ref(), expected.as_ref());
     }
@@ -1848,6 +2416,7 @@ mod tests {
             }),
         };
         static REGISTRATION: PdataCodecRegistration = PdataCodecRegistration {
+            provider: CodecProviderId::new("org.opentelemetry.test.invalid-batcher"),
             count_items: None,
             metadata: &METADATA,
             create: || Box::new(InvalidBatcher),

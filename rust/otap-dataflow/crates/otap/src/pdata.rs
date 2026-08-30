@@ -2859,7 +2859,8 @@ mod test {
             ),
         ] {
             let pdata = OtapPdata::new_default(
-                ResolvedCodec::OTLP
+                ResolvedCodec::otlp()
+                    .unwrap()
                     .admit(signal, bytes.into())
                     .expect("admit OTLP")
                     .into(),

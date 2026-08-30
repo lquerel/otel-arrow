@@ -1095,6 +1095,7 @@ struct ExporterMetrics {
 /// Geneva exporter that sends OTAP data to Geneva backend
 pub struct GenevaExporter {
     config: Config,
+    otlp_encoding: EncodingPlan,
     pdata_metrics: MeasurementMetricSet<ExporterExportMetrics>,
     metrics: MetricSet<ExporterMetrics>,
     geneva_client: GenevaClient,
@@ -1223,6 +1224,11 @@ impl GenevaExporter {
 
         Ok(Self {
             config,
+            otlp_encoding: EncodingPlan::otlp().map_err(|error| {
+                ConfigError::InvalidUserConfig {
+                    error: error.to_string(),
+                }
+            })?,
             pdata_metrics,
             metrics,
             geneva_client,
@@ -1395,7 +1401,7 @@ impl GenevaExporter {
             return Ok(0);
         }
 
-        if payload.format() != otel_arrow_dfe_pdata::batching::PdataFormat::OTLP {
+        if payload.encoding() != Some(&otel_arrow_dfe_pdata::codec::PdataEncoding::OTLP) {
             let otap_records = effect_handler
                 .try_payload_into_otap(payload)
                 .await
@@ -1454,7 +1460,7 @@ impl GenevaExporter {
                     let mut trace_payload =
                         OtapPayload::from(OtapArrowRecords::Traces(otap_records));
                     let bytes = effect_handler
-                        .encode_owned(&mut trace_payload, &EncodingPlan::OTLP)
+                        .encode_owned(&mut trace_payload, &self.otlp_encoding)
                         .await
                         .map_err(|e| {
                             self.metrics.conversion_errors.inc();

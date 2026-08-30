@@ -29,7 +29,10 @@ fn encoded_otlp(
 ) -> &[u8] {
     use otel_arrow_dfe_pdata::batching::PdataFormat;
 
-    assert_eq!(pdata.payload_ref().format(), PdataFormat::OTLP);
+    assert_eq!(
+        pdata.payload_ref().format(),
+        PdataFormat::otlp().expect("selected OTLP format")
+    );
     assert_eq!(pdata.signal_type(), signal);
     pdata
         .payload_ref()
