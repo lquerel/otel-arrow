@@ -7,12 +7,15 @@
 //!
 //! ```text
 //! "SLG1" | item_count:u32 | repeated {
-//!     observed_time_unix_nano:i64 | message_length:u32 | message_bytes
+//!     observed_time_unix_nano:i64 | run_item_count:u32 | repeated {
+//!         message_length:u32 | message_bytes
+//!     }
 //! }
 //! ```
 //!
 //! Timestamps are captured when a receiver batch is sealed. Native batching
-//! copies complete frames without parsing their syslog contents.
+//! copies message frames and coalesces adjacent timestamp runs without parsing
+//! their syslog contents.
 
 use std::num::NonZeroUsize;
 use std::sync::LazyLock;
@@ -34,7 +37,8 @@ pub const SYSLOG_CEF_ENCODING: PdataEncoding = PdataEncoding::new("syslog-cef-ba
 
 const MAGIC: &[u8; 4] = b"SLG1";
 const BATCH_HEADER_LEN: usize = 8;
-const FRAME_HEADER_LEN: usize = 12;
+const RUN_HEADER_LEN: usize = 12;
+const FRAME_HEADER_LEN: usize = 4;
 const MAX_NATIVE_LOGS: usize = 65_535;
 const MAX_PREDICTED_BATCH_CAPACITY: usize = 32 * 1024;
 
@@ -69,6 +73,7 @@ fn operation_error(
 
 fn predicted_batch_capacity(max_items: usize, message_len: usize) -> usize {
     BATCH_HEADER_LEN
+        .saturating_add(RUN_HEADER_LEN)
         .saturating_add(
             FRAME_HEADER_LEN
                 .saturating_add(message_len)
@@ -100,8 +105,10 @@ impl SyslogBatchBuilder {
     /// Creates an empty batch using a bounded first-message capacity estimate.
     #[must_use]
     pub(crate) fn with_max_items(max_items_hint: usize) -> Self {
-        let mut bytes = BytesMut::with_capacity(BATCH_HEADER_LEN);
+        let mut bytes = BytesMut::with_capacity(BATCH_HEADER_LEN + RUN_HEADER_LEN);
         bytes.extend_from_slice(MAGIC);
+        bytes.put_u32(0);
+        bytes.put_i64(0);
         bytes.put_u32(0);
         Self {
             bytes,
@@ -135,7 +142,6 @@ impl SyslogBatchBuilder {
             .item_count
             .checked_add(1)
             .ok_or_else(|| framing_error("syslog batch item count exceeds u32"))?;
-        self.bytes.put_i64(0);
         self.bytes.put_u32(message_len);
         self.bytes.extend_from_slice(message);
         Ok(())
@@ -158,7 +164,7 @@ impl SyslogBatchBuilder {
         self.bytes.capacity()
     }
 
-    /// Seals a non-empty batch and stamps every message with the flush time.
+    /// Seals a non-empty batch with one timestamp run for the flush.
     pub(crate) fn finish(
         mut self,
         observed_time: i64,
@@ -167,12 +173,10 @@ impl SyslogBatchBuilder {
             return Err(framing_error("cannot seal an empty syslog batch"));
         }
         self.bytes[4..BATCH_HEADER_LEN].copy_from_slice(&self.item_count.to_be_bytes());
-        let mut cursor = BATCH_HEADER_LEN;
-        for _ in 0..self.item_count {
-            self.bytes[cursor..cursor + 8].copy_from_slice(&observed_time.to_be_bytes());
-            let message_len = read_u32(&self.bytes[cursor + 8..cursor + FRAME_HEADER_LEN]) as usize;
-            cursor += FRAME_HEADER_LEN + message_len;
-        }
+        self.bytes[BATCH_HEADER_LEN..BATCH_HEADER_LEN + 8]
+            .copy_from_slice(&observed_time.to_be_bytes());
+        self.bytes[BATCH_HEADER_LEN + 8..BATCH_HEADER_LEN + RUN_HEADER_LEN]
+            .copy_from_slice(&self.item_count.to_be_bytes());
         let item_count = self.item_count as usize;
         Ok((self.bytes.freeze(), item_count))
     }
@@ -189,6 +193,8 @@ struct FrameIter<'a> {
     bytes: &'a [u8],
     cursor: usize,
     remaining: usize,
+    run_remaining: usize,
+    observed_time: i64,
     finished: bool,
 }
 
@@ -204,6 +210,28 @@ impl<'a> Iterator for FrameIter<'a> {
             return (self.cursor != self.bytes.len())
                 .then(|| Err(framing_error("trailing bytes after syslog batch frames")));
         }
+        if self.run_remaining == 0 {
+            let run_end = match self.cursor.checked_add(RUN_HEADER_LEN) {
+                Some(run_end) if run_end <= self.bytes.len() => run_end,
+                Some(_) => {
+                    self.finished = true;
+                    return Some(Err(framing_error("truncated syslog timestamp run")));
+                }
+                None => {
+                    self.finished = true;
+                    return Some(Err(framing_error("syslog timestamp run overflow")));
+                }
+            };
+            self.observed_time = read_i64(&self.bytes[self.cursor..self.cursor + 8]);
+            self.run_remaining = read_u32(&self.bytes[self.cursor + 8..run_end]) as usize;
+            self.cursor = run_end;
+            if self.run_remaining == 0 || self.run_remaining > self.remaining {
+                self.finished = true;
+                return Some(Err(framing_error(
+                    "invalid syslog timestamp run item count",
+                )));
+            }
+        }
         let start = self.cursor;
         let header_end = match start.checked_add(FRAME_HEADER_LEN) {
             Some(header_end) if header_end <= self.bytes.len() => header_end,
@@ -216,8 +244,7 @@ impl<'a> Iterator for FrameIter<'a> {
                 return Some(Err(framing_error("syslog frame header overflow")));
             }
         };
-        let observed_time = read_i64(&self.bytes[start..start + 8]);
-        let message_len = read_u32(&self.bytes[start + 8..header_end]) as usize;
+        let message_len = read_u32(&self.bytes[start..header_end]) as usize;
         let message_start = header_end;
         let end = match message_start.checked_add(message_len) {
             Some(end) if end <= self.bytes.len() => end,
@@ -232,8 +259,9 @@ impl<'a> Iterator for FrameIter<'a> {
         };
         self.cursor = end;
         self.remaining -= 1;
+        self.run_remaining -= 1;
         Some(Ok(Frame {
-            observed_time,
+            observed_time: self.observed_time,
             message: &self.bytes[message_start..end],
             encoded: &self.bytes[start..end],
         }))
@@ -253,7 +281,7 @@ fn validated_frames(bytes: &[u8]) -> Result<(usize, FrameIter<'_>), SyslogFramin
     }
     let minimum_len = count
         .checked_mul(FRAME_HEADER_LEN)
-        .and_then(|len| len.checked_add(BATCH_HEADER_LEN))
+        .and_then(|len| len.checked_add(BATCH_HEADER_LEN + RUN_HEADER_LEN))
         .ok_or_else(|| framing_error("syslog batch length overflow"))?;
     if minimum_len > bytes.len() {
         return Err(framing_error("syslog batch frame count exceeds its length"));
@@ -265,6 +293,8 @@ fn validated_frames(bytes: &[u8]) -> Result<(usize, FrameIter<'_>), SyslogFramin
             bytes,
             cursor: BATCH_HEADER_LEN,
             remaining: count,
+            run_remaining: 0,
+            observed_time: 0,
             finished: false,
         },
     ))
@@ -365,7 +395,7 @@ impl PdataBatcher for SyslogBatcher {
                     output = RawBatchWriter::new();
                 }
                 output
-                    .append(frame.encoded)
+                    .append(frame)
                     .map_err(|error| operation_error(CodecOperation::Batch, error))?;
             }
         }
@@ -386,6 +416,9 @@ impl PdataBatcher for SyslogBatcher {
 struct RawBatchWriter {
     bytes: BytesMut,
     count: u32,
+    run_count_offset: usize,
+    run_count: u32,
+    observed_time: Option<i64>,
 }
 
 impl RawBatchWriter {
@@ -393,7 +426,13 @@ impl RawBatchWriter {
         let mut bytes = BytesMut::with_capacity(BATCH_HEADER_LEN);
         bytes.extend_from_slice(MAGIC);
         bytes.put_u32(0);
-        Self { bytes, count: 0 }
+        Self {
+            bytes,
+            count: 0,
+            run_count_offset: 0,
+            run_count: 0,
+            observed_time: None,
+        }
     }
 
     const fn len(&self) -> usize {
@@ -404,12 +443,25 @@ impl RawBatchWriter {
         self.count == 0
     }
 
-    fn append(&mut self, frame: &[u8]) -> Result<(), SyslogFramingError> {
+    fn append(&mut self, frame: Frame<'_>) -> Result<(), SyslogFramingError> {
+        if self.observed_time != Some(frame.observed_time) {
+            self.bytes.put_i64(frame.observed_time);
+            self.run_count_offset = self.bytes.len();
+            self.bytes.put_u32(0);
+            self.run_count = 0;
+            self.observed_time = Some(frame.observed_time);
+        }
         self.count = self
             .count
             .checked_add(1)
             .ok_or_else(|| framing_error("syslog batch item count exceeds u32"))?;
-        self.bytes.extend_from_slice(frame);
+        self.run_count = self
+            .run_count
+            .checked_add(1)
+            .ok_or_else(|| framing_error("syslog timestamp run item count exceeds u32"))?;
+        self.bytes[self.run_count_offset..self.run_count_offset + 4]
+            .copy_from_slice(&self.run_count.to_be_bytes());
+        self.bytes.extend_from_slice(frame.encoded);
         Ok(())
     }
 
@@ -595,6 +647,10 @@ mod tests {
         assert_eq!(frames[0].message, b"first");
         assert_eq!(frames[1].message, b"second");
         assert!(frames.iter().all(|frame| frame.observed_time == 42));
+        assert_eq!(
+            bytes.len(),
+            BATCH_HEADER_LEN + RUN_HEADER_LEN + 2 * FRAME_HEADER_LEN + 11
+        );
     }
 
     /// Scenario: A receiver starts a homogeneous batch with a configured item target.
@@ -677,6 +733,45 @@ mod tests {
         assert_eq!(payload.known_item_count(), None);
         assert_eq!(payload.num_items(), 3);
         assert_eq!(payload.known_item_count(), Some(3));
+    }
+
+    /// Scenario: Native batching combines adjacent input batches sealed at the same time.
+    /// Guarantees: Equal timestamps share one run while message order and item count are retained.
+    #[test]
+    fn native_batching_coalesces_adjacent_timestamp_runs() {
+        let first = batch(&[b"one", b"two"], 11);
+        let second = batch(&[b"three"], 11);
+        let profile = BatchProfile {
+            min_size: NonZeroUsize::new(4),
+            max_size: NonZeroUsize::new(4),
+            sizer: BatchSizer::Items,
+            max_split_fragments: None,
+            max_split_overhead_bytes: None,
+            max_split_fragments_per_flush: None,
+        };
+
+        let output = SyslogBatcher
+            .batch(SignalType::Logs, &profile, vec![first, second])
+            .expect("batch encoded syslog");
+
+        assert_eq!(output.batches.len(), 1);
+        let (bytes, item_count) = &output.batches[0];
+        assert_eq!(*item_count, 3);
+        assert_eq!(
+            read_u32(&bytes[BATCH_HEADER_LEN + 8..BATCH_HEADER_LEN + RUN_HEADER_LEN]),
+            3
+        );
+        assert_eq!(
+            bytes.len(),
+            BATCH_HEADER_LEN + RUN_HEADER_LEN + 3 * FRAME_HEADER_LEN + 11
+        );
+        let (_, frames) = validated_frames(bytes).expect("valid coalesced batch");
+        let frames = frames.collect::<Result<Vec<_>, _>>().expect("valid frames");
+        assert_eq!(
+            frames.iter().map(|frame| frame.message).collect::<Vec<_>>(),
+            vec![b"one".as_slice(), b"two".as_slice(), b"three".as_slice()]
+        );
+        assert!(frames.iter().all(|frame| frame.observed_time == 11));
     }
 
     /// Scenario: Native batching combines inputs and splits at an item limit.
