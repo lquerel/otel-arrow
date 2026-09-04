@@ -9,6 +9,10 @@ It also exposes controller-level primitives for reading the full committed
 engine config, reconciling against a desired full config, creating empty
 pipeline groups, and deleting committed pipelines or groups.
 
+For the source, resolved, and effective configuration representations used by
+these operations, see
+[Factory-Resolved Configuration](../configuration-resolution.md).
+
 ## Goals
 
 - Reconfigure one pipeline in a running engine instance.
@@ -55,9 +59,9 @@ runtime state.
 - Serving generation: the generation currently selected for a specific core in
   observed state. During a rolling cutover, different cores may temporarily
   serve different generations.
-- Candidate pipeline config: the pipeline config submitted by the client and
-  validated by the controller before it is committed into the live in-memory
-  engine config.
+- Candidate pipeline config: the pipeline config submitted by the client. The
+  controller uses it to build source, resolved, and effective candidate forms
+  before anything is committed into the live in-memory engine config.
 - Candidate generation: the target generation for a `create` or `replace`
   rollout while it is still being tested and has not yet been committed as the
   active generation.
@@ -125,12 +129,13 @@ other config-mutating lifecycle operations return `409 Conflict`. This prevents
 full-config reconciliation, group creation, group deletion, and pipeline
 deletion from interleaving with each other or with per-pipeline rollouts.
 
-Rollout planning validates a candidate by patching one pipeline into the
-controller's current in-memory `OtelDataflowSpec` snapshot and running full
-engine validation on that candidate snapshot. That validation does not make the
-operation a whole-config transaction: another logical pipeline can commit before
-this rollout commits, and commit applies only the accepted pipeline back into
-the latest live config.
+Rollout planning patches one source pipeline into the controller's private
+in-memory `OtelDataflowSpec`, resolves the complete candidate through the
+registered factories, and runs full engine validation. Resolution creates the
+typed runtime state and safe effective snapshot before admission. This does not
+make the operation a whole-config transaction: another logical pipeline can
+commit before this rollout commits, and commit applies only the accepted
+pipeline back into the latest live state.
 
 The API intentionally leaves room to adjust the consistency scope later. If
 group-level invariants become mutable outside full-engine reconciliation, the
@@ -143,16 +148,17 @@ the existing pipeline endpoint or response schema.
 1. The client submits a candidate pipeline config to
    `PUT /groups/{group}/pipelines/{id}`.
 1. The controller patches exactly that pipeline into its live in-memory
-   `OtelDataflowSpec`.
-1. The candidate config is validated as a full engine snapshot:
+   source `OtelDataflowSpec`.
+1. The complete candidate is resolved and validated before admission:
    - pipeline structure and canonicalization;
-   - component config validation;
+   - factory-owned component parsing, validation, defaulting, and safe
+     snapshot construction;
    - whole-config validation, including topic cycle checks;
    - topic runtime profile compatibility.
 1. The controller classifies the update:
    - `create`: the logical pipeline does not exist yet;
-   - `noop`: the resolved pipeline and active serving footprint already match
-     the request;
+   - `noop`: the typed resolved pipeline and active serving footprint already
+     match the request;
    - `replace`: the runtime graph or runtime-significant node config changed;
    - `resize`: only the effective core allocation changed.
 1. The controller executes the plan:
@@ -319,6 +325,10 @@ Returns:
 - `pipeline`
 - optional `rollout` summary
 
+The `pipeline` field is the committed effective representation. Component
+defaults and normalization are materialized, secrets are redacted, and unsafe
+component config may be replaced with `[OMITTED]`.
+
 ### Create, replace, or resize a pipeline
 
 `PUT /groups/{group}/pipelines/{id}?wait=true|false&timeout_secs=<overall>`
@@ -408,10 +418,14 @@ older ids may return `404 Not Found` after eviction.
 
 `GET /config`
 
-Returns the controller-owned `OtelDataflowSpec` snapshot currently committed in
-memory. This is the source used by the live controller for later
-reconfiguration and lifecycle operations. The startup YAML file is not read
-again and is not rewritten by this endpoint.
+Returns the committed effective `OtelDataflowSpec` currently stored in memory.
+Component defaults and normalization are materialized, secrets are redacted,
+and unsafe component config may be replaced with `[OMITTED]`. The parsed source
+used by the controller for later reconfiguration remains private. The startup
+YAML file is not read again and is not rewritten by this endpoint.
+
+Because redaction and omission markers are display-only and rejected on input,
+this response is not a replayable source configuration.
 
 Status codes:
 
@@ -439,7 +453,9 @@ Request body:
 
 Behavior:
 
-- The desired full config is validated before any live work starts.
+- The desired full source config is completely resolved and validated before
+  any live work starts. This produces typed runtime state and a safe effective
+  snapshot for every desired component.
 - Desired pipelines are created, replaced, resized, or treated as `noop` using
   the same rollout machinery as `PUT /groups/{group}/pipelines/{id}`.
 - Placement-sensitive rollouts are planned before they start. Desired
@@ -460,7 +476,8 @@ Behavior:
   reconciliation succeeds.
 - Reconciliation is not atomic across pipelines. Pipeline rollouts that
   succeeded before a later rollout failure remain applied and are reflected in
-  the committed live config.
+  the committed live config. Each committed pipeline still updates its source,
+  effective, and resolved representations together.
 - Runtime topic profile mutation is rejected with `422 Unprocessable Entity`.
 - Runtime memory limiter mutation is rejected with `422 Unprocessable Entity`.
 
@@ -846,8 +863,8 @@ original state.
 - Full-config reconciliation, group creation, group deletion, and pipeline
   deletion use an engine-scoped lifecycle guard and return `409 Conflict` when
   another guarded operation is active.
-- `GET /groups/{group}/pipelines/{id}` always returns the committed
-  live config, not an uncommitted candidate.
+- `GET /groups/{group}/pipelines/{id}` always returns the committed effective
+  config, not private source config or an uncommitted candidate.
 - `GET /groups/{group}/pipelines/{id}/status` is the best endpoint
   for watching serving generations and per-instance phase changes during a
   rollout.

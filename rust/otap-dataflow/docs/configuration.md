@@ -8,8 +8,11 @@ topics, observability, and validation workflow.
 Read it sequentially if you are configuring the engine for the first time, or
 use the section headings as a checklist when reviewing YAML. For exact field
 semantics, defaults, precedence rules, and validation behavior, use the
-[configuration model reference](configuration-model.md); for node-specific
-config payloads, use the [core node catalog](../crates/core-nodes/README.md),
+[configuration model reference](configuration-model.md). For how submitted
+configuration becomes typed runtime state and safe control-plane output, see
+[Factory-Resolved Configuration](configuration-resolution.md). For
+node-specific config payloads, use the
+[core node catalog](../crates/core-nodes/README.md),
 [development node catalog](../crates/dev-nodes/README.md), and
 [contrib node catalog](../crates/contrib-nodes/README.md).
 
@@ -56,8 +59,11 @@ cargo run -- --config configs/otlp-otlp.yaml --validate-and-exit
 ```
 
 Validation parses YAML or JSON, validates the root model, checks graph
-references, checks that every node type is registered in the binary, and runs
-node-specific config validation when the component provides it.
+references, checks that every component type is registered in the binary, and
+requires every selected factory to resolve its component config into a typed
+runtime value and a safe effective snapshot. Resolution applies
+component-specific parsing, validation, defaults, and normalization before the
+configuration can be admitted.
 
 After loading, the CLI can override selected engine-level settings:
 
@@ -600,6 +606,8 @@ Useful adjacent docs:
   feature-gated node implementations.
 - [Configuration model reference](configuration-model.md): exact field
   semantics, defaults, precedence, and validation behavior.
+- [Factory-resolved configuration](configuration-resolution.md): typed
+  resolution, effective snapshots, reconciliation, and privacy boundaries.
 - [Node and flow metrics](node-and-flow-metrics.md): configure and interpret
   node item metrics and processor flow metrics.
 - [URN reference](urns.md): node type and extension type syntax.
@@ -653,6 +661,7 @@ in the root model, use the
 - [Core-node catalog](../crates/core-nodes/README.md)
 - [Contrib-node catalog](../crates/contrib-nodes/README.md)
 - [Configuration model reference](configuration-model.md)
+- [Factory-resolved configuration](configuration-resolution.md)
 - [URN reference](urns.md)
 - [Processor behavior taxonomy](processors.md)
 - [Transport header policies](transport-headers.md)

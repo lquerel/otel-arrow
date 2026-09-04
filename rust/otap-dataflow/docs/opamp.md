@@ -4,6 +4,10 @@ This document describes the mechanism through which dataflow engine can be
 configured via an embedded [OpAMP](https://opentelemetry.io/docs/specs/opamp/)
 Agent, implemented as a controller extension.
 
+For the configuration privacy and resolution contract behind OpAMP reporting
+and reconciliation, see
+[Factory-Resolved Configuration](configuration-resolution.md).
+
 ## Problem
 
 The OpAMP protocol is used in the OpenTelemetry ecosystem for fleet management.
@@ -551,6 +555,21 @@ without collisions. The agent does not calculate hashes, it only stores and
 compares them. This is
 [recommended by the OpAMP spec as well](https://opentelemetry.io/docs/specs/opamp/#calculating-hashes).
 
+When `reports_effective_config` is enabled, the agent reports the controller's
+stored effective representation. It does not serialize the private submitted
+source. The effective config contains factory-resolved defaults and
+normalization, serializes typed secrets as `[REDACTED]`, replaces unsafe
+component subtrees with `[OMITTED]`, and replaces each top-level
+`engine.custom` value with `[OMITTED]`.
+
+Effective reporting reuses the snapshot created during candidate resolution;
+an OpAMP heartbeat does not parse component configuration or perform a late
+redaction pass. The display-only redaction and omission markers are rejected
+when used as submitted operational values, so an effective report must not be
+sent back as desired state. See
+[Factory-Resolved Configuration](configuration-resolution.md) for the complete
+policy and replay rules.
+
 ### Engine Config Reconciliation
 
 When the OpAMP agent controller extension receives a `ServerToAgent` message,
@@ -560,6 +579,11 @@ last applied config hash, the new config will be applied to the engine.
 The agent will try to deserialize the remote config as an `OtelDataflowSpec`.
 If deserialization fails, it will respond to the server with an `AgentToServer`
 message with a `remote_config_status` containing a `FAILED` status.
+
+After deserialization, the controller resolves the complete candidate through
+all selected component factories. Unknown component types, invalid component
+configuration, reserved snapshot markers, and safe-snapshot failures reject the
+candidate before live rollout begins.
 
 If deserialization of the new remote_config succeeds, the agent will immediately
 reply to the server with an `AgentToServer` message with a `remote_config_status`

@@ -21,6 +21,8 @@ details plus custom node config guidance, see:
 
 - Progressive configuration guide: [configuration.md](configuration.md).
 - Runtime configuration reference: this document.
+- Factory resolution, snapshots, and privacy:
+  [configuration-resolution.md](configuration-resolution.md).
 - Core node catalog:
   [crates/core-nodes/README.md](../crates/core-nodes/README.md).
 - Node URN syntax: [docs/urns.md](urns.md).
@@ -450,9 +452,12 @@ linking it with a side-effect import. See
 [Developing Controller Extensions](../README.md#developing-controller-extensions)
 for implementation guidance.
 
-Each controller extension factory provides static config validation, so
-`--validate-and-exit` rejects unknown controller extension types and invalid
-extension-specific config without starting the extension.
+Each controller extension factory provides a typed config resolver and an
+explicit snapshot policy. Therefore, `--validate-and-exit` rejects unknown
+controller extension types, invalid extension-specific config, and unsafe
+snapshot failures without starting the extension. See
+[Factory-Resolved Configuration](configuration-resolution.md) for the resolver
+and effective-snapshot contracts.
 
 The built-in read-only controller monitor is available in the stock
 `df_engine` binary:
