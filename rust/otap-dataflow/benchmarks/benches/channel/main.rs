@@ -87,7 +87,7 @@ fn bench_compare(c: &mut Criterion) {
     let _ = group.bench_function(BenchmarkId::new("local_mpsc", MSG_COUNT), |b| {
         b.iter(|| {
             rt.block_on(async {
-                let (tx, rx) = otap_df_channel::mpsc::Channel::new(CHANNEL_SIZE);
+                let (tx, rx) = otel_arrow_dfe_channel::mpsc::Channel::new(CHANNEL_SIZE);
                 let pdata = Rc::new("test".to_string());
 
                 let send_handle = tokio::task::spawn_local(async move {

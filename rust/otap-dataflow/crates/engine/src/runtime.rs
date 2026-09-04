@@ -3,7 +3,7 @@
 
 //! Tokio runtime helpers for the engine.
 
-use otap_df_config::engine::LocalRuntimeSettings;
+use otel_arrow_dfe_config::engine::LocalRuntimeSettings;
 use std::io;
 use tokio::runtime::{Builder, LocalOptions, LocalRuntime};
 

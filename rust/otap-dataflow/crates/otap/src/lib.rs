@@ -4,8 +4,8 @@
 //! Implementation of the OTAP nodes (receiver, exporter, processor).
 
 use crate::pdata::OtapPdata;
-use otap_df_engine::{PipelineFactory, build_factory};
-use otap_df_engine_macros::pipeline_factory;
+use otel_arrow_dfe_engine::{PipelineFactory, build_factory};
+use otel_arrow_dfe_engine_macros::pipeline_factory;
 
 /// gRPC service implementation
 pub mod otap_grpc;
@@ -21,6 +21,8 @@ pub mod metrics;
 
 /// Shared OTLP receiver metric definitions used by OTLP protocol support.
 pub mod otlp_metrics;
+
+mod bearer_authorization;
 
 /// testing utilities
 #[cfg(any(test, feature = "test-utils"))]
@@ -44,6 +46,9 @@ pub mod memory_pressure_layer;
 
 /// Shared ingress shedding based on receiver-local rate limits.
 pub mod rate_limit_layer;
+
+/// Shared mapping from a pipeline NACK to OTLP wire status codes.
+mod nack_status;
 
 /// gRPC service implementation
 pub mod otlp_grpc;

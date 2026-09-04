@@ -23,9 +23,9 @@ use crate::extension_monitor::{
 use crate::terminal_state::TerminalMetricsDeadline;
 use futures::FutureExt;
 use futures::stream::{FuturesUnordered, StreamExt};
-use otap_df_telemetry::otel_warn;
-use otap_df_telemetry::registry::EntityKey;
-use otap_df_telemetry::reporter::MetricsReporter;
+use otel_arrow_dfe_telemetry::otel_warn;
+use otel_arrow_dfe_telemetry::registry::EntityKey;
+use otel_arrow_dfe_telemetry::reporter::MetricsReporter;
 use std::collections::{HashMap, HashSet};
 use std::time::{Duration, Instant};
 use tokio::runtime::LocalRuntime;
@@ -438,7 +438,7 @@ impl ExtensionLifecycle {
         &mut self,
         reporter: &MetricsReporter,
         deadline: Instant,
-    ) -> Result<(), otap_df_telemetry::error::Error> {
+    ) -> Result<(), otel_arrow_dfe_telemetry::error::Error> {
         self.monitor
             .finish_reporting_until(reporter, deadline)
             .await
@@ -782,10 +782,11 @@ mod tests {
             let (ext_ctx, _registry) = crate::testing::test_extension_ctx();
 
             let passive_cfg = crate::config::ExtensionConfig::new("passive_ext");
-            let user = std::sync::Arc::new(otap_df_config::extension::ExtensionUserConfig::new(
-                "urn:otap:extension:test".into(),
-                serde_json::Value::Null,
-            ));
+            let user =
+                std::sync::Arc::new(otel_arrow_dfe_config::extension::ExtensionUserConfig::new(
+                    "urn:otap:extension:test".into(),
+                    serde_json::Value::Null,
+                ));
             let mut passive_bundle =
                 ExtensionWrapper::builder("passive_ext".into(), user.clone(), &passive_cfg)
                     .passive()
@@ -914,7 +915,7 @@ mod tests {
     #[test]
     fn collect_telemetry_fanout_is_scoped_to_owning_monitor() {
         use crate::message::Sender;
-        use otap_df_channel::mpsc;
+        use otel_arrow_dfe_channel::mpsc;
 
         let rt = crate::testing::setup_test_runtime();
         rt.block_on(async {
@@ -1300,10 +1301,11 @@ mod tests {
             });
 
             let cfg = crate::config::ExtensionConfig::new("disabled-monitor");
-            let user = std::sync::Arc::new(otap_df_config::extension::ExtensionUserConfig::new(
-                "urn:otap:extension:test".into(),
-                serde_json::Value::Null,
-            ));
+            let user =
+                std::sync::Arc::new(otel_arrow_dfe_config::extension::ExtensionUserConfig::new(
+                    "urn:otap:extension:test".into(),
+                    serde_json::Value::Null,
+                ));
             let wrapper = ExtensionWrapper::builder("disabled-monitor".into(), user, &cfg)
                 .active()
                 .local(ext)
@@ -1367,7 +1369,7 @@ mod tests {
             });
 
             let cfg = crate::config::ExtensionConfig::new("guarded");
-            let user = std::sync::Arc::new(otap_df_config::extension::ExtensionUserConfig::new(
+            let user = std::sync::Arc::new(otel_arrow_dfe_config::extension::ExtensionUserConfig::new(
                 "urn:otap:extension:test".into(),
                 serde_json::Value::Null,
             ));
