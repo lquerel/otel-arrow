@@ -476,11 +476,11 @@ fn insecure_false_with_https_token_url_is_accepted() {
     assert!(cfg.tls.is_some());
 }
 
-// Scenario: The factory's static `validate_config` hook is called with a valid config.
+// Scenario: The factory's static `resolve_config` hook is called with a valid config.
 // Guarantees: It accepts the config, mirroring the parse-then-validate path used at wiring time.
 #[test]
-fn validate_config_hook_accepts_valid_config() {
-    assert!(validate_config(&valid_config_json("https://idp.example.com/token")).is_ok());
+fn resolve_config_hook_accepts_valid_config() {
+    assert!(resolve_config(&valid_config_json("https://idp.example.com/token")).is_ok());
 }
 
 // Scenario: The extension registers itself into the factory slice.
@@ -503,12 +503,17 @@ fn factory_is_registered_with_capability() {
 fn create_bundle(config: serde_json::Value) -> Result<ExtensionBundle, ConfigError> {
     let (ext_ctx, _registry) = otel_arrow_dfe_engine::testing::test_extension_ctx();
     let name: otel_arrow_dfe_config::ExtensionId = "oauth2-client-auth".into();
-    let user_config = Arc::new(ExtensionUserConfig::new(
+    let user_config = otel_arrow_dfe_config::extension::ExtensionUserConfig::new(
         OAUTH2_CLIENT_AUTH_URN.into(),
-        config,
-    ));
+        config.clone(),
+    );
+    let resolved = Arc::new(ResolvedExtensionConfig::new(
+        &user_config,
+        resolve_config(&config)?,
+        OAUTH2_CLIENT_AUTH_EXTENSION.snapshot_policy,
+    )?);
     let extension_config = ExtensionConfig::new(name.clone());
-    create(&ext_ctx, name, user_config, &extension_config)
+    create(&ext_ctx, name, resolved, &extension_config)
 }
 
 // Scenario: The factory's `create` hook runs against a valid client-credentials config.

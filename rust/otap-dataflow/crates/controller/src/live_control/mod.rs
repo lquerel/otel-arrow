@@ -65,6 +65,7 @@ pub(crate) use self::state::{PanicReport, RuntimeInstanceError, RuntimeInstanceE
 pub(super) struct ControllerRuntime<PData: 'static + Clone + Send + Sync + std::fmt::Debug> {
     /// Factory used to build runtime pipelines for new instances.
     pipeline_factory: &'static PipelineFactory<PData>,
+    controller_extensions: ControllerExtensionRegistry,
     /// Static controller context cloned into launched pipeline threads.
     controller_context: ControllerContext,
     /// Mutable observed-state store used for compaction and status updates.
@@ -122,6 +123,7 @@ impl<
     /// Builds the resident controller runtime used by live reconfiguration.
     pub(super) fn new(
         pipeline_factory: &'static PipelineFactory<PData>,
+        controller_extensions: ControllerExtensionRegistry,
         controller_context: ControllerContext,
         observed_state_store: ObservedStateStore,
         observed_state_handle: ObservedStateHandle,
@@ -135,9 +137,11 @@ impl<
         telemetry_reporting_interval: Duration,
         memory_pressure_tx: tokio::sync::watch::Sender<MemoryPressureChanged>,
         live_config: OtelDataflowSpec,
+        effective_config: OtelDataflowSpec,
     ) -> Self {
         Self {
             pipeline_factory,
+            controller_extensions,
             controller_context,
             observed_state_store,
             observed_state_handle,
@@ -152,6 +156,7 @@ impl<
             memory_pressure_tx,
             state: Mutex::new(ControllerRuntimeState {
                 live_config,
+                effective_config,
                 config_revision: 0,
                 logical_pipelines: HashMap::new(),
                 runtime_instances: HashMap::new(),
@@ -188,6 +193,7 @@ impl<
     pub(super) fn register_committed_pipeline(
         &self,
         resolved: ResolvedPipelineConfig,
+        runtime_resolved: otel_arrow_dfe_engine::component_config::ResolvedPipelineConfig,
         placement: PipelinePlacement,
         generation: u64,
     ) {
@@ -213,6 +219,7 @@ impl<
             pipeline_key,
             LogicalPipelineRecord {
                 resolved,
+                runtime_resolved,
                 active_generation: generation,
                 placement,
                 placement_generation: 0,
@@ -575,8 +582,8 @@ impl<
         self.runtime.create_group(pipeline_group_id, group)
     }
 
-    fn engine_config_snapshot(&self) -> Result<OtelDataflowSpec, ControlPlaneError> {
-        Ok(self.runtime.engine_config_snapshot())
+    fn effective_config_snapshot(&self) -> Result<OtelDataflowSpec, ControlPlaneError> {
+        Ok(self.runtime.effective_config_snapshot())
     }
 
     fn reconcile_engine_config(

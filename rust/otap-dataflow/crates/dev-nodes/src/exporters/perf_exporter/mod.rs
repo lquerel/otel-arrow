@@ -28,9 +28,11 @@ pub mod config;
 use crate::exporters::perf_exporter::config::Config;
 use async_trait::async_trait;
 use linkme::distributed_slice;
-use otel_arrow_dfe_config::node::NodeUserConfig;
 use otel_arrow_dfe_engine::ConsumerEffectHandlerExtension;
 use otel_arrow_dfe_engine::ExporterFactory;
+use otel_arrow_dfe_engine::component_config::{
+    ConfigSnapshotPolicy, ResolvedNodeConfig, resolve_typed_config,
+};
 use otel_arrow_dfe_engine::config::ExporterConfig;
 use otel_arrow_dfe_engine::context::PipelineContext;
 use otel_arrow_dfe_engine::control::{AckMsg, NodeControlMsg};
@@ -70,18 +72,22 @@ pub static PERF_EXPORTER: ExporterFactory<OtapPdata> = ExporterFactory {
     create:
         |pipeline: PipelineContext,
          node: NodeId,
-         node_config: Arc<NodeUserConfig>,
+         node_config: Arc<ResolvedNodeConfig>,
          exporter_config: &ExporterConfig,
          _capabilities: &otel_arrow_dfe_engine::capability::registry::Capabilities| {
             Ok(ExporterWrapper::local(
-                PerfExporter::from_config(pipeline, &node_config.config)?,
+                PerfExporter::new(
+                    pipeline,
+                    (*node_config.component_config::<Config>()?).clone(),
+                ),
                 node,
-                node_config,
+                node_config.effective(),
                 exporter_config,
             ))
         },
     wiring_contract: otel_arrow_dfe_engine::wiring_contract::WiringContract::UNRESTRICTED,
-    validate_config: otel_arrow_dfe_config::validation::validate_typed_config::<Config>,
+    resolve_config: resolve_typed_config::<Config>,
+    snapshot_policy: ConfigSnapshotPolicy::TypedSafe,
 };
 
 impl PerfExporter {

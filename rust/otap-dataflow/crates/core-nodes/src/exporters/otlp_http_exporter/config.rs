@@ -3,13 +3,13 @@
 
 use std::num::NonZeroUsize;
 
-use serde::Deserialize;
+use serde::{Deserialize, Serialize};
 
 use crate::exporters::otlp_grpc_exporter::default_max_in_flight;
 use otel_arrow_dfe_otap::otlp_http::client_settings::HttpClientSettings;
 
 /// Configuration for OTLP HTTP Exporter
-#[derive(Debug, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct Config {
     /// Configuration for the HTTP client that will be used by this exporter
     pub http: HttpClientSettings,

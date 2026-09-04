@@ -21,7 +21,6 @@ use futures::stream::{FuturesUnordered, StreamExt};
 use http::HeaderValue;
 use linkme::distributed_slice;
 use otel_arrow_dfe_config::SignalType;
-use otel_arrow_dfe_config::node::NodeUserConfig;
 use otel_arrow_dfe_engine::ConsumerEffectHandlerExtension;
 use otel_arrow_dfe_engine::ExporterFactory;
 use otel_arrow_dfe_engine::config::ExporterConfig;
@@ -82,7 +81,7 @@ const GRPC_BEARER_AUTH_EVENTS: BearerAuthEvents = BearerAuthEvents {
 };
 
 /// Configuration for the OTLP Exporter
-#[derive(Debug, Deserialize)]
+#[derive(Debug, Clone, PartialEq, serde::Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct Config {
     /// Shared gRPC client settings reused across OTLP exports.
@@ -125,7 +124,7 @@ pub static OTLP_EXPORTER: ExporterFactory<OtapPdata> = ExporterFactory {
     name: OTLP_EXPORTER_URN,
     create: |pipeline: PipelineContext,
              node: NodeId,
-             node_config: Arc<NodeUserConfig>,
+             node_config: Arc<otel_arrow_dfe_engine::component_config::ResolvedNodeConfig>,
              exporter_config: &ExporterConfig,
              capabilities: &otel_arrow_dfe_engine::capability::registry::Capabilities| {
         // Optionally resolve a bound bearer token provider. Absent binding keeps
@@ -137,14 +136,19 @@ pub static OTLP_EXPORTER: ExporterFactory<OtapPdata> = ExporterFactory {
                 error: e.to_string(),
             })?;
         Ok(ExporterWrapper::local(
-            OTLPExporter::from_config(pipeline, &node_config.config, token_provider)?,
+            OTLPExporter::new(
+                pipeline,
+                (*node_config.component_config::<Config>()?).clone(),
+                token_provider,
+            ),
             node,
-            node_config,
+            node_config.effective(),
             exporter_config,
         ))
     },
     wiring_contract: otel_arrow_dfe_engine::wiring_contract::WiringContract::UNRESTRICTED,
-    validate_config,
+    resolve_config,
+    snapshot_policy: otel_arrow_dfe_engine::component_config::ConfigSnapshotPolicy::TypedSafe,
 };
 
 /// Validates the OTLP gRPC exporter configuration at config load time.
@@ -152,7 +156,12 @@ pub static OTLP_EXPORTER: ExporterFactory<OtapPdata> = ExporterFactory {
 /// Runs before any node is started (initial load and live reconfigure), so bad
 /// configuration is rejected fast and attributed to the offending node rather
 /// than surfacing as an opaque client error at startup.
-fn validate_config(config: &serde_json::Value) -> Result<(), otel_arrow_dfe_config::error::Error> {
+fn resolve_config(
+    config: &serde_json::Value,
+) -> Result<
+    otel_arrow_dfe_engine::component_config::ResolvedComponentConfig,
+    otel_arrow_dfe_config::error::Error,
+> {
     let cfg: Config = serde_json::from_value(config.clone()).map_err(|e| {
         otel_arrow_dfe_config::error::Error::InvalidUserConfig {
             error: e.to_string(),
@@ -163,29 +172,35 @@ fn validate_config(config: &serde_json::Value) -> Result<(), otel_arrow_dfe_conf
         .map_err(|e| otel_arrow_dfe_config::error::Error::InvalidUserConfig {
             error: e.to_string(),
         })?;
-    Ok(())
+    otel_arrow_dfe_engine::component_config::ResolvedComponentConfig::typed_safe(cfg)
 }
 
 impl OTLPExporter {
+    fn new(
+        pipeline_ctx: PipelineContext,
+        config: Config,
+        token_provider: Option<Box<dyn BearerTokenProvider>>,
+    ) -> Self {
+        Self {
+            config,
+            metrics: OtlpGrpcExporterMetrics::register(&pipeline_ctx),
+            token_provider,
+        }
+    }
+
     /// create a new instance of the `[OTLPExporter]` from json config value
     pub fn from_config(
         pipeline_ctx: PipelineContext,
         config: &serde_json::Value,
         token_provider: Option<Box<dyn BearerTokenProvider>>,
     ) -> Result<Self, otel_arrow_dfe_config::error::Error> {
-        let metrics = OtlpGrpcExporterMetrics::register(&pipeline_ctx);
-
         let config: Config = serde_json::from_value(config.clone()).map_err(|e| {
             otel_arrow_dfe_config::error::Error::InvalidUserConfig {
                 error: e.to_string(),
             }
         })?;
 
-        Ok(Self {
-            config,
-            metrics,
-            token_provider,
-        })
+        Ok(Self::new(pipeline_ctx, config, token_provider))
     }
 }
 

@@ -54,8 +54,10 @@ use async_trait::async_trait;
 use linkme::distributed_slice;
 use otel_arrow_dfe_config::SignalType;
 use otel_arrow_dfe_config::error::Error as ConfigError;
-use otel_arrow_dfe_config::node::NodeUserConfig;
 use otel_arrow_dfe_engine::ConsumerEffectHandlerExtension;
+use otel_arrow_dfe_engine::component_config::{
+    ConfigSnapshotPolicy, ResolvedComponentConfig, ResolvedNodeConfig,
+};
 use otel_arrow_dfe_engine::config::ProcessorConfig;
 use otel_arrow_dfe_engine::context::PipelineContext;
 use otel_arrow_dfe_engine::control::{NackCause, NackMsg, NodeControlMsg};
@@ -162,13 +164,16 @@ pub struct ResourceValidatorProcessor {
 pub fn create_resource_validator_processor(
     pipeline_ctx: PipelineContext,
     node: NodeId,
-    node_config: Arc<NodeUserConfig>,
+    node_config: Arc<ResolvedNodeConfig>,
     processor_config: &ProcessorConfig,
 ) -> Result<ProcessorWrapper<OtapPdata>, ConfigError> {
     Ok(ProcessorWrapper::local(
-        ResourceValidatorProcessor::from_config(pipeline_ctx, &node_config.config)?,
+        ResourceValidatorProcessor::from_typed_config(
+            pipeline_ctx,
+            node_config.component_config::<Config>()?.as_ref(),
+        ),
         node,
-        node_config,
+        node_config.effective(),
         processor_config,
     ))
 }
@@ -184,32 +189,47 @@ pub static RESOURCE_VALIDATOR_PROCESSOR_FACTORY: otel_arrow_dfe_engine::Processo
     create:
         |pipeline_ctx: PipelineContext,
          node: NodeId,
-         node_config: Arc<NodeUserConfig>,
+         node_config: Arc<ResolvedNodeConfig>,
          proc_cfg: &ProcessorConfig,
          _capabilities: &otel_arrow_dfe_engine::capability::registry::Capabilities| {
             create_resource_validator_processor(pipeline_ctx, node, node_config, proc_cfg)
         },
     wiring_contract: otel_arrow_dfe_engine::wiring_contract::WiringContract::UNRESTRICTED,
-    validate_config: otel_arrow_dfe_config::validation::validate_typed_config::<Config>,
+    resolve_config: resolve_resource_validator_config,
+    snapshot_policy: ConfigSnapshotPolicy::TypedSafe,
 };
+
+fn resolve_resource_validator_config(raw: &Value) -> Result<ResolvedComponentConfig, ConfigError> {
+    let config: Config =
+        serde_json::from_value(raw.clone()).map_err(|error| ConfigError::InvalidUserConfig {
+            error: error.to_string(),
+        })?;
+    config.validate()?;
+    ResolvedComponentConfig::typed_safe(config)
+}
 
 impl ResourceValidatorProcessor {
     /// Creates a new ResourceValidatorProcessor from configuration
     pub fn from_config(pipeline_ctx: PipelineContext, config: &Value) -> Result<Self, ConfigError> {
-        let metrics = pipeline_ctx.register_metrics::<ResourceValidatorMetrics>();
         let config: Config =
             serde_json::from_value(config.clone()).map_err(|e| ConfigError::InvalidUserConfig {
                 error: e.to_string(),
             })?;
         config.validate()?;
 
-        Ok(Self {
+        Ok(Self::from_typed_config(pipeline_ctx, &config))
+    }
+
+    fn from_typed_config(pipeline_ctx: PipelineContext, config: &Config) -> Self {
+        let metrics = pipeline_ctx.register_metrics::<ResourceValidatorMetrics>();
+
+        Self {
             required_attribute_key: config.required_attribute_key.clone(),
             allowed_values: config.allowed_values_set(),
             source_mode: AllowedValuesSource::Static,
             case_sensitive: config.case_sensitive,
             metrics,
-        })
+        }
     }
 
     /// Creates a new ResourceValidatorProcessor with explicit configuration

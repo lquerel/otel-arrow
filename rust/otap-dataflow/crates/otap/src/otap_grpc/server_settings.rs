@@ -7,7 +7,7 @@ use crate::compression::{self, CompressionMethod};
 use crate::otap_grpc::otlp::server_new::OtlpServerSettings;
 use otel_arrow_dfe_config::byte_units;
 use otel_arrow_dfe_config::tls::TlsServerConfig;
-use serde::Deserialize;
+use serde::{Deserialize, Serialize};
 use std::net::SocketAddr;
 use std::time::Duration;
 use tokio::net::TcpListener;
@@ -15,7 +15,7 @@ use tonic::codec::EnabledCompressionEncodings;
 use tonic::transport::server::TcpIncoming;
 
 /// Common configuration shared across gRPC receivers.
-#[derive(Debug, Deserialize, Clone)]
+#[derive(Debug, Serialize, Deserialize, Clone, PartialEq)]
 #[serde(deny_unknown_fields)]
 pub struct GrpcServerSettings {
     /// The endpoint details: protocol, name, port.

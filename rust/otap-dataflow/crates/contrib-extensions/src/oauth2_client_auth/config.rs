@@ -7,8 +7,8 @@ use std::collections::HashMap;
 use std::path::PathBuf;
 use std::time::Duration;
 
+use otel_arrow_dfe_config::secret::RedactedString;
 use otel_arrow_dfe_config::tls::TlsClientConfig;
-use secrecy::SecretString;
 use serde::Deserialize;
 
 use otel_arrow_dfe_engine::capability::auth::bearer_token_provider::TOKEN_USABLE_MARGIN;
@@ -102,7 +102,7 @@ pub enum SignatureAlgorithm {
 }
 
 /// Configuration for the OAuth 2.0 Client Auth extension.
-#[derive(Debug, Clone, Deserialize)]
+#[derive(Debug, Clone, Deserialize, PartialEq)]
 #[serde(deny_unknown_fields)]
 pub struct Config {
     /// Grant type used to acquire tokens.
@@ -125,11 +125,9 @@ pub struct Config {
     /// Client secret. Required for `client_credentials` unless
     /// `client_secret_file` is set.
     ///
-    /// Held as a [`SecretString`] so it is redacted from `Debug` output.
-    /// Note that the raw pipeline config retains the cleartext;
-    /// prefer `client_secret_file`.
+    /// Held as a [`RedactedString`] so snapshots and debug output are redacted.
     #[serde(default)]
-    pub client_secret: Option<SecretString>,
+    pub client_secret: Option<RedactedString>,
 
     /// Path to a file holding the client secret. Re-read on each acquisition
     /// and takes precedence over `client_secret`.
@@ -185,11 +183,9 @@ pub struct Config {
     /// Private key (PEM) used to sign the JWT-bearer assertion. Required for
     /// the `jwt-bearer` grant unless `client_certificate_key_file` is set.
     ///
-    /// Held as a [`SecretString`] so it is redacted from `Debug` output.
-    /// Note that the raw pipeline config retains the cleartext;
-    /// prefer `client_certificate_key_file`.
+    /// Held as a [`RedactedString`] so snapshots and debug output are redacted.
     #[serde(default)]
-    pub client_certificate_key: Option<SecretString>,
+    pub client_certificate_key: Option<RedactedString>,
 
     /// Path to a file holding the signing key. Re-read on each acquisition and
     /// takes precedence over `client_certificate_key`.

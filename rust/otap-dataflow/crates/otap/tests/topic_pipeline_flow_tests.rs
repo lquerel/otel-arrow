@@ -9,6 +9,7 @@ use otel_arrow_dfe_config::node::NodeUserConfig;
 use otel_arrow_dfe_core_nodes::exporters::topic_exporter::{TOPIC_EXPORTER, TOPIC_EXPORTER_URN};
 use otel_arrow_dfe_core_nodes::receivers::topic_receiver::{TOPIC_RECEIVER, TOPIC_RECEIVER_URN};
 use otel_arrow_dfe_engine::Interests;
+use otel_arrow_dfe_engine::component_config::ResolvedNodeConfig;
 use otel_arrow_dfe_engine::config::{ExporterConfig, ReceiverConfig};
 use otel_arrow_dfe_engine::control::{
     Controllable, NodeControlMsg, pipeline_completion_msg_channel, runtime_ctrl_msg_channel,
@@ -85,7 +86,15 @@ fn topic_exporter_to_topic_receiver_transfers_pdata() {
         let mut exporter = (TOPIC_EXPORTER.create)(
             exporter_ctx,
             exporter_node.clone(),
-            Arc::new(exporter_user_cfg),
+            Arc::new(
+                ResolvedNodeConfig::new(
+                    &exporter_user_cfg,
+                    (TOPIC_EXPORTER.resolve_config)(&exporter_user_cfg.config)
+                        .expect("topic exporter config should resolve"),
+                    TOPIC_EXPORTER.snapshot_policy,
+                )
+                .expect("topic exporter policy should match"),
+            ),
             &ExporterConfig::new("topic_exporter"),
             &otel_arrow_dfe_engine::capability::registry::Capabilities::empty(),
         )
@@ -94,7 +103,15 @@ fn topic_exporter_to_topic_receiver_transfers_pdata() {
         let mut receiver = (TOPIC_RECEIVER.create)(
             receiver_ctx,
             receiver_node.clone(),
-            Arc::new(receiver_user_cfg),
+            Arc::new(
+                ResolvedNodeConfig::new(
+                    &receiver_user_cfg,
+                    (TOPIC_RECEIVER.resolve_config)(&receiver_user_cfg.config)
+                        .expect("topic receiver config should resolve"),
+                    TOPIC_RECEIVER.snapshot_policy,
+                )
+                .expect("topic receiver policy should match"),
+            ),
             &ReceiverConfig::new("topic_receiver"),
             &otel_arrow_dfe_engine::capability::registry::Capabilities::empty(),
         )
@@ -235,7 +252,15 @@ fn topic_receiver_applies_source_tag_when_enabled() {
         let mut exporter = (TOPIC_EXPORTER.create)(
             exporter_ctx,
             exporter_node.clone(),
-            Arc::new(exporter_user_cfg),
+            Arc::new(
+                ResolvedNodeConfig::new(
+                    &exporter_user_cfg,
+                    (TOPIC_EXPORTER.resolve_config)(&exporter_user_cfg.config)
+                        .expect("topic exporter config should resolve"),
+                    TOPIC_EXPORTER.snapshot_policy,
+                )
+                .expect("topic exporter policy should match"),
+            ),
             &ExporterConfig::new("topic_exporter"),
             &otel_arrow_dfe_engine::capability::registry::Capabilities::empty(),
         )
@@ -244,7 +269,15 @@ fn topic_receiver_applies_source_tag_when_enabled() {
         let mut receiver = (TOPIC_RECEIVER.create)(
             receiver_ctx,
             receiver_node.clone(),
-            Arc::new(receiver_user_cfg),
+            Arc::new(
+                ResolvedNodeConfig::new(
+                    &receiver_user_cfg,
+                    (TOPIC_RECEIVER.resolve_config)(&receiver_user_cfg.config)
+                        .expect("topic receiver config should resolve"),
+                    TOPIC_RECEIVER.snapshot_policy,
+                )
+                .expect("topic receiver policy should match"),
+            ),
             &ReceiverConfig::new("topic_receiver"),
             &otel_arrow_dfe_engine::capability::registry::Capabilities::empty(),
         )

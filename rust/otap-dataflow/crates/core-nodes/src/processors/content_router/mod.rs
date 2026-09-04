@@ -74,7 +74,11 @@ use linkme::distributed_slice;
 use otel_arrow_dfe_config::PortName;
 use otel_arrow_dfe_config::SignalType;
 use otel_arrow_dfe_config::error::Error as ConfigError;
+#[cfg(test)]
 use otel_arrow_dfe_config::node::NodeUserConfig;
+use otel_arrow_dfe_engine::component_config::{
+    ConfigSnapshotPolicy, ResolvedNodeConfig, resolve_typed_config,
+};
 use otel_arrow_dfe_engine::config::ProcessorConfig;
 use otel_arrow_dfe_engine::context::PipelineContext;
 use otel_arrow_dfe_engine::control::{
@@ -126,7 +130,7 @@ pub const CONTENT_ROUTER_URN: &str = "urn:otel:processor:content_router";
 /// Using an explicit source type makes the configuration unambiguous and allows
 /// future variants (e.g. scope attributes, metric names) to be added without
 /// breaking existing configs.
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum RoutingKeyExpr {
     /// Extract the routing value from a resource attribute with the given key.
@@ -232,7 +236,7 @@ impl ContentRouterMetrics {
 ///       "backend": "backend_pipeline"
 ///     default_output: "fallback"
 /// ```
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct ContentRouterConfig {
     /// The source and key used to extract the routing value from a telemetry message.
     pub routing_key: RoutingKeyExpr,
@@ -999,21 +1003,18 @@ impl local::Processor<OtapPdata> for ContentRouter {
 /// Factory function to create a ContentRouter processor
 pub fn create_content_router(
     node: NodeId,
-    node_config: Arc<NodeUserConfig>,
+    node_config: Arc<ResolvedNodeConfig>,
     processor_config: &ProcessorConfig,
 ) -> Result<ProcessorWrapper<OtapPdata>, ConfigError> {
-    let router_config: ContentRouterConfig = serde_json::from_value(node_config.config.clone())
-        .map_err(|e| ConfigError::InvalidUserConfig {
-            error: format!("Failed to parse ContentRouter configuration: {e}"),
-        })?;
-    router_config.validate(&node_config.outputs)?;
+    let router_config = (*node_config.component_config::<ContentRouterConfig>()?).clone();
+    router_config.validate(&node_config.effective().outputs)?;
 
     let router = ContentRouter::new(router_config);
 
     Ok(ProcessorWrapper::local(
         router,
         node,
-        node_config,
+        node_config.effective(),
         processor_config,
     ))
 }
@@ -1025,24 +1026,25 @@ pub fn create_content_router(
 pub static CONTENT_ROUTER_FACTORY: ProcessorFactory<OtapPdata> = ProcessorFactory {
     name: CONTENT_ROUTER_URN,
     wiring_contract: otel_arrow_dfe_engine::wiring_contract::WiringContract::UNRESTRICTED,
-    validate_config: otel_arrow_dfe_config::validation::validate_typed_config::<ContentRouterConfig>,
+    resolve_config: resolve_typed_config::<ContentRouterConfig>,
+    snapshot_policy: ConfigSnapshotPolicy::TypedSafe,
     create:
         |pipeline: PipelineContext,
          node: NodeId,
-         node_config: Arc<NodeUserConfig>,
+         node_config: Arc<ResolvedNodeConfig>,
          proc_cfg: &ProcessorConfig,
          _capabilities: &otel_arrow_dfe_engine::capability::registry::Capabilities| {
-            let router_config: ContentRouterConfig =
-                serde_json::from_value(node_config.config.clone()).map_err(|e| {
-                    ConfigError::InvalidUserConfig {
-                        error: format!("Failed to parse ContentRouter configuration: {e}"),
-                    }
-                })?;
-            router_config.validate(&node_config.outputs)?;
+            let router_config = (*node_config.component_config::<ContentRouterConfig>()?).clone();
+            router_config.validate(&node_config.effective().outputs)?;
 
             let router = ContentRouter::with_pipeline_ctx(pipeline, router_config);
 
-            Ok(ProcessorWrapper::local(router, node, node_config, proc_cfg))
+            Ok(ProcessorWrapper::local(
+                router,
+                node,
+                node_config.effective(),
+                proc_cfg,
+            ))
         },
 };
 
@@ -1059,6 +1061,15 @@ mod tests {
     };
     use prost::Message as ProstMessage;
     use serde_json::json;
+
+    fn create_from_source(
+        node: NodeId,
+        source: NodeUserConfig,
+        processor_config: &ProcessorConfig,
+    ) -> Result<ProcessorWrapper<OtapPdata>, ConfigError> {
+        let resolved = CONTENT_ROUTER_FACTORY.resolve_node_config(source)?;
+        create_content_router(node, resolved, processor_config)
+    }
 
     fn create_logs_with_resource_attr(key: &str, value: &str) -> Bytes {
         let request = ExportLogsServiceRequest::new(vec![ResourceLogs::new(
@@ -1389,9 +1400,9 @@ mod tests {
         let mut node_config = NodeUserConfig::new_processor_config(CONTENT_ROUTER_URN);
         node_config.config = config;
         node_config.add_output("tenant_a");
-        let result = create_content_router(
+        let result = create_from_source(
             test_node(processor_config.name.clone()),
-            Arc::new(node_config),
+            node_config,
             &processor_config,
         );
         assert!(result.is_ok());
@@ -1408,9 +1419,9 @@ mod tests {
         node_config.config = config;
         // Declare an unrelated output -- "tenant_a" is not in the list.
         node_config.add_output("other_port");
-        let result = create_content_router(
+        let result = create_from_source(
             test_node(processor_config.name.clone()),
-            Arc::new(node_config),
+            node_config,
             &processor_config,
         );
         assert!(result.is_err());
@@ -1422,9 +1433,9 @@ mod tests {
         let processor_config = ProcessorConfig::new("test_content_router");
         let mut node_config = NodeUserConfig::new_processor_config(CONTENT_ROUTER_URN);
         node_config.config = config;
-        let result = create_content_router(
+        let result = create_from_source(
             test_node(processor_config.name.clone()),
-            Arc::new(node_config),
+            node_config,
             &processor_config,
         );
         assert!(result.is_err());

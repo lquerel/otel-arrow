@@ -49,7 +49,11 @@ use async_trait::async_trait;
 use linkme::distributed_slice;
 use otel_arrow_dfe_config::PortName;
 use otel_arrow_dfe_config::error::Error as ConfigError;
+#[cfg(test)]
 use otel_arrow_dfe_config::node::NodeUserConfig;
+use otel_arrow_dfe_engine::component_config::{
+    ConfigSnapshotPolicy, ResolvedComponentConfig, ResolvedNodeConfig,
+};
 use otel_arrow_dfe_engine::config::ProcessorConfig;
 use otel_arrow_dfe_engine::context::PipelineContext;
 use otel_arrow_dfe_engine::control::{
@@ -173,7 +177,7 @@ impl SignalTypeRouterMetrics {
 }
 
 /// Minimal configuration for the SignalTypeRouter processor
-#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
 pub struct SignalTypeRouterConfig {
     /// Policy for selected-route `Full` admission.
     #[serde(default)]
@@ -637,14 +641,11 @@ impl local::Processor<OtapPdata> for SignalTypeRouter {
 /// Factory function to create a SignalTypeRouter processor
 pub fn create_signal_type_router(
     node: NodeId,
-    node_config: Arc<NodeUserConfig>,
+    node_config: Arc<ResolvedNodeConfig>,
     processor_config: &ProcessorConfig,
 ) -> Result<ProcessorWrapper<OtapPdata>, ConfigError> {
     // Deserialize the (currently empty) router configuration
-    let router_config: SignalTypeRouterConfig = serde_json::from_value(node_config.config.clone())
-        .map_err(|e| ConfigError::InvalidUserConfig {
-            error: format!("Failed to parse SignalTypeRouter configuration: {e}"),
-        })?;
+    let router_config = (*node_config.component_config::<SignalTypeRouterConfig>()?).clone();
     router_config.validate()?;
 
     // Create the router processor
@@ -653,7 +654,7 @@ pub fn create_signal_type_router(
     Ok(ProcessorWrapper::local(
         router,
         node,
-        node_config,
+        node_config.effective(),
         processor_config,
     ))
 }
@@ -667,27 +668,34 @@ pub static SIGNAL_TYPE_ROUTER_FACTORY: ProcessorFactory<OtapPdata> = ProcessorFa
     create:
         |pipeline: PipelineContext,
          node: NodeId,
-         node_config: Arc<NodeUserConfig>,
+         node_config: Arc<ResolvedNodeConfig>,
          proc_cfg: &ProcessorConfig,
          _capabilities: &otel_arrow_dfe_engine::capability::registry::Capabilities| {
             // Deserialize the (currently empty) router configuration
-            let router_config: SignalTypeRouterConfig =
-                serde_json::from_value(node_config.config.clone()).map_err(|e| {
-                    ConfigError::InvalidUserConfig {
-                        error: format!("Failed to parse SignalTypeRouter configuration: {e}"),
-                    }
-                })?;
+            let router_config =
+                (*node_config.component_config::<SignalTypeRouterConfig>()?).clone();
             router_config.validate()?;
 
             // Create the router with metrics registered via PipelineContext
             let router = SignalTypeRouter::with_pipeline_ctx(pipeline, router_config);
 
-            Ok(ProcessorWrapper::local(router, node, node_config, proc_cfg))
+            Ok(ProcessorWrapper::local(
+                router,
+                node,
+                node_config.effective(),
+                proc_cfg,
+            ))
         },
     wiring_contract: otel_arrow_dfe_engine::wiring_contract::WiringContract::UNRESTRICTED,
-    validate_config: otel_arrow_dfe_config::validation::validate_typed_config::<
-        SignalTypeRouterConfig,
-    >,
+    resolve_config: |value| {
+        let config: SignalTypeRouterConfig =
+            serde_json::from_value(value.clone()).map_err(|e| ConfigError::InvalidUserConfig {
+                error: format!("Failed to parse SignalTypeRouter configuration: {e}"),
+            })?;
+        config.validate()?;
+        ResolvedComponentConfig::typed_safe(config)
+    },
+    snapshot_policy: ConfigSnapshotPolicy::TypedSafe,
 };
 
 #[cfg(test)]
@@ -696,6 +704,15 @@ mod tests {
     use otel_arrow_dfe_engine::testing::{processor::TestRuntime, test_node};
     use otel_arrow_dfe_pdata::otap::{Logs, OtapArrowRecords};
     use serde_json::json;
+
+    fn create_from_source(
+        node: NodeId,
+        source: NodeUserConfig,
+        processor_config: &ProcessorConfig,
+    ) -> Result<ProcessorWrapper<OtapPdata>, ConfigError> {
+        let resolved = SIGNAL_TYPE_ROUTER_FACTORY.resolve_node_config(source)?;
+        create_signal_type_router(node, resolved, processor_config)
+    }
 
     #[test]
     fn test_config_deserialization_defaults() {
@@ -709,9 +726,9 @@ mod tests {
         let processor_config = ProcessorConfig::new("test_router");
         let mut node_config = NodeUserConfig::new_processor_config(SIGNAL_TYPE_ROUTER_URN);
         node_config.config = config;
-        let result = create_signal_type_router(
+        let result = create_from_source(
             test_node(processor_config.name.clone()),
-            Arc::new(node_config),
+            node_config,
             &processor_config,
         );
         assert!(result.is_ok());
@@ -724,9 +741,9 @@ mod tests {
         let processor_config = ProcessorConfig::new("test_router");
         let mut node_config = NodeUserConfig::new_processor_config(SIGNAL_TYPE_ROUTER_URN);
         node_config.config = config;
-        let result = create_signal_type_router(
+        let result = create_from_source(
             test_node(processor_config.name.clone()),
-            Arc::new(node_config),
+            node_config,
             &processor_config,
         );
         assert!(result.is_err());

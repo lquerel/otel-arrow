@@ -378,19 +378,6 @@ impl PipelineNodes {
         self.0.contains_key(id)
     }
 
-    /// Returns a clone of this node set with every node's credential header
-    /// values redacted, for safe exposure through the admin/config snapshot
-    /// APIs. See [`NodeUserConfig::redacted_for_snapshot`]. The stored config is
-    /// left unchanged.
-    #[must_use]
-    pub fn redacted_for_snapshot(&self) -> PipelineNodes {
-        let mut redacted = self.clone();
-        for node in redacted.0.values_mut() {
-            *node = Arc::new(node.redacted_for_snapshot());
-        }
-        redacted
-    }
-
     /// Returns an iterator visiting all nodes.
     pub fn iter(&self) -> impl Iterator<Item = (&NodeId, &Arc<NodeUserConfig>)> {
         self.0.iter()
@@ -642,24 +629,6 @@ impl PipelineConfig {
         &self.nodes
     }
 
-    /// Returns a clone of this pipeline config with every node's and
-    /// extension's credential header values redacted, for safe exposure through
-    /// the admin/config snapshot APIs. See
-    /// [`NodeUserConfig::redacted_for_snapshot`] and
-    /// [`ExtensionUserConfig::redacted_for_snapshot`]. The stored config is left
-    /// unchanged.
-    #[must_use]
-    pub fn redacted_for_snapshot(&self) -> PipelineConfig {
-        let mut redacted = self.clone();
-        for node in redacted.nodes.0.values_mut() {
-            *node = Arc::new(node.redacted_for_snapshot());
-        }
-        for extension in redacted.extensions.0.values_mut() {
-            *extension = Arc::new(extension.redacted_for_snapshot());
-        }
-        redacted
-    }
-
     /// Returns a reference to the pipeline extensions.
     #[must_use]
     pub const fn extensions(&self) -> &PipelineExtensions {
@@ -676,6 +645,45 @@ impl PipelineConfig {
         &self,
     ) -> impl Iterator<Item = (&ExtensionId, &Arc<ExtensionUserConfig>)> {
         self.extensions.iter()
+    }
+
+    /// Replaces every component-specific config with its precomputed effective snapshot.
+    ///
+    /// Callers must supply exactly one snapshot for every node and extension. This
+    /// prevents an unresolved submitted value from leaking into an effective config.
+    pub fn replace_component_config_snapshots(
+        &mut self,
+        node_snapshots: &HashMap<NodeId, Value>,
+        extension_snapshots: &HashMap<ExtensionId, Value>,
+    ) -> Result<(), Error> {
+        if node_snapshots.len() != self.nodes.0.len()
+            || extension_snapshots.len() != self.extensions.0.len()
+        {
+            return Err(Error::InvalidUserConfig {
+                error: "effective config snapshots must cover every pipeline component".to_owned(),
+            });
+        }
+
+        for (node_id, node) in &mut self.nodes.0 {
+            let snapshot = node_snapshots
+                .get(node_id)
+                .ok_or_else(|| Error::InvalidUserConfig {
+                    error: format!("missing effective config snapshot for node `{node_id}`"),
+                })?;
+            Arc::make_mut(node).config = snapshot.clone();
+        }
+        for (extension_id, extension) in &mut self.extensions.0 {
+            let snapshot =
+                extension_snapshots
+                    .get(extension_id)
+                    .ok_or_else(|| Error::InvalidUserConfig {
+                        error: format!(
+                            "missing effective config snapshot for extension `{extension_id}`"
+                        ),
+                    })?;
+            Arc::make_mut(extension).config = snapshot.clone();
+        }
+        Ok(())
     }
 
     /// Returns true if the pipeline graph is defined with top-level connections.
@@ -3193,74 +3201,6 @@ extensions:
         assert!(
             msg.contains("duplicate extension key"),
             "error should mention duplicate extension key: {msg}"
-        );
-    }
-
-    #[test]
-    fn redacted_for_snapshot_masks_exporter_headers() {
-        let yaml = r#"
-            nodes:
-              receiver:
-                type: "urn:otel:receiver:otlp"
-                config: {}
-              exporter:
-                type: "urn:otel:exporter:otlp_http"
-                config:
-                  endpoint: "https://backend.example"
-                  http:
-                    headers:
-                      authorization: "Bearer super-secret-token"
-            connections:
-              - from: receiver
-                to: exporter
-        "#;
-        let config = super::PipelineConfig::from_yaml("group".into(), "pipe".into(), yaml)
-            .expect("pipeline should parse and validate");
-        let redacted = config.redacted_for_snapshot();
-
-        let redacted_json = serde_json::to_string(&redacted).expect("redacted serializes");
-        assert!(
-            !redacted_json.contains("Bearer super-secret-token"),
-            "credential must not survive redaction: {redacted_json}"
-        );
-        assert!(
-            redacted_json.contains(crate::node::REDACTED_HEADER_VALUE),
-            "redaction placeholder should be present"
-        );
-        // The stored pipeline config keeps the cleartext for runtime use.
-        let original_json = serde_json::to_string(&config).expect("config serializes");
-        assert!(original_json.contains("Bearer super-secret-token"));
-    }
-
-    #[test]
-    fn redacted_for_snapshot_masks_extension_headers() {
-        // Extensions carry the same raw `config` Value as nodes; an extension
-        // that holds static `headers` must be redacted too. Deserialize
-        // directly (no validation) so the test stays focused on redaction.
-        let yaml = r#"
-            nodes:
-              receiver:
-                type: "urn:otel:receiver:otlp"
-                config: {}
-            extensions:
-              auth:
-                type: "urn:otap:extension:headers_setter"
-                config:
-                  headers:
-                    authorization: "Bearer ext-super-secret"
-        "#;
-        let config: super::PipelineConfig =
-            serde_yaml::from_str(yaml).expect("pipeline should deserialize");
-        let redacted = config.redacted_for_snapshot();
-
-        let redacted_json = serde_json::to_string(&redacted).expect("redacted serializes");
-        assert!(
-            !redacted_json.contains("Bearer ext-super-secret"),
-            "extension credential must not survive redaction: {redacted_json}"
-        );
-        assert!(
-            redacted_json.contains(crate::node::REDACTED_HEADER_VALUE),
-            "redaction placeholder should be present"
         );
     }
 }

@@ -30,7 +30,6 @@ use otel_arrow_dfe_otap::tls_utils::{build_tls_acceptor, create_tls_stream};
 use async_trait::async_trait;
 use linkme::distributed_slice;
 use otel_arrow_dfe_config::SignalType;
-use otel_arrow_dfe_config::node::NodeUserConfig;
 use otel_arrow_dfe_engine::ReceiverFactory;
 use otel_arrow_dfe_engine::clock;
 use otel_arrow_dfe_engine::config::ReceiverConfig;
@@ -74,7 +73,7 @@ use tonic_middleware::MiddlewareLayer;
 const OTAP_RECEIVER_URN: &str = "urn:otel:receiver:otap";
 
 /// Configuration for the OTAP Receiver
-#[derive(Debug, Deserialize)]
+#[derive(Debug, Clone, PartialEq, serde::Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct Config {
     listening_addr: SocketAddr,
@@ -171,21 +170,38 @@ pub static OTAP_RECEIVER: ReceiverFactory<OtapPdata> = ReceiverFactory {
     create:
         |pipeline: PipelineContext,
          node: NodeId,
-         node_config: Arc<NodeUserConfig>,
+         node_config: Arc<otel_arrow_dfe_engine::component_config::ResolvedNodeConfig>,
          receiver_config: &ReceiverConfig,
          _capabilities: &otel_arrow_dfe_engine::capability::registry::Capabilities| {
             Ok(ReceiverWrapper::shared(
-                OTAPReceiver::from_config(pipeline, &node_config.config)?,
+                OTAPReceiver::new(
+                    pipeline,
+                    (*node_config.component_config::<Config>()?).clone(),
+                ),
                 node,
-                node_config,
+                node_config.effective(),
                 receiver_config,
             ))
         },
     wiring_contract: otel_arrow_dfe_engine::wiring_contract::WiringContract::UNRESTRICTED,
-    validate_config: otel_arrow_dfe_config::validation::validate_typed_config::<Config>,
+    resolve_config: otel_arrow_dfe_engine::component_config::resolve_typed_config::<Config>,
+    snapshot_policy: otel_arrow_dfe_engine::component_config::ConfigSnapshotPolicy::TypedSafe,
 };
 
 impl OTAPReceiver {
+    fn new(pipeline_ctx: PipelineContext, config: Config) -> Self {
+        let metrics = Arc::new(SharedOtapReceiverMetrics::new(
+            OtapReceiverMetrics::register(&pipeline_ctx),
+        ));
+        Self {
+            config,
+            metrics,
+            admission_state: SharedReceiverAdmissionState::from_process_state(
+                &pipeline_ctx.memory_pressure_state(),
+            ),
+        }
+    }
+
     /// Creates a new OTAPReceiver from a configuration object
     pub fn from_config(
         pipeline_ctx: PipelineContext,
@@ -197,18 +213,7 @@ impl OTAPReceiver {
             }
         })?;
 
-        // Register OTAP receiver metrics for this node.
-        let metrics = Arc::new(SharedOtapReceiverMetrics::new(
-            OtapReceiverMetrics::register(&pipeline_ctx),
-        ));
-
-        Ok(OTAPReceiver {
-            config,
-            metrics,
-            admission_state: SharedReceiverAdmissionState::from_process_state(
-                &pipeline_ctx.memory_pressure_state(),
-            ),
-        })
+        Ok(Self::new(pipeline_ctx, config))
     }
 
     fn route_ack_response(

@@ -36,7 +36,6 @@ otel_arrow_dfe_telemetry::otel_component_scope!(
 use async_trait::async_trait;
 use bytes::Bytes;
 use linkme::distributed_slice;
-use otel_arrow_dfe_config::node::NodeUserConfig;
 use otel_arrow_dfe_config::pipeline::telemetry::AttributeValue as ConfigAttributeValue;
 use otel_arrow_dfe_engine::ReceiverFactory;
 use otel_arrow_dfe_engine::config::ReceiverConfig;
@@ -201,7 +200,7 @@ pub static INTERNAL_TELEMETRY_RECEIVER: ReceiverFactory<OtapPdata> = ReceiverFac
     create:
         |mut pipeline: PipelineContext,
          node: NodeId,
-         node_config: Arc<NodeUserConfig>,
+         node_config: Arc<otel_arrow_dfe_engine::component_config::ResolvedNodeConfig>,
          receiver_config: &ReceiverConfig,
          _capabilities: &otel_arrow_dfe_engine::capability::registry::Capabilities| {
             // Get internal telemetry settings from the pipeline context
@@ -211,17 +210,24 @@ pub static INTERNAL_TELEMETRY_RECEIVER: ReceiverFactory<OtapPdata> = ReceiverFac
             }
         })?;
 
-            let config = InternalTelemetryReceiver::parse_config(&node_config.config)?;
+            let config = node_config.component_config::<Config>()?;
 
             Ok(ReceiverWrapper::local(
-                InternalTelemetryReceiver::new_with_telemetry(config, internal_telemetry),
+                InternalTelemetryReceiver::new_with_telemetry(
+                    (*config).clone(),
+                    internal_telemetry,
+                ),
                 node,
-                node_config,
+                node_config.effective(),
                 receiver_config,
             ))
         },
     wiring_contract: otel_arrow_dfe_engine::wiring_contract::WiringContract::UNRESTRICTED,
-    validate_config: InternalTelemetryReceiver::validate_config,
+    resolve_config: |config| {
+        let config = InternalTelemetryReceiver::parse_config(config)?;
+        otel_arrow_dfe_engine::component_config::ResolvedComponentConfig::typed_safe(config)
+    },
+    snapshot_policy: otel_arrow_dfe_engine::component_config::ConfigSnapshotPolicy::TypedSafe,
 };
 
 impl InternalTelemetryReceiver {
@@ -246,10 +252,6 @@ impl InternalTelemetryReceiver {
         })?;
         config.validate()?;
         Ok(config)
-    }
-
-    fn validate_config(config: &Value) -> Result<(), otel_arrow_dfe_config::error::Error> {
-        Self::parse_config(config).map(drop)
     }
 }
 

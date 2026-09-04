@@ -15,9 +15,11 @@ use async_trait::async_trait;
 use linkme::distributed_slice;
 use metrics::TrafficGeneratorReceiverMetrics;
 use otel_arrow_dfe_channel::error::{RecvError, SendError};
-use otel_arrow_dfe_config::node::NodeUserConfig;
 use otel_arrow_dfe_config::transport_headers::{TransportHeader, TransportHeaders};
 use otel_arrow_dfe_engine::MessageSourceLocalEffectHandlerExtension;
+use otel_arrow_dfe_engine::component_config::{
+    ConfigSnapshotPolicy, ResolvedComponentConfig, ResolvedNodeConfig,
+};
 use otel_arrow_dfe_engine::config::ReceiverConfig;
 use otel_arrow_dfe_engine::context::PipelineContext;
 use otel_arrow_dfe_engine::control::CallData;
@@ -77,6 +79,17 @@ pub struct TrafficGeneratorReceiver {
     pending_completions: u64,
 }
 
+struct ResolvedTrafficGeneratorConfig {
+    config: Config,
+    normalized: Value,
+}
+
+impl PartialEq for ResolvedTrafficGeneratorConfig {
+    fn eq(&self, other: &Self) -> bool {
+        self.normalized == other.normalized
+    }
+}
+
 fn smooth_batch_interval(run_len: usize) -> Option<Duration> {
     if run_len == 0 {
         return None;
@@ -107,18 +120,44 @@ pub static TRAFFIC_GENERATOR_RECEIVER: ReceiverFactory<OtapPdata> = ReceiverFact
     create:
         |pipeline: PipelineContext,
          node: NodeId,
-         node_config: Arc<NodeUserConfig>,
+         node_config: Arc<ResolvedNodeConfig>,
          receiver_config: &ReceiverConfig,
          _capabilities: &otel_arrow_dfe_engine::capability::registry::Capabilities| {
             Ok(ReceiverWrapper::local(
-                TrafficGeneratorReceiver::from_config(pipeline, &node_config.config)?,
+                TrafficGeneratorReceiver::new(
+                    pipeline,
+                    node_config
+                        .component_config::<ResolvedTrafficGeneratorConfig>()?
+                        .config
+                        .clone(),
+                ),
                 node,
-                node_config,
+                node_config.effective(),
                 receiver_config,
             ))
         },
     wiring_contract: otel_arrow_dfe_engine::wiring_contract::WiringContract::UNRESTRICTED,
-    validate_config: otel_arrow_dfe_config::validation::validate_typed_config::<Config>,
+    resolve_config: |value| {
+        let config: Config = serde_json::from_value(value.clone()).map_err(|e| {
+            otel_arrow_dfe_config::error::Error::InvalidUserConfig {
+                error: e.to_string(),
+            }
+        })?;
+        config.get_traffic_config().validate()?;
+        let normalized = serde_json::to_value(&config).map_err(|e| {
+            otel_arrow_dfe_config::error::Error::InvalidUserConfig {
+                error: format!("failed to serialize traffic generator configuration: {e}"),
+            }
+        })?;
+        Ok(ResolvedComponentConfig::custom_safe(
+            ResolvedTrafficGeneratorConfig {
+                config,
+                normalized: normalized.clone(),
+            },
+            normalized,
+        ))
+    },
+    snapshot_policy: ConfigSnapshotPolicy::CustomSafe,
 };
 
 impl TrafficGeneratorReceiver {

@@ -21,7 +21,9 @@ use async_trait::async_trait;
 use linkme::distributed_slice;
 use otel_arrow_dfe_config::PortName;
 use otel_arrow_dfe_config::error::Error as ConfigError;
-use otel_arrow_dfe_config::node::NodeUserConfig;
+use otel_arrow_dfe_engine::component_config::{
+    ConfigSnapshotPolicy, ResolvedNodeConfig, resolve_typed_config,
+};
 use otel_arrow_dfe_engine::config::ProcessorConfig;
 use otel_arrow_dfe_engine::context::PipelineContext;
 use otel_arrow_dfe_engine::control::{CallData, NodeControlMsg};
@@ -76,13 +78,16 @@ pub struct DebugProcessor {
 pub fn create_debug_processor(
     pipeline_ctx: PipelineContext,
     node: NodeId,
-    node_config: Arc<NodeUserConfig>,
+    node_config: Arc<ResolvedNodeConfig>,
     processor_config: &ProcessorConfig,
 ) -> Result<ProcessorWrapper<OtapPdata>, ConfigError> {
     Ok(ProcessorWrapper::local(
-        DebugProcessor::from_config(pipeline_ctx, &node_config.config)?,
+        DebugProcessor::new(
+            (*node_config.component_config::<Config>()?).clone(),
+            pipeline_ctx,
+        ),
         node,
-        node_config,
+        node_config.effective(),
         processor_config,
     ))
 }
@@ -97,13 +102,14 @@ pub static DEBUG_PROCESSOR_FACTORY: otel_arrow_dfe_engine::ProcessorFactory<Otap
         create:
             |pipeline_ctx: PipelineContext,
              node: NodeId,
-             node_config: Arc<NodeUserConfig>,
+             node_config: Arc<ResolvedNodeConfig>,
              proc_cfg: &ProcessorConfig,
              _capabilities: &otel_arrow_dfe_engine::capability::registry::Capabilities| {
                 create_debug_processor(pipeline_ctx, node, node_config, proc_cfg)
             },
         wiring_contract: otel_arrow_dfe_engine::wiring_contract::WiringContract::UNRESTRICTED,
-        validate_config: otel_arrow_dfe_config::validation::validate_typed_config::<Config>,
+        resolve_config: resolve_typed_config::<Config>,
+        snapshot_policy: ConfigSnapshotPolicy::TypedSafe,
     };
 
 impl DebugProcessor {

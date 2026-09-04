@@ -25,7 +25,9 @@ otel_arrow_dfe_telemetry::otel_component_scope!(
 use async_trait::async_trait;
 use linkme::distributed_slice;
 use otel_arrow_dfe_config::error::Error as ConfigError;
-use otel_arrow_dfe_config::node::NodeUserConfig;
+use otel_arrow_dfe_engine::component_config::{
+    ConfigSnapshotPolicy, ResolvedNodeConfig, resolve_typed_config,
+};
 use otel_arrow_dfe_engine::config::ProcessorConfig;
 use otel_arrow_dfe_engine::control::NodeControlMsg;
 use otel_arrow_dfe_engine::error::Error;
@@ -44,7 +46,7 @@ use std::time::Duration;
 pub const DELAY_PROCESSOR_URN: &str = "urn:otel:processor:delay";
 
 /// Configuration for the delay processor.
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct DelayConfig {
     /// How long to sleep before forwarding each message.
     /// Format: humantime (e.g., "500ms", "1s", "2s").
@@ -60,29 +62,26 @@ pub static DELAY_PROCESSOR_FACTORY: ProcessorFactory<OtapPdata> = ProcessorFacto
     name: DELAY_PROCESSOR_URN,
     create: create_delay_processor,
     wiring_contract: otel_arrow_dfe_engine::wiring_contract::WiringContract::UNRESTRICTED,
-    validate_config: otel_arrow_dfe_config::validation::validate_typed_config::<DelayConfig>,
+    resolve_config: resolve_typed_config::<DelayConfig>,
+    snapshot_policy: ConfigSnapshotPolicy::TypedSafe,
 };
 
 /// Factory function to create a DelayProcessor.
 pub fn create_delay_processor(
     _pipeline_ctx: otel_arrow_dfe_engine::context::PipelineContext,
     node: NodeId,
-    node_config: Arc<NodeUserConfig>,
+    node_config: Arc<ResolvedNodeConfig>,
     processor_config: &ProcessorConfig,
     _capabilities: &otel_arrow_dfe_engine::capability::registry::Capabilities,
 ) -> Result<ProcessorWrapper<OtapPdata>, ConfigError> {
-    let config: DelayConfig = serde_json::from_value(node_config.config.clone()).map_err(|e| {
-        ConfigError::InvalidUserConfig {
-            error: format!("Failed to parse delay processor configuration: {e}"),
-        }
-    })?;
+    let config = node_config.component_config::<DelayConfig>()?;
 
     Ok(ProcessorWrapper::local(
         DelayProcessor {
             delay: config.delay,
         },
         node,
-        node_config,
+        node_config.effective(),
         processor_config,
     ))
 }
@@ -116,13 +115,13 @@ impl local::Processor<OtapPdata> for DelayProcessor {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use otel_arrow_dfe_config::node::NodeUserConfig;
     use otel_arrow_dfe_engine::context::ControllerContext;
     use otel_arrow_dfe_engine::testing::node::test_node;
     use otel_arrow_dfe_engine::testing::processor::TestRuntime;
     use otel_arrow_dfe_otap::testing::create_test_pdata;
     use otel_arrow_dfe_telemetry::registry::TelemetryRegistryHandle;
     use serde_json::json;
-    use std::sync::Arc;
 
     #[test]
     fn test_config_parsing() {
@@ -163,7 +162,9 @@ mod tests {
         let proc = create_delay_processor(
             pipeline_ctx,
             node,
-            Arc::new(node_config),
+            DELAY_PROCESSOR_FACTORY
+                .resolve_node_config(node_config)
+                .expect("delay processor config must resolve"),
             rt.config(),
             &otel_arrow_dfe_engine::capability::registry::Capabilities::empty(),
         )

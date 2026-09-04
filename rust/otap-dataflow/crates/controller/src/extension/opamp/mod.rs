@@ -58,6 +58,7 @@ use crate::{
 };
 use otel_arrow_dfe_config::PipelineKey;
 use otel_arrow_dfe_config::error::Error as ConfigError;
+use otel_arrow_dfe_engine::component_config::{ConfigSnapshotPolicy, ResolvedComponentConfig};
 use otel_arrow_dfe_state::pipeline_status::PipelineStatus;
 
 pub mod config;
@@ -90,11 +91,14 @@ pub static OPAMP_CONTROLLER_EXTENSION: ControllerExtensionFactory = ControllerEx
     name: CONTROL_EXTENSION_URN,
     description: "OpAMP controller extension",
     documentation_url: "",
-    validate_config,
+    resolve_config: resolve_opamp_config,
+    snapshot_policy: ConfigSnapshotPolicy::Omit,
     start,
 };
 
-fn validate_config(config: &serde_json::Value) -> Result<(), ConfigError> {
+fn resolve_opamp_config(
+    config: &serde_json::Value,
+) -> Result<ResolvedComponentConfig, ConfigError> {
     let config: Config =
         serde_json::from_value(config.clone()).map_err(|e| ConfigError::InvalidUserConfig {
             error: e.to_string(),
@@ -104,16 +108,18 @@ fn validate_config(config: &serde_json::Value) -> Result<(), ConfigError> {
         .validate()
         .map_err(|e| ConfigError::InvalidUserConfig {
             error: e.to_string(),
-        })
+        })?;
+    Ok(ResolvedComponentConfig::omitted(config))
 }
 
 fn start(
     context: ControllerExtensionContext,
 ) -> Result<ControllerExtensionTaskFactory, ControllerExtensionError> {
-    // safety: we can 'expect' the deserialization to have succeeded because it's also deserialized
-    // in the `validate_config` call
-    let config: Config =
-        serde_json::from_value(context.extension.config.clone()).expect("config validated");
+    let config = (*context
+        .extension
+        .component_config::<Config>()
+        .map_err(|source| Box::new(source) as ControllerExtensionError)?)
+    .clone();
 
     Ok(Box::new(move |cancellation_token| {
         Box::pin(
@@ -166,7 +172,7 @@ impl SessionState {
     fn try_new(config: &Config) -> Result<Self, Error> {
         let instance_uid = match &config.instance_uid {
             Some(instance_uid) => {
-                // safety: this was validated in validate_config
+                // safety: this was validated during factory resolution
                 Uuid::parse_str(instance_uid).expect("valid UUID")
             }
             None => Uuid::now_v7(),
@@ -1547,7 +1553,7 @@ fn set_health_and_status_from_components(group_health: &mut ComponentHealth) {
 fn effective_config(context: &ControllerExtensionContext) -> EffectiveConfig {
     let config_result = context
         .control_plane
-        .engine_config_snapshot()
+        .effective_config_snapshot()
         .map_err(|e| format!("Failed to get engine config snapshot: {e:?}"))
         .and_then(|config| {
             serde_json::to_vec(&config)
@@ -1668,12 +1674,17 @@ mod test {
         );
 
         let extension_urn = ExtensionUrn::parse(CONTROL_EXTENSION_URN).unwrap();
+        let extension_source =
+            ExtensionUserConfig::new(extension_urn, serde_json::to_value(&config).unwrap());
+        let extension = otel_arrow_dfe_engine::component_config::ResolvedExtensionConfig::new(
+            &extension_source,
+            resolve_opamp_config(&extension_source.config).expect("OpAMP config resolves"),
+            ConfigSnapshotPolicy::Omit,
+        )
+        .expect("OpAMP extension envelope resolves");
         let context = ControllerExtensionContext {
             extension_id: Cow::Borrowed("opamp"),
-            extension: Arc::new(ExtensionUserConfig::new(
-                extension_urn,
-                serde_json::to_value(&config).unwrap(),
-            )),
+            extension: Arc::new(extension),
             control_plane,
             observed_state: observed_state_store.handle(),
             telemetry_registry: telemetry_registry_handle,
@@ -2029,7 +2040,7 @@ mod test {
         );
         assert_eq!(
             control_plane
-                .engine_config_snapshot()
+                .effective_config_snapshot()
                 .expect("effective config should be available"),
             desired
         );
@@ -2481,20 +2492,20 @@ mod test {
     }
 
     #[test]
-    fn test_validate_config_accepts_valid() {
+    fn test_resolve_config_accepts_valid() {
         let config_value = serde_json::json!({
             "endpoint": "ws://127.0.0.1:4320/v1/opamp"
         });
-        assert!(validate_config(&config_value).is_ok());
+        assert!(resolve_opamp_config(&config_value).is_ok());
     }
 
     #[test]
-    fn test_validate_config_rejects_invalid_json_structure() {
+    fn test_resolve_config_rejects_invalid_json_structure() {
         // Missing required "endpoint" field
         let config_value = serde_json::json!({
             "not_a_real_field": "hello"
         });
-        let err = validate_config(&config_value).unwrap_err();
+        let err = resolve_opamp_config(&config_value).unwrap_err();
         assert!(
             err.to_string().contains("endpoint"),
             "expected error about missing endpoint, got: {err}"
@@ -2502,11 +2513,11 @@ mod test {
     }
 
     #[test]
-    fn test_validate_config_rejects_invalid_endpoint() {
+    fn test_resolve_config_rejects_invalid_endpoint() {
         let config_value = serde_json::json!({
             "endpoint": "ftp://nope.invalid:1234"
         });
-        let err = validate_config(&config_value).unwrap_err();
+        let err = resolve_opamp_config(&config_value).unwrap_err();
         assert!(
             err.to_string().contains("ftp"),
             "expected error mentioning invalid scheme, got: {err}"
@@ -2514,12 +2525,12 @@ mod test {
     }
 
     #[test]
-    fn test_validate_config_rejects_invalid_instance_uid() {
+    fn test_resolve_config_rejects_invalid_instance_uid() {
         let config_value = serde_json::json!({
             "endpoint": "ws://127.0.0.1:4320",
             "instance_uid": "not-a-uuid"
         });
-        let err = validate_config(&config_value).unwrap_err();
+        let err = resolve_opamp_config(&config_value).unwrap_err();
         assert!(
             err.to_string().contains("invalid"),
             "expected error about invalid UUID, got: {err}"

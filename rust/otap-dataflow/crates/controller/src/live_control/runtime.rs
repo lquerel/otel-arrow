@@ -22,6 +22,7 @@ struct RuntimeRecoveryAttempt {
     attempt: usize,
     target_key: DeployedPipelineKey,
     resolved: ResolvedPipelineConfig,
+    runtime_resolved: otel_arrow_dfe_engine::component_config::ResolvedPipelineConfig,
     placement: LivePipelinePlacement,
     backoff: Duration,
 }
@@ -77,6 +78,7 @@ impl<
     pub(super) fn launch_regular_pipeline_instance(
         self: &Arc<Self>,
         resolved_pipeline: &ResolvedPipelineConfig,
+        runtime_resolved_pipeline: &otel_arrow_dfe_engine::component_config::ResolvedPipelineConfig,
         placement: &LivePipelinePlacement,
         core_id: usize,
         deployment_generation: u64,
@@ -93,7 +95,7 @@ impl<
                     ))),
                 })?;
         let num_cores = placement.placement.core_count();
-        let live_config = self.engine_config_snapshot();
+        let live_config = self.source_config_snapshot();
         let deployed_key = DeployedPipelineKey {
             pipeline_group_id: resolved_pipeline.pipeline_group_id.clone(),
             pipeline_id: resolved_pipeline.pipeline_id.clone(),
@@ -107,7 +109,7 @@ impl<
             core_placement.numa_node_id,
             Arc::clone(&placement.listener_group_snapshot),
             num_cores,
-            resolved_pipeline.pipeline.clone(),
+            runtime_resolved_pipeline.clone(),
             resolved_pipeline.policies.channel_capacity.clone(),
             resolved_pipeline.policies.telemetry.clone(),
             resolved_pipeline.policies.transport_headers.clone(),
@@ -606,6 +608,7 @@ impl<
 
             let target_key = match self.launch_regular_pipeline_instance(
                 &attempt.resolved,
+                &attempt.runtime_resolved,
                 &attempt.placement,
                 core_id,
                 attempt.target_key.deployment_generation,
@@ -784,10 +787,11 @@ impl<
             return RuntimeRecoveryAttemptDecision::Exhausted;
         }
 
-        let Some((resolved, placement, placement_generation)) =
+        let Some((resolved, runtime_resolved, placement, placement_generation)) =
             state.logical_pipelines.get(pipeline_key).map(|record| {
                 (
                     record.resolved.clone(),
+                    record.runtime_resolved.clone(),
                     record.placement.clone(),
                     record.placement_generation,
                 )
@@ -825,6 +829,7 @@ impl<
                 deployment_generation: target_generation,
             },
             resolved,
+            runtime_resolved,
             placement,
             backoff: runtime_recovery_backoff(policy, attempt),
         }))

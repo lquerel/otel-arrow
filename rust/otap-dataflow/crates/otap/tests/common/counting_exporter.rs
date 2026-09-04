@@ -11,7 +11,9 @@
 
 use async_trait::async_trait;
 use linkme::distributed_slice;
-use otel_arrow_dfe_config::node::NodeUserConfig;
+use otel_arrow_dfe_engine::component_config::{
+    ConfigSnapshotPolicy, ResolvedNodeConfig, resolve_omitted_config,
+};
 use otel_arrow_dfe_engine::config::ExporterConfig;
 use otel_arrow_dfe_engine::context::PipelineContext;
 use otel_arrow_dfe_engine::control::{AckMsg, NodeControlMsg};
@@ -66,24 +68,23 @@ static COUNTING_EXPORTER: ExporterFactory<OtapPdata> = ExporterFactory {
     create:
         |_pipeline: PipelineContext,
          node: NodeId,
-         node_config: Arc<NodeUserConfig>,
+         node_config: Arc<ResolvedNodeConfig>,
          exporter_config: &ExporterConfig,
          _capabilities: &otel_arrow_dfe_engine::capability::registry::Capabilities| {
             // Look up counter by ID from node config
-            let counter_id = node_config
-                .config
-                .get("counter_id")
-                .and_then(|v| v.as_str());
+            let component = node_config.component_config::<serde_json::Value>()?;
+            let counter_id = component.get("counter_id").and_then(|v| v.as_str());
             let counter = counter_id.and_then(get_counter);
             Ok(ExporterWrapper::local(
                 CountingExporter { counter },
                 node,
-                node_config,
+                node_config.effective(),
                 exporter_config,
             ))
         },
     wiring_contract: otel_arrow_dfe_engine::wiring_contract::WiringContract::UNRESTRICTED,
-    validate_config: |_| Ok(()),
+    resolve_config: resolve_omitted_config::<serde_json::Value>,
+    snapshot_policy: ConfigSnapshotPolicy::Omit,
 };
 
 #[async_trait(?Send)]

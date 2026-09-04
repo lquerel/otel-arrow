@@ -16,8 +16,6 @@ mod record_json;
 use async_trait::async_trait;
 use linkme::distributed_slice;
 use otel_arrow_dfe_config::SignalType;
-use otel_arrow_dfe_config::error::Error as ConfigError;
-use otel_arrow_dfe_config::node::NodeUserConfig;
 use otel_arrow_dfe_engine::config::ExporterConfig;
 use otel_arrow_dfe_engine::context::PipelineContext;
 use otel_arrow_dfe_engine::control::{AckMsg, NodeControlMsg};
@@ -55,7 +53,9 @@ use self::record_json::RecordJsonFormatter;
 pub const CONSOLE_EXPORTER_URN: &str = "urn:otel:exporter:console";
 
 /// Output formats supported by the console exporter.
-#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, serde::Deserialize, AttributeEnum)]
+#[derive(
+    Debug, Clone, Copy, Default, PartialEq, Eq, serde::Deserialize, serde::Serialize, AttributeEnum,
+)]
 #[serde(rename_all = "snake_case")]
 pub enum ConsoleOutputFormat {
     /// Human-readable hierarchical output intended for interactive inspection.
@@ -66,7 +66,7 @@ pub enum ConsoleOutputFormat {
 }
 
 /// Histogram detail levels supported by `pretty`.
-#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, serde::Deserialize)]
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, serde::Deserialize, serde::Serialize)]
 #[serde(rename_all = "snake_case")]
 pub enum PrettyHistogramMode {
     /// Render compact distribution statistics without bucket details.
@@ -77,7 +77,7 @@ pub enum PrettyHistogramMode {
 }
 
 /// Format-specific configuration for `pretty`.
-#[derive(Debug, Clone, Copy, Default, serde::Deserialize)]
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, serde::Deserialize, serde::Serialize)]
 pub struct PrettyConfig {
     /// Histogram detail level (default: compact).
     #[serde(default)]
@@ -85,7 +85,7 @@ pub struct PrettyConfig {
 }
 
 /// Timestamp encodings supported by `record_json`.
-#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, serde::Deserialize)]
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, serde::Deserialize, serde::Serialize)]
 #[serde(rename_all = "snake_case")]
 pub enum RecordJsonTimestampFormat {
     /// UTC RFC 3339 with nanosecond precision.
@@ -96,7 +96,7 @@ pub enum RecordJsonTimestampFormat {
 }
 
 /// Field names supported for the `record_json` log body.
-#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, serde::Deserialize)]
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, serde::Deserialize, serde::Serialize)]
 #[serde(rename_all = "snake_case")]
 pub enum RecordJsonBodyField {
     /// Emit the log body under `body`.
@@ -107,7 +107,7 @@ pub enum RecordJsonBodyField {
 }
 
 /// Int64 encodings supported by `record_json`.
-#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, serde::Deserialize)]
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, serde::Deserialize, serde::Serialize)]
 #[serde(rename_all = "snake_case")]
 pub enum RecordJsonInt64Format {
     /// Emit int64 values as JSON integers.
@@ -118,7 +118,7 @@ pub enum RecordJsonInt64Format {
 }
 
 /// Format-specific configuration for `record_json`.
-#[derive(Debug, Clone, Copy, serde::Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Deserialize, serde::Serialize)]
 pub struct RecordJsonConfig {
     /// Timestamp encoding (default: rfc3339).
     #[serde(default)]
@@ -154,7 +154,7 @@ impl Default for RecordJsonConfig {
 }
 
 /// Configuration for the console exporter
-#[derive(Debug, Clone, serde::Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, serde::Deserialize, serde::Serialize)]
 pub struct ConsoleExporterConfig {
     /// Output format (default: pretty).
     #[serde(default)]
@@ -235,24 +235,22 @@ pub static CONSOLE_EXPORTER: ExporterFactory<OtapPdata> = ExporterFactory {
     create:
         |pipeline: PipelineContext,
          node: NodeId,
-         node_config: Arc<NodeUserConfig>,
+         node_config: Arc<otel_arrow_dfe_engine::component_config::ResolvedNodeConfig>,
          exporter_config: &ExporterConfig,
          _capabilities: &otel_arrow_dfe_engine::capability::registry::Capabilities| {
-            let config: ConsoleExporterConfig = serde_json::from_value(node_config.config.clone())
-                .map_err(|e| ConfigError::InvalidUserConfig {
-                    error: format!("Failed to parse console exporter config: {}", e),
-                })?;
+            let config = node_config.component_config::<ConsoleExporterConfig>()?;
             Ok(ExporterWrapper::local(
-                ConsoleExporter::new(&pipeline, config),
+                ConsoleExporter::new(&pipeline, (*config).clone()),
                 node,
-                node_config,
+                node_config.effective(),
                 exporter_config,
             ))
         },
     wiring_contract: otel_arrow_dfe_engine::wiring_contract::WiringContract::UNRESTRICTED,
-    validate_config: otel_arrow_dfe_config::validation::validate_typed_config::<
+    resolve_config: otel_arrow_dfe_engine::component_config::resolve_typed_config::<
         ConsoleExporterConfig,
     >,
+    snapshot_policy: otel_arrow_dfe_engine::component_config::ConfigSnapshotPolicy::TypedSafe,
 };
 
 #[async_trait(?Send)]

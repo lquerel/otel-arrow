@@ -5,7 +5,7 @@ use std::num::NonZeroUsize;
 
 use serde::Deserialize;
 
-#[derive(Debug, Deserialize, PartialEq)]
+#[derive(Clone, Debug, Deserialize, PartialEq)]
 pub struct Config {
     /// configuration for how to compute the partition
     pub partition_by: PartitionByConfig,
@@ -24,7 +24,7 @@ pub struct Config {
     pub outbound_request_limit: NonZeroUsize,
 }
 
-#[derive(Debug, Deserialize, PartialEq)]
+#[derive(Clone, Debug, Deserialize, PartialEq)]
 #[serde(rename_all = "snake_case")]
 pub enum PartitionByConfig {
     /// partition the OTAP batches by the result of evaluating this OPL expression
@@ -39,7 +39,7 @@ pub enum PartitionByConfig {
 /// so there needs to be a conversion. Different strategies may optimize for performance,
 /// vs preserving type information
 ///
-#[derive(Debug, Deserialize, PartialEq)]
+#[derive(Clone, Debug, Deserialize, PartialEq)]
 #[serde(rename_all = "snake_case")]
 pub enum PartitionValueSerializeStrategy {
     /// Simply convert the header value to Binary by taking the bytes.

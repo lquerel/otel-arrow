@@ -71,8 +71,10 @@ use session::EtwEventData;
 
 use async_trait::async_trait;
 use linkme::distributed_slice;
-use otel_arrow_dfe_config::node::NodeUserConfig;
 use otel_arrow_dfe_engine::ReceiverFactory;
+use otel_arrow_dfe_engine::component_config::{
+    ConfigSnapshotPolicy, ResolvedComponentConfig, ResolvedNodeConfig,
+};
 use otel_arrow_dfe_engine::config::ReceiverConfig;
 use otel_arrow_dfe_engine::context::PipelineContext;
 use otel_arrow_dfe_engine::control::NodeControlMsg;
@@ -364,6 +366,13 @@ impl EtwReceiver {
         })?;
         cfg.validate()?;
 
+        Self::from_typed_config(pipeline, cfg)
+    }
+
+    fn from_typed_config(
+        pipeline: PipelineContext,
+        cfg: Config,
+    ) -> Result<Self, otel_arrow_dfe_config::error::Error> {
         let num_cores = pipeline.num_cores();
         let metrics = pipeline.register_metrics::<EtwReceiverMetrics>();
         let batching = cfg.batching.clone().unwrap_or_default();
@@ -834,19 +843,35 @@ pub static ETW_RECEIVER: ReceiverFactory<OtapPdata> = ReceiverFactory {
     create:
         |pipeline: PipelineContext,
          node: NodeId,
-         node_config: Arc<NodeUserConfig>,
+         node_config: Arc<ResolvedNodeConfig>,
          receiver_config: &ReceiverConfig,
          _capabilities: &otel_arrow_dfe_engine::capability::registry::Capabilities| {
             Ok(ReceiverWrapper::local(
-                EtwReceiver::from_config(pipeline, &node_config.config)?,
+                EtwReceiver::from_typed_config(
+                    pipeline,
+                    node_config.component_config::<Config>()?.as_ref().clone(),
+                )?,
                 node,
-                node_config,
+                node_config.effective(),
                 receiver_config,
             ))
         },
     wiring_contract: otel_arrow_dfe_engine::wiring_contract::WiringContract::UNRESTRICTED,
-    validate_config: otel_arrow_dfe_config::validation::validate_typed_config::<Config>,
+    resolve_config: resolve_etw_config,
+    snapshot_policy: ConfigSnapshotPolicy::Omit,
 };
+
+fn resolve_etw_config(
+    raw: &Value,
+) -> Result<ResolvedComponentConfig, otel_arrow_dfe_config::error::Error> {
+    let config: Config = serde_json::from_value(raw.clone()).map_err(|error| {
+        otel_arrow_dfe_config::error::Error::InvalidUserConfig {
+            error: error.to_string(),
+        }
+    })?;
+    config.validate()?;
+    Ok(ResolvedComponentConfig::omitted(config))
+}
 
 // -- Receiver trait implementation --------------------------------------------
 

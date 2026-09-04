@@ -635,7 +635,7 @@ impl KafkaExporterConfigBuilder {
 ///
 /// Construct via [`TryFrom<KafkaExporterConfigBuilder>`] or by deserializing
 /// directly (serde runs validation automatically via `try_from`).
-#[derive(Debug, Clone, Deserialize)]
+#[derive(Debug, Clone, Deserialize, PartialEq)]
 #[serde(try_from = "KafkaExporterConfigBuilder")]
 pub struct KafkaExporterConfig(KafkaExporterConfigBuilder);
 
@@ -650,7 +650,7 @@ pub struct KafkaExporterConfig(KafkaExporterConfigBuilder);
 /// as a standalone regex and then anchored to a whole-topic match as
 /// `\A(?:<pattern>)\z` -- so an invalid pattern (including one crafted to break
 /// out of the anchoring wrapper) fails fast at config time, including through
-/// the factory `validate_config` path, which runs this validation without
+/// the factory resolver path, which runs this validation without
 /// constructing an exporter.
 fn validate_signal_topics(signal: &SignalConfig) -> Result<(), String> {
     validate_kafka_topic(&signal.topic).map_err(|e| format!("topic: {e}"))?;

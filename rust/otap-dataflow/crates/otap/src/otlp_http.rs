@@ -43,7 +43,7 @@ use otel_arrow_dfe_telemetry::common_attributes::ReceiverRejectionErrorType;
 use parking_lot::Mutex;
 use prost::Message;
 use prost_types::Any;
-use serde::Deserialize;
+use serde::{Deserialize, Serialize};
 use std::convert::Infallible;
 use std::net::SocketAddr;
 use std::sync::{Arc, OnceLock};
@@ -62,7 +62,7 @@ pub mod client_settings;
 pub const PROTOBUF_CONTENT_TYPE: &str = "application/x-protobuf";
 
 /// Settings for the OTLP/HTTP server.
-#[derive(Debug, Deserialize, Clone)]
+#[derive(Debug, Serialize, Deserialize, Clone, PartialEq)]
 #[serde(deny_unknown_fields)]
 pub struct HttpServerSettings {
     /// Listening address for OTLP/HTTP (typically `0.0.0.0:4318`).

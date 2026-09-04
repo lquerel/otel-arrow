@@ -5,7 +5,6 @@
 //! scenarios.
 
 use std::net::SocketAddr;
-use std::sync::Arc;
 
 use otel_arrow_dfe_config::SignalType;
 pub(super) use otel_arrow_dfe_config::error::Error as ConfigError;
@@ -298,7 +297,7 @@ pub(super) fn try_create_processor(
     (TEMPORAL_REAGGREGATION_PROCESSOR_FACTORY.create)(
         pipeline_ctx,
         node,
-        Arc::new(node_config),
+        TEMPORAL_REAGGREGATION_PROCESSOR_FACTORY.resolve_node_config(node_config)?,
         rt.config(),
         &otel_arrow_dfe_engine::capability::registry::Capabilities::empty(),
     )

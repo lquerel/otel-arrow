@@ -18,7 +18,7 @@ use std::time::Duration;
 
 use byte_unit::{Byte, Unit};
 use otel_arrow_dfe_quiver::config::RetentionPolicy;
-use serde::Deserialize;
+use serde::{Deserialize, Serialize};
 
 /// Default retention size cap (10 GiB).
 const fn default_retention_size_cap() -> Byte {
@@ -66,7 +66,7 @@ const fn default_max_in_flight() -> usize {
 }
 
 /// How to handle incoming OTLP data.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum OtlpHandling {
     /// Store OTLP bytes as opaque binary (default).
@@ -80,7 +80,7 @@ pub enum OtlpHandling {
 }
 
 /// Size cap policy when retention limit is reached.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum SizeCapPolicy {
     /// Apply backpressure when at capacity (default, no data loss).
@@ -100,7 +100,7 @@ impl From<SizeCapPolicy> for RetentionPolicy {
 }
 
 /// Configuration for the durable buffer.
-#[derive(Debug, Clone, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct DurableBufferConfig {
     /// Directory path for persistent storage.
     pub path: PathBuf,

@@ -34,7 +34,7 @@
 use otel_arrow_dfe_config::SignalType;
 use otel_arrow_dfe_config::error::Error as ConfigError;
 use otel_arrow_dfe_telemetry_macros::AttributeEnum;
-use serde::Deserialize;
+use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use std::path::{Component, Path, PathBuf};
 
@@ -46,7 +46,7 @@ const MAX_MAX_FRAME_BYTES: usize = 256 * 1024 * 1024;
 const TOKENS: [&str; 3] = ["{signal}", "{core_id}", "{generation}"];
 
 /// File format supported by the exporter.
-#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Deserialize, AttributeEnum)]
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Deserialize, Serialize, AttributeEnum)]
 #[serde(rename_all = "snake_case")]
 pub enum FileFormat {
     /// Compact OTLP ProtoJSON with one pdata batch per line.
@@ -55,7 +55,7 @@ pub enum FileFormat {
 }
 
 /// Behavior when a signal file is first opened.
-#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Deserialize, AttributeEnum)]
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Deserialize, Serialize, AttributeEnum)]
 #[serde(rename_all = "snake_case")]
 pub enum OpenMode {
     /// Retain complete existing frames and append new frames.
@@ -68,7 +68,7 @@ pub enum OpenMode {
 }
 
 /// Durability point that must complete before an ACK is routed.
-#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Deserialize, AttributeEnum)]
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Deserialize, Serialize, AttributeEnum)]
 #[serde(rename_all = "snake_case")]
 pub enum Durability {
     /// ACK after the operating system accepts and flushes the write operation.
@@ -79,7 +79,7 @@ pub enum Durability {
 }
 
 /// Recovery policy for an incomplete append-mode file tail.
-#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Deserialize, AttributeEnum)]
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Deserialize, Serialize, AttributeEnum)]
 #[serde(rename_all = "snake_case")]
 pub enum TailRecovery {
     /// Remove a bounded incomplete final frame.
@@ -90,7 +90,7 @@ pub enum TailRecovery {
 }
 
 /// Typed file exporter configuration.
-#[derive(Debug, Clone, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Deserialize, Serialize)]
 #[serde(deny_unknown_fields)]
 pub struct FileExporterConfig {
     /// Absolute path template containing all required runtime tokens.

@@ -20,6 +20,7 @@ use async_trait::async_trait;
 use linkme::distributed_slice;
 #[cfg(target_os = "linux")]
 use otel_arrow_dfe_channel::error::SendError;
+#[cfg(test)]
 use otel_arrow_dfe_config::node::NodeUserConfig;
 use otel_arrow_dfe_engine::ReceiverFactory;
 use otel_arrow_dfe_engine::config::ReceiverConfig;
@@ -82,6 +83,20 @@ pub use config::{
 
 /// URN for the journald receiver.
 pub const JOURNALD_RECEIVER_URN: &str = "urn:otel:receiver:journald";
+
+#[cfg(target_os = "linux")]
+#[derive(Clone)]
+struct ResolvedJournaldConfig {
+    runtime: RuntimeConfig,
+    equivalence: Value,
+}
+
+#[cfg(target_os = "linux")]
+impl PartialEq for ResolvedJournaldConfig {
+    fn eq(&self, other: &Self) -> bool {
+        self.equivalence == other.equivalence
+    }
+}
 
 /// Telemetry metrics for the journald receiver.
 ///
@@ -147,20 +162,21 @@ pub static JOURNALD_RECEIVER: ReceiverFactory<OtapPdata> = ReceiverFactory {
     create:
         |pipeline: PipelineContext,
          node: NodeId,
-         node_config: Arc<NodeUserConfig>,
+         node_config: Arc<otel_arrow_dfe_engine::component_config::ResolvedNodeConfig>,
          receiver_config: &ReceiverConfig,
          _capabilities: &otel_arrow_dfe_engine::capability::registry::Capabilities| {
             create_journald_receiver(pipeline, node, node_config, receiver_config)
         },
     wiring_contract: otel_arrow_dfe_engine::wiring_contract::WiringContract::UNRESTRICTED,
-    validate_config: validate_journald_config,
+    resolve_config: resolve_journald_config,
+    snapshot_policy: otel_arrow_dfe_engine::component_config::ConfigSnapshotPolicy::CustomSafe,
 };
 
 #[cfg(target_os = "linux")]
 fn create_journald_receiver(
     pipeline: PipelineContext,
     node: NodeId,
-    node_config: Arc<NodeUserConfig>,
+    node_config: Arc<otel_arrow_dfe_engine::component_config::ResolvedNodeConfig>,
     receiver_config: &ReceiverConfig,
 ) -> Result<ReceiverWrapper<OtapPdata>, otel_arrow_dfe_config::error::Error> {
     if pipeline.num_cores() > 1 {
@@ -170,7 +186,8 @@ fn create_journald_receiver(
                 .to_owned(),
         });
     }
-    let mut receiver = JournaldReceiver::from_config(&node_config.config)?;
+    let resolved = node_config.component_config::<ResolvedJournaldConfig>()?;
+    let mut receiver = JournaldReceiver::from_runtime(resolved.runtime.clone())?;
     receiver.checkpoint_path = checkpoint::checkpoint_path(
         &receiver.config.checkpoint.directory,
         pipeline.pipeline_group_id().as_ref(),
@@ -182,7 +199,7 @@ fn create_journald_receiver(
     Ok(ReceiverWrapper::local(
         receiver,
         node,
-        node_config,
+        node_config.effective(),
         receiver_config,
     ))
 }
@@ -191,24 +208,48 @@ fn create_journald_receiver(
 fn create_journald_receiver(
     _pipeline: PipelineContext,
     _node: NodeId,
-    _node_config: Arc<NodeUserConfig>,
+    _node_config: Arc<otel_arrow_dfe_engine::component_config::ResolvedNodeConfig>,
     _receiver_config: &ReceiverConfig,
 ) -> Result<ReceiverWrapper<OtapPdata>, otel_arrow_dfe_config::error::Error> {
     Err(unsupported_platform_error())
 }
 
 #[cfg(target_os = "linux")]
-fn validate_journald_config(config: &Value) -> Result<(), otel_arrow_dfe_config::error::Error> {
+fn resolve_journald_config(
+    config: &Value,
+) -> Result<
+    otel_arrow_dfe_engine::component_config::ResolvedComponentConfig,
+    otel_arrow_dfe_config::error::Error,
+> {
     let parsed: Config = serde_json::from_value(config.clone()).map_err(|e| {
         otel_arrow_dfe_config::error::Error::InvalidUserConfig {
             error: e.to_string(),
         }
     })?;
-    RuntimeConfig::try_from(parsed).map(|_| ())
+    let snapshot = serde_json::to_value(&parsed).map_err(|error| {
+        otel_arrow_dfe_config::error::Error::InvalidUserConfig {
+            error: error.to_string(),
+        }
+    })?;
+    let runtime = RuntimeConfig::try_from(parsed)?;
+    Ok(
+        otel_arrow_dfe_engine::component_config::ResolvedComponentConfig::custom_safe(
+            ResolvedJournaldConfig {
+                runtime,
+                equivalence: snapshot.clone(),
+            },
+            snapshot,
+        ),
+    )
 }
 
 #[cfg(not(target_os = "linux"))]
-fn validate_journald_config(_config: &Value) -> Result<(), otel_arrow_dfe_config::error::Error> {
+fn resolve_journald_config(
+    _config: &Value,
+) -> Result<
+    otel_arrow_dfe_engine::component_config::ResolvedComponentConfig,
+    otel_arrow_dfe_config::error::Error,
+> {
     Err(unsupported_platform_error())
 }
 
@@ -220,19 +261,7 @@ fn unsupported_platform_error() -> otel_arrow_dfe_config::error::Error {
 }
 
 impl JournaldReceiver {
-    /// Builds a receiver from a JSON config value.
-    fn from_config(config: &Value) -> Result<Self, otel_arrow_dfe_config::error::Error> {
-        let parsed: Config = serde_json::from_value(config.clone()).map_err(|e| {
-            otel_arrow_dfe_config::error::Error::InvalidUserConfig {
-                error: e.to_string(),
-            }
-        })?;
-        Self::new(parsed)
-    }
-
-    /// Builds a receiver from an already-deserialized `Config`.
-    fn new(config: Config) -> Result<Self, otel_arrow_dfe_config::error::Error> {
-        let runtime = RuntimeConfig::try_from(config)?;
+    fn from_runtime(runtime: RuntimeConfig) -> Result<Self, otel_arrow_dfe_config::error::Error> {
         let lease = SourceLease::acquire(&runtime.lease_key)?;
         Ok(Self {
             config: runtime,
@@ -1179,21 +1208,21 @@ mod tests {
             "source_id": "system",
             "unknown_field": true,
         });
-        assert!(validate_journald_config(&json).is_err());
+        assert!(resolve_journald_config(&json).is_err());
     }
 
     #[cfg(target_os = "linux")]
     #[test]
     fn validates_default_config() {
         let json = serde_json::json!({});
-        validate_journald_config(&json).expect("default config must validate");
+        let _ = resolve_journald_config(&json).expect("default config must validate");
     }
 
     #[cfg(not(target_os = "linux"))]
     #[test]
     fn rejects_config_validation_on_non_linux() {
         let json = serde_json::json!({});
-        assert!(validate_journald_config(&json).is_err());
+        assert!(resolve_journald_config(&json).is_err());
     }
 
     #[test]
@@ -1224,7 +1253,11 @@ mod tests {
         let controller = otel_arrow_dfe_engine::context::ControllerContext::new(registry);
         let pipeline =
             controller.pipeline_context_with("test-group".into(), "test-pipeline".into(), 0, 2, 0);
-        let node_config = Arc::new(NodeUserConfig::new_receiver_config(JOURNALD_RECEIVER_URN));
+        let mut user_config = NodeUserConfig::new_receiver_config(JOURNALD_RECEIVER_URN);
+        user_config.config = serde_json::json!({});
+        let node_config = JOURNALD_RECEIVER
+            .resolve_node_config(user_config)
+            .expect("journald receiver config must resolve");
         let receiver_config = ReceiverConfig::new("journald");
 
         let result = create_journald_receiver(

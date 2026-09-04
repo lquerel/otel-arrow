@@ -20,10 +20,12 @@ use hashbrown::hash_map::EntryRef::{Occupied, Vacant};
 use linkme::distributed_slice;
 use otel_arrow_dfe_config::SignalType;
 use otel_arrow_dfe_config::error::Error as ConfigError;
-use otel_arrow_dfe_config::node::NodeUserConfig;
 use otel_arrow_dfe_engine::MessageSourceLocalEffectHandlerExtension;
 use otel_arrow_dfe_engine::ProducerEffectHandlerExtension;
 use otel_arrow_dfe_engine::WakeupError;
+use otel_arrow_dfe_engine::component_config::{
+    ConfigSnapshotPolicy, ResolvedComponentConfig, ResolvedNodeConfig,
+};
 use otel_arrow_dfe_engine::config::ProcessorConfig;
 use otel_arrow_dfe_engine::context::PipelineContext;
 use otel_arrow_dfe_engine::control::{
@@ -134,26 +136,38 @@ pub static TEMPORAL_REAGGREGATION_PROCESSOR_FACTORY: otel_arrow_dfe_engine::Proc
     create:
         |pipeline_ctx: PipelineContext,
          node: NodeId,
-         node_config: Arc<NodeUserConfig>,
+         node_config: Arc<ResolvedNodeConfig>,
          proc_cfg: &ProcessorConfig,
          _capabilities: &otel_arrow_dfe_engine::capability::registry::Capabilities| {
             create_temporal_reaggregation_processor(pipeline_ctx, node, node_config, proc_cfg)
         },
     wiring_contract: otel_arrow_dfe_engine::wiring_contract::WiringContract::UNRESTRICTED,
-    validate_config: otel_arrow_dfe_config::validation::validate_typed_config::<Config>,
+    resolve_config: |value| {
+        let config: Config = serde_json::from_value(value.clone()).map_err(|error| {
+            ConfigError::InvalidUserConfig {
+                error: error.to_string(),
+            }
+        })?;
+        config.validate()?;
+        ResolvedComponentConfig::typed_safe(config)
+    },
+    snapshot_policy: ConfigSnapshotPolicy::TypedSafe,
 };
 
 /// Factory function to create a [`TemporalReaggregationProcessor`].
 pub fn create_temporal_reaggregation_processor(
     pipeline_ctx: PipelineContext,
     node: NodeId,
-    node_config: Arc<NodeUserConfig>,
+    node_config: Arc<ResolvedNodeConfig>,
     processor_config: &ProcessorConfig,
 ) -> Result<ProcessorWrapper<OtapPdata>, ConfigError> {
     Ok(ProcessorWrapper::local(
-        TemporalReaggregationProcessor::from_config(pipeline_ctx, &node_config.config)?,
+        TemporalReaggregationProcessor::from_typed_config(
+            pipeline_ctx,
+            (*node_config.component_config::<Config>()?).clone(),
+        )?,
         node,
-        node_config,
+        node_config.effective(),
         processor_config,
     ))
 }
@@ -351,12 +365,20 @@ impl TemporalReaggregationProcessor {
         pipeline_ctx: PipelineContext,
         config: &serde_json::Value,
     ) -> Result<Self, ConfigError> {
-        let metrics = TemporalReaggregationMetrics::new(&pipeline_ctx);
         let config: Config =
             serde_json::from_value(config.clone()).map_err(|e| ConfigError::InvalidUserConfig {
                 error: e.to_string(),
             })?;
+        Self::from_typed_config(pipeline_ctx, config)
+    }
+
+    /// Creates a new processor from a factory-resolved configuration.
+    fn from_typed_config(
+        pipeline_ctx: PipelineContext,
+        config: Config,
+    ) -> Result<Self, ConfigError> {
         config.validate()?;
+        let metrics = TemporalReaggregationMetrics::new(&pipeline_ctx);
         Ok(Self {
             metrics,
             collection_period: config.period,

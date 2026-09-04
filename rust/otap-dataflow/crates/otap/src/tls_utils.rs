@@ -114,9 +114,10 @@ pub async fn load_server_tls_config(
             })?;
             (cert, key)
         }
-        (None, None, Some(cert_pem), Some(key_pem)) => {
-            (cert_pem.as_bytes().to_vec(), key_pem.as_bytes().to_vec())
-        }
+        (None, None, Some(cert_pem), Some(key_pem)) => (
+            cert_pem.as_bytes().to_vec(),
+            key_pem.expose().as_bytes().to_vec(),
+        ),
         (None, None, None, None) => {
             return Ok(None);
         }
@@ -220,7 +221,7 @@ pub(crate) async fn load_client_tls_config(
             .config
             .key_pem
             .as_ref()
-            .is_some_and(|pem| !pem.trim().is_empty());
+            .is_some_and(|pem| !pem.expose().trim().is_empty());
 
     // Note: Providing a TLS config block forces TLS regardless of scheme.
 
@@ -299,7 +300,7 @@ pub(crate) async fn load_client_tls_config(
                     otel_error!("tls.client_cert_file.read_error", cert_path = ?cert_path, error = ?e, message = "Failed to read client cert file");
                     e
                 })?;
-                tls.identity(Identity::from_pem(cert, key_pem.as_bytes()))
+                tls.identity(Identity::from_pem(cert, key_pem.expose().as_bytes()))
             }
             ((None, Some(cert_pem)), (Some(key_path), _)) => {
                 let key = read_file_with_limit_async(key_path).await.map_err(|e| {
@@ -308,9 +309,10 @@ pub(crate) async fn load_client_tls_config(
                 })?;
                 tls.identity(Identity::from_pem(cert_pem.as_bytes(), key))
             }
-            ((None, Some(cert_pem)), (None, Some(key_pem))) => {
-                tls.identity(Identity::from_pem(cert_pem.as_bytes(), key_pem.as_bytes()))
-            }
+            ((None, Some(cert_pem)), (None, Some(key_pem))) => tls.identity(Identity::from_pem(
+                cert_pem.as_bytes(),
+                key_pem.expose().as_bytes(),
+            )),
             _ => unreachable!("validation ensures both cert and key are configured"),
         };
     }
@@ -1398,8 +1400,9 @@ pub async fn build_reloadable_server_config(
             .collect::<Result<Vec<_>, _>>()
             .map_err(|e| io::Error::new(io::ErrorKind::InvalidData, e))?;
 
-        let key = PrivateKeyDer::from_pem_reader(&mut io::BufReader::new(key_pem.as_bytes()))
-            .map_err(|e| io::Error::new(io::ErrorKind::InvalidData, e))?;
+        let key =
+            PrivateKeyDer::from_pem_reader(&mut io::BufReader::new(key_pem.expose().as_bytes()))
+                .map_err(|e| io::Error::new(io::ErrorKind::InvalidData, e))?;
 
         builder
             .with_single_cert(certs, key)
@@ -1760,7 +1763,7 @@ mod tests {
         let config = TlsServerConfig {
             config: TlsConfig {
                 cert_pem: None,
-                key_pem: Some("fake key".to_string()),
+                key_pem: Some("fake key".into()),
                 cert_file: None,
                 key_file: None,
                 reload_interval: None,
@@ -1788,7 +1791,7 @@ mod tests {
         let config = TlsServerConfig {
             config: TlsConfig {
                 cert_pem: Some(cert_pem),
-                key_pem: Some(key_pem),
+                key_pem: Some(key_pem.into()),
                 cert_file: None,
                 key_file: None,
                 reload_interval: None,

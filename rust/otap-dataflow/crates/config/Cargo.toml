@@ -26,6 +26,7 @@ byte-unit = { workspace = true }
 humantime-serde = { workspace = true }
 reqwest = { workspace = true, features = ["blocking"] }
 tracing-subscriber = { workspace = true, features = ["env-filter"] }
+secrecy = { workspace = true }
 
 [dev-dependencies]
 k8s-openapi = { workspace = true }

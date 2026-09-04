@@ -4,10 +4,10 @@
 //! Implementation of the Sampler for the DebugProcessor
 
 use otel_arrow_dfe_engine::error::Error;
-use serde::Deserialize;
+use serde::{Deserialize, Serialize};
 use tokio::time::{Duration, Instant};
 
-#[derive(Debug, Clone, Copy, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Deserialize, Serialize)]
 #[serde(tag = "type", rename_all = "snake_case")]
 pub enum SamplingConfig {
     NoSampling,

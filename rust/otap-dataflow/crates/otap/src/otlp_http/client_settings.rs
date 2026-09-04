@@ -3,10 +3,10 @@
 
 //! Shared configuration for HTTP-based clients.
 
+use otel_arrow_dfe_config::secret::RedactedString;
 use reqwest::ClientBuilder;
 use reqwest::header::HeaderValue;
-use secrecy::{ExposeSecret, SecretString};
-use serde::Deserialize;
+use serde::{Deserialize, Serialize};
 use std::collections::{HashMap, HashSet};
 use std::io;
 use std::time::Duration;
@@ -22,7 +22,7 @@ use crate::otap_grpc::client_settings::{
 };
 
 /// Common configuration shared across HTTP clients.
-#[derive(Debug, Deserialize, Clone)]
+#[derive(Debug, Serialize, Deserialize, Clone, PartialEq)]
 #[serde(deny_unknown_fields)]
 pub struct HttpClientSettings {
     /// Maximum number of concurrent in-flight requests allowed by the transport stack.
@@ -77,9 +77,9 @@ pub struct HttpClientSettings {
     /// Static headers added to every outbound OTLP/HTTP request (e.g. an
     /// `Authorization` or backend routing header).
     ///
-    /// Values are wrapped in [`SecretString`] so a header credential is not
+    /// Values are wrapped in [`RedactedString`] so a header credential is not
     /// accidentally leaked through `Debug`/telemetry; the cleartext is reached
-    /// only through an explicit [`ExposeSecret::expose_secret`] call -- during
+    /// only through an explicit [`RedactedString::expose`] call -- during
     /// [`HttpClientSettings::validate`] and at the request-construction site.
     ///
     /// Protocol headers (`Content-Type` / `Content-Encoding` /
@@ -87,7 +87,7 @@ pub struct HttpClientSettings {
     /// (`Accept` / `Accept-Encoding`) cannot be set here and are rejected by
     /// [`HttpClientSettings::validate`]; they are managed by the exporter.
     #[serde(default)]
-    pub headers: HashMap<String, SecretString>,
+    pub headers: HashMap<String, RedactedString>,
 }
 
 impl HttpClientSettings {
@@ -125,7 +125,7 @@ impl HttpClientSettings {
                     "header name \"{name}\" is not a valid HTTP header name"
                 ))
             })?;
-            if HeaderValue::from_str(value.expose_secret()).is_err() {
+            if HeaderValue::from_str(value.expose()).is_err() {
                 return Err(HttpClientError::InvalidConfig(format!(
                     "header \"{name}\" has a value that cannot be represented as an HTTP header \
                      value (must be visible ASCII)"
@@ -247,7 +247,7 @@ impl HttpClientSettings {
                     .config
                     .key_pem
                     .as_ref()
-                    .is_some_and(|pem| !pem.trim().is_empty());
+                    .is_some_and(|pem| !pem.expose().trim().is_empty());
 
             if client_cert_configured || client_key_configured {
                 if !(client_cert_configured && client_key_configured) {
@@ -286,7 +286,7 @@ impl HttpClientSettings {
                         e
                     })?
                 } else if let Some(key_pem) = &tls.config.key_pem {
-                    key_pem.as_bytes().to_vec()
+                    key_pem.expose().as_bytes().to_vec()
                 } else {
                     unreachable!()
                 };
@@ -524,7 +524,7 @@ mod tests {
             settings
                 .headers
                 .get("authorization")
-                .map(|v| v.expose_secret()),
+                .map(RedactedString::expose),
             Some("Basic super-secret-token"),
             "the cleartext must remain reachable via the explicit accessor"
         );
@@ -541,14 +541,14 @@ mod tests {
             settings
                 .headers
                 .get("authorization")
-                .map(|v| v.expose_secret()),
+                .map(RedactedString::expose),
             Some("Basic abc123")
         );
         assert_eq!(
             settings
                 .headers
                 .get("stream-name")
-                .map(|v| v.expose_secret()),
+                .map(RedactedString::expose),
             Some("default")
         );
 

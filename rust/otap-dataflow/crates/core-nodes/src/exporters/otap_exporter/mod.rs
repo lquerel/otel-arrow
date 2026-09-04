@@ -31,7 +31,6 @@ use async_trait::async_trait;
 use futures::stream::{FuturesUnordered, StreamExt};
 use linkme::distributed_slice;
 use otel_arrow_dfe_config::SignalType;
-use otel_arrow_dfe_config::node::NodeUserConfig;
 use otel_arrow_dfe_engine::ConsumerEffectHandlerExtension;
 use otel_arrow_dfe_engine::ExporterFactory;
 use otel_arrow_dfe_engine::config::ExporterConfig;
@@ -312,18 +311,22 @@ pub static OTAP_EXPORTER: ExporterFactory<OtapPdata> = ExporterFactory {
     create:
         |pipeline: PipelineContext,
          node: NodeId,
-         node_config: Arc<NodeUserConfig>,
+         node_config: Arc<otel_arrow_dfe_engine::component_config::ResolvedNodeConfig>,
          exporter_config: &ExporterConfig,
          _capabilities: &otel_arrow_dfe_engine::capability::registry::Capabilities| {
             Ok(ExporterWrapper::local(
-                OTAPExporter::from_config(pipeline, &node_config.config)?,
+                OTAPExporter::new(
+                    pipeline,
+                    (*node_config.component_config::<Config>()?).clone(),
+                ),
                 node,
-                node_config,
+                node_config.effective(),
                 exporter_config,
             ))
         },
     wiring_contract: otel_arrow_dfe_engine::wiring_contract::WiringContract::UNRESTRICTED,
-    validate_config,
+    resolve_config,
+    snapshot_policy: otel_arrow_dfe_engine::component_config::ConfigSnapshotPolicy::TypedSafe,
 };
 
 /// Validates the OTAP exporter configuration at config load time.
@@ -331,7 +334,12 @@ pub static OTAP_EXPORTER: ExporterFactory<OtapPdata> = ExporterFactory {
 /// Runs before any node is started (initial load and live reconfigure), so bad
 /// configuration is rejected fast and attributed to the offending node rather
 /// than surfacing as an opaque client error at startup.
-fn validate_config(config: &Value) -> Result<(), otel_arrow_dfe_config::error::Error> {
+fn resolve_config(
+    config: &Value,
+) -> Result<
+    otel_arrow_dfe_engine::component_config::ResolvedComponentConfig,
+    otel_arrow_dfe_config::error::Error,
+> {
     let cfg: Config = serde_json::from_value(config.clone()).map_err(|e| {
         otel_arrow_dfe_config::error::Error::InvalidUserConfig {
             error: e.to_string(),
@@ -342,7 +350,7 @@ fn validate_config(config: &Value) -> Result<(), otel_arrow_dfe_config::error::E
         .map_err(|e| otel_arrow_dfe_config::error::Error::InvalidUserConfig {
             error: e.to_string(),
         })?;
-    Ok(())
+    otel_arrow_dfe_engine::component_config::ResolvedComponentConfig::typed_safe(cfg)
 }
 
 enum EnqueueResult {
@@ -378,7 +386,7 @@ impl OTAPExporter {
 
         // Defense-in-depth: validate the shared gRPC settings (including the
         // ASCII/reserved/duplicate `headers` checks) here too, not only in the
-        // factory `validate_config` hook. This guarantees that any construction
+        // factory resolver. This guarantees that any construction
         // path (including direct/programmatic `from_config` callers) rejects
         // invalid or gRPC-reserved headers up front, so `start()` can never
         // build stream metadata from an unvalidated config.
@@ -1454,7 +1462,6 @@ mod tests {
         ArrowLogsServiceMock, ArrowMetricsServiceMock, ArrowTracesServiceMock, create_otap_batch,
     };
     use otel_arrow_dfe_otap::pdata::OtapPdata;
-    use secrecy::ExposeSecret;
 
     use otel_arrow_dfe_config::SignalType;
     use otel_arrow_dfe_config::node::NodeUserConfig;
@@ -1943,7 +1950,7 @@ mod tests {
                 .grpc
                 .headers
                 .get("authorization")
-                .map(|v| v.expose_secret()),
+                .map(|v| v.expose()),
             Some("Basic dXNlcjpwYXNz")
         );
         assert_eq!(
@@ -1952,22 +1959,22 @@ mod tests {
                 .grpc
                 .headers
                 .get("x-scope-orgid")
-                .map(|v| v.expose_secret()),
+                .map(|v| v.expose()),
             Some("tenant-1")
         );
     }
 
     #[test]
-    fn test_validate_config_accepts_headers() {
+    fn test_resolve_config_accepts_headers() {
         let json_config = json!({
             "grpc_endpoint": "http://localhost:4317",
             "headers": { "x-tenant": "acme" }
         });
-        super::validate_config(&json_config).expect("valid headers should pass validation");
+        let _ = super::resolve_config(&json_config).expect("valid headers should pass validation");
     }
 
     #[test]
-    fn test_validate_config_rejects_reserved_headers() {
+    fn test_resolve_config_rejects_reserved_headers() {
         // Header validation is delegated to `GrpcClientSettings::validate()`, which
         // rejects gRPC-reserved metadata (here, the `grpc-` prefix) so a bad header
         // is still caught loudly at config load rather than silently mangled.
@@ -1975,7 +1982,7 @@ mod tests {
             "grpc_endpoint": "http://localhost:4317",
             "headers": { "grpc-timeout": "1S" }
         });
-        let err = super::validate_config(&json_config)
+        let err = super::resolve_config(&json_config)
             .expect_err("reserved gRPC metadata must fail validation");
         assert!(format!("{err}").contains("reserved by the gRPC protocol"));
     }
@@ -1989,9 +1996,9 @@ mod tests {
 
         // `from_config` validates the shared gRPC settings itself (defense in
         // depth), so a header whose value is not valid gRPC metadata is rejected
-        // at construction time, not only via the factory `validate_config` hook.
+        // at construction time, not only via the factory resolver.
         // Reserved-name rejection is covered separately by
-        // `test_validate_config_rejects_reserved_headers`. The value here carries a
+        // `test_resolve_config_rejects_reserved_headers`. The value here carries a
         // control character (a newline): high-byte bytes are accepted as obs-text,
         // so a non-visible control byte is the value class actually rejected. It is
         // written as an escape so this source file stays ASCII-only.

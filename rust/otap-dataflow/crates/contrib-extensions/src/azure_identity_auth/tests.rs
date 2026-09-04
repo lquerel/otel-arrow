@@ -120,8 +120,8 @@ fn per_method_fields_are_validated() {
 }
 
 #[test]
-fn validate_config_hook_accepts_valid_config() {
-    assert!(validate_config(&serde_json::json!({ "method": "managed_identity" })).is_ok());
+fn resolve_config_hook_accepts_valid_config() {
+    assert!(resolve_config(&serde_json::json!({ "method": "managed_identity" })).is_ok());
 }
 
 #[test]
@@ -142,12 +142,17 @@ fn factory_is_registered_with_capability() {
 fn create_bundle(config: serde_json::Value) -> Result<ExtensionBundle, ConfigError> {
     let (ext_ctx, _registry) = otel_arrow_dfe_engine::testing::test_extension_ctx();
     let name: otel_arrow_dfe_config::ExtensionId = "azure-identity-auth".into();
-    let user_config = Arc::new(ExtensionUserConfig::new(
+    let user_config = otel_arrow_dfe_config::extension::ExtensionUserConfig::new(
         AZURE_IDENTITY_AUTH_URN.into(),
-        config,
-    ));
+        config.clone(),
+    );
+    let resolved = Arc::new(ResolvedExtensionConfig::new(
+        &user_config,
+        resolve_config(&config)?,
+        AZURE_IDENTITY_AUTH_EXTENSION.snapshot_policy,
+    )?);
     let extension_config = ExtensionConfig::new(name.clone());
-    create(&ext_ctx, name, user_config, &extension_config)
+    create(&ext_ctx, name, resolved, &extension_config)
 }
 
 // Scenario: The factory's `create` hook runs against a valid managed-identity config.

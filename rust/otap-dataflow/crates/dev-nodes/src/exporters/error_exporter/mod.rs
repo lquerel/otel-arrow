@@ -8,7 +8,9 @@ otel_arrow_dfe_telemetry::otel_component_scope!(
 
 use async_trait::async_trait;
 use linkme::distributed_slice;
-use otel_arrow_dfe_config::node::NodeUserConfig;
+use otel_arrow_dfe_engine::component_config::{
+    ConfigSnapshotPolicy, ResolvedNodeConfig, resolve_typed_config,
+};
 use otel_arrow_dfe_engine::config::ExporterConfig;
 use otel_arrow_dfe_engine::context::PipelineContext;
 use otel_arrow_dfe_engine::control::{NackMsg, NodeControlMsg};
@@ -34,7 +36,7 @@ struct ErrorExporter {
 }
 
 /// Configuration for the error exporter.
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 struct ErrorExporterConfig {
     /// The error message.
     pub message: String,
@@ -48,28 +50,26 @@ pub static ERROR_EXPORTER: ExporterFactory<OtapPdata> = ExporterFactory {
     name: ERROR_EXPORTER_URN,
     create: ErrorExporter::create_exporter,
     wiring_contract: otel_arrow_dfe_engine::wiring_contract::WiringContract::UNRESTRICTED,
-    validate_config: otel_arrow_dfe_config::validation::validate_typed_config::<ErrorExporterConfig>,
+    resolve_config: resolve_typed_config::<ErrorExporterConfig>,
+    snapshot_policy: ConfigSnapshotPolicy::TypedSafe,
 };
 
 impl ErrorExporter {
     fn create_exporter(
         _pipeline: PipelineContext,
         node: NodeId,
-        node_config: Arc<NodeUserConfig>,
+        node_config: Arc<ResolvedNodeConfig>,
         exporter_config: &ExporterConfig,
         _capabilities: &otel_arrow_dfe_engine::capability::registry::Capabilities,
     ) -> Result<ExporterWrapper<OtapPdata>, otel_arrow_dfe_config::error::Error> {
-        let config: ErrorExporterConfig = serde_json::from_value(node_config.config.clone())
-            .map_err(|e| otel_arrow_dfe_config::error::Error::InvalidUserConfig {
-                error: format!("Failed to parse error-exporter configuration: {e}"),
-            })?;
+        let config = (*node_config.component_config::<ErrorExporterConfig>()?).clone();
 
         let exporter = ErrorExporter::from_config(config);
 
         Ok(ExporterWrapper::local(
             exporter,
             node,
-            node_config,
+            node_config.effective(),
             exporter_config,
         ))
     }

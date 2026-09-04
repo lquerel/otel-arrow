@@ -8,9 +8,9 @@ use async_trait::async_trait;
 use linkme::distributed_slice;
 use otel_arrow_dfe_config::DeployedPipelineKey;
 use otel_arrow_dfe_config::engine::OtelDataflowSpec;
-use otel_arrow_dfe_config::node::NodeUserConfig;
 use otel_arrow_dfe_config::observed_state::{ObservedStateSettings, SendPolicy};
 use otel_arrow_dfe_core_nodes::receivers::internal_telemetry_receiver::INTERNAL_TELEMETRY_RECEIVER;
+use otel_arrow_dfe_engine::component_config::ResolvedNodeConfig;
 use otel_arrow_dfe_engine::config::ExporterConfig;
 use otel_arrow_dfe_engine::context::{ControllerContext, PipelineContext};
 use otel_arrow_dfe_engine::control::{
@@ -82,7 +82,7 @@ impl Exporter<OtapPdata> for CaptureExporter {
 fn create_capture_exporter(
     _pipeline: PipelineContext,
     node: NodeId,
-    node_config: Arc<NodeUserConfig>,
+    node_config: Arc<ResolvedNodeConfig>,
     exporter_config: &ExporterConfig,
     _capabilities: &otel_arrow_dfe_engine::capability::registry::Capabilities,
 ) -> Result<ExporterWrapper<OtapPdata>, otel_arrow_dfe_config::error::Error> {
@@ -94,7 +94,7 @@ fn create_capture_exporter(
     Ok(ExporterWrapper::local(
         CaptureExporter { sender },
         node,
-        node_config,
+        node_config.effective(),
         exporter_config,
     ))
 }
@@ -105,7 +105,8 @@ static CAPTURE_EXPORTER: ExporterFactory<OtapPdata> = ExporterFactory {
     name: CAPTURE_EXPORTER_URN,
     create: create_capture_exporter,
     wiring_contract: otel_arrow_dfe_engine::wiring_contract::WiringContract::UNRESTRICTED,
-    validate_config: otel_arrow_dfe_config::validation::no_config,
+    resolve_config: otel_arrow_dfe_engine::component_config::resolve_no_config,
+    snapshot_policy: otel_arrow_dfe_engine::component_config::ConfigSnapshotPolicy::TypedSafe,
 };
 
 #[metric_set(name = "test.its.pipeline")]
@@ -304,10 +305,13 @@ groups: {{}}
         0,
     );
     let pipeline_entity_key = pipeline_context.register_pipeline_entity();
+    let runtime_config = OTAP_PIPELINE_FACTORY
+        .resolve_pipeline_config(&observability_pipeline.pipeline)
+        .expect("component configs should resolve");
     let runtime_pipeline = OTAP_PIPELINE_FACTORY
         .build(
             pipeline_context.clone(),
-            observability_pipeline.pipeline,
+            runtime_config,
             channel_capacity.clone(),
             telemetry_policy,
             None,

@@ -49,7 +49,7 @@ use otel_arrow_dfe_config::engine::{
     OtelDataflowSpec, ResolvedPipelineConfig, ResolvedPipelineRole,
     SYSTEM_OBSERVABILITY_PIPELINE_ID, SYSTEM_PIPELINE_GROUP_ID,
 };
-use otel_arrow_dfe_config::extension::{ExtensionUrn, ExtensionUserConfig};
+use otel_arrow_dfe_config::extension::ExtensionUrn;
 use otel_arrow_dfe_config::node::{NodeKind, NodeUserConfig};
 use otel_arrow_dfe_config::pipeline::telemetry::AttributeValue;
 use otel_arrow_dfe_config::pipeline_group::PipelineGroupConfig;
@@ -58,6 +58,7 @@ use otel_arrow_dfe_config::policy::{
     ChannelCapacityPolicy, CoreAllocation, CoreAllocationStrategy, RateLimiterPolicy,
     RuntimeRecoveryPolicy, TelemetryPolicy,
 };
+use otel_arrow_dfe_config::secret::{OMITTED_VALUE, REDACTED_VALUE};
 use otel_arrow_dfe_config::topic::{
     TopicAckPropagationMode, TopicBackendKind, TopicBroadcastAckMode, TopicBroadcastOnLagPolicy,
     TopicImplSelectionPolicy, TopicSpec,
@@ -70,6 +71,9 @@ use otel_arrow_dfe_config::{
 use otel_arrow_dfe_engine::PipelineFactory;
 use otel_arrow_dfe_engine::ReceivedAtNode;
 use otel_arrow_dfe_engine::Unwindable;
+use otel_arrow_dfe_engine::component_config::{
+    ConfigSnapshotPolicy, ResolveConfigFn, ResolvedExtensionConfig,
+};
 use otel_arrow_dfe_engine::context::{ControllerContext, PipelineContext};
 use otel_arrow_dfe_engine::control::{
     PipelineAdminSender, PipelineCompletionMsgReceiver, PipelineCompletionMsgSender,
@@ -172,6 +176,22 @@ enum RunMode {
     ShutdownWhenDone,
 }
 
+#[derive(Clone, Debug)]
+struct ResolvedRuntimePipeline {
+    policy: ResolvedPipelineConfig,
+    runtime: otel_arrow_dfe_engine::component_config::ResolvedPipelineConfig,
+}
+
+#[derive(Clone, Debug)]
+struct ResolvedEngineCandidate {
+    source: OtelDataflowSpec,
+    effective: OtelDataflowSpec,
+    engine: otel_arrow_dfe_config::engine::EngineConfig,
+    pipelines: Vec<ResolvedRuntimePipeline>,
+    observability: ResolvedRuntimePipeline,
+    controller_extensions: HashMap<ExtensionId, Arc<ResolvedExtensionConfig>>,
+}
+
 /// Error type returned by controller extension startup and runtime tasks.
 pub type ControllerExtensionError = Box<dyn std::error::Error + Send + Sync + 'static>;
 
@@ -182,10 +202,6 @@ pub type ControllerExtensionTask =
 /// Factory for the async task that runs a configured controller extension.
 pub type ControllerExtensionTaskFactory =
     Box<dyn FnOnce(CancellationToken) -> ControllerExtensionTask + Send + 'static>;
-
-/// Static validator for controller extension user configuration.
-pub type ControllerExtensionValidateFn =
-    fn(config: &serde_json::Value) -> Result<(), otel_arrow_dfe_config::error::Error>;
 
 type ControllerExtensionStartFn = dyn Fn(
         ControllerExtensionContext,
@@ -208,8 +224,10 @@ pub struct ControllerExtensionFactory {
     pub description: &'static str,
     /// URL to extension documentation, when available.
     pub documentation_url: &'static str,
-    /// Validates the extension-specific config statically, without starting the extension.
-    pub validate_config: ControllerExtensionValidateFn,
+    /// Parses, validates, defaults, and snapshots the extension configuration.
+    pub resolve_config: ResolveConfigFn,
+    /// Explicit snapshot policy enforced against the resolver result.
+    pub snapshot_policy: ConfigSnapshotPolicy,
     /// Starts one configured controller extension instance.
     pub start: fn(
         ControllerExtensionContext,
@@ -225,8 +243,8 @@ pub static CONTROLLER_EXTENSION_FACTORIES: [ControllerExtensionFactory] = [..];
 pub struct ControllerExtensionContext {
     /// Configured extension instance identifier.
     pub extension_id: ExtensionId,
-    /// Configured extension envelope, including type URN and opaque config.
-    pub extension: Arc<ExtensionUserConfig>,
+    /// Factory-resolved extension configuration.
+    pub extension: Arc<ResolvedExtensionConfig>,
     /// Semantic control-plane handle for live engine operations.
     pub control_plane: Arc<dyn ControlPlane>,
     /// Read handle for observed runtime state.
@@ -240,7 +258,8 @@ pub struct ControllerExtensionContext {
 #[derive(Clone)]
 struct RegisteredControllerExtensionFactory {
     start: Arc<ControllerExtensionStartFn>,
-    validate_config: ControllerExtensionValidateFn,
+    resolve_config: ResolveConfigFn,
+    snapshot_policy: ConfigSnapshotPolicy,
 }
 
 /// Registry of controller extension factories keyed by extension type URN.
@@ -276,7 +295,12 @@ impl ControllerExtensionRegistry {
 
     /// Registers a statically linked controller extension factory.
     pub fn register_factory(&mut self, factory: ControllerExtensionFactory) {
-        self.register(factory.name.into(), factory.start, factory.validate_config);
+        self.register(
+            factory.name.into(),
+            factory.start,
+            factory.resolve_config,
+            factory.snapshot_policy,
+        );
     }
 
     /// Registers a factory for a controller extension type.
@@ -284,7 +308,8 @@ impl ControllerExtensionRegistry {
         &mut self,
         extension_type: ExtensionUrn,
         factory: F,
-        validate_config: ControllerExtensionValidateFn,
+        resolve_config: ResolveConfigFn,
+        snapshot_policy: ConfigSnapshotPolicy,
     ) where
         F: Fn(
                 ControllerExtensionContext,
@@ -297,7 +322,8 @@ impl ControllerExtensionRegistry {
             extension_type.clone(),
             RegisteredControllerExtensionFactory {
                 start: Arc::new(factory),
-                validate_config,
+                resolve_config,
+                snapshot_policy,
             },
         );
         if replaced.is_some() {
@@ -1287,31 +1313,105 @@ impl<
         Ok(set)
     }
 
+    fn resolve_engine_candidate(
+        &self,
+        source: OtelDataflowSpec,
+        extensions: &ControllerExtensionRegistry,
+    ) -> Result<ResolvedEngineCandidate, Box<dyn std::error::Error>> {
+        source.validate()?;
+
+        for (key, value) in &source.engine.custom {
+            if value
+                .as_str()
+                .is_some_and(|marker| marker == OMITTED_VALUE || marker == REDACTED_VALUE)
+            {
+                return Err(std::io::Error::other(format!(
+                    "engine.custom.{key} uses a snapshot-only marker"
+                ))
+                .into());
+            }
+        }
+
+        let controller_extensions = startup::resolve_controller_extensions(&source, extensions)?;
+        let mut effective = source.clone();
+        let extension_snapshots = controller_extensions
+            .iter()
+            .map(|(id, config)| (id.clone(), config.component_snapshot().clone()))
+            .collect();
+        effective
+            .engine
+            .controller
+            .extensions
+            .replace_config_snapshots(&extension_snapshots)?;
+        for value in effective.engine.custom.values_mut() {
+            *value = serde_json::Value::String(OMITTED_VALUE.to_owned());
+        }
+
+        let resolved = source.resolve();
+        let (engine, policy_pipelines, observability) = resolved.into_parts();
+        let mut pipelines = Vec::with_capacity(policy_pipelines.len());
+        for policy in policy_pipelines {
+            let runtime = self
+                .pipeline_factory
+                .resolve_pipeline_config(&policy.pipeline)?;
+            let effective_pipeline = runtime.effective().clone();
+            let group = effective
+                .groups
+                .get_mut(&policy.pipeline_group_id)
+                .ok_or_else(|| std::io::Error::other("resolved pipeline group disappeared"))?;
+            _ = group
+                .pipelines
+                .insert(policy.pipeline_id.clone(), effective_pipeline);
+            pipelines.push(ResolvedRuntimePipeline { policy, runtime });
+        }
+
+        let observability = observability.ok_or_else(|| {
+            std::io::Error::other("resolved configuration is missing the observability pipeline")
+        })?;
+        let observability_runtime = self
+            .pipeline_factory
+            .resolve_pipeline_config(&observability.pipeline)?;
+        effective.engine.observability.pipeline.nodes =
+            observability_runtime.effective().nodes().clone();
+
+        Ok(ResolvedEngineCandidate {
+            source,
+            effective,
+            engine,
+            pipelines,
+            observability: ResolvedRuntimePipeline {
+                policy: observability,
+                runtime: observability_runtime,
+            },
+            controller_extensions,
+        })
+    }
+
     fn run_with_mode(
         &self,
         engine_config: OtelDataflowSpec,
         run_mode: RunMode,
         options: ControllerRunOptions,
     ) -> Result<(), Error> {
-        engine_config.validate().map_err(|error| match error {
-            otel_arrow_dfe_config::error::Error::InvalidConfiguration { errors } => {
-                Error::InvalidConfiguration { errors }
-            }
-            other => Error::InvalidConfiguration {
-                errors: vec![other],
-            },
-        })?;
-
-        let num_pipeline_groups = engine_config.groups.len();
-        let resolved_config = engine_config.resolve();
-        let (mut engine, pipelines, observability_pipeline) = resolved_config.into_parts();
-        let observability_pipeline =
-            observability_pipeline.ok_or_else(|| Error::PipelineRuntimeError {
-                source: Box::new(std::io::Error::other(
-                    "resolved configuration is missing the mandatory observability pipeline",
-                )),
+        let resolved_candidate = self
+            .resolve_engine_candidate(engine_config, &options.extensions)
+            .map_err(|error| Error::InvalidConfiguration {
+                errors: vec![otel_arrow_dfe_config::error::Error::InvalidUserConfig {
+                    error: error.to_string(),
+                }],
             })?;
-        let num_pipelines = pipelines.len();
+        let engine_config = resolved_candidate.source;
+        let effective_config = resolved_candidate.effective;
+        let mut engine = resolved_candidate.engine;
+        let runtime_pipelines = resolved_candidate.pipelines;
+        let pipelines: Vec<_> = runtime_pipelines
+            .iter()
+            .map(|pipeline| pipeline.policy.clone())
+            .collect();
+        let observability_pipeline = resolved_candidate.observability;
+        let resolved_controller_extensions = resolved_candidate.controller_extensions;
+        let num_pipeline_groups = engine_config.groups.len();
+        let num_pipelines = runtime_pipelines.len();
         let admin_settings = engine.http_admin.clone().unwrap_or_default();
 
         // Create the shared telemetry registry first - it is used by both the
@@ -1507,7 +1607,7 @@ impl<
                 observability_key.pipeline_group_id.clone(),
                 observability_key.pipeline_id.clone(),
             ),
-            observability_pipeline.policies.health.clone(),
+            observability_pipeline.policy.policies.health.clone(),
         );
         let topology = NumaTopology::detect();
         let observability_numa_node_id =
@@ -1523,6 +1623,7 @@ impl<
 
         let runtime = Arc::new(ControllerRuntime::new(
             self.pipeline_factory,
+            options.extensions.clone(),
             controller_ctx.clone(),
             obs_state_store.clone(),
             obs_state_handle.clone(),
@@ -1536,6 +1637,7 @@ impl<
             telemetry_reporting_interval,
             memory_pressure_tx.clone(),
             engine_config.clone(),
+            effective_config.clone(),
         ));
 
         let control_plane = runtime.control_plane();
@@ -1545,7 +1647,8 @@ impl<
         // extension tasks are spawned later, after bootstrap pipelines have been
         // registered, to preserve the runtime lifecycle view exposed to them.
         let prepared_controller_extensions = Self::prepare_controller_extensions(
-            &engine_config,
+            &effective_config,
+            &resolved_controller_extensions,
             &options,
             Arc::clone(&control_plane),
             obs_state_handle.clone(),
@@ -1660,22 +1763,25 @@ impl<
 
         runtime.register_launched_instance(observability_pipeline_handle);
 
-        for (pipeline_entry, pipeline_placement) in
-            pipelines.iter().zip(placement_snapshot.pipelines.iter())
+        for (pipeline_candidate, pipeline_placement) in runtime_pipelines
+            .iter()
+            .zip(placement_snapshot.pipelines.iter())
         {
             runtime.register_committed_pipeline(
-                pipeline_entry.clone(),
+                pipeline_candidate.policy.clone(),
+                pipeline_candidate.runtime.clone(),
                 pipeline_placement.clone(),
                 0,
             );
             let num_cores = pipeline_placement.core_count();
             let listener_group_snapshot = Arc::new(listener_group::snapshot_for_pipeline(
-                pipeline_entry,
+                &pipeline_candidate.policy,
                 pipeline_placement,
                 placement_snapshot.generation,
             ));
 
-            let core_allocation = pipeline_entry
+            let core_allocation = pipeline_candidate
+                .policy
                 .policies
                 .resources
                 .core_allocation
@@ -1697,8 +1803,8 @@ impl<
                 .join(",");
             otel_info!(
                 "pipeline.core_allocation",
-                pipeline_group_id = pipeline_entry.pipeline_group_id.as_ref(),
-                pipeline_id = pipeline_entry.pipeline_id.as_ref(),
+                pipeline_group_id = pipeline_candidate.policy.pipeline_group_id.as_ref(),
+                pipeline_id = pipeline_candidate.policy.pipeline_id.as_ref(),
                 num_cores = num_cores,
                 core_allocation = core_allocation,
                 resolved_cores = resolved_cores,
@@ -1712,8 +1818,8 @@ impl<
                 let launched = Self::launch_pipeline_thread(
                     self.pipeline_factory,
                     DeployedPipelineKey {
-                        pipeline_group_id: pipeline_entry.pipeline_group_id.clone(),
-                        pipeline_id: pipeline_entry.pipeline_id.clone(),
+                        pipeline_group_id: pipeline_candidate.policy.pipeline_group_id.clone(),
+                        pipeline_id: pipeline_candidate.policy.pipeline_id.clone(),
                         core_id: placement.core_id.id,
                         deployment_generation: placement_snapshot.generation,
                     },
@@ -1721,12 +1827,16 @@ impl<
                     placement.numa_node_id,
                     Arc::clone(&listener_group_snapshot),
                     num_cores,
-                    pipeline_entry.pipeline.clone(),
-                    pipeline_entry.policies.channel_capacity.clone(),
-                    pipeline_entry.policies.telemetry.clone(),
-                    pipeline_entry.policies.transport_headers.clone(),
-                    pipeline_entry.policies.rate_limiters.clone(),
-                    pipeline_entry.policies.rate_limiter_scope.clone(),
+                    pipeline_candidate.runtime.clone(),
+                    pipeline_candidate.policy.policies.channel_capacity.clone(),
+                    pipeline_candidate.policy.policies.telemetry.clone(),
+                    pipeline_candidate.policy.policies.transport_headers.clone(),
+                    pipeline_candidate.policy.policies.rate_limiters.clone(),
+                    pipeline_candidate
+                        .policy
+                        .policies
+                        .rate_limiter_scope
+                        .clone(),
                     controller_ctx.clone(),
                     metrics_reporter.clone(),
                     engine_evt_reporter.clone(),
@@ -1899,6 +2009,7 @@ impl<
 
     fn prepare_controller_extensions(
         engine_config: &OtelDataflowSpec,
+        resolved_extensions: &HashMap<ExtensionId, Arc<ResolvedExtensionConfig>>,
         options: &ControllerRunOptions,
         control_plane: Arc<dyn ControlPlane>,
         observed_state: ObservedStateHandle,
@@ -1922,7 +2033,13 @@ impl<
                 }
             })?;
             let extension_id = extension_id.clone();
-            let extension_config = Arc::clone(extension);
+            let extension_config =
+                Arc::clone(resolved_extensions.get(&extension_id).ok_or_else(|| {
+                    Error::ControllerExtensionNotRegistered {
+                        extension_id: extension_id.to_string(),
+                        extension_type: extension_type.to_string(),
+                    }
+                })?);
             let context = ControllerExtensionContext {
                 extension_id: extension_id.clone(),
                 extension: extension_config,
@@ -2551,7 +2668,7 @@ impl<
         numa_node_id: usize,
         listener_group_snapshot: Arc<ListenerGroupSnapshot>,
         num_cores: usize,
-        pipeline_config: PipelineConfig,
+        pipeline_config: otel_arrow_dfe_engine::component_config::ResolvedPipelineConfig,
         channel_capacity_policy: ChannelCapacityPolicy,
         telemetry_policy: TelemetryPolicy,
         transport_headers_policy: Option<TransportHeadersPolicy>,
@@ -2671,7 +2788,7 @@ impl<
         runtime: std::sync::Weak<ControllerRuntime<PData>>,
         observability_key: DeployedPipelineKey,
         observability_core: CoreId,
-        observability_pipeline: ResolvedPipelineConfig,
+        observability_pipeline: ResolvedRuntimePipeline,
         config: &OtelDataflowSpec,
         telemetry_system: &InternalTelemetrySystem,
         pipeline_factory: &'static PipelineFactory<PData>,
@@ -2684,12 +2801,12 @@ impl<
         observability_numa_node_id: usize,
     ) -> Result<LaunchedPipelineThread<PData>, Error> {
         debug_assert_eq!(
-            observability_pipeline.role,
+            observability_pipeline.policy.role,
             ResolvedPipelineRole::ObservabilityInternal
         );
-        let channel_capacity_policy = observability_pipeline.policies.channel_capacity;
-        let telemetry_policy = observability_pipeline.policies.telemetry;
-        let pipeline_config = observability_pipeline.pipeline;
+        let channel_capacity_policy = observability_pipeline.policy.policies.channel_capacity;
+        let telemetry_policy = observability_pipeline.policy.policies.telemetry;
+        let pipeline_config = observability_pipeline.runtime;
 
         let internal_telemetry_settings = telemetry_system.internal_telemetry_settings();
 
@@ -2753,7 +2870,7 @@ impl<
     fn run_pipeline_thread(
         pipeline_key: DeployedPipelineKey,
         core_id: CoreId,
-        pipeline_config: PipelineConfig,
+        pipeline_config: otel_arrow_dfe_engine::component_config::ResolvedPipelineConfig,
         channel_capacity_policy: ChannelCapacityPolicy,
         telemetry_policy: TelemetryPolicy,
         transport_headers_policy: Option<TransportHeadersPolicy>,
@@ -3011,7 +3128,6 @@ mod tests {
     use super::*;
     use async_trait::async_trait;
     use otel_arrow_dfe_config::engine::{ResolvedPipelineConfig, ResolvedPipelineRole};
-    use otel_arrow_dfe_config::node::NodeUserConfig;
     /// Scenario: `BuildInfo::seed_attrs` runs with a mix of set, empty, and absent fields.
     /// Guarantees: it yields typed pairs for non-empty values only, skipping empty and `None`.
     #[test]
@@ -3229,14 +3345,14 @@ connections:
     fn create_test_observability_receiver(
         _pipeline_ctx: PipelineContext,
         node: otel_arrow_dfe_engine::node::NodeId,
-        node_config: Arc<NodeUserConfig>,
+        node_config: Arc<otel_arrow_dfe_engine::component_config::ResolvedNodeConfig>,
         receiver_config: &ReceiverConfig,
         _capabilities: &otel_arrow_dfe_engine::capability::registry::Capabilities,
     ) -> Result<ReceiverWrapper<()>, otel_arrow_dfe_config::error::Error> {
         Ok(ReceiverWrapper::local(
             TestObservabilityReceiver,
             node,
-            node_config,
+            node_config.effective(),
             receiver_config,
         ))
     }
@@ -3244,14 +3360,14 @@ connections:
     fn create_test_observability_processor(
         _pipeline_ctx: PipelineContext,
         node: otel_arrow_dfe_engine::node::NodeId,
-        node_config: Arc<NodeUserConfig>,
+        node_config: Arc<otel_arrow_dfe_engine::component_config::ResolvedNodeConfig>,
         processor_config: &ProcessorConfig,
         _capabilities: &otel_arrow_dfe_engine::capability::registry::Capabilities,
     ) -> Result<ProcessorWrapper<()>, otel_arrow_dfe_config::error::Error> {
         Ok(ProcessorWrapper::local(
             TestObservabilityProcessor,
             node,
-            node_config,
+            node_config.effective(),
             processor_config,
         ))
     }
@@ -3259,30 +3375,41 @@ connections:
     fn create_test_observability_exporter(
         _pipeline_ctx: PipelineContext,
         node: otel_arrow_dfe_engine::node::NodeId,
-        node_config: Arc<NodeUserConfig>,
+        node_config: Arc<otel_arrow_dfe_engine::component_config::ResolvedNodeConfig>,
         exporter_config: &ExporterConfig,
         _capabilities: &otel_arrow_dfe_engine::capability::registry::Capabilities,
     ) -> Result<ExporterWrapper<()>, otel_arrow_dfe_config::error::Error> {
         Ok(ExporterWrapper::local(
             TestObservabilityExporter,
             node,
-            node_config,
+            node_config.effective(),
             exporter_config,
         ))
     }
 
-    static TEST_OBSERVABILITY_RECEIVERS: &[ReceiverFactory<()>] = &[ReceiverFactory {
-        name: "urn:otel:receiver:internal_telemetry",
-        create: create_test_observability_receiver,
-        wiring_contract: WiringContract::UNRESTRICTED,
-        validate_config: accept_any_test_config,
-    }];
+    static TEST_OBSERVABILITY_RECEIVERS: &[ReceiverFactory<()>] = &[
+        ReceiverFactory {
+            name: "urn:otel:receiver:internal_telemetry",
+            create: create_test_observability_receiver,
+            wiring_contract: WiringContract::UNRESTRICTED,
+            resolve_config: resolve_any_test_config,
+            snapshot_policy: ConfigSnapshotPolicy::Omit,
+        },
+        ReceiverFactory {
+            name: "urn:test:receiver:example",
+            create: create_test_observability_receiver,
+            wiring_contract: WiringContract::UNRESTRICTED,
+            resolve_config: resolve_any_test_config,
+            snapshot_policy: ConfigSnapshotPolicy::Omit,
+        },
+    ];
 
     static TEST_OBSERVABILITY_PROCESSORS: &[ProcessorFactory<()>] = &[ProcessorFactory {
         name: "urn:otel:processor:type_router",
         create: create_test_observability_processor,
         wiring_contract: WiringContract::UNRESTRICTED,
-        validate_config: accept_any_test_config,
+        resolve_config: resolve_any_test_config,
+        snapshot_policy: ConfigSnapshotPolicy::Omit,
     }];
 
     static TEST_OBSERVABILITY_EXPORTERS: &[ExporterFactory<()>] = &[
@@ -3290,13 +3417,22 @@ connections:
             name: "urn:otel:exporter:console",
             create: create_test_observability_exporter,
             wiring_contract: WiringContract::UNRESTRICTED,
-            validate_config: accept_any_test_config,
+            resolve_config: resolve_any_test_config,
+            snapshot_policy: ConfigSnapshotPolicy::Omit,
         },
         ExporterFactory {
             name: "urn:otel:exporter:noop",
             create: create_test_observability_exporter,
             wiring_contract: WiringContract::UNRESTRICTED,
-            validate_config: accept_any_test_config,
+            resolve_config: resolve_any_test_config,
+            snapshot_policy: ConfigSnapshotPolicy::Omit,
+        },
+        ExporterFactory {
+            name: "urn:test:exporter:example",
+            create: create_test_observability_exporter,
+            wiring_contract: WiringContract::UNRESTRICTED,
+            resolve_config: resolve_any_test_config,
+            snapshot_policy: ConfigSnapshotPolicy::Omit,
         },
     ];
 
@@ -3317,16 +3453,17 @@ connections:
         Ok(Box::new(|_cancellation_token| Box::pin(async { Ok(()) })))
     }
 
-    fn validate_test_linked_controller_extension_config(
+    fn resolve_any_test_config(
         config: &serde_json::Value,
-    ) -> Result<(), otel_arrow_dfe_config::error::Error> {
-        otel_arrow_dfe_config::validation::no_config(config)
-    }
-
-    fn accept_any_test_config(
-        _config: &serde_json::Value,
-    ) -> Result<(), otel_arrow_dfe_config::error::Error> {
-        Ok(())
+    ) -> Result<
+        otel_arrow_dfe_engine::component_config::ResolvedComponentConfig,
+        otel_arrow_dfe_config::error::Error,
+    > {
+        Ok(
+            otel_arrow_dfe_engine::component_config::ResolvedComponentConfig::omitted(
+                config.clone(),
+            ),
+        )
     }
 
     #[allow(unsafe_code)]
@@ -3336,7 +3473,8 @@ connections:
             name: TEST_LINKED_CONTROLLER_EXTENSION_URN,
             description: "Test linked controller extension.",
             documentation_url: "",
-            validate_config: validate_test_linked_controller_extension_config,
+            resolve_config: otel_arrow_dfe_engine::component_config::resolve_no_config,
+            snapshot_policy: ConfigSnapshotPolicy::TypedSafe,
             start: start_test_linked_controller_extension,
         };
 
@@ -3665,18 +3803,20 @@ groups: {{}}
         registry.register(
             extension_type.clone(),
             start_test_linked_controller_extension,
-            otel_arrow_dfe_config::validation::no_config,
+            otel_arrow_dfe_engine::component_config::resolve_no_config,
+            ConfigSnapshotPolicy::TypedSafe,
         );
         registry.register(
             extension_type.clone(),
             start_test_linked_controller_extension,
-            accept_any_test_config,
+            resolve_any_test_config,
+            ConfigSnapshotPolicy::Omit,
         );
 
         let factory = registry
             .get(&extension_type)
             .expect("extension factory should be registered");
-        (factory.validate_config)(&serde_json::json!({ "accepted_by_latest": true }))
+        let _ = (factory.resolve_config)(&serde_json::json!({ "accepted_by_latest": true }))
             .expect("duplicate registration should keep the latest factory");
     }
 
@@ -3696,7 +3836,8 @@ groups: {{}}
                     .push(context.extension_id.to_string());
                 Ok(Box::new(|_cancellation_token| Box::pin(async { Ok(()) })))
             },
-            otel_arrow_dfe_config::validation::no_config,
+            otel_arrow_dfe_engine::component_config::resolve_no_config,
+            ConfigSnapshotPolicy::TypedSafe,
         );
 
         let controller = Controller::new(test_pipeline_factory());
@@ -3824,16 +3965,9 @@ groups: {{}}
             )
             .expect_err("missing controller extension factory should fail startup");
 
-        match err {
-            Error::ControllerExtensionNotRegistered {
-                extension_id,
-                extension_type,
-            } => {
-                assert_eq!(extension_id, "controller_monitor");
-                assert_eq!(extension_type, CONTROLLER_MONITOR_EXTENSION_URN);
-            }
-            other => panic!("unexpected error: {other:?}"),
-        }
+        let message = err.to_string();
+        assert!(message.contains("Unknown controller extension"));
+        assert!(message.contains("controller_monitor"));
     }
 
     #[test]
@@ -3849,19 +3983,9 @@ groups: {{}}
             )
             .expect_err("invalid controller monitor config should fail startup");
 
-        match err {
-            Error::ControllerExtensionStartError {
-                extension_id,
-                source,
-            } => {
-                assert_eq!(extension_id, "controller_monitor");
-                assert!(
-                    source.to_string().contains("greater than zero"),
-                    "unexpected error: {source}"
-                );
-            }
-            other => panic!("unexpected error: {other:?}"),
-        }
+        let message = err.to_string();
+        assert!(message.contains("controller_monitor"));
+        assert!(message.contains("greater than zero"));
     }
 
     #[test]
@@ -3884,7 +4008,8 @@ groups: {{}}
                     std::io::Error::other("simulated controller extension start failure"),
                 ))
             },
-            otel_arrow_dfe_config::validation::no_config,
+            otel_arrow_dfe_engine::component_config::resolve_no_config,
+            ConfigSnapshotPolicy::TypedSafe,
         );
 
         let err = controller
@@ -3966,7 +4091,8 @@ groups: {{}}
                     })
                 }))
             },
-            otel_arrow_dfe_config::validation::no_config,
+            otel_arrow_dfe_engine::component_config::resolve_no_config,
+            ConfigSnapshotPolicy::TypedSafe,
         );
 
         let (result_tx, result_rx) = std_mpsc::channel();

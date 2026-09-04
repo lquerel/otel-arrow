@@ -21,7 +21,9 @@ use std::time::{Duration, Instant};
 
 use async_trait::async_trait;
 use linkme::distributed_slice;
-use otel_arrow_dfe_config::node::NodeUserConfig;
+use otel_arrow_dfe_engine::component_config::{
+    ConfigSnapshotPolicy, ResolvedComponentConfig, ResolvedNodeConfig,
+};
 use otel_arrow_dfe_engine::config::ReceiverConfig;
 use otel_arrow_dfe_engine::context::PipelineContext;
 use otel_arrow_dfe_engine::memory_limiter::LocalReceiverAdmissionState;
@@ -64,7 +66,7 @@ const DEFAULT_LATE_REGISTRATION_POLL: Duration = Duration::from_secs(1);
 /// and structurally decodes records into OTAP logs.
 pub const USER_EVENTS_RECEIVER_URN: &str = "urn:otel:receiver:user_events";
 
-#[derive(Debug, Clone, Default, Deserialize)]
+#[derive(Debug, Clone, Default, Deserialize, PartialEq)]
 #[serde(tag = "type", rename_all = "snake_case", deny_unknown_fields)]
 enum FormatConfig {
     /// Decode the sample using the Linux tracefs `format` metadata registered
@@ -89,7 +91,7 @@ enum FormatConfig {
 ///
 /// Each subscription opens the named tracepoint and chooses the payload decoder
 /// used for samples read from that tracepoint.
-#[derive(Debug, Clone, Deserialize)]
+#[derive(Debug, Clone, Deserialize, PartialEq)]
 #[serde(deny_unknown_fields)]
 struct SubscriptionConfig {
     /// user_events tracepoint name, with or without the `user_events:` prefix.
@@ -107,7 +109,7 @@ struct SubscriptionConfig {
 /// These limits govern receiver-side buffering after one_collect has parsed a
 /// sample and before the receiver drain loop has consumed it. They do not
 /// isolate the shared perf ring used by one_collect.
-#[derive(Debug, Clone, Deserialize)]
+#[derive(Debug, Clone, Deserialize, PartialEq)]
 #[serde(deny_unknown_fields)]
 struct SubscriptionLimitsConfig {
     /// Maximum parsed events buffered for this subscription.
@@ -128,16 +130,12 @@ impl SubscriptionLimitsConfig {
 ///
 /// These values tune how the receiver opens and services the per-CPU perf ring
 /// buffers used by the underlying user_events tracepoint session.
-#[derive(Debug, Deserialize, Clone)]
+#[derive(Debug, Deserialize, Clone, PartialEq)]
 #[serde(deny_unknown_fields)]
 struct SessionConfig {
     /// Ring buffer capacity allocated per CPU for tracepoint samples.
     #[serde(default = "default_per_cpu_buffer_size")]
     per_cpu_buffer_size: usize,
-    #[expect(
-        dead_code,
-        reason = "reserved for future one-collect wakeup watermark support"
-    )]
     /// Planned readiness threshold for waking the reader when buffered data is
     /// available.
     ///
@@ -161,7 +159,7 @@ struct SessionConfig {
 /// These limits cap total receiver-side buffering across all subscriptions in a
 /// session. Per-subscription limits may further constrain individual
 /// subscriptions, but these global ceilings always apply.
-#[derive(Debug, Deserialize, Clone)]
+#[derive(Debug, Deserialize, Clone, PartialEq)]
 #[serde(deny_unknown_fields)]
 struct SessionLimitsConfig {
     /// Maximum number of parsed events buffered between one_collect callbacks
@@ -187,7 +185,7 @@ impl Default for SessionLimitsConfig {
 ///
 /// The receiver runs cooperatively with the local pipeline task. These limits
 /// bound how much work one drain pass can do before yielding back to the engine.
-#[derive(Debug, Deserialize, Clone)]
+#[derive(Debug, Deserialize, Clone, PartialEq)]
 #[serde(deny_unknown_fields)]
 struct DrainConfig {
     /// Maximum number of decoded records to read during one receiver turn.
@@ -207,7 +205,7 @@ struct DrainConfig {
 /// Decoded user_events records are accumulated into OTAP log batches before
 /// they are sent downstream. Batching improves throughput but also increases
 /// how many decoded records can be lost if the process exits before a flush.
-#[derive(Debug, Deserialize, Clone)]
+#[derive(Debug, Deserialize, Clone, PartialEq)]
 #[serde(deny_unknown_fields)]
 struct BatchConfig {
     // NOTE: These batches are in-memory only. Unlike a network receiver such as
@@ -229,7 +227,7 @@ struct BatchConfig {
 }
 
 /// User-supplied configuration for the Linux user_events receiver.
-#[derive(Debug, Deserialize, Clone)]
+#[derive(Debug, Deserialize, Clone, PartialEq)]
 #[serde(deny_unknown_fields)]
 struct UserEventsReceiverConfig {
     /// Required non-empty list of tracepoints to subscribe to.
@@ -243,6 +241,14 @@ struct UserEventsReceiverConfig {
     /// OTAP log batching limits.
     #[serde(default)]
     batching: Option<BatchConfig>,
+}
+
+#[derive(Debug, Clone, PartialEq)]
+struct ResolvedUserEventsConfig {
+    subscriptions: Vec<SubscriptionConfig>,
+    session: SessionConfig,
+    drain: DrainConfig,
+    batching: BatchConfig,
 }
 
 /// Runtime state for one local user_events receiver task.
@@ -264,17 +270,28 @@ struct UserEventsReceiver {
 }
 
 impl UserEventsReceiver {
-    fn from_config(
+    fn from_typed_config(
         pipeline: PipelineContext,
-        config: &Value,
+        config: ResolvedUserEventsConfig,
     ) -> Result<Self, otel_arrow_dfe_config::error::Error> {
-        let mut config: UserEventsReceiverConfig =
-            serde_json::from_value(config.clone()).map_err(|e| {
-                otel_arrow_dfe_config::error::Error::InvalidUserConfig {
-                    error: e.to_string(),
-                }
-            })?;
+        Ok(Self {
+            subscriptions: config.subscriptions,
+            session: config.session,
+            drain: config.drain,
+            batching: config.batching,
+            cpu_id: pipeline.core_id(),
+            metrics: Rc::new(RefCell::new(
+                pipeline.register_metrics::<UserEventsReceiverMetrics>(),
+            )),
+            admission_state: LocalReceiverAdmissionState::from_process_state(
+                &pipeline.memory_pressure_state(),
+            ),
+        })
+    }
 
+    fn resolve_runtime_config(
+        mut config: UserEventsReceiverConfig,
+    ) -> Result<ResolvedUserEventsConfig, otel_arrow_dfe_config::error::Error> {
         Self::normalize_subscriptions(&mut config.subscriptions)?;
         let session = config.session.clone().unwrap_or(SessionConfig {
             per_cpu_buffer_size: default_per_cpu_buffer_size(),
@@ -295,18 +312,11 @@ impl UserEventsReceiver {
         });
         Self::validate_batching(&batching)?;
 
-        Ok(Self {
+        Ok(ResolvedUserEventsConfig {
             subscriptions: config.subscriptions,
             session,
             drain,
             batching,
-            cpu_id: pipeline.core_id(),
-            metrics: Rc::new(RefCell::new(
-                pipeline.register_metrics::<UserEventsReceiverMetrics>(),
-            )),
-            admission_state: LocalReceiverAdmissionState::from_process_state(
-                &pipeline.memory_pressure_state(),
-            ),
         })
     }
 
@@ -579,21 +589,46 @@ pub static USER_EVENTS_RECEIVER: ReceiverFactory<OtapPdata> = ReceiverFactory {
     create:
         |pipeline: PipelineContext,
          node: NodeId,
-         node_config: Arc<NodeUserConfig>,
+         node_config: Arc<ResolvedNodeConfig>,
          receiver_config: &ReceiverConfig,
          _capabilities: &otel_arrow_dfe_engine::capability::registry::Capabilities| {
             Ok(ReceiverWrapper::local(
-                UserEventsReceiver::from_config(pipeline, &node_config.config)?,
+                UserEventsReceiver::from_typed_config(
+                    pipeline,
+                    node_config
+                        .component_config::<ResolvedUserEventsConfig>()?
+                        .as_ref()
+                        .clone(),
+                )?,
                 node,
-                node_config,
+                node_config.effective(),
                 receiver_config,
             ))
         },
     wiring_contract: otel_arrow_dfe_engine::wiring_contract::WiringContract::UNRESTRICTED,
-    validate_config: otel_arrow_dfe_config::validation::validate_typed_config::<
-        UserEventsReceiverConfig,
-    >,
+    resolve_config: resolve_user_events_config,
+    snapshot_policy: ConfigSnapshotPolicy::Omit,
 };
+
+fn resolve_user_events_runtime_config(
+    config: UserEventsReceiverConfig,
+) -> Result<ResolvedUserEventsConfig, otel_arrow_dfe_config::error::Error> {
+    UserEventsReceiver::resolve_runtime_config(config)
+}
+
+fn resolve_user_events_config(
+    raw: &Value,
+) -> Result<ResolvedComponentConfig, otel_arrow_dfe_config::error::Error> {
+    let config: UserEventsReceiverConfig =
+        serde_json::from_value(raw.clone()).map_err(|error| {
+            otel_arrow_dfe_config::error::Error::InvalidUserConfig {
+                error: error.to_string(),
+            }
+        })?;
+    Ok(ResolvedComponentConfig::omitted(
+        resolve_user_events_runtime_config(config)?,
+    ))
+}
 
 #[async_trait(?Send)]
 impl local::Receiver<OtapPdata> for UserEventsReceiver {

@@ -78,7 +78,7 @@ impl MockControlPlane {
 }
 
 impl ControlPlane for MockControlPlane {
-    fn engine_config_snapshot(&self) -> Result<OtelDataflowSpec, ControlPlaneError> {
+    fn effective_config_snapshot(&self) -> Result<OtelDataflowSpec, ControlPlaneError> {
         Ok(self.current_config.lock().unwrap().clone())
     }
 

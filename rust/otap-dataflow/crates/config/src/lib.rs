@@ -35,6 +35,8 @@ pub mod observed_state;
 pub mod pipeline;
 pub mod pipeline_group;
 pub mod policy;
+/// Secret-bearing configuration value types and snapshot markers.
+pub mod secret;
 /// Engine telemetry settings.
 pub mod settings;
 /// TLS configuration.

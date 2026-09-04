@@ -45,7 +45,6 @@ use async_trait::async_trait;
 use futures::{FutureExt, pin_mut};
 use futures_timer::Delay;
 use linkme::distributed_slice;
-use otel_arrow_dfe_config::node::NodeUserConfig;
 use otel_arrow_dfe_engine::ExporterFactory;
 use otel_arrow_dfe_engine::capability::auth::bearer_token_provider::BearerTokenProvider;
 use otel_arrow_dfe_engine::config::ExporterConfig;
@@ -92,10 +91,11 @@ pub static PARQUET_EXPORTER: ExporterFactory<OtapPdata> = ExporterFactory {
     name: PARQUET_EXPORTER_URN,
     create: |pipeline: PipelineContext,
              node: NodeId,
-             node_config: Arc<NodeUserConfig>,
+             node_config: Arc<otel_arrow_dfe_engine::component_config::ResolvedNodeConfig>,
              exporter_config: &ExporterConfig,
              capabilities: &otel_arrow_dfe_engine::capability::registry::Capabilities| {
-        let mut exporter = ParquetExporter::from_config(pipeline, &node_config.config)?;
+        let config = node_config.component_config::<config::Config>()?;
+        let mut exporter = ParquetExporter::from_resolved(pipeline, (*config).clone());
         if exporter.config.storage.requires_bearer_token_provider() {
             exporter.token_provider = Some(
                 capabilities
@@ -108,15 +108,27 @@ pub static PARQUET_EXPORTER: ExporterFactory<OtapPdata> = ExporterFactory {
         Ok(ExporterWrapper::local(
             exporter,
             node,
-            node_config,
+            node_config.effective(),
             exporter_config,
         ))
     },
     wiring_contract: otel_arrow_dfe_engine::wiring_contract::WiringContract::UNRESTRICTED,
-    validate_config: otel_arrow_dfe_config::validation::validate_typed_config::<config::Config>,
+    resolve_config: otel_arrow_dfe_engine::component_config::resolve_typed_config::<config::Config>,
+    snapshot_policy: otel_arrow_dfe_engine::component_config::ConfigSnapshotPolicy::TypedSafe,
 };
 
 impl ParquetExporter {
+    fn from_resolved(pipeline_ctx: PipelineContext, config: config::Config) -> Self {
+        let pdata_metrics = ExporterExportMetrics::register(&pipeline_ctx);
+        let io_metrics = pipeline_ctx.register_metrics::<metrics::ParquetExporterMetrics>();
+        Self {
+            config,
+            token_provider: None,
+            pdata_metrics: Some(pdata_metrics),
+            io_metrics: Some(io_metrics),
+        }
+    }
+
     /// construct a new instance of the `ParquetExporter`
     #[must_use]
     pub const fn new(config: config::Config) -> Self {
@@ -141,15 +153,7 @@ impl ParquetExporter {
             }
         })?;
 
-        let pdata_metrics = ExporterExportMetrics::register(&pipeline_ctx);
-        let io_metrics = pipeline_ctx.register_metrics::<metrics::ParquetExporterMetrics>();
-
-        Ok(ParquetExporter {
-            config,
-            token_provider: None,
-            pdata_metrics: Some(pdata_metrics),
-            io_metrics: Some(io_metrics),
-        })
+        Ok(Self::from_resolved(pipeline_ctx, config))
     }
 
     fn terminal_state(
@@ -1488,7 +1492,9 @@ mod test {
         let created = (PARQUET_EXPORTER.create)(
             pipeline_ctx,
             test_node("parquet_exporter"),
-            Arc::new(node_config),
+            PARQUET_EXPORTER
+                .resolve_node_config(node_config)
+                .expect("parquet exporter config must resolve"),
             &ExporterConfig::new("parquet_exporter"),
             &otel_arrow_dfe_engine::capability::registry::Capabilities::empty(),
         );
@@ -1499,37 +1505,18 @@ mod test {
         );
     }
 
-    /// Scenario: The factory is given a config it cannot deserialize.
-    /// Guarantees: The node fails at wiring time rather than starting with an unusable storage config.
+    /// Scenario: The factory resolver is given a config it cannot deserialize.
+    /// Guarantees: Admission fails before wiring starts with an unusable storage config.
     #[test]
     fn factory_rejects_an_invalid_storage_config() {
-        use otel_arrow_dfe_engine::context::ControllerContext;
-        use otel_arrow_dfe_engine::testing::test_node;
         use serde_json::json;
-
-        let metrics_system = otel_arrow_dfe_telemetry::InternalTelemetrySystem::default();
-        let controller_ctx = ControllerContext::new(metrics_system.registry());
-        let pipeline_ctx = controller_ctx
-            .pipeline_context_with("grp".into(), "pipe".into(), 0, 1, 0)
-            .with_node_context(
-                "parquet_exporter".into(),
-                PARQUET_EXPORTER_URN.into(),
-                otel_arrow_dfe_config::node::NodeKind::Exporter,
-                std::collections::HashMap::new(),
-            );
 
         let mut node_config = NodeUserConfig::new_exporter_config(PARQUET_EXPORTER_URN);
         node_config.config = json!({ "storage": { "file": { "unexpected_key": "x" } } });
 
-        let created = (PARQUET_EXPORTER.create)(
-            pipeline_ctx,
-            test_node("parquet_exporter"),
-            Arc::new(node_config),
-            &ExporterConfig::new("parquet_exporter"),
-            &otel_arrow_dfe_engine::capability::registry::Capabilities::empty(),
-        );
+        let resolved = PARQUET_EXPORTER.resolve_node_config(node_config);
 
-        assert!(created.is_err(), "invalid storage config must be rejected");
+        assert!(resolved.is_err(), "invalid storage config must be rejected");
     }
 
     /// Scenario: The factory builds an Azure-backed exporter with no capability bound to the node.

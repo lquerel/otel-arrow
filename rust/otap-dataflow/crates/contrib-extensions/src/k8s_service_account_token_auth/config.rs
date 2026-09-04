@@ -6,7 +6,7 @@
 use std::collections::HashSet;
 use std::time::Duration;
 
-use serde::Deserialize;
+use serde::{Deserialize, Serialize};
 
 /// Default maximum duration of a Kubernetes review request.
 pub(crate) const DEFAULT_REVIEW_TIMEOUT: Duration = Duration::from_secs(5);
@@ -27,7 +27,7 @@ fn default_review_timeout() -> Duration {
 }
 
 /// Configuration for the Kubernetes service-account-token auth extension.
-#[derive(Debug, Clone, Deserialize)]
+#[derive(Debug, Clone, Deserialize, Serialize, PartialEq)]
 #[serde(deny_unknown_fields)]
 pub struct Config {
     /// Per-audience (per-tenant) admission entries. Each entry ties **one**
@@ -62,7 +62,7 @@ pub struct Config {
 /// The two admission strategies (`allowed_service_accounts` and
 /// `resource_attributes`) are mutually exclusive within an entry; when neither
 /// is set, any account authenticated for this audience is admitted.
-#[derive(Debug, Clone, Deserialize)]
+#[derive(Debug, Clone, Deserialize, Serialize, PartialEq)]
 #[serde(deny_unknown_fields)]
 pub struct AudienceConfig {
     /// The audience this entry admits. A token is admitted through this entry
@@ -89,7 +89,7 @@ pub struct AudienceConfig {
 ///
 /// Mirrors the fields of the Kubernetes `ResourceAttributes` type. `resource`
 /// and `verb` are required; the rest narrow the check.
-#[derive(Debug, Clone, Deserialize)]
+#[derive(Debug, Clone, Deserialize, Serialize, PartialEq)]
 #[serde(deny_unknown_fields)]
 pub struct ResourceAttributesConfig {
     /// API group of the resource (e.g. `telemetry.opentelemetry.io`). Empty for

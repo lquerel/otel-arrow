@@ -26,9 +26,13 @@ use async_trait::async_trait;
 use linkme::distributed_slice;
 use otel_arrow_dfe_config::SignalType;
 use otel_arrow_dfe_config::error::Error as ConfigError;
+#[cfg(test)]
 use otel_arrow_dfe_config::node::NodeUserConfig;
 use otel_arrow_dfe_engine::ConsumerEffectHandlerExtension;
 use otel_arrow_dfe_engine::MessageSourceLocalEffectHandlerExtension;
+use otel_arrow_dfe_engine::component_config::{
+    ConfigSnapshotPolicy, ResolvedComponentConfig, ResolvedNodeConfig,
+};
 use otel_arrow_dfe_engine::config::ProcessorConfig;
 use otel_arrow_dfe_engine::context::PipelineContext;
 use otel_arrow_dfe_engine::control::{AckMsg, NackMsg, NodeControlMsg};
@@ -46,6 +50,7 @@ use otel_arrow_dfe_pdata::TryIntoWithOptions;
 use otel_arrow_dfe_pdata::otap::OtapArrowRecords;
 use otel_arrow_dfe_pdata::otap::filter::{IdBitmapPool, filter_otap_batch};
 use otel_arrow_dfe_telemetry::metrics::MetricSet;
+#[cfg(test)]
 use serde_json::Value;
 use std::sync::Arc;
 
@@ -60,12 +65,21 @@ static LOG_SAMPLING_PROCESSOR_FACTORY: otel_arrow_dfe_engine::ProcessorFactory<O
         create:
             |pipeline_ctx: PipelineContext,
              node: NodeId,
-             node_config: Arc<NodeUserConfig>,
+             node_config: Arc<ResolvedNodeConfig>,
              proc_cfg: &ProcessorConfig,
              _capabilities: &otel_arrow_dfe_engine::capability::registry::Capabilities| {
                 create_log_sampling_processor(pipeline_ctx, node, node_config, proc_cfg)
             },
-        validate_config: otel_arrow_dfe_config::validation::validate_typed_config::<Config>,
+        resolve_config: |value| {
+            let config: Config = serde_json::from_value(value.clone()).map_err(|e| {
+                ConfigError::InvalidUserConfig {
+                    error: e.to_string(),
+                }
+            })?;
+            config.validate()?;
+            ResolvedComponentConfig::typed_safe(config)
+        },
+        snapshot_policy: ConfigSnapshotPolicy::TypedSafe,
         wiring_contract: otel_arrow_dfe_engine::wiring_contract::WiringContract::UNRESTRICTED,
     };
 
@@ -82,11 +96,19 @@ struct LogSamplingProcessor {
 }
 
 impl LogSamplingProcessor {
+    #[cfg(test)]
     fn from_config(pipeline_ctx: PipelineContext, config: &Value) -> Result<Self, ConfigError> {
         let config: Config =
             serde_json::from_value(config.clone()).map_err(|e| ConfigError::InvalidUserConfig {
                 error: e.to_string(),
             })?;
+        Self::from_typed_config(pipeline_ctx, config)
+    }
+
+    fn from_typed_config(
+        pipeline_ctx: PipelineContext,
+        config: Config,
+    ) -> Result<Self, ConfigError> {
         config.validate()?;
 
         let sampler = sampler_from_config(&config.policy);
@@ -239,13 +261,16 @@ impl local::Processor<OtapPdata> for LogSamplingProcessor {
 fn create_log_sampling_processor(
     pipeline_ctx: PipelineContext,
     node: NodeId,
-    node_config: Arc<NodeUserConfig>,
+    node_config: Arc<ResolvedNodeConfig>,
     processor_config: &ProcessorConfig,
 ) -> Result<ProcessorWrapper<OtapPdata>, ConfigError> {
     Ok(ProcessorWrapper::local(
-        LogSamplingProcessor::from_config(pipeline_ctx, &node_config.config)?,
+        LogSamplingProcessor::from_typed_config(
+            pipeline_ctx,
+            (*node_config.component_config::<Config>()?).clone(),
+        )?,
         node,
-        node_config,
+        node_config.effective(),
         processor_config,
     ))
 }

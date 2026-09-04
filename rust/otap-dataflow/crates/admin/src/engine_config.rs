@@ -27,14 +27,10 @@ fn operation_error_response(status: StatusCode, error: crate::ControlPlaneError)
     (status, Json(error.as_operation_error())).into_response()
 }
 
-/// Returns the full controller-owned engine configuration.
-///
-/// Credential header values are redacted from the response (see
-/// [`OtelDataflowSpec::redacted_for_snapshot`]) so secrets configured in node
-/// and extension `headers` are not exposed in cleartext through this endpoint.
+/// Returns the full effective engine configuration.
 pub async fn show_config(State(state): State<AppState>) -> impl IntoResponse {
-    match state.controller.engine_config_snapshot() {
-        Ok(config) => (StatusCode::OK, Json(config.redacted_for_snapshot())).into_response(),
+    match state.controller.effective_config_snapshot() {
+        Ok(config) => (StatusCode::OK, Json(config)).into_response(),
         Err(error) => operation_error_response(StatusCode::INTERNAL_SERVER_ERROR, error),
     }
 }
@@ -146,7 +142,7 @@ mod tests {
             Ok(None)
         }
 
-        fn engine_config_snapshot(&self) -> Result<OtelDataflowSpec, ControlPlaneError> {
+        fn effective_config_snapshot(&self) -> Result<OtelDataflowSpec, ControlPlaneError> {
             self.snapshot_result.clone()
         }
 
@@ -235,7 +231,7 @@ mod tests {
     /// configuration.
     /// Guarantees: the handler returns the config snapshot directly.
     #[tokio::test]
-    async fn show_config_returns_engine_config_snapshot() {
+    async fn show_config_returns_effective_config_snapshot() {
         let config = empty_engine_config();
         let response = show_config(State(test_app_state(stub(
             Ok(config.clone()),
@@ -253,11 +249,10 @@ mod tests {
         assert_eq!(decoded, config);
     }
 
-    /// Scenario: a node config contains credential header values.
-    /// Guarantees: `show_config` redacts them so the raw credential never
-    /// appears in the response body.
+    /// Scenario: the control plane returns a precomputed omitted component config.
+    /// Guarantees: `show_config` serializes that effective representation directly.
     #[tokio::test]
-    async fn show_config_redacts_credential_header_values() {
+    async fn show_config_serializes_precomputed_effective_config() {
         let yaml = r#"
 version: otel_dataflow/v1
 engine: {}
@@ -271,9 +266,7 @@ groups:
             config: null
           exporter:
             type: "urn:test:exporter:example"
-            config:
-              headers:
-                authorization: "Bearer super-secret-token"
+            config: "[OMITTED]"
         connections:
           - from: receiver
             to: exporter
@@ -292,12 +285,8 @@ groups:
             .expect("body should collect");
         let text = String::from_utf8(body.to_vec()).expect("config body is utf-8");
         assert!(
-            !text.contains("Bearer super-secret-token"),
-            "raw credential must not appear in the config response: {text}"
-        );
-        assert!(
-            text.contains("[REDACTED]"),
-            "redacted placeholder should appear in the config response: {text}"
+            text.contains("[OMITTED]"),
+            "precomputed omission marker should appear in the config response: {text}"
         );
     }
 

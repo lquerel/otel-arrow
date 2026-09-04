@@ -27,6 +27,7 @@ use http::{HeaderMap, HeaderValue, StatusCode};
 use linkme::distributed_slice;
 use otel_arrow_dfe_config::SignalType;
 use otel_arrow_dfe_config::error::Error as ConfigError;
+#[cfg(test)]
 use otel_arrow_dfe_config::node::NodeUserConfig;
 use otel_arrow_dfe_engine::config::ExporterConfig;
 use otel_arrow_dfe_engine::context::PipelineContext;
@@ -58,7 +59,6 @@ use otel_arrow_dfe_pdata::proto::opentelemetry::collector::trace::v1::{
 use otel_arrow_dfe_pdata::{OtapPayload, OtapPayloadHelpers, PayloadData};
 use prost::Message as _;
 use reqwest::{Client, Response};
-use secrecy::ExposeSecret;
 
 use self::config::Config;
 use crate::exporters::otlp_grpc_exporter::InFlightExports;
@@ -111,7 +111,8 @@ pub static OTLP_HTTP_EXPORTER: ExporterFactory<OtapPdata> = ExporterFactory {
     name: OTLP_HTTP_EXPORTER_URN,
     create: factory_create,
     wiring_contract: WiringContract::UNRESTRICTED,
-    validate_config,
+    resolve_config,
+    snapshot_policy: otel_arrow_dfe_engine::component_config::ConfigSnapshotPolicy::TypedSafe,
 };
 
 /// Validates the OTLP HTTP exporter configuration at config load time.
@@ -119,7 +120,9 @@ pub static OTLP_HTTP_EXPORTER: ExporterFactory<OtapPdata> = ExporterFactory {
 /// Runs before any node is started (initial load and live reconfigure), so bad
 /// configuration is rejected fast and attributed to the offending node rather
 /// than surfacing as an opaque client error at startup.
-fn validate_config(config: &serde_json::Value) -> Result<(), ConfigError> {
+fn resolve_config(
+    config: &serde_json::Value,
+) -> Result<otel_arrow_dfe_engine::component_config::ResolvedComponentConfig, ConfigError> {
     let cfg: Config =
         serde_json::from_value(config.clone()).map_err(|e| ConfigError::InvalidUserConfig {
             error: e.to_string(),
@@ -129,13 +132,14 @@ fn validate_config(config: &serde_json::Value) -> Result<(), ConfigError> {
         .map_err(|e| ConfigError::InvalidUserConfig {
             error: e.to_string(),
         })?;
-    Ok(())
+    validate_endpoints(&cfg)?;
+    otel_arrow_dfe_engine::component_config::ResolvedComponentConfig::typed_safe(cfg)
 }
 
 fn factory_create(
     pipeline: PipelineContext,
     node: NodeId,
-    node_config: Arc<NodeUserConfig>,
+    node_config: Arc<otel_arrow_dfe_engine::component_config::ResolvedNodeConfig>,
     exporter_config: &ExporterConfig,
     capabilities: &otel_arrow_dfe_engine::capability::registry::Capabilities,
 ) -> Result<ExporterWrapper<OtapPdata>, ConfigError> {
@@ -148,98 +152,113 @@ fn factory_create(
             error: e.to_string(),
         })?;
     Ok(ExporterWrapper::local(
-        OtlpHttpExporter::from_config(pipeline, &node_config.config, token_provider)?,
+        OtlpHttpExporter::new(
+            pipeline,
+            (*node_config.component_config::<Config>()?).clone(),
+            token_provider,
+        )?,
         node,
-        node_config,
+        node_config.effective(),
         exporter_config,
     ))
 }
 
 impl OtlpHttpExporter {
+    fn new(
+        pipeline_ctx: PipelineContext,
+        config: Config,
+        token_provider: Option<Box<dyn BearerTokenProvider>>,
+    ) -> Result<Self, ConfigError> {
+        validate_endpoints(&config)?;
+        Ok(Self {
+            config,
+            metrics: OtlpHttpExporterMetrics::register(&pipeline_ctx),
+            token_provider,
+        })
+    }
+
     /// create a new instance of the `[OtlpHttpExporter]` from json config value
     pub fn from_config(
         pipeline_ctx: PipelineContext,
         config: &serde_json::Value,
         token_provider: Option<Box<dyn BearerTokenProvider>>,
     ) -> Result<Self, ConfigError> {
-        let metrics = OtlpHttpExporterMetrics::register(&pipeline_ctx);
-
         let config: Config = serde_json::from_value(config.clone()).map_err(|e| {
             otel_arrow_dfe_config::error::Error::InvalidUserConfig {
                 error: e.to_string(),
             }
         })?;
 
-        // validate the endpoint URL
-        _ = reqwest::Url::parse(&config.endpoint).map_err(|e| ConfigError::InvalidUserConfig {
-            error: format!("invalid endpoint URL: {e}"),
+        Self::new(pipeline_ctx, config, token_provider)
+    }
+}
+
+fn validate_endpoints(config: &Config) -> Result<(), ConfigError> {
+    // validate the endpoint URL
+    _ = reqwest::Url::parse(&config.endpoint).map_err(|e| ConfigError::InvalidUserConfig {
+        error: format!("invalid endpoint URL: {e}"),
+    })?;
+
+    // validate the endpoint overrides if supplied
+    if let Some(endpoint) = config.logs_endpoint.as_ref() {
+        _ = reqwest::Url::parse(endpoint).map_err(|e| ConfigError::InvalidUserConfig {
+            error: format!("invalid logs endpoint URL: {e}"),
         })?;
+    }
+    if let Some(endpoint) = config.metrics_endpoint.as_ref() {
+        _ = reqwest::Url::parse(endpoint).map_err(|e| ConfigError::InvalidUserConfig {
+            error: format!("invalid metrics endpoint URL: {e}"),
+        })?;
+    }
+    if let Some(endpoint) = config.traces_endpoint.as_ref() {
+        _ = reqwest::Url::parse(endpoint).map_err(|e| ConfigError::InvalidUserConfig {
+            error: format!("invalid traces endpoint URL: {e}"),
+        })?;
+    }
 
-        // validate the endpoint overrides if supplied
-        if let Some(endpoint) = config.logs_endpoint.as_ref() {
-            _ = reqwest::Url::parse(endpoint).map_err(|e| ConfigError::InvalidUserConfig {
-                error: format!("invalid logs endpoint URL: {e}"),
-            })?;
-        }
-        if let Some(endpoint) = config.metrics_endpoint.as_ref() {
-            _ = reqwest::Url::parse(endpoint).map_err(|e| ConfigError::InvalidUserConfig {
-                error: format!("invalid metrics endpoint URL: {e}"),
-            })?;
-        }
-        if let Some(endpoint) = config.traces_endpoint.as_ref() {
-            _ = reqwest::Url::parse(endpoint).map_err(|e| ConfigError::InvalidUserConfig {
-                error: format!("invalid traces endpoint URL: {e}"),
-            })?;
-        }
-
-        if let Some(tls) = &config.http.tls {
-            // server_name not currently supported
-            if let Some(_server_name) = &tls.server_name {
-                return Err(ConfigError::InvalidUserConfig {
-                    error: "TLS configuration error: server_name_override is not supported by \
+    if let Some(tls) = &config.http.tls {
+        // server_name not currently supported
+        if let Some(_server_name) = &tls.server_name {
+            return Err(ConfigError::InvalidUserConfig {
+                error: "TLS configuration error: server_name_override is not supported by \
                     the current Rust OTLP HTTP client implementation (reqwest/rustls) remove \
                     server_name_override."
-                        .into(),
-                });
-            }
-
-            if let Some(true) = tls.insecure {
-                // Keeping with the same behaviour in the golang collector: if this is
-                // configured, but the endpoints are start with https, we still send the
-                // request using https. Just warn about the ignored config mismatch.
-                let wants_https = config.endpoint.starts_with("https://")
-                    || config
-                        .logs_endpoint
-                        .as_ref()
-                        .map(|e| e.starts_with("https://"))
-                        .unwrap_or(false)
-                    || config
-                        .metrics_endpoint
-                        .as_ref()
-                        .map(|e| e.starts_with("https://"))
-                        .unwrap_or(false)
-                    || config
-                        .traces_endpoint
-                        .as_ref()
-                        .map(|e| e.starts_with("https://"))
-                        .unwrap_or(false);
-                if wants_https {
-                    otel_warn!(
-                        "otlp.exporter.http.validate_insecure_flag",
-                        message = "config setting http.tls.insecure = true is ignored. \
-                            requests will still be sent with TLS to endpoints configured \
-                            with scheme https"
-                    )
-                }
-            }
+                    .into(),
+            });
         }
 
-        Ok(Self {
-            config,
-            metrics,
-            token_provider,
-        })
+        if let Some(true) = tls.insecure {
+            // Keeping with the same behaviour in the golang collector: if this is
+            // configured, but the endpoints are start with https, we still send the
+            // request using https. Just warn about the ignored config mismatch.
+            let wants_https = config.endpoint.starts_with("https://")
+                || config
+                    .logs_endpoint
+                    .as_ref()
+                    .map(|e| e.starts_with("https://"))
+                    .unwrap_or(false)
+                || config
+                    .metrics_endpoint
+                    .as_ref()
+                    .map(|e| e.starts_with("https://"))
+                    .unwrap_or(false)
+                || config
+                    .traces_endpoint
+                    .as_ref()
+                    .map(|e| e.starts_with("https://"))
+                    .unwrap_or(false);
+            if wants_https {
+                otel_warn!(
+                    "otlp.exporter.http.validate_insecure_flag",
+                    message = "config setting http.tls.insecure = true is ignored. \
+                            requests will still be sent with TLS to endpoints configured \
+                            with scheme https"
+                )
+            }
+        }
     }
+
+    Ok(())
 }
 
 #[derive(Debug)]
@@ -1092,7 +1111,7 @@ impl HttpClientPool {
             let header_name = http::HeaderName::from_bytes(name.as_bytes()).map_err(|e| {
                 HttpClientError::InvalidConfig(format!("invalid header name \"{name}\": {e}"))
             })?;
-            let mut header_value = HeaderValue::from_str(value.expose_secret()).map_err(|e| {
+            let mut header_value = HeaderValue::from_str(value.expose()).map_err(|e| {
                 HttpClientError::InvalidConfig(format!("invalid value for header \"{name}\": {e}"))
             })?;
             // Mark the value sensitive so it is redacted in any `HeaderMap`
@@ -4111,7 +4130,7 @@ mod test {
                     cert_file: None,
                     cert_pem: Some(client.cert_pem.clone()),
                     key_file: None,
-                    key_pem: Some(client.key_pem.clone()),
+                    key_pem: Some(client.key_pem.clone().into()),
                     reload_interval: None,
                 },
                 ca_file: None,

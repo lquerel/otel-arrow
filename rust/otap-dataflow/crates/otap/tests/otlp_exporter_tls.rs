@@ -95,7 +95,7 @@ async fn otlp_exporter_connects_with_mtls() {
                 cert_file: None,
                 cert_pem: Some(client_cert_pem),
                 key_file: None,
-                key_pem: Some(client_key_pem),
+                key_pem: Some(client_key_pem.into()),
                 reload_interval: None,
             },
             ca_file: None,

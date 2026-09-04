@@ -13,7 +13,6 @@ use linkme::distributed_slice;
 use otel_arrow_dfe_channel::error::SendError;
 use otel_arrow_dfe_config::TopicName;
 use otel_arrow_dfe_config::error::Error as ConfigError;
-use otel_arrow_dfe_config::node::NodeUserConfig;
 use otel_arrow_dfe_config::topic::{
     SubscriptionGroupName, TopicAckPropagationMode, TopicBroadcastOnLagPolicy,
 };
@@ -102,7 +101,7 @@ pub struct TopicReceiverMetrics {
 }
 
 /// Topic receiver configuration.
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 #[serde(deny_unknown_fields)]
 pub struct TopicReceiverConfig {
     /// Topic name to subscribe to.
@@ -160,10 +159,10 @@ pub static TOPIC_RECEIVER: ReceiverFactory<OtapPdata> = ReceiverFactory {
     create:
         |pipeline: PipelineContext,
          node: NodeId,
-         node_config: Arc<NodeUserConfig>,
+         node_config: Arc<otel_arrow_dfe_engine::component_config::ResolvedNodeConfig>,
          receiver_config: &ReceiverConfig,
          _capabilities: &otel_arrow_dfe_engine::capability::registry::Capabilities| {
-            let config = TopicReceiver::parse_config(&node_config.config)?;
+            let config = node_config.component_config::<TopicReceiverConfig>()?;
             let topic_set = pipeline.topic_set::<OtapPdata>().ok_or_else(|| {
                 ConfigError::InvalidUserConfig {
                     error: "Topic set is not available in pipeline context".to_owned(),
@@ -201,19 +200,22 @@ pub static TOPIC_RECEIVER: ReceiverFactory<OtapPdata> = ReceiverFactory {
                 .register_metrics_with_topic::<TopicReceiverMetrics>(topic_binding.name().into());
             Ok(ReceiverWrapper::local(
                 TopicReceiver {
-                    config,
+                    config: (*config).clone(),
                     subscription,
                     ack_propagation_mode,
                     broadcast_on_lag,
                     metrics,
                 },
                 node,
-                node_config,
+                node_config.effective(),
                 receiver_config,
             ))
         },
     wiring_contract: otel_arrow_dfe_engine::wiring_contract::WiringContract::UNRESTRICTED,
-    validate_config: |config| TopicReceiver::parse_config(config).map(|_| ()),
+    resolve_config: otel_arrow_dfe_engine::component_config::resolve_typed_config::<
+        TopicReceiverConfig,
+    >,
+    snapshot_policy: otel_arrow_dfe_engine::component_config::ConfigSnapshotPolicy::TypedSafe,
 };
 
 impl TopicReceiver {
@@ -846,7 +848,9 @@ mod tests {
             let mut receiver = (TOPIC_RECEIVER.create)(
                 receiver_ctx,
                 receiver_node.clone(),
-                Arc::new(receiver_user_cfg),
+                TOPIC_RECEIVER
+                    .resolve_node_config(receiver_user_cfg)
+                    .expect("topic receiver config must resolve"),
                 &ReceiverConfig::new("topic_receiver"),
                 &otel_arrow_dfe_engine::capability::registry::Capabilities::empty(),
             )
@@ -947,7 +951,9 @@ mod tests {
             let mut receiver = (TOPIC_RECEIVER.create)(
                 receiver_ctx,
                 receiver_node.clone(),
-                Arc::new(receiver_user_cfg),
+                TOPIC_RECEIVER
+                    .resolve_node_config(receiver_user_cfg)
+                    .expect("topic receiver config must resolve"),
                 &ReceiverConfig::new("topic_receiver"),
                 &otel_arrow_dfe_engine::capability::registry::Capabilities::empty(),
             )
@@ -1050,7 +1056,9 @@ mod tests {
             let mut receiver = (TOPIC_RECEIVER.create)(
                 receiver_ctx,
                 receiver_node.clone(),
-                Arc::new(receiver_user_cfg),
+                TOPIC_RECEIVER
+                    .resolve_node_config(receiver_user_cfg)
+                    .expect("topic receiver config must resolve"),
                 &ReceiverConfig::new("topic_receiver"),
                 &otel_arrow_dfe_engine::capability::registry::Capabilities::empty(),
             )
@@ -1145,7 +1153,9 @@ mod tests {
             let mut receiver = (TOPIC_RECEIVER.create)(
                 receiver_ctx,
                 receiver_node.clone(),
-                Arc::new(receiver_user_cfg),
+                TOPIC_RECEIVER
+                    .resolve_node_config(receiver_user_cfg)
+                    .expect("topic receiver config must resolve"),
                 &ReceiverConfig::new("topic_receiver"),
                 &otel_arrow_dfe_engine::capability::registry::Capabilities::empty(),
             )
@@ -1267,7 +1277,9 @@ mod tests {
             let mut receiver = (TOPIC_RECEIVER.create)(
                 receiver_ctx,
                 receiver_node.clone(),
-                Arc::new(receiver_user_cfg),
+                TOPIC_RECEIVER
+                    .resolve_node_config(receiver_user_cfg)
+                    .expect("topic receiver config must resolve"),
                 &ReceiverConfig::new("topic_receiver"),
                 &otel_arrow_dfe_engine::capability::registry::Capabilities::empty(),
             )

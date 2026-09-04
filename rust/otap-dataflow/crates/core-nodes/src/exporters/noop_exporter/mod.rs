@@ -8,7 +8,6 @@ otel_arrow_dfe_telemetry::otel_component_scope!(
 
 use async_trait::async_trait;
 use linkme::distributed_slice;
-use otel_arrow_dfe_config::node::NodeUserConfig;
 use otel_arrow_dfe_engine::config::ExporterConfig;
 use otel_arrow_dfe_engine::context::PipelineContext;
 use otel_arrow_dfe_engine::control::{AckMsg, NodeControlMsg};
@@ -38,18 +37,19 @@ pub static NOOP_EXPORTER: ExporterFactory<OtapPdata> = ExporterFactory {
     create:
         |_pipeline: PipelineContext,
          node: NodeId,
-         node_config: Arc<NodeUserConfig>,
+         node_config: Arc<otel_arrow_dfe_engine::component_config::ResolvedNodeConfig>,
          exporter_config: &ExporterConfig,
          _capabilities: &otel_arrow_dfe_engine::capability::registry::Capabilities| {
             Ok(ExporterWrapper::local(
                 NoopExporter {},
                 node,
-                node_config,
+                node_config.effective(),
                 exporter_config,
             ))
         },
     wiring_contract: otel_arrow_dfe_engine::wiring_contract::WiringContract::UNRESTRICTED,
-    validate_config: otel_arrow_dfe_config::validation::no_config,
+    resolve_config: otel_arrow_dfe_engine::component_config::resolve_no_config,
+    snapshot_policy: otel_arrow_dfe_engine::component_config::ConfigSnapshotPolicy::TypedSafe,
 };
 
 #[async_trait(?Send)]

@@ -626,6 +626,7 @@ impl<
             None,
             None,
             None,
+            None,
         )?;
         self.spawn_rollout(plan)
     }
@@ -645,6 +646,7 @@ impl<
             None,
             None,
             None,
+            None,
         )
     }
 
@@ -654,6 +656,9 @@ impl<
         pipeline_id: &str,
         request: &ReconfigureRequest,
         planning_config: Option<&OtelDataflowSpec>,
+        pre_resolved_runtime: Option<
+            &HashMap<PipelineKey, otel_arrow_dfe_engine::component_config::ResolvedPipelineConfig>,
+        >,
         engine_operation_id: Option<&str>,
         projected_reserved_core_ids: Option<&BTreeSet<usize>>,
     ) -> Result<CandidateRolloutPlan, ControlPlaneError> {
@@ -740,6 +745,17 @@ impl<
             .ok_or_else(|| ControlPlaneError::Internal {
                 message: "candidate pipeline disappeared during resolution".to_owned(),
             })?;
+        let runtime_resolved_pipeline =
+            match pre_resolved_runtime.and_then(|pipelines| pipelines.get(&pipeline_key)) {
+                Some(resolved) => resolved.clone(),
+                None => self
+                    .pipeline_factory
+                    .resolve_pipeline_config(&resolved_pipeline.pipeline)
+                    .map_err(|error| ControlPlaneError::InvalidRequest {
+                        message: error.to_string(),
+                    })?,
+            };
+        let effective_pipeline = runtime_resolved_pipeline.effective().clone();
         let current_pipeline_placement = current_record
             .as_ref()
             .map(|record| record.placement.clone());
@@ -812,7 +828,10 @@ impl<
             let identical_update = current_core_set == target_core_set
                 && active_core_set == target_core_set
                 && !active_runtime_state.has_foreign_active_generations
-                && record.resolved.runtime_matches(&resolved_pipeline);
+                && record.resolved.runtime_matches(&resolved_pipeline)
+                && record
+                    .runtime_resolved
+                    .eq_ignoring_policies(&runtime_resolved_pipeline);
             let resize_only = current_core_set != target_core_set
                 && !active_runtime_state.has_foreign_active_generations
                 // Listener snapshots are immutable per worker. Retained cores cannot
@@ -820,7 +839,10 @@ impl<
                 && !target_has_listener_groups
                 && record
                     .resolved
-                    .runtime_shape_matches_ignoring_resources(&resolved_pipeline);
+                    .runtime_shape_matches_ignoring_resources(&resolved_pipeline)
+                && record
+                    .runtime_resolved
+                    .eq_ignoring_policies(&runtime_resolved_pipeline);
             if identical_update {
                 RolloutAction::NoOp
             } else if resize_only {
@@ -976,6 +998,8 @@ impl<
             pipeline_id,
             action,
             resolved_pipeline,
+            runtime_resolved_pipeline,
+            effective_pipeline,
             base_config_revision,
             current_record,
             current_placement,
@@ -1177,10 +1201,18 @@ impl<
                     plan.pipeline_id.clone(),
                     plan.resolved_pipeline.pipeline.clone(),
                 );
+            _ = state
+                .effective_config
+                .groups
+                .entry(plan.pipeline_group_id.clone())
+                .or_default()
+                .pipelines
+                .insert(plan.pipeline_id.clone(), plan.effective_pipeline.clone());
             _ = state.logical_pipelines.insert(
                 plan.pipeline_key.clone(),
                 LogicalPipelineRecord {
                     resolved: plan.resolved_pipeline.clone(),
+                    runtime_resolved: plan.runtime_resolved_pipeline.clone(),
                     active_generation,
                     placement: plan.target_placement.placement.clone(),
                     placement_generation: plan.target_placement.listener_group_snapshot.generation,
@@ -1440,7 +1472,7 @@ impl<
             pipeline_group_id: pipeline_key.pipeline_group_id().clone(),
             pipeline_id: pipeline_key.pipeline_id().clone(),
             active_generation: Some(record.active_generation),
-            pipeline: record.resolved.pipeline.clone(),
+            pipeline: record.runtime_resolved.effective().clone(),
             rollout,
         }))
     }
@@ -1454,7 +1486,11 @@ impl<
             .state
             .lock()
             .unwrap_or_else(|poisoned| poisoned.into_inner());
-        state.live_config.groups.get(pipeline_group_id).cloned()
+        state
+            .effective_config
+            .groups
+            .get(pipeline_group_id)
+            .cloned()
     }
 
     /// Creates an empty pipeline group in the controller-owned live config.
@@ -1505,12 +1541,16 @@ impl<
                 message: err.to_string(),
             })?;
         state.live_config = candidate_config;
+        _ = state
+            .effective_config
+            .groups
+            .insert(pipeline_group_id.clone(), group.clone());
         state.config_revision += 1;
         Ok(group)
     }
 
     /// Returns a clone of the current controller-owned engine configuration.
-    pub(super) fn engine_config_snapshot(&self) -> OtelDataflowSpec {
+    pub(super) fn source_config_snapshot(&self) -> OtelDataflowSpec {
         let state = self
             .state
             .lock()
@@ -1518,7 +1558,21 @@ impl<
         state.live_config.clone()
     }
 
-    fn apply_reconcile_success(&self, desired_config: &OtelDataflowSpec, delete_missing: bool) {
+    /// Returns the safe effective representation for control-plane reporting.
+    pub(super) fn effective_config_snapshot(&self) -> OtelDataflowSpec {
+        let state = self
+            .state
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner());
+        state.effective_config.clone()
+    }
+
+    fn apply_reconcile_success(
+        &self,
+        desired_config: &OtelDataflowSpec,
+        desired_effective_config: &OtelDataflowSpec,
+        delete_missing: bool,
+    ) {
         self.log_filter_handle
             .apply(&desired_config.engine.telemetry.logs.level);
         let mut state = self
@@ -1527,6 +1581,7 @@ impl<
             .unwrap_or_else(|poisoned| poisoned.into_inner());
         if delete_missing {
             state.live_config = desired_config.clone();
+            state.effective_config = desired_effective_config.clone();
             state.config_revision += 1;
             return;
         }
@@ -1538,6 +1593,24 @@ impl<
         for (pipeline_group_id, desired_group) in &desired_config.groups {
             let group = state
                 .live_config
+                .groups
+                .entry(pipeline_group_id.clone())
+                .or_default();
+            group.policies = desired_group.policies.clone();
+            group.topics = desired_group.topics.clone();
+            for (pipeline_id, pipeline) in &desired_group.pipelines {
+                _ = group
+                    .pipelines
+                    .insert(pipeline_id.clone(), pipeline.clone());
+            }
+        }
+        state.effective_config.version = desired_effective_config.version.clone();
+        state.effective_config.policies = desired_effective_config.policies.clone();
+        state.effective_config.topics = desired_effective_config.topics.clone();
+        state.effective_config.engine = desired_effective_config.engine.clone();
+        for (pipeline_group_id, desired_group) in &desired_effective_config.groups {
+            let group = state
+                .effective_config
                 .groups
                 .entry(pipeline_group_id.clone())
                 .or_default();
@@ -1631,6 +1704,13 @@ impl<
 
             if let Some(group) = state
                 .live_config
+                .groups
+                .get_mut(pipeline_key.pipeline_group_id())
+            {
+                let _ = group.pipelines.remove(pipeline_key.pipeline_id());
+            }
+            if let Some(group) = state
+                .effective_config
                 .groups
                 .get_mut(pipeline_key.pipeline_group_id())
             {
@@ -1924,6 +2004,7 @@ impl<
                 });
             }
             let _ = state.live_config.groups.remove(&pipeline_group_id);
+            let _ = state.effective_config.groups.remove(&pipeline_group_id);
             state.config_revision += 1;
         }
 
@@ -1951,18 +2032,27 @@ impl<
             started_at,
         );
 
-        let live_config = self.engine_config_snapshot();
-        let desired_config = request.config;
-        desired_config
-            .validate()
-            .map_err(|err| ControlPlaneError::InvalidRequest {
-                message: err.to_string(),
-            })?;
-        startup::validate_engine_components(&desired_config, self.pipeline_factory).map_err(
-            |error| ControlPlaneError::InvalidRequest {
+        let live_config = self.source_config_snapshot();
+        let desired_candidate = Controller::<PData>::new(self.pipeline_factory)
+            .resolve_engine_candidate(request.config, &self.controller_extensions)
+            .map_err(|error| ControlPlaneError::InvalidRequest {
                 message: error.to_string(),
-            },
-        )?;
+            })?;
+        let desired_runtime_by_key: HashMap<_, _> = desired_candidate
+            .pipelines
+            .iter()
+            .map(|pipeline| {
+                (
+                    PipelineKey::new(
+                        pipeline.policy.pipeline_group_id.clone(),
+                        pipeline.policy.pipeline_id.clone(),
+                    ),
+                    pipeline.runtime.clone(),
+                )
+            })
+            .collect();
+        let desired_effective_config = desired_candidate.effective;
+        let desired_config = desired_candidate.source;
 
         let current_profiles = Self::pipeline_topic_profiles(&live_config)?;
         let desired_profiles = Self::pipeline_topic_profiles(&desired_config)?;
@@ -2034,6 +2124,7 @@ impl<
                 pipeline_key.pipeline_id(),
                 &reconfigure_request,
                 Some(&desired_config),
+                Some(&desired_runtime_by_key),
                 Some(guard.operation_id()),
                 Some(&projected_exclusive_core_ids),
             )?;
@@ -2163,7 +2254,11 @@ impl<
             }
         }
 
-        self.apply_reconcile_success(&desired_config, request.delete_missing);
+        self.apply_reconcile_success(
+            &desired_config,
+            &desired_effective_config,
+            request.delete_missing,
+        );
         status.state = EngineConfigReconcileState::Succeeded;
         status.updated_at = timestamp_now();
         Ok(status)

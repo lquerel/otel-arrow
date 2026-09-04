@@ -6,6 +6,8 @@ use serde::{Deserialize, Serialize};
 use std::path::PathBuf;
 use std::time::Duration;
 
+use crate::secret::RedactedString;
+
 /// Common TLS configuration for both client and server.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema, Default)]
 pub struct TlsConfig {
@@ -19,7 +21,7 @@ pub struct TlsConfig {
     pub key_file: Option<PathBuf>,
 
     /// In memory PEM encoded TLS key to use for TLS required connections.
-    pub key_pem: Option<String>,
+    pub key_pem: Option<RedactedString>,
     // TODO: Implement these fields
     // /// MinVersion sets the minimum TLS version that is acceptable.
     // /// If not set, TLS 1.2 will be used.

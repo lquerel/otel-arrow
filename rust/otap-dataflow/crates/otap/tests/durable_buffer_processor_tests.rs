@@ -463,10 +463,13 @@ where
 
     let pipeline_entity_key = pipeline_ctx.register_pipeline_entity();
     let channel_capacity_policy = ChannelCapacityPolicy::default();
+    let runtime_config = OTAP_PIPELINE_FACTORY
+        .resolve_pipeline_config(&config)
+        .expect("component configs should resolve");
     let runtime_pipeline = OTAP_PIPELINE_FACTORY
         .build(
             pipeline_ctx.clone(),
-            config.clone(),
+            runtime_config,
             channel_capacity_policy.clone(),
             TelemetryPolicy::default(),
             None,                              // transport_headers_policy
@@ -758,10 +761,13 @@ where
 
     let pipeline_entity_key = pipeline_ctx.register_pipeline_entity();
     let channel_capacity_policy = ChannelCapacityPolicy::default();
+    let runtime_config = OTAP_PIPELINE_FACTORY
+        .resolve_pipeline_config(&config)
+        .expect("component configs should resolve");
     let runtime_pipeline = OTAP_PIPELINE_FACTORY
         .build(
             pipeline_ctx.clone(),
-            config.clone(),
+            runtime_config,
             channel_capacity_policy.clone(),
             TelemetryPolicy::default(),
             None,                              // transport_headers_policy

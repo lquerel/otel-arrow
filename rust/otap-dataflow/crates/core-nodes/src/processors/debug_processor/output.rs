@@ -24,11 +24,11 @@ use otel_arrow_dfe_pdata::proto::{
         trace::v1::{ResourceSpans, ScopeSpans, TracesData},
     },
 };
-use serde::Deserialize;
+use serde::{Deserialize, Serialize};
 use tokio::fs::File;
 use tokio::io::{AsyncWrite, AsyncWriteExt};
 
-#[derive(Debug, Clone, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(untagged)]
 pub enum OutputMode {
     Console,

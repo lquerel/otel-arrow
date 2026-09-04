@@ -28,9 +28,10 @@ use self::config::RecordsetKqlProcessorConfig;
 use self::processor::RecordsetKqlProcessor;
 use otel_arrow_dfe_otap::pdata::OtapPdata;
 
-use otel_arrow_dfe_config::{error::Error as ConfigError, node::NodeUserConfig};
+use otel_arrow_dfe_config::error::Error as ConfigError;
 use otel_arrow_dfe_engine::{
-    config::ProcessorConfig, context::PipelineContext, node::NodeId, processor::ProcessorWrapper,
+    component_config::ResolvedNodeConfig, config::ProcessorConfig, context::PipelineContext,
+    node::NodeId, processor::ProcessorWrapper,
 };
 use std::sync::Arc;
 
@@ -38,21 +39,19 @@ use std::sync::Arc;
 pub fn create_recordset_kql_processor(
     pipeline_ctx: PipelineContext,
     node: NodeId,
-    node_config: Arc<NodeUserConfig>,
+    node_config: Arc<ResolvedNodeConfig>,
     processor_config: &ProcessorConfig,
     _capabilities: &otel_arrow_dfe_engine::capability::registry::Capabilities,
 ) -> Result<ProcessorWrapper<OtapPdata>, ConfigError> {
-    let config: RecordsetKqlProcessorConfig = serde_json::from_value(node_config.config.clone())
-        .map_err(|e| ConfigError::InvalidUserConfig {
-            error: format!("Failed to parse KQL configuration: {e}"),
-        })?;
+    let config = node_config.component_config::<RecordsetKqlProcessorConfig>()?;
 
-    let processor = RecordsetKqlProcessor::with_pipeline_ctx(pipeline_ctx, config)?;
+    let processor =
+        RecordsetKqlProcessor::with_pipeline_ctx(pipeline_ctx, config.as_ref().clone())?;
 
     Ok(ProcessorWrapper::local(
         processor,
         node,
-        node_config,
+        node_config.effective(),
         processor_config,
     ))
 }

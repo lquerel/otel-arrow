@@ -15,7 +15,7 @@ const MIN_INBOUND_REQUEST_LIMIT: usize = 1;
 const MIN_OUTBOUND_REQUEST_LIMIT: usize = 3;
 
 /// Configuration for the temporal reaggregation processor.
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct Config {
     /// The interval at which the processor aggregates and emits metrics.
     /// Must be at least [`MIN_PERIOD_MILLIS`]ms. Default: [`DEFAULT_PERIOD_SECONDS`]s.

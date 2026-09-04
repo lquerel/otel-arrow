@@ -471,7 +471,7 @@ connections:
             &OTAP_PIPELINE_FACTORY,
         )
         .expect_err("semantic component validation should fail");
-        assert!(err.to_string().contains("Unknown receiver component"));
+        assert!(err.to_string().contains("Unknown receiver plugin"));
     }
 
     #[test]

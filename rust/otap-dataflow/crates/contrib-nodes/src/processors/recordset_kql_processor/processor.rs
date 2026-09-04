@@ -19,6 +19,7 @@ use otel_arrow_dfe_config::SignalType;
 use otel_arrow_dfe_config::error::Error as ConfigError;
 use otel_arrow_dfe_engine::{
     ConsumerEffectHandlerExtension, ProcessorFactory,
+    component_config::{ConfigSnapshotPolicy, ResolvedComponentConfig},
     context::PipelineContext,
     control::NackMsg,
     error::Error,
@@ -41,10 +42,20 @@ pub static RECORDSET_KQL_PROCESSOR_FACTORY: ProcessorFactory<OtapPdata> = Proces
     name: RECORDSET_KQL_PROCESSOR_URN,
     create: create_recordset_kql_processor,
     wiring_contract: otel_arrow_dfe_engine::wiring_contract::WiringContract::UNRESTRICTED,
-    validate_config: otel_arrow_dfe_config::validation::validate_typed_config::<
-        RecordsetKqlProcessorConfig,
-    >,
+    resolve_config: resolve_recordset_kql_config,
+    snapshot_policy: ConfigSnapshotPolicy::Omit,
 };
+
+fn resolve_recordset_kql_config(
+    raw: &serde_json::Value,
+) -> Result<ResolvedComponentConfig, ConfigError> {
+    let config: RecordsetKqlProcessorConfig =
+        serde_json::from_value(raw.clone()).map_err(|error| ConfigError::InvalidUserConfig {
+            error: format!("Failed to parse KQL configuration: {error}"),
+        })?;
+    RecordsetKqlProcessor::validate_config(&config)?;
+    Ok(ResolvedComponentConfig::omitted(config))
+}
 
 /// KQL processor that applies KQL queries to telemetry data
 pub struct RecordsetKqlProcessor {
@@ -61,6 +72,18 @@ struct ProcessedSignal {
 }
 
 impl RecordsetKqlProcessor {
+    fn validate_config(config: &RecordsetKqlProcessorConfig) -> Result<(), ConfigError> {
+        let parsed_bridge_options = Self::parse_bridge_options(&config.bridge_options)?;
+        parse_kql_logs_query_into_pipeline(
+            &config.query,
+            Some(Self::apply_bridge_options_defaults(parsed_bridge_options)),
+        )
+        .map(drop)
+        .map_err(|errors| ConfigError::InvalidUserConfig {
+            error: format!("Failed to parse KQL query: {errors:?}"),
+        })
+    }
+
     /// Creates a new KQL processor
     pub fn with_pipeline_ctx(
         pipeline_ctx: PipelineContext,
@@ -322,6 +345,7 @@ mod tests {
     use bytes::BytesMut;
     use otel_arrow_dfe_config::node::NodeUserConfig;
     use otel_arrow_dfe_engine::capability;
+    use otel_arrow_dfe_engine::component_config::ResolvedNodeConfig;
     use otel_arrow_dfe_engine::context::ControllerContext;
     use otel_arrow_dfe_engine::message::Message;
     use otel_arrow_dfe_engine::testing::{node::test_node, processor::TestRuntime};
@@ -398,10 +422,19 @@ mod tests {
             json!({ "query": query })
         };
 
+        let resolved = Arc::new(
+            ResolvedNodeConfig::new(
+                &node_config,
+                resolve_recordset_kql_config(&node_config.config)
+                    .expect("KQL config should resolve"),
+                RECORDSET_KQL_PROCESSOR_FACTORY.snapshot_policy,
+            )
+            .expect("resolved config should match the factory policy"),
+        );
         let proc = create_recordset_kql_processor(
             pipeline_ctx,
             node,
-            Arc::new(node_config),
+            resolved,
             rt.config(),
             &capability::registry::Capabilities::empty(),
         )

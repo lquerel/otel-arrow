@@ -22,10 +22,11 @@ use bytes::Bytes;
 use linkme::distributed_slice;
 use otel_arrow_dfe_config::SignalType;
 use otel_arrow_dfe_config::error::Error as ConfigError;
-use otel_arrow_dfe_config::node::NodeUserConfig;
 use otel_arrow_dfe_config::transport_headers::TransportHeaders;
 use otel_arrow_dfe_config::transport_headers_policy::HeaderCapturePolicy;
-use otel_arrow_dfe_config::validation::validate_typed_config;
+use otel_arrow_dfe_engine::component_config::{
+    ConfigSnapshotPolicy, ResolvedNodeConfig, resolve_omitted_config,
+};
 use otel_arrow_dfe_engine::config::ReceiverConfig;
 use otel_arrow_dfe_engine::context::PipelineContext;
 use otel_arrow_dfe_engine::control::{CallData, Context8u8, NodeControlMsg};
@@ -263,17 +264,24 @@ pub static KAFKA_RECEIVER: ReceiverFactory<OtapPdata> = ReceiverFactory {
     create:
         |pipeline: PipelineContext,
          node: NodeId,
-         node_config: Arc<NodeUserConfig>,
+         node_config: Arc<ResolvedNodeConfig>,
          receiver_config: &ReceiverConfig,
          _capabilities: &otel_arrow_dfe_engine::capability::registry::Capabilities| {
             Ok(ReceiverWrapper::local(
-                KafkaReceiver::from_config(pipeline, &node_config.config)?,
+                KafkaReceiver::new(
+                    pipeline,
+                    node_config
+                        .component_config::<KafkaReceiverConfig>()?
+                        .as_ref()
+                        .clone(),
+                )?,
                 node,
-                node_config,
+                node_config.effective(),
                 receiver_config,
             ))
         },
-    validate_config: validate_typed_config::<KafkaReceiverConfig>,
+    resolve_config: resolve_omitted_config::<KafkaReceiverConfig>,
+    snapshot_policy: ConfigSnapshotPolicy::Omit,
     wiring_contract: otel_arrow_dfe_engine::wiring_contract::WiringContract::UNRESTRICTED,
 };
 

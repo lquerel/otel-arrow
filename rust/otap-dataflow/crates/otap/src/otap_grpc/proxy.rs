@@ -22,13 +22,14 @@ use base64::Engine;
 use base64::prelude::*;
 use http::Uri;
 use ipnet::IpNet;
+use otel_arrow_dfe_config::secret::{OMITTED_VALUE, REDACTED_VALUE};
 use otel_arrow_dfe_config::tls::TlsClientConfig;
 use otel_arrow_dfe_telemetry::{otel_debug, otel_warn};
 use rustls::RootCertStore;
 use rustls_native_certs::load_native_certs;
 use rustls_pki_types::pem::PemObject;
 use rustls_pki_types::{CertificateDer, ServerName};
-use serde::Deserialize;
+use serde::{Deserialize, Deserializer, Serialize, Serializer};
 use std::borrow::Cow;
 use std::env;
 use std::io;
@@ -47,9 +48,32 @@ use crate::tls_utils::read_file_with_limit_async;
 ///
 /// `Debug` and `Display` redact credentials by default.
 /// Use [`SensitiveUrl::expose`] when the original value is required.
-#[derive(Clone, PartialEq, Eq, Hash, Deserialize)]
-#[serde(transparent)]
+#[derive(Clone, PartialEq, Eq, Hash)]
 pub struct SensitiveUrl(String);
+
+impl Serialize for SensitiveUrl {
+    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
+    where
+        S: Serializer,
+    {
+        serializer.serialize_str(REDACTED_VALUE)
+    }
+}
+
+impl<'de> Deserialize<'de> for SensitiveUrl {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: Deserializer<'de>,
+    {
+        let value = String::deserialize(deserializer)?;
+        if value == REDACTED_VALUE || value == OMITTED_VALUE {
+            return Err(serde::de::Error::custom(
+                "snapshot display markers are not valid submitted proxy URLs",
+            ));
+        }
+        Ok(Self(value))
+    }
+}
 
 impl SensitiveUrl {
     /// Creates a new sensitive URL wrapper.
@@ -154,7 +178,7 @@ pub enum ProxyError {
 }
 
 /// Proxy configuration that can be set explicitly or read from environment.
-#[derive(Debug, Clone, Default, Deserialize)]
+#[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq)]
 #[serde(deny_unknown_fields)]
 #[doc(hidden)]
 pub struct ProxyConfig {
@@ -644,7 +668,7 @@ async fn build_proxy_tls_connector(
                 .config
                 .key_pem
                 .as_ref()
-                .is_some_and(|pem| !pem.trim().is_empty());
+                .is_some_and(|pem| !pem.expose().trim().is_empty());
 
         if cert_configured || key_configured {
             if !(cert_configured && key_configured) {
@@ -666,7 +690,7 @@ async fn build_proxy_tls_connector(
 
             let key_pem = match (&cfg.config.key_file, &cfg.config.key_pem) {
                 (Some(path), _) => read_proxy_tls_file(path.as_path(), "key_file").await?,
-                (None, Some(pem)) => pem.as_bytes().to_vec(),
+                (None, Some(pem)) => pem.expose().as_bytes().to_vec(),
                 (None, None) => {
                     return Err(ProxyError::InvalidProxyUrl(
                         "proxy.tls key is required for mTLS but missing".to_string(),

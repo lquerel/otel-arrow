@@ -160,7 +160,7 @@ impl RetryOptions {
 }
 
 /// Supported object storage types
-#[derive(Clone, Debug, Deserialize, PartialEq)]
+#[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
 #[serde(rename_all = "snake_case", deny_unknown_fields)]
 pub enum StorageType {
     /// File storage

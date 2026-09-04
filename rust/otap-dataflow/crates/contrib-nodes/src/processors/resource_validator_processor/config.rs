@@ -22,7 +22,7 @@ use std::collections::HashSet;
 ///       - "/subscriptions/xxx/resourceGroups/yyy/..."
 ///     case_sensitive: false  # optional, defaults to true
 /// ```
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 pub struct Config {
     /// The resource attribute key that must be present on all resources.
     /// This is a required field with no default.

@@ -684,7 +684,7 @@ fn build_http_client(settings: &HttpAdminClientSettings) -> Result<reqwest::Clie
                 .config
                 .key_pem
                 .as_ref()
-                .is_some_and(|pem| !pem.trim().is_empty());
+                .is_some_and(|pem| !pem.expose().trim().is_empty());
 
         if client_cert_configured || client_key_configured {
             if !(client_cert_configured && client_key_configured) {
@@ -705,7 +705,7 @@ fn build_http_client(settings: &HttpAdminClientSettings) -> Result<reqwest::Clie
             let key_pem = if let Some(key_file) = &tls.config.key_file {
                 fs::read(key_file).map_err(client_config_io_error)?
             } else if let Some(key_pem) = &tls.config.key_pem {
-                key_pem.as_bytes().to_vec()
+                key_pem.expose().as_bytes().to_vec()
             } else {
                 unreachable!();
             };
@@ -755,7 +755,7 @@ fn validate_tls_settings(settings: &HttpAdminClientSettings) -> Result<(), Error
                 .config
                 .key_pem
                 .as_ref()
-                .is_some_and(|pem| !pem.trim().is_empty())
+                .is_some_and(|pem| !pem.expose().trim().is_empty())
             || tls.server_name.is_some()
             || tls.insecure == Some(true)
             || tls.insecure_skip_verify == Some(true);
@@ -2024,7 +2024,7 @@ mod tests {
                         ca_pem: Some(ca.cert_pem.clone()),
                         config: TlsConfig {
                             cert_pem: Some(client_cert.cert_pem),
-                            key_pem: Some(client_cert.key_pem),
+                            key_pem: Some(client_cert.key_pem.into()),
                             ..TlsConfig::default()
                         },
                         ..TlsClientConfig::default()

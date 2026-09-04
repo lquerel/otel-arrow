@@ -479,6 +479,7 @@ pub(super) struct RuntimeRecoveryState {
 /// Committed logical pipeline config plus the active deployment generation.
 pub(super) struct LogicalPipelineRecord {
     pub(super) resolved: ResolvedPipelineConfig,
+    pub(super) runtime_resolved: otel_arrow_dfe_engine::component_config::ResolvedPipelineConfig,
     /// Pipeline-wide config generation; recovered cores may serve newer generations.
     pub(super) active_generation: u64,
     pub(super) placement: PipelinePlacement,
@@ -520,6 +521,8 @@ pub(super) struct TopicRuntimeProfile {
 pub(super) struct ControllerRuntimeState {
     /// Latest accepted full engine config, including committed live changes.
     pub(super) live_config: OtelDataflowSpec,
+    /// Safe effective snapshot for the same committed generation.
+    pub(super) effective_config: OtelDataflowSpec,
     /// Monotonic revision for committed logical config changes.
     pub(super) config_revision: u64,
     /// Committed logical pipelines keyed by group/pipeline id.
@@ -621,6 +624,11 @@ pub(super) struct CandidateRolloutPlan {
     pub(super) action: RolloutAction,
     /// Resolved target pipeline config after applying the request.
     pub(super) resolved_pipeline: ResolvedPipelineConfig,
+    /// Factory-resolved immutable runtime configuration for the target pipeline.
+    pub(super) runtime_resolved_pipeline:
+        otel_arrow_dfe_engine::component_config::ResolvedPipelineConfig,
+    /// Effective pipeline snapshot committed only after rollout success.
+    pub(super) effective_pipeline: PipelineConfig,
     /// Runtime config revision used to build this plan.
     pub(super) base_config_revision: u64,
     /// Current committed record, absent for create rollouts.

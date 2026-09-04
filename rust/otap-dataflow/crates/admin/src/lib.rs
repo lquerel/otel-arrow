@@ -179,8 +179,8 @@ pub trait ControlPlane: Send + Sync {
         })
     }
 
-    /// Returns the full current engine configuration known to the controller.
-    fn engine_config_snapshot(&self) -> Result<OtelDataflowSpec, ControlPlaneError> {
+    /// Returns the full effective engine configuration known to the controller.
+    fn effective_config_snapshot(&self) -> Result<OtelDataflowSpec, ControlPlaneError> {
         let _ = self;
         Err(ControlPlaneError::Internal {
             message: "engine config snapshots are not supported by this control plane".to_owned(),

@@ -25,9 +25,11 @@ use std::time::Duration;
 
 use linkme::distributed_slice;
 use otel_arrow_dfe_config::error::Error as ConfigError;
-use otel_arrow_dfe_config::extension::ExtensionUserConfig;
 use otel_arrow_dfe_engine::ExtensionFactory;
 use otel_arrow_dfe_engine::capability::auth::bearer_token_provider::BearerTokenProvider;
+use otel_arrow_dfe_engine::component_config::{
+    ConfigSnapshotPolicy, ResolvedComponentConfig, ResolvedExtensionConfig,
+};
 use otel_arrow_dfe_engine::config::ExtensionConfig;
 use otel_arrow_dfe_engine::context::ExtensionContext;
 use otel_arrow_dfe_engine::extension::wrapper::ExtensionVariant;
@@ -64,20 +66,18 @@ fn parse_config(config: &serde_json::Value) -> Result<Config, ConfigError> {
     Ok(parsed)
 }
 
-/// Static config validation hook for the factory.
-fn validate_config(config: &serde_json::Value) -> Result<(), ConfigError> {
-    parse_config(config).map(|_| ())
+fn resolve_config(config: &serde_json::Value) -> Result<ResolvedComponentConfig, ConfigError> {
+    ResolvedComponentConfig::typed_safe(parse_config(config)?)
 }
 
 /// Builds an `AzureIdentityAuthExtension` bundle.
 fn create(
     ext_ctx: &ExtensionContext,
     name: otel_arrow_dfe_config::ExtensionId,
-    ext_config: Arc<ExtensionUserConfig>,
+    ext_config: Arc<ResolvedExtensionConfig>,
     extension_config: &ExtensionConfig,
 ) -> Result<ExtensionBundle, ConfigError> {
-    // Validate config now so a bad config fails fast at wiring time.
-    let config = parse_config(&ext_config.config)?;
+    let config = ext_config.component_config::<Config>()?;
 
     let auth = Auth::new(&config).map_err(|e| ConfigError::InvalidUserConfig {
         error: format!("failed to initialize Azure credential: {e}"),
@@ -99,7 +99,7 @@ fn create(
         tracker,
     );
 
-    ExtensionWrapper::builder(name, ext_config, extension_config)
+    ExtensionWrapper::builder(name, ext_config.effective(), extension_config)
         .active()
         .with_readiness_probe_timeout_override(config.startup_timeout)
         .shared::<AzureIdentityAuthExtension>(extension)
@@ -121,5 +121,6 @@ pub static AZURE_IDENTITY_AUTH_EXTENSION: ExtensionFactory = ExtensionFactory {
         shared: AzureIdentityAuthExtension => [BearerTokenProvider]
     )),
     create,
-    validate_config,
+    resolve_config,
+    snapshot_policy: ConfigSnapshotPolicy::TypedSafe,
 };

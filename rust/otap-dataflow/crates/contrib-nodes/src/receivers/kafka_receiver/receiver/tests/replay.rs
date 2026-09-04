@@ -8,7 +8,6 @@ use super::*;
 use crate::receivers::kafka_receiver::retry::BeginRetry;
 use async_trait::async_trait;
 use linkme::distributed_slice;
-use otel_arrow_dfe_config::node::NodeUserConfig;
 use otel_arrow_dfe_config::observed_state::{ObservedStateSettings, SendPolicy};
 use otel_arrow_dfe_config::pipeline::{PipelineConfigBuilder, PipelineType};
 use otel_arrow_dfe_config::policy::{ChannelCapacityPolicy, TelemetryPolicy};
@@ -16,6 +15,9 @@ use otel_arrow_dfe_config::{DeployedPipelineKey, PipelineGroupId, PipelineId};
 use otel_arrow_dfe_core_nodes::processors::retry_processor::RETRY_PROCESSOR_URN;
 use otel_arrow_dfe_engine::ConsumerEffectHandlerExtension;
 use otel_arrow_dfe_engine::ExporterFactory;
+use otel_arrow_dfe_engine::component_config::{
+    ConfigSnapshotPolicy, ResolvedNodeConfig, resolve_no_config,
+};
 use otel_arrow_dfe_engine::config::ExporterConfig;
 use otel_arrow_dfe_engine::context::PipelineContext;
 use otel_arrow_dfe_engine::control::{
@@ -52,18 +54,19 @@ static REPLAY_TOPOLOGY_EXPORTER: ExporterFactory<OtapPdata> = ExporterFactory {
     create:
         |_pipeline: PipelineContext,
          node: NodeId,
-         node_config: Arc<NodeUserConfig>,
+         node_config: Arc<ResolvedNodeConfig>,
          exporter_config: &ExporterConfig,
          _capabilities: &otel_arrow_dfe_engine::capability::registry::Capabilities| {
             Ok(ExporterWrapper::local(
                 ReplayTopologyExporter,
                 node,
-                node_config,
+                node_config.effective(),
                 exporter_config,
             ))
         },
     wiring_contract: otel_arrow_dfe_engine::wiring_contract::WiringContract::UNRESTRICTED,
-    validate_config: |_| Ok(()),
+    resolve_config: resolve_no_config,
+    snapshot_policy: ConfigSnapshotPolicy::TypedSafe,
 };
 
 #[async_trait(?Send)]
@@ -631,10 +634,13 @@ fn run_retry_topology_pipeline(bootstrap_servers: String) {
     );
     let pipeline_entity_key = pipeline_ctx.register_pipeline_entity();
     let channel_capacity_policy = ChannelCapacityPolicy::default();
+    let runtime_config = OTAP_PIPELINE_FACTORY
+        .resolve_pipeline_config(&config)
+        .expect("component configs should resolve");
     let runtime_pipeline = OTAP_PIPELINE_FACTORY
         .build(
             pipeline_ctx.clone(),
-            config,
+            runtime_config,
             channel_capacity_policy.clone(),
             TelemetryPolicy::default(),
             None,

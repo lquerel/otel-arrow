@@ -23,8 +23,11 @@ use otel_arrow_dfe_otap::pdata::OtapPdata;
 
 use async_trait::async_trait;
 use linkme::distributed_slice;
-use otel_arrow_dfe_config::{SignalType, error::Error as ConfigError, node::NodeUserConfig};
+use otel_arrow_dfe_config::{SignalType, error::Error as ConfigError};
 use otel_arrow_dfe_engine::MessageSourceLocalEffectHandlerExtension;
+use otel_arrow_dfe_engine::component_config::{
+    ConfigSnapshotPolicy, ResolvedNodeConfig, resolve_typed_config,
+};
 use otel_arrow_dfe_engine::context::PipelineContext;
 use otel_arrow_dfe_engine::{
     ConsumerEffectHandlerExtension, Interests, ProcessorFactory, ProducerEffectHandlerExtension,
@@ -330,7 +333,8 @@ pub static RETRY_PROCESSOR_FACTORY: ProcessorFactory<OtapPdata> = ProcessorFacto
     name: RETRY_PROCESSOR_URN,
     create: create_retry_processor,
     wiring_contract: otel_arrow_dfe_engine::wiring_contract::WiringContract::UNRESTRICTED,
-    validate_config: otel_arrow_dfe_config::validation::validate_typed_config::<RetryConfig>,
+    resolve_config: resolve_typed_config::<RetryConfig>,
+    snapshot_policy: ConfigSnapshotPolicy::TypedSafe,
 };
 
 /// A processor that handles message retries with exponential backoff
@@ -354,22 +358,18 @@ pub struct RetryProcessor {
 pub fn create_retry_processor(
     pipeline_ctx: PipelineContext,
     node: NodeId,
-    node_config: Arc<NodeUserConfig>,
+    node_config: Arc<ResolvedNodeConfig>,
     processor_config: &ProcessorConfig,
     _capabilities: &otel_arrow_dfe_engine::capability::registry::Capabilities,
 ) -> Result<ProcessorWrapper<OtapPdata>, ConfigError> {
-    let config: RetryConfig = serde_json::from_value(node_config.config.clone()).map_err(|e| {
-        ConfigError::InvalidUserConfig {
-            error: format!("Failed to parse retry configuration: {e}"),
-        }
-    })?;
+    let config = (*node_config.component_config::<RetryConfig>()?).clone();
 
     let retry = RetryProcessor::with_pipeline_ctx(pipeline_ctx, config)?;
 
     Ok(ProcessorWrapper::local(
         retry,
         node,
-        node_config,
+        node_config.effective(),
         processor_config,
     ))
 }
@@ -731,9 +731,9 @@ impl RetryProcessor {
 #[cfg(test)]
 mod test {
     use super::{
-        ExhaustionAction, RETRY_PROCESSOR_URN, RetryConfig, RetryMessageMetrics,
-        RetryOperationalMetrics, RetryTerminationAttributes, RetryTerminationReason,
-        SignalAttributes,
+        ExhaustionAction, RETRY_PROCESSOR_FACTORY, RETRY_PROCESSOR_URN, RetryConfig,
+        RetryMessageMetrics, RetryOperationalMetrics, RetryTerminationAttributes,
+        RetryTerminationReason, SignalAttributes,
     };
     use otel_arrow_dfe_channel::mpsc::Channel;
     use otel_arrow_dfe_config::{SignalType, node::NodeUserConfig};
@@ -757,7 +757,6 @@ mod test {
     use otel_arrow_dfe_telemetry::registry::TelemetryRegistryHandle;
     use otel_arrow_dfe_telemetry::reporter::MetricsReporter;
     use serde_json::json;
-    use std::sync::Arc;
     use std::time::{Duration, Instant};
 
     /// Scenario: Scheduled and recovered retry operations are recorded for several signal types.
@@ -1176,7 +1175,9 @@ mod test {
         let proc = crate::processors::retry_processor::create_retry_processor(
             pipeline_ctx,
             node,
-            Arc::new(node_config),
+            RETRY_PROCESSOR_FACTORY
+                .resolve_node_config(node_config)
+                .expect("retry processor config must resolve"),
             rt.config(),
             &otel_arrow_dfe_engine::capability::registry::Capabilities::empty(),
         )
@@ -1249,7 +1250,9 @@ mod test {
         let proc = crate::processors::retry_processor::create_retry_processor(
             pipeline_ctx,
             node,
-            Arc::new(node_config),
+            RETRY_PROCESSOR_FACTORY
+                .resolve_node_config(node_config)
+                .expect("retry processor config must resolve"),
             rt.config(),
             &otel_arrow_dfe_engine::capability::registry::Capabilities::empty(),
         )
@@ -1331,7 +1334,9 @@ mod test {
         let mut processor = crate::processors::retry_processor::create_retry_processor(
             pipeline_ctx,
             node.clone(),
-            Arc::new(node_config),
+            RETRY_PROCESSOR_FACTORY
+                .resolve_node_config(node_config)
+                .expect("retry processor config must resolve"),
             &processor_config,
             &otel_arrow_dfe_engine::capability::registry::Capabilities::empty(),
         )
@@ -1388,7 +1393,9 @@ mod test {
         let proc = crate::processors::retry_processor::create_retry_processor(
             pipeline_ctx,
             node,
-            Arc::new(node_config),
+            RETRY_PROCESSOR_FACTORY
+                .resolve_node_config(node_config)
+                .expect("retry processor config must resolve"),
             rt.config(),
             &otel_arrow_dfe_engine::capability::registry::Capabilities::empty(),
         )

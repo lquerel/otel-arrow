@@ -30,6 +30,9 @@ use linkme::distributed_slice;
 use otel_arrow_dfe_config::PortName;
 use otel_arrow_dfe_config::error::Error as ConfigError;
 use otel_arrow_dfe_config::node::NodeUserConfig;
+use otel_arrow_dfe_engine::component_config::{
+    ConfigSnapshotPolicy, ResolvedNodeConfig, resolve_typed_config,
+};
 use otel_arrow_dfe_engine::config::ProcessorConfig;
 use otel_arrow_dfe_engine::context::PipelineContext;
 use otel_arrow_dfe_engine::control::{
@@ -44,6 +47,7 @@ use otel_arrow_dfe_engine::{
 };
 use otel_arrow_dfe_engine::{ProcessorFactory, processor::ProcessorWrapper};
 use serde::{Deserialize, Serialize};
+#[cfg(test)]
 use serde_json::Value;
 use smallvec::{SmallVec, smallvec};
 use std::cmp::Reverse;
@@ -79,7 +83,7 @@ enum AwaitAck {
     None,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 struct DestinationConfig {
     /// Out port name used to reach the destination.
     pub port: PortName,
@@ -94,7 +98,7 @@ struct DestinationConfig {
     pub fallback_for: Option<PortName>,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, Default)]
 struct FanoutConfig {
     /// Delivery pattern.
     #[serde(default)]
@@ -439,6 +443,7 @@ impl FanoutProcessor {
         }
     }
 
+    #[cfg(test)]
     fn from_config(
         pipeline_ctx: PipelineContext,
         node_config: &NodeUserConfig,
@@ -1163,15 +1168,16 @@ impl Processor<OtapPdata> for FanoutProcessor {
 pub fn create_fanout_processor(
     pipeline_ctx: PipelineContext,
     node: NodeId,
-    node_config: Arc<NodeUserConfig>,
+    node_config: Arc<ResolvedNodeConfig>,
     processor_config: &ProcessorConfig,
 ) -> Result<ProcessorWrapper<OtapPdata>, ConfigError> {
-    let fanout =
-        FanoutProcessor::from_config(pipeline_ctx.clone(), &node_config, &node_config.config)?;
+    let effective = node_config.effective();
+    let config = (*node_config.component_config::<FanoutConfig>()?).clone();
+    let fanout = FanoutProcessor::new(pipeline_ctx.clone(), config.validate(&effective)?);
     Ok(ProcessorWrapper::local(
         fanout,
         node,
-        node_config,
+        effective,
         processor_config,
     ))
 }
@@ -1185,7 +1191,7 @@ pub static FANOUT_PROCESSOR_FACTORY: ProcessorFactory<OtapPdata> = ProcessorFact
     create:
         |pipeline_ctx: PipelineContext,
          node: NodeId,
-         node_config: Arc<NodeUserConfig>,
+         node_config: Arc<ResolvedNodeConfig>,
          proc_cfg: &ProcessorConfig,
          _capabilities: &otel_arrow_dfe_engine::capability::registry::Capabilities| {
             create_fanout_processor(pipeline_ctx, node, node_config, proc_cfg)
@@ -1193,7 +1199,8 @@ pub static FANOUT_PROCESSOR_FACTORY: ProcessorFactory<OtapPdata> = ProcessorFact
     wiring_contract: otel_arrow_dfe_engine::wiring_contract::WiringContract {
         output_fanout: otel_arrow_dfe_engine::wiring_contract::OutputFanoutRule::AtMostPerOutput(1),
     },
-    validate_config: otel_arrow_dfe_config::validation::validate_typed_config::<FanoutConfig>,
+    resolve_config: resolve_typed_config::<FanoutConfig>,
+    snapshot_policy: ConfigSnapshotPolicy::TypedSafe,
 };
 
 #[cfg(test)]

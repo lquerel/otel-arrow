@@ -35,9 +35,10 @@ otel_arrow_dfe_telemetry::otel_component_scope!(
 use async_trait::async_trait;
 use futures::future::LocalBoxFuture;
 use linkme::distributed_slice;
-use otel_arrow_dfe_config::node::NodeUserConfig;
-use otel_arrow_dfe_config::validation::validate_typed_config;
 use otel_arrow_dfe_config::{SignalFormat, SignalType};
+use otel_arrow_dfe_engine::component_config::{
+    ConfigSnapshotPolicy, ResolvedComponentConfig, ResolvedNodeConfig,
+};
 use otel_arrow_dfe_engine::config::ExporterConfig;
 use otel_arrow_dfe_engine::context::PipelineContext;
 use otel_arrow_dfe_engine::control::{AckMsg, NackMsg, NodeControlMsg};
@@ -120,9 +121,6 @@ impl ClickhouseExporter {
         pipeline_ctx: PipelineContext,
         config: &serde_json::Value,
     ) -> Result<Self, otel_arrow_dfe_config::error::Error> {
-        let ch_metrics = pipeline_ctx.register_metrics::<ClickhouseExporterMetrics>();
-        let pdata_metrics = ExporterExportMetrics::register(&pipeline_ctx);
-
         let patch: ConfigPatch = serde_json::from_value(config.clone()).map_err(|e| {
             otel_arrow_dfe_config::error::Error::InvalidUserConfig {
                 error: e.to_string(),
@@ -130,11 +128,18 @@ impl ClickhouseExporter {
         })?;
         let config: Config = Config::from_patch(patch);
 
-        Ok(Self {
+        Ok(Self::new(pipeline_ctx, config))
+    }
+
+    fn new(pipeline_ctx: PipelineContext, config: Config) -> Self {
+        let ch_metrics = pipeline_ctx.register_metrics::<ClickhouseExporterMetrics>();
+        let pdata_metrics = ExporterExportMetrics::register(&pipeline_ctx);
+
+        Self {
             config,
             pdata_metrics,
             ch_metrics,
-        })
+        }
     }
 
     /// Get exporter configuration
@@ -251,19 +256,34 @@ pub static CLICKHOUSE_EXPORTER: ExporterFactory<OtapPdata> = ExporterFactory {
     create:
         |pipeline: PipelineContext,
          node: NodeId,
-         node_config: Arc<NodeUserConfig>,
+         node_config: Arc<ResolvedNodeConfig>,
          exporter_config: &ExporterConfig,
          _capabilities: &otel_arrow_dfe_engine::capability::registry::Capabilities| {
             Ok(ExporterWrapper::local(
-                ClickhouseExporter::from_config(pipeline, &node_config.config)?,
+                ClickhouseExporter::new(
+                    pipeline,
+                    node_config.component_config::<Config>()?.as_ref().clone(),
+                ),
                 node,
-                node_config,
+                node_config.effective(),
                 exporter_config,
             ))
         },
-    validate_config: validate_typed_config::<ConfigPatch>,
+    resolve_config: resolve_clickhouse_config,
+    snapshot_policy: ConfigSnapshotPolicy::TypedSafe,
     wiring_contract: otel_arrow_dfe_engine::wiring_contract::WiringContract::UNRESTRICTED,
 };
+
+fn resolve_clickhouse_config(
+    raw: &serde_json::Value,
+) -> Result<ResolvedComponentConfig, otel_arrow_dfe_config::error::Error> {
+    let patch: ConfigPatch = serde_json::from_value(raw.clone()).map_err(|error| {
+        otel_arrow_dfe_config::error::Error::InvalidUserConfig {
+            error: error.to_string(),
+        }
+    })?;
+    ResolvedComponentConfig::typed_safe(Config::from_patch(patch))
+}
 
 #[async_trait(?Send)]
 impl Exporter<OtapPdata> for ClickhouseExporter {

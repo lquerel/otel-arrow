@@ -500,7 +500,7 @@ impl IsolationLevel {
 ///
 /// This matches the exporter's `KafkaExporterConfig` / `KafkaExporterConfigBuilder`
 /// pattern, ensuring consistency across Kafka components.
-#[derive(Clone, Debug, Deserialize)]
+#[derive(Clone, Debug, Deserialize, PartialEq)]
 #[serde(try_from = "KafkaReceiverConfigBuilder")]
 pub struct KafkaReceiverConfig {
     inner: KafkaReceiverConfigBuilder,

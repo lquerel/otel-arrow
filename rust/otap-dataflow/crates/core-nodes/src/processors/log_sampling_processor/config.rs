@@ -5,10 +5,10 @@
 
 use super::samplers::{RatioConfig, ZipConfig};
 use otel_arrow_dfe_config::error::Error as ConfigError;
-use serde::Deserialize;
+use serde::{Deserialize, Serialize};
 
 /// Configuration for the log sampling processor.
-#[derive(Debug, Clone, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct Config {
     /// The sampling policy to apply.
     pub policy: Policy,
@@ -17,7 +17,7 @@ pub struct Config {
 /// Sampling policy configuration.
 ///
 /// Exactly one policy must be specified (externally tagged enum).
-#[derive(Debug, Clone, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum Policy {
     /// Emit at most N log records per time window.

@@ -8,6 +8,7 @@
 
 use crate::ExporterFactory;
 use crate::Interests;
+use crate::component_config::ResolvedNodeConfig;
 use crate::config::ExporterConfig;
 use crate::context::{ControllerContext, PipelineContext};
 use crate::control::{
@@ -406,6 +407,8 @@ pub fn create_exporter_from_factory<PData: Clone + Debug + 'static>(
     node_config.config = config;
     let exporter_config = ExporterConfig::new("test_exporter");
     let capabilities = crate::capability::registry::Capabilities::empty();
+    let component = (factory.resolve_config)(&node_config.config)?;
+    let node_config = ResolvedNodeConfig::new(&node_config, component, factory.snapshot_policy)?;
 
     (factory.create)(
         pipeline_ctx,

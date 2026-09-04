@@ -3,10 +3,10 @@
 
 use std::time::Duration;
 
-use serde::Deserialize;
+use serde::{Deserialize, Serialize};
 
 /// Configuration of parquet exporter
-#[derive(Debug, Deserialize, PartialEq)]
+#[derive(Clone, Debug, Deserialize, Serialize, PartialEq)]
 #[serde(deny_unknown_fields)]
 pub struct Config {
     /// The base URI for where the parquet files should be written
@@ -22,7 +22,7 @@ pub struct Config {
     pub writer_options: Option<WriterOptions>,
 }
 
-#[derive(Clone, Debug, Deserialize, PartialEq)]
+#[derive(Clone, Debug, Deserialize, Serialize, PartialEq)]
 pub struct WriterOptions {
     /// Target number of rows in one parquet file. The writer will flush automatically any files
     /// that attain greater than this number of rows. If this is `None`, the writer won't flush
@@ -58,7 +58,7 @@ impl Default for WriterOptions {
 }
 
 /// Configuration options for how the parquet files should be partitioned
-#[derive(Debug, Deserialize, PartialEq)]
+#[derive(Clone, Debug, Deserialize, Serialize, PartialEq)]
 pub enum PartitioningStrategy {
     /// compute partition values from schema metadata keys
     #[serde(alias = "schema_metadata")]

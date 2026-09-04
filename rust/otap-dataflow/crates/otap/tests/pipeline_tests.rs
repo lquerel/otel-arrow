@@ -62,10 +62,13 @@ fn test_telemetry_registries_cleanup() {
 
     let pipeline_entity_key = pipeline_ctx.register_pipeline_entity();
     let channel_capacity_policy = ChannelCapacityPolicy::default();
+    let runtime_config = OTAP_PIPELINE_FACTORY
+        .resolve_pipeline_config(&config)
+        .expect("component configs should resolve");
     let runtime_pipeline = OTAP_PIPELINE_FACTORY
         .build(
             pipeline_ctx.clone(),
-            config.clone(),
+            runtime_config,
             channel_capacity_policy.clone(),
             telemetry_policy,
             None,                              // transport_headers_policy
@@ -157,10 +160,13 @@ fn test_pipeline_fan_in_builds() {
         controller_ctx.pipeline_context_with(pipeline_group_id, pipeline_id, 0, 1, 0);
 
     let _pipeline_entity_key = pipeline_ctx.register_pipeline_entity();
+    let runtime_config = OTAP_PIPELINE_FACTORY
+        .resolve_pipeline_config(&config)
+        .expect("component configs should resolve");
     let _runtime_pipeline = OTAP_PIPELINE_FACTORY
         .build(
             pipeline_ctx,
-            config,
+            runtime_config,
             ChannelCapacityPolicy::default(),
             telemetry_policy,
             None,                              // transport_headers_policy
@@ -197,10 +203,13 @@ fn test_pipeline_mixed_receivers_shared_channel_builds() {
         controller_ctx.pipeline_context_with(pipeline_group_id, pipeline_id, 0, 1, 0);
 
     let _pipeline_entity_key = pipeline_ctx.register_pipeline_entity();
+    let runtime_config = OTAP_PIPELINE_FACTORY
+        .resolve_pipeline_config(&config)
+        .expect("component configs should resolve");
     let _runtime_pipeline = OTAP_PIPELINE_FACTORY
         .build(
             pipeline_ctx,
-            config,
+            runtime_config,
             ChannelCapacityPolicy::default(),
             telemetry_policy,
             None,                              // transport_headers_policy

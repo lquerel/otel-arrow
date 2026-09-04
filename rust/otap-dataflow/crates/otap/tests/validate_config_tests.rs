@@ -1,77 +1,65 @@
 // Copyright The OpenTelemetry Authors
 // SPDX-License-Identifier: Apache-2.0
 
-//! Tests that every registered component's `validate_config` function correctly
-//! rejects invalid configuration input.
+//! Tests that every registered pipeline component declares resolution metadata.
 //!
-//! These tests iterate over all factories registered in `OTAP_PIPELINE_FACTORY`
-//! and call `validate_config` with clearly invalid JSON values to ensure:
-//! 1. Every component's validator is wired up and callable.
-//! 2. Invalid configs produce `Err`, not silent acceptance.
-//!
-//! Valid-config paths are already covered by the CI `validate-configs.sh` script
-//! which runs `--validate-and-exit` against every example YAML in the repo.
+//! The test iterates over all factories registered in `OTAP_PIPELINE_FACTORY`
+//! so a newly linked factory cannot escape the explicit snapshot-policy audit.
 
+use otel_arrow_dfe_engine::component_config::ConfigSnapshotPolicy;
 use otel_arrow_dfe_otap::OTAP_PIPELINE_FACTORY;
-use serde_json::json;
 
-// Keep this side-effect import so the crate is linked and its `linkme`
-// distributed-slice registrations (contrib nodes) are visible
-// in `OTAP_PIPELINE_FACTORY` at runtime.
+// Keep these side-effect imports so their linkme registrations are visible.
 use otel_arrow_dfe_contrib_nodes as _;
-
-// Keep this side-effect import so the crate is linked and its `linkme`
-// distributed-slice registrations (core nodes) are visible
-// in `OTAP_PIPELINE_FACTORY` at runtime.
 use otel_arrow_dfe_core_nodes as _;
 
-#[test]
-fn all_receiver_validators_reject_invalid_config() {
-    let factory_map = OTAP_PIPELINE_FACTORY.get_receiver_factory_map();
-    assert!(
-        !factory_map.is_empty(),
-        "No receiver factories registered \u{2014} test is misconfigured"
-    );
-
-    for (urn, factory) in factory_map {
-        let result = (factory.validate_config)(&json!("this is not a valid config"));
-        assert!(
-            result.is_err(),
-            "Receiver `{urn}`: validate_config should reject a plain string"
-        );
+fn assert_declared(name: &str, resolver: usize, policy: ConfigSnapshotPolicy) {
+    assert_ne!(resolver, 0, "factory `{name}` has no resolver");
+    match policy {
+        ConfigSnapshotPolicy::TypedSafe
+        | ConfigSnapshotPolicy::CustomSafe
+        | ConfigSnapshotPolicy::Omit => {}
     }
 }
 
+/// Scenario: All linked receiver, processor, exporter, and extension factories are inspected.
+/// Guarantees: Every registration exposes a resolver and one explicit snapshot policy.
 #[test]
-fn all_processor_validators_reject_invalid_config() {
-    let factory_map = OTAP_PIPELINE_FACTORY.get_processor_factory_map();
-    assert!(
-        !factory_map.is_empty(),
-        "No processor factories registered \u{2014} test is misconfigured"
-    );
+fn all_linked_factories_declare_resolution_metadata() {
+    let receivers = OTAP_PIPELINE_FACTORY.get_receiver_factory_map();
+    let processors = OTAP_PIPELINE_FACTORY.get_processor_factory_map();
+    let exporters = OTAP_PIPELINE_FACTORY.get_exporter_factory_map();
+    let extensions = OTAP_PIPELINE_FACTORY.get_extension_factory_map();
+    assert!(!receivers.is_empty(), "no receiver factories registered");
+    assert!(!processors.is_empty(), "no processor factories registered");
+    assert!(!exporters.is_empty(), "no exporter factories registered");
 
-    for (urn, factory) in factory_map {
-        let result = (factory.validate_config)(&json!("this is not a valid config"));
-        assert!(
-            result.is_err(),
-            "Processor `{urn}`: validate_config should reject a plain string"
+    for (name, factory) in receivers {
+        assert_declared(
+            name,
+            factory.resolve_config as usize,
+            factory.snapshot_policy,
         );
     }
-}
-
-#[test]
-fn all_exporter_validators_reject_invalid_config() {
-    let factory_map = OTAP_PIPELINE_FACTORY.get_exporter_factory_map();
-    assert!(
-        !factory_map.is_empty(),
-        "No exporter factories registered \u{2014} test is misconfigured"
-    );
-
-    for (urn, factory) in factory_map {
-        let result = (factory.validate_config)(&json!("this is not a valid config"));
-        assert!(
-            result.is_err(),
-            "Exporter `{urn}`: validate_config should reject a plain string"
+    for (name, factory) in processors {
+        assert_declared(
+            name,
+            factory.resolve_config as usize,
+            factory.snapshot_policy,
+        );
+    }
+    for (name, factory) in exporters {
+        assert_declared(
+            name,
+            factory.resolve_config as usize,
+            factory.snapshot_policy,
+        );
+    }
+    for (name, factory) in extensions {
+        assert_declared(
+            name,
+            factory.resolve_config as usize,
+            factory.snapshot_policy,
         );
     }
 }

@@ -16,7 +16,7 @@ use crate::otap::{Logs, Metrics, ParentPayloadType, Traces, parent_payload_type}
 use crate::proto::opentelemetry::arrow::v1::ArrowPayloadType;
 use crate::schema::consts;
 use arrow::buffer::BooleanBuffer;
-use serde::Deserialize;
+use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::sync::Arc;
 pub mod logs;
@@ -410,7 +410,7 @@ impl Default for IdBitmapPool {
 }
 
 /// MatchType describes how we should match the String values provided
-#[derive(Debug, Clone, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum MatchType {
     /// match on the string values exactly how they are defined
@@ -424,7 +424,7 @@ const fn default_match_type() -> MatchType {
 }
 
 /// enum that allows a field to have any type
-#[derive(Debug, Clone, PartialEq, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(untagged)]
 pub enum AnyValue {
     /// string type
@@ -442,7 +442,7 @@ pub enum AnyValue {
 }
 
 /// struct that represents attributes and other key value pairs
-#[derive(Debug, Clone, PartialEq, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct KeyValue {
     /// Attribute key.
     pub key: String,

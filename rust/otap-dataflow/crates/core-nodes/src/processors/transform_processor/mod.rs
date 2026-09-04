@@ -46,7 +46,10 @@ use async_trait::async_trait;
 use linkme::distributed_slice;
 use otel_arrow_contrib_data_engine_expressions::Expression;
 use otel_arrow_contrib_data_engine_kql_parser::{KqlParser, Parser};
-use otel_arrow_dfe_config::{SignalType, error::Error as ConfigError, node::NodeUserConfig};
+use otel_arrow_dfe_config::{SignalType, error::Error as ConfigError};
+use otel_arrow_dfe_engine::component_config::{
+    ConfigSnapshotPolicy, ResolvedComponentConfig, ResolvedNodeConfig,
+};
 use otel_arrow_dfe_engine::{
     ConsumerEffectHandlerExtension, Interests, MessageSourceLocalEffectHandlerExtension,
     ProcessorFactory, ProducerEffectHandlerExtension,
@@ -81,6 +84,7 @@ use otel_arrow_dfe_query_engine::{
     },
 };
 use otel_arrow_dfe_query_engine_languages::{opl::parser::OplParser, ottl::parser::OttlParser};
+#[cfg(test)]
 use serde_json::Value;
 use slotmap::Key as _;
 
@@ -185,13 +189,21 @@ impl SignalScope {
 }
 
 impl TransformProcessor {
-    /// Create new instance from serialized configuration
+    /// Create a test instance from serialized configuration.
+    #[cfg(test)]
     fn from_config(pipeline_ctx: &PipelineContext, config: &Value) -> Result<Self, ConfigError> {
         let config: Config =
             serde_json::from_value(config.clone()).map_err(|e| ConfigError::InvalidUserConfig {
                 error: format!("Failed to parse TransformProcessor config: {e}"),
             })?;
 
+        Self::from_typed_config(pipeline_ctx, config)
+    }
+
+    fn from_typed_config(
+        pipeline_ctx: &PipelineContext,
+        config: Config,
+    ) -> Result<Self, ConfigError> {
         // TODO we should pass some context to the parser so we can determine if there are valid
         // identifiers when checking the config:
         // https://github.com/open-telemetry/otel-arrow/issues/1530
@@ -540,15 +552,18 @@ impl TransformProcessor {
 fn create_transform_processor(
     pipeline_ctx: PipelineContext,
     node_id: NodeId,
-    user_config: Arc<NodeUserConfig>,
+    user_config: Arc<ResolvedNodeConfig>,
     processor_config: &ProcessorConfig,
     _capabilities: &otel_arrow_dfe_engine::capability::registry::Capabilities,
 ) -> Result<ProcessorWrapper<OtapPdata>, ConfigError> {
-    let processor = TransformProcessor::from_config(&pipeline_ctx, &user_config.config)?;
+    let processor = TransformProcessor::from_typed_config(
+        &pipeline_ctx,
+        (*user_config.component_config::<Config>()?).clone(),
+    )?;
     Ok(ProcessorWrapper::local(
         processor,
         node_id,
-        user_config,
+        user_config.effective(),
         processor_config,
     ))
 }
@@ -561,7 +576,14 @@ pub static TRANSFORM_PROCESSOR_FACTORY: ProcessorFactory<OtapPdata> = ProcessorF
     name: TRANSFORM_PROCESSOR_URN,
     create: create_transform_processor,
     wiring_contract: otel_arrow_dfe_engine::wiring_contract::WiringContract::UNRESTRICTED,
-    validate_config: otel_arrow_dfe_config::validation::validate_typed_config::<Config>,
+    resolve_config: |value| {
+        let config: Config =
+            serde_json::from_value(value.clone()).map_err(|e| ConfigError::InvalidUserConfig {
+                error: format!("Failed to parse TransformProcessor config: {e}"),
+            })?;
+        Ok(ResolvedComponentConfig::omitted(config))
+    },
+    snapshot_policy: ConfigSnapshotPolicy::Omit,
 };
 
 #[async_trait(?Send)]
@@ -973,7 +995,9 @@ mod test {
         create_transform_processor(
             pipeline_context,
             node_id,
-            Arc::new(node_config),
+            TRANSFORM_PROCESSOR_FACTORY
+                .resolve_node_config(node_config)
+                .expect("transform processor config must resolve"),
             runtime.config(),
             &otel_arrow_dfe_engine::capability::registry::Capabilities::empty(),
         )
@@ -2462,7 +2486,9 @@ mod test {
         let processor = create_transform_processor(
             pipeline_context,
             node_id,
-            Arc::new(node_config),
+            TRANSFORM_PROCESSOR_FACTORY
+                .resolve_node_config(node_config)
+                .expect("transform processor config must resolve"),
             runtime.config(),
             &otel_arrow_dfe_engine::capability::registry::Capabilities::empty(),
         )

@@ -6,7 +6,7 @@
 use std::path::PathBuf;
 use std::time::Duration;
 
-use serde::Deserialize;
+use serde::{Deserialize, Serialize};
 
 /// Default OAuth scope requested when none is configured.
 fn default_scope() -> String {
@@ -24,7 +24,7 @@ fn default_startup_timeout() -> Duration {
 }
 
 /// Azure identity authentication flow.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Deserialize, Serialize)]
 #[serde(rename_all = "lowercase")]
 pub enum AuthMethod {
     /// Azure Managed Identity (system- or user-assigned).
@@ -58,7 +58,7 @@ impl std::fmt::Display for AuthMethod {
 }
 
 /// Configuration for the Azure Identity Auth extension.
-#[derive(Debug, Clone, Deserialize)]
+#[derive(Debug, Clone, Deserialize, Serialize, PartialEq)]
 #[serde(deny_unknown_fields)]
 pub struct Config {
     /// Authentication flow to use.

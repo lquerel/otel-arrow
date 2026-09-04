@@ -126,12 +126,7 @@ fn shutdown_is_success(state: &str) -> bool {
     state == "succeeded"
 }
 
-/// Returns committed configuration details for one logical pipeline.
-///
-/// Credential header values are redacted from the response (see
-/// [`otel_arrow_dfe_config::pipeline::PipelineConfig::redacted_for_snapshot`]) so
-/// secrets configured in node and extension `headers` are not exposed in
-/// cleartext.
+/// Returns committed effective configuration details for one logical pipeline.
 pub async fn show_pipeline(
     Path((pipeline_group_id, pipeline_id)): Path<(String, String)>,
     State(state): State<AppState>,
@@ -140,10 +135,7 @@ pub async fn show_pipeline(
         .controller
         .pipeline_details(&pipeline_group_id, &pipeline_id)
     {
-        Ok(Some(mut details)) => {
-            details.pipeline = details.pipeline.redacted_for_snapshot();
-            Ok(Json(details))
-        }
+        Ok(Some(details)) => Ok(Json(details)),
         Ok(None) => Err(StatusCode::NOT_FOUND),
         Err(
             crate::ControlPlaneError::PipelineNotFound | crate::ControlPlaneError::GroupNotFound,
@@ -697,11 +689,10 @@ mod tests {
         }
     }
 
-    /// Scenario: a pipeline's node config contains credential header values.
-    /// Guarantees: `show_pipeline` redacts them so the raw credential never
-    /// appears in the response body.
+    /// Scenario: pipeline details contain a precomputed omitted component config.
+    /// Guarantees: `show_pipeline` serializes the effective representation directly.
     #[tokio::test]
-    async fn show_pipeline_redacts_credential_header_values() {
+    async fn show_pipeline_serializes_precomputed_effective_config() {
         let details: PipelineDetails = serde_json::from_value(json!({
             "pipelineGroupId": "default",
             "pipelineId": "main",
@@ -709,9 +700,7 @@ mod tests {
                 "nodes": {
                     "exporter": {
                         "type": "urn:test:exporter:example",
-                        "config": {
-                            "headers": { "authorization": "Bearer super-secret-token" }
-                        }
+                        "config": "[OMITTED]"
                     }
                 }
             }
@@ -733,12 +722,8 @@ mod tests {
             .expect("body should collect");
         let text = String::from_utf8(body.to_vec()).expect("pipeline body is utf-8");
         assert!(
-            !text.contains("Bearer super-secret-token"),
-            "raw credential must not appear in the pipeline response: {text}"
-        );
-        assert!(
-            text.contains("[REDACTED]"),
-            "redacted placeholder should appear in the pipeline response: {text}"
+            text.contains("[OMITTED]"),
+            "omission marker should appear in the pipeline response: {text}"
         );
     }
 

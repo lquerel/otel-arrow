@@ -23,8 +23,10 @@ use async_trait::async_trait;
 use linkme::distributed_slice;
 use otel_arrow_dfe_config::SignalType;
 use otel_arrow_dfe_config::error::Error as ConfigError;
-use otel_arrow_dfe_config::node::NodeUserConfig;
 use otel_arrow_dfe_engine::ConsumerEffectHandlerExtension;
+use otel_arrow_dfe_engine::component_config::{
+    ConfigSnapshotPolicy, ResolvedComponentConfig, ResolvedNodeConfig,
+};
 use otel_arrow_dfe_engine::config::ProcessorConfig;
 use otel_arrow_dfe_engine::context::PipelineContext;
 use otel_arrow_dfe_engine::control::NackMsg;
@@ -59,6 +61,7 @@ pub const CONDENSE_ATTRIBUTES_PROCESSOR_URN: &str = "urn:otel:processor:condense
 /// `exclude_keys`: Optional set of keys to exclude from condensing. Cannot be specified with `source_keys`.
 ///
 /// If neither `source_keys` nor `exclude_keys` is specified, all attributes will be condensed.
+#[derive(Clone, Debug, PartialEq)]
 pub struct Config {
     destination_key: String,
     delimiter: char,
@@ -176,17 +179,20 @@ fn engine_err(msg: &str) -> Error {
 pub fn create_condense_attributes_processor(
     pipeline_ctx: PipelineContext,
     node: NodeId,
-    node_config: Arc<NodeUserConfig>,
+    node_config: Arc<ResolvedNodeConfig>,
     processor_config: &ProcessorConfig,
 ) -> Result<ProcessorWrapper<OtapPdata>, ConfigError> {
-    let processor = CondenseAttributesProcessor::from_config(pipeline_ctx, &node_config.config)?;
+    let processor = CondenseAttributesProcessor::from_typed_config(
+        pipeline_ctx,
+        node_config.component_config::<Config>()?.as_ref().clone(),
+    );
 
     otel_info!("condense_attributes_processor.ready");
 
     Ok(ProcessorWrapper::local(
         processor,
         node,
-        node_config,
+        node_config.effective(),
         processor_config,
     ))
 }
@@ -202,14 +208,33 @@ pub static CONDENSE_ATTRIBUTES_PROCESSOR_FACTORY: otel_arrow_dfe_engine::Process
     create:
         |pipeline_ctx: PipelineContext,
          node: NodeId,
-         node_config: Arc<NodeUserConfig>,
+         node_config: Arc<ResolvedNodeConfig>,
          proc_cfg: &ProcessorConfig,
          _capabilities: &otel_arrow_dfe_engine::capability::registry::Capabilities| {
             create_condense_attributes_processor(pipeline_ctx, node, node_config, proc_cfg)
         },
     wiring_contract: otel_arrow_dfe_engine::wiring_contract::WiringContract::UNRESTRICTED,
-    validate_config: |config| Config::from_config(config).map(|_| ()),
+    resolve_config: resolve_condense_attributes_config,
+    snapshot_policy: ConfigSnapshotPolicy::CustomSafe,
 };
+
+fn resolve_condense_attributes_config(raw: &Value) -> Result<ResolvedComponentConfig, ConfigError> {
+    let config = Config::from_config(raw)?;
+    let sorted = |keys: &Option<HashSet<String>>| {
+        keys.as_ref().map(|keys| {
+            let mut values = keys.iter().cloned().collect::<Vec<_>>();
+            values.sort();
+            values
+        })
+    };
+    let snapshot = serde_json::json!({
+        "destination_key": config.destination_key.clone(),
+        "delimiter": config.delimiter.to_string(),
+        "source_keys": sorted(&config.source_keys),
+        "exclude_keys": sorted(&config.exclude_keys),
+    });
+    Ok(ResolvedComponentConfig::custom_safe(config, snapshot))
+}
 
 impl CondenseAttributesProcessor {
     /// Creates a new CondenseAttributesProcessor instance from configuration
@@ -219,6 +244,13 @@ impl CondenseAttributesProcessor {
             config: Config::from_config(config)?,
             compute_duration,
         })
+    }
+
+    fn from_typed_config(pipeline_ctx: PipelineContext, config: Config) -> Self {
+        Self {
+            config,
+            compute_duration: ComputeDuration::new(&pipeline_ctx),
+        }
     }
 
     /// Creates a new CondenseAttributesProcessor from configuration for testing.
@@ -708,6 +740,7 @@ impl local::Processor<OtapPdata> for CondenseAttributesProcessor {
 mod condense_tests {
     use super::*;
     use bytes::BytesMut;
+    use otel_arrow_dfe_config::node::NodeUserConfig;
     use otel_arrow_dfe_engine::Interests;
     use otel_arrow_dfe_engine::context::ControllerContext;
     use otel_arrow_dfe_engine::control::NodeControlMsg;
@@ -729,6 +762,19 @@ mod condense_tests {
     use otel_arrow_dfe_telemetry::registry::TelemetryRegistryHandle;
     use prost::Message as _;
     use serde_json::json;
+
+    fn resolve_node_config(source: NodeUserConfig) -> Arc<ResolvedNodeConfig> {
+        let component = resolve_condense_attributes_config(&source.config)
+            .expect("condense attributes config should resolve");
+        Arc::new(
+            ResolvedNodeConfig::new(
+                &source,
+                component,
+                CONDENSE_ATTRIBUTES_PROCESSOR_FACTORY.snapshot_policy,
+            )
+            .expect("resolved config should match the factory policy"),
+        )
+    }
 
     fn build_log_with_attrs(log_attrs: Vec<KeyValue>) -> ExportLogsServiceRequest {
         ExportLogsServiceRequest::new(vec![ResourceLogs::new(
@@ -768,7 +814,7 @@ mod condense_tests {
         let proc = create_condense_attributes_processor(
             pipeline_ctx,
             node,
-            Arc::new(node_config),
+            resolve_node_config(node_config),
             rt.config(),
         )
         .expect("create processor");
@@ -1302,7 +1348,7 @@ mod condense_tests {
         let proc = create_condense_attributes_processor(
             pipeline_ctx,
             node,
-            Arc::new(node_config),
+            resolve_node_config(node_config),
             rt.config(),
         )
         .expect("create processor");
@@ -1366,7 +1412,7 @@ mod condense_tests {
         let proc = create_condense_attributes_processor(
             pipeline_ctx,
             node,
-            Arc::new(node_config),
+            resolve_node_config(node_config),
             rt.config(),
         )
         .expect("create processor");

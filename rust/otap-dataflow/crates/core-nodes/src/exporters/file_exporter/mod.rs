@@ -23,7 +23,6 @@ use metrics::{
     SignalOperationAttributes,
 };
 use otel_arrow_dfe_config::SignalType;
-use otel_arrow_dfe_config::node::NodeUserConfig;
 use otel_arrow_dfe_engine::config::ExporterConfig;
 use otel_arrow_dfe_engine::context::PipelineContext;
 use otel_arrow_dfe_engine::control::{AckMsg, NackMsg, NodeControlMsg};
@@ -75,15 +74,15 @@ pub static FILE_EXPORTER: ExporterFactory<OtapPdata> = ExporterFactory {
     create:
         |pipeline: PipelineContext,
          node: NodeId,
-         node_config: Arc<NodeUserConfig>,
+         node_config: Arc<otel_arrow_dfe_engine::component_config::ResolvedNodeConfig>,
          exporter_config: &ExporterConfig,
          _capabilities: &otel_arrow_dfe_engine::capability::registry::Capabilities| {
-            let config = FileExporterConfig::parse(&node_config.config)?;
+            let config = node_config.component_config::<FileExporterConfig>()?;
             let paths =
                 config.render_paths(pipeline.core_id(), pipeline.deployment_generation())?;
             let exporter = FileExporter {
                 frame: Vec::with_capacity(config.max_frame_bytes.min(8 * 1024)),
-                config,
+                config: (*config).clone(),
                 paths,
                 writers: std::array::from_fn(|_| None),
                 failure_active: [false; 3],
@@ -94,12 +93,15 @@ pub static FILE_EXPORTER: ExporterFactory<OtapPdata> = ExporterFactory {
             Ok(ExporterWrapper::local(
                 exporter,
                 node,
-                node_config,
+                node_config.effective(),
                 exporter_config,
             ))
         },
     wiring_contract: otel_arrow_dfe_engine::wiring_contract::WiringContract::UNRESTRICTED,
-    validate_config: |value| FileExporterConfig::parse(value).map(|_| ()),
+    resolve_config: otel_arrow_dfe_engine::component_config::resolve_typed_config::<
+        FileExporterConfig,
+    >,
+    snapshot_policy: otel_arrow_dfe_engine::component_config::ConfigSnapshotPolicy::TypedSafe,
 };
 
 #[async_trait(?Send)]

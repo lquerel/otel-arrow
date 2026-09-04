@@ -36,10 +36,11 @@ use futures_channel::oneshot::Canceled;
 use linkme::distributed_slice;
 use otel_arrow_dfe_config::SignalType;
 use otel_arrow_dfe_config::error::Error as ConfigError;
-use otel_arrow_dfe_config::node::NodeUserConfig;
-use otel_arrow_dfe_config::validation::validate_typed_config;
 use otel_arrow_dfe_engine::ConsumerEffectHandlerExtension;
 use otel_arrow_dfe_engine::ExporterFactory;
+use otel_arrow_dfe_engine::component_config::{
+    ConfigSnapshotPolicy, ResolvedNodeConfig, resolve_omitted_config,
+};
 use otel_arrow_dfe_engine::config::ExporterConfig;
 use otel_arrow_dfe_engine::context::PipelineContext;
 use otel_arrow_dfe_engine::control::{AckMsg, NackMsg, NodeControlMsg};
@@ -323,17 +324,27 @@ pub static KAFKA_EXPORTER_FACTORY: ExporterFactory<OtapPdata> = ExporterFactory 
     create:
         |pipeline_ctx: PipelineContext,
          node: NodeId,
-         node_config: Arc<NodeUserConfig>,
+         node_config: Arc<ResolvedNodeConfig>,
          exporter_config: &ExporterConfig,
          _capabilities: &otel_arrow_dfe_engine::capability::registry::Capabilities| {
             Ok(ExporterWrapper::local(
-                KafkaExporter::from_config(pipeline_ctx, &node_config.config)?,
+                KafkaExporter::new(
+                    pipeline_ctx,
+                    node_config
+                        .component_config::<KafkaExporterConfig>()?
+                        .as_ref()
+                        .clone(),
+                )
+                .map_err(|error| ConfigError::InvalidUserConfig {
+                    error: error.to_string(),
+                })?,
                 node,
-                node_config,
+                node_config.effective(),
                 exporter_config,
             ))
         },
-    validate_config: validate_typed_config::<KafkaExporterConfig>,
+    resolve_config: resolve_omitted_config::<KafkaExporterConfig>,
+    snapshot_policy: ConfigSnapshotPolicy::Omit,
     wiring_contract: otel_arrow_dfe_engine::wiring_contract::WiringContract::UNRESTRICTED,
 };
 

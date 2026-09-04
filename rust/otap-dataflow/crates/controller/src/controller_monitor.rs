@@ -42,6 +42,7 @@ use crate::{
 use otel_arrow_dfe_config::ExtensionId;
 use otel_arrow_dfe_config::error::Error as ConfigError;
 use otel_arrow_dfe_config::extension::ExtensionUserConfig;
+use otel_arrow_dfe_engine::component_config::{ConfigSnapshotPolicy, ResolvedComponentConfig};
 use otel_arrow_dfe_state::store::ObservedStateHandle;
 use otel_arrow_dfe_telemetry::instrument::Gauge;
 use otel_arrow_dfe_telemetry::metrics::MetricSet;
@@ -69,7 +70,8 @@ pub static CONTROLLER_MONITOR_EXTENSION_FACTORY: ControllerExtensionFactory =
         name: CONTROLLER_MONITOR_EXTENSION_URN,
         description: "Read-only controller state and telemetry monitor.",
         documentation_url: "",
-        validate_config: validate_controller_monitor_config,
+        resolve_config: resolve_controller_monitor_config,
+        snapshot_policy: ConfigSnapshotPolicy::TypedSafe,
         start: start_controller_monitor_extension,
     };
 
@@ -139,21 +141,27 @@ pub fn register_builtin_controller_extensions(registry: &mut ControllerExtension
     registry.register_factory(CONTROLLER_MONITOR_EXTENSION_FACTORY);
 }
 
-fn validate_controller_monitor_config(config: &serde_json::Value) -> Result<(), ConfigError> {
+fn resolve_controller_monitor_config(
+    config: &serde_json::Value,
+) -> Result<ResolvedComponentConfig, ConfigError> {
     let extension =
         ExtensionUserConfig::new(CONTROLLER_MONITOR_EXTENSION_URN.into(), config.clone());
-    ControllerMonitorConfig::from_extension(&extension)
-        .map(|_| ())
-        .map_err(|source| ConfigError::InvalidUserConfig {
+    let config = ControllerMonitorConfig::from_extension(&extension).map_err(|source| {
+        ConfigError::InvalidUserConfig {
             error: source.to_string(),
-        })
+        }
+    })?;
+    ResolvedComponentConfig::typed_safe(config)
 }
 
 fn start_controller_monitor_extension(
     context: ControllerExtensionContext,
 ) -> Result<ControllerExtensionTaskFactory, ControllerExtensionError> {
-    let config = ControllerMonitorConfig::from_extension(&context.extension)
-        .map_err(|source| Box::new(source) as ControllerExtensionError)?;
+    let config = (*context
+        .extension
+        .component_config::<ControllerMonitorConfig>()
+        .map_err(|source| Box::new(source) as ControllerExtensionError)?)
+    .clone();
     let monitor = ControllerMonitor::new(
         context.extension_id.clone(),
         context.observed_state,

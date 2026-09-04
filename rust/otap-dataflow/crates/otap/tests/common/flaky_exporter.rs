@@ -26,7 +26,9 @@
 
 use async_trait::async_trait;
 use linkme::distributed_slice;
-use otel_arrow_dfe_config::node::NodeUserConfig;
+use otel_arrow_dfe_engine::component_config::{
+    ConfigSnapshotPolicy, ResolvedNodeConfig, resolve_omitted_config,
+};
 use otel_arrow_dfe_engine::config::ExporterConfig;
 use otel_arrow_dfe_engine::context::PipelineContext;
 use otel_arrow_dfe_engine::control::{AckMsg, NackMsg, NodeControlMsg};
@@ -185,11 +187,12 @@ static FLAKY_EXPORTER: ExporterFactory<OtapPdata> = ExporterFactory {
     create:
         |_pipeline: PipelineContext,
          node: NodeId,
-         node_config: Arc<NodeUserConfig>,
+         node_config: Arc<ResolvedNodeConfig>,
          exporter_config: &ExporterConfig,
          _capabilities: &otel_arrow_dfe_engine::capability::registry::Capabilities| {
             // Look up state by ID from node config
-            let flaky_id = node_config.config.get("flaky_id").and_then(|v| v.as_str());
+            let component = node_config.component_config::<serde_json::Value>()?;
+            let flaky_id = component.get("flaky_id").and_then(|v| v.as_str());
             let (counter, should_ack, nack_count, permanent_nack, permanent_nack_count, auto_ack) =
                 flaky_id
                     .and_then(get_state)
@@ -207,12 +210,13 @@ static FLAKY_EXPORTER: ExporterFactory<OtapPdata> = ExporterFactory {
                     auto_ack_after_nacks: auto_ack,
                 },
                 node,
-                node_config,
+                node_config.effective(),
                 exporter_config,
             ))
         },
     wiring_contract: otel_arrow_dfe_engine::wiring_contract::WiringContract::UNRESTRICTED,
-    validate_config: |_| Ok(()),
+    resolve_config: resolve_omitted_config::<serde_json::Value>,
+    snapshot_policy: ConfigSnapshotPolicy::Omit,
 };
 
 #[async_trait(?Send)]

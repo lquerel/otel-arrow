@@ -293,9 +293,8 @@ the pipeline starts. Validation rejects an empty `token_url`, a zero
 identifier, a missing
 secret/signing key for the selected grant, and any grant-specific field that does
 not apply to the selected `grant_type`. Because these cross-field rules go beyond
-what serde deserialization can express, the factory wires a **custom**
-`validate_config` hook (rather than `validate_typed_config::<Config>`) that
-deserializes `Config` and then runs `Config::validate()` - the same
+what serde deserialization can express, the factory wires a **custom resolver**
+that deserializes `Config`, runs `Config::validate()`, and returns the typed value - the same
 parse-then-validate pattern the Azure extension uses.
 
 ### Token-endpoint TLS
@@ -586,7 +585,8 @@ pub static OAUTH2_CLIENT_AUTH_EXTENSION: ExtensionFactory = ExtensionFactory {
         shared: OAuth2ClientAuthExtension => [BearerTokenProvider]
     )),
     create,
-    validate_config,
+    resolve_config,
+    snapshot_policy: ConfigSnapshotPolicy::TypedSafe,
 };
 ```
 

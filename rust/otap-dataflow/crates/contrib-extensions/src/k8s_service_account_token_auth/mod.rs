@@ -31,9 +31,11 @@ use std::sync::Arc;
 
 use linkme::distributed_slice;
 use otel_arrow_dfe_config::error::Error as ConfigError;
-use otel_arrow_dfe_config::extension::ExtensionUserConfig;
 use otel_arrow_dfe_engine::ExtensionFactory;
 use otel_arrow_dfe_engine::capability::auth::bearer_token_authorizer::BearerTokenAuthorizer;
+use otel_arrow_dfe_engine::component_config::{
+    ConfigSnapshotPolicy, ResolvedComponentConfig, ResolvedExtensionConfig,
+};
 use otel_arrow_dfe_engine::config::ExtensionConfig;
 use otel_arrow_dfe_engine::context::ExtensionContext;
 use otel_arrow_dfe_engine::extension::{ExtensionBundle, ExtensionWrapper};
@@ -59,20 +61,18 @@ fn parse_config(config: &serde_json::Value) -> Result<Config, ConfigError> {
     Ok(parsed)
 }
 
-/// Static config validation hook for the factory.
-fn validate_config(config: &serde_json::Value) -> Result<(), ConfigError> {
-    parse_config(config).map(|_| ())
+fn resolve_config(config: &serde_json::Value) -> Result<ResolvedComponentConfig, ConfigError> {
+    ResolvedComponentConfig::typed_safe(parse_config(config)?)
 }
 
 /// Builds the dual-variant authorizer bundle.
 fn create(
     _ext_ctx: &ExtensionContext,
     name: otel_arrow_dfe_config::ExtensionId,
-    ext_config: Arc<ExtensionUserConfig>,
+    ext_config: Arc<ResolvedExtensionConfig>,
     extension_config: &ExtensionConfig,
 ) -> Result<ExtensionBundle, ConfigError> {
-    // Validate config now so a bad config fails fast at wiring time.
-    let config = parse_config(&ext_config.config)?;
+    let config = ext_config.component_config::<Config>()?.as_ref().clone();
 
     // Build both capability variants from the same config. The shared variant is
     // `Arc`-backed (Send) and the local variant is `Rc`-backed (lock-free,
@@ -94,7 +94,7 @@ fn create(
 
     // The extension is passive: it exposes the authorizer capability and builds
     // its Kubernetes client lazily on first use.
-    ExtensionWrapper::builder(name, ext_config, extension_config)
+    ExtensionWrapper::builder(name, ext_config.effective(), extension_config)
         .passive()
         .cloned()
         .shared::<SharedK8sServiceAccountTokenAuth>(shared)
@@ -117,5 +117,6 @@ pub static K8S_SERVICE_ACCOUNT_TOKEN_AUTH_EXTENSION: ExtensionFactory = Extensio
         (shared: SharedK8sServiceAccountTokenAuth, local: LocalK8sServiceAccountTokenAuth) => [BearerTokenAuthorizer]
     )),
     create,
-    validate_config,
+    resolve_config,
+    snapshot_policy: ConfigSnapshotPolicy::TypedSafe,
 };

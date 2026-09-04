@@ -4,10 +4,10 @@
 //! Implementation of the configuration of the perf exporter
 //!
 
-use serde::Deserialize;
+use serde::{Deserialize, Serialize};
 
 /// Defines the settings of the perf exporter such as what to track
-#[derive(Debug, Deserialize)]
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct Config {
     /// Time duration after which a perf trace is displayed (default = 1000ms).

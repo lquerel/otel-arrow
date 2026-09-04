@@ -26,20 +26,20 @@
 //! The merge helpers (`from_patch` and `merge_table`) apply patch overrides on top of defaults so
 //! downstream code can generate schemas and write data without needing to reason about missing
 //! configuration fields.
-use secrecy::SecretString;
-use serde::Deserialize;
+use otel_arrow_dfe_config::secret::RedactedString;
+use serde::{Deserialize, Serialize};
 use std::num::NonZeroUsize;
 
 const DEFAULT_MAX_IN_FLIGHT: NonZeroUsize =
     NonZeroUsize::new(10).expect("default max_in_flight must be non-zero");
 
-#[derive(Debug, Deserialize, Clone)]
+#[derive(Debug, Deserialize, Serialize, Clone, PartialEq)]
 #[serde(deny_unknown_fields)]
 pub struct ConfigPatch {
     pub endpoint: String,
     pub database: String,
     pub username: String,
-    pub password: SecretString,
+    pub password: RedactedString,
 
     pub async_insert: Option<bool>,
 
@@ -54,7 +54,7 @@ pub struct ConfigPatch {
 }
 
 /// Configuration for the Clickhouse Exporter
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Serialize, PartialEq)]
 pub struct Config {
     /// ClickHouse HTTP(S) endpoint URL (e.g. "http://localhost:8123"). TCP is not supported for now.
     pub endpoint: String,
@@ -63,7 +63,7 @@ pub struct Config {
     /// Clickhouse user name
     pub username: String,
     /// Clickhouse password
-    pub password: SecretString,
+    pub password: RedactedString,
     /// Use async insert
     pub async_insert: bool,
     /// Maximum number of ClickHouse insert requests allowed to run concurrently.
@@ -93,7 +93,7 @@ impl Config {
 }
 
 /// Configuration for a ClickHouse table engine
-#[derive(Debug, Deserialize, Clone)]
+#[derive(Debug, Deserialize, Serialize, Clone, PartialEq)]
 pub struct TableEngine {
     pub name: String,
     #[serde(default)]
@@ -109,7 +109,7 @@ impl Default for TableEngine {
 }
 
 /// Configuration for a single table, Option values are overriden by global defaults if None.
-#[derive(Debug, Deserialize, Clone, Default)]
+#[derive(Debug, Deserialize, Serialize, Clone, Default, PartialEq)]
 #[serde(default)]
 pub struct TableConfigPatch {
     pub name: Option<String>,
@@ -119,7 +119,7 @@ pub struct TableConfigPatch {
 }
 
 /// Configuration for a single table, Option values are overriden by global defaults if None.
-#[derive(Debug, Clone, Default)]
+#[derive(Debug, Clone, Serialize, Default, PartialEq)]
 pub struct TableConfig {
     /// Logical name (users query this)
     pub name: String,
@@ -135,7 +135,7 @@ pub struct TableConfig {
 }
 
 /// Default Table configuration settings
-#[derive(Debug, Deserialize, Clone)]
+#[derive(Debug, Deserialize, Serialize, Clone, PartialEq)]
 pub struct DefaultTableConfig {
     /// TTL INTERVAL, e.g., "72 HOUR"
     #[serde(default)]
@@ -164,7 +164,7 @@ fn default_true() -> bool {
 }
 
 /// Configuration for metrics tables by type
-#[derive(Debug, Deserialize, Clone, Default)]
+#[derive(Debug, Deserialize, Serialize, Clone, Default, PartialEq)]
 #[serde(default)]
 pub struct MetricsTableConfigPatch {
     pub gauge: Option<TableConfigPatch>,
@@ -175,7 +175,7 @@ pub struct MetricsTableConfigPatch {
 }
 
 /// Configuration for metrics tables by type
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Serialize, PartialEq)]
 pub struct MetricsTableConfig {
     pub gauge: TableConfig,
     pub sum: TableConfig,
@@ -228,7 +228,7 @@ impl MetricsTableConfig {
     }
 }
 
-#[derive(Debug, Deserialize, Clone, Default)]
+#[derive(Debug, Deserialize, Serialize, Clone, Default, PartialEq)]
 #[serde(default)]
 pub struct TablesConfigPatch {
     pub logs: Option<TableConfigPatch>,
@@ -237,7 +237,7 @@ pub struct TablesConfigPatch {
 }
 
 /// Full tables configuration
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Serialize, PartialEq)]
 pub struct TablesConfig {
     /// Main logs and traces tables
     pub logs: TableConfig,
@@ -293,7 +293,6 @@ fn merge_table(default: TableConfig, patch: Option<TableConfigPatch>) -> TableCo
 #[cfg(test)]
 mod tests {
     use super::*;
-    use secrecy::ExposeSecret;
 
     /// Scenario: a ClickHouse exporter config omits the concurrency setting.
     /// Guarantees: the runtime configuration permits ten concurrent inserts by default.
@@ -377,7 +376,7 @@ mod tests {
         assert_eq!(config.endpoint, "http://localhost:8123");
         assert_eq!(config.database, "otap");
         assert_eq!(config.username, "clickhouse");
-        assert_eq!(config.password.expose_secret(), "secret");
+        assert_eq!(config.password.expose(), "secret");
         assert!(!config.async_insert);
 
         // --- Table defaults ---

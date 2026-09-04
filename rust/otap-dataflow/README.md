@@ -454,11 +454,13 @@ use otel_arrow_dfe_controller::{
     ControllerExtensionError, ControllerExtensionFactory,
     ControllerExtensionTaskFactory, distributed_slice,
 };
-use otel_arrow_dfe_config::validation::validate_typed_config;
+use otel_arrow_dfe_engine::component_config::{
+    ConfigSnapshotPolicy, resolve_typed_config,
+};
 
 pub const REMOTE_CONTROL_URN: &str = "urn:example:extension:remote_control";
 
-#[derive(serde::Deserialize)]
+#[derive(Clone, PartialEq, serde::Deserialize, serde::Serialize)]
 struct RemoteControlConfig {
     endpoint: String,
 }
@@ -470,21 +472,18 @@ pub static REMOTE_CONTROL_EXTENSION: ControllerExtensionFactory =
         name: REMOTE_CONTROL_URN,
         description: "Remote controller integration.",
         documentation_url: "",
-        validate_config: validate_remote_control_config,
+        resolve_config: resolve_typed_config::<RemoteControlConfig>,
+        snapshot_policy: ConfigSnapshotPolicy::TypedSafe,
         start: start_remote_control,
     };
-
-fn validate_remote_control_config(
-    config: &serde_json::Value,
-) -> Result<(), otel_arrow_dfe_config::error::Error> {
-    validate_typed_config::<RemoteControlConfig>(config)
-}
 
 fn start_remote_control(
     context: ControllerExtensionContext,
 ) -> Result<ControllerExtensionTaskFactory, ControllerExtensionError> {
-    // Parse context.extension.config here and build any client state needed by
-    // the running task.
+    let config = context
+        .extension
+        .component_config::<RemoteControlConfig>()
+        .map_err(|error| Box::new(error) as ControllerExtensionError)?;
     let extension_id = context.extension_id.clone();
     let control_plane = context.control_plane.clone();
     let observed_state = context.observed_state.clone();
@@ -502,6 +501,7 @@ fn start_remote_control(
                     ) => {
                         // Run extension work here.
                         let _ = (
+                            &config,
                             &extension_id,
                             &control_plane,
                             &observed_state,

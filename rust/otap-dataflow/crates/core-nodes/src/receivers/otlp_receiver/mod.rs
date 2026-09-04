@@ -34,7 +34,6 @@ use otel_arrow_dfe_pdata::TryIntoWithOptions;
 
 use async_trait::async_trait;
 use linkme::distributed_slice;
-use otel_arrow_dfe_config::node::NodeUserConfig;
 use otel_arrow_dfe_engine::ReceiverFactory;
 use otel_arrow_dfe_engine::admission::{AdmissionDimension, SharedAdmissionGate};
 use otel_arrow_dfe_engine::capability::auth::bearer_token_authorizer::BearerTokenAuthorizer as BearerTokenAuthorizerCapability;
@@ -129,7 +128,7 @@ const DEFAULT_AUTHORIZATION_TIMEOUT: Duration = Duration::from_secs(10);
 ///         cert_file: "/path/to/server.crt"
 ///         key_file: "/path/to/server.key"
 /// ```
-#[derive(Debug, Deserialize)]
+#[derive(Debug, Clone, PartialEq, serde::Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct Config {
     /// Protocol configurations.
@@ -143,7 +142,7 @@ pub struct Config {
 ///
 /// This struct allows flexible deployment: gRPC-only, HTTP-only, or both.
 /// At least one protocol must be configured; the receiver validates this at startup.
-#[derive(Debug, Deserialize, Default)]
+#[derive(Debug, Clone, Default, PartialEq, serde::Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct Protocols {
     /// Optional gRPC server settings.
@@ -212,11 +211,12 @@ pub static OTLP_RECEIVER: ReceiverFactory<OtapPdata> = ReceiverFactory {
     name: OTLP_RECEIVER_URN,
     create: |pipeline: PipelineContext,
              node: NodeId,
-             node_config: Arc<NodeUserConfig>,
+             node_config: Arc<otel_arrow_dfe_engine::component_config::ResolvedNodeConfig>,
              receiver_config: &ReceiverConfig,
              capabilities: &otel_arrow_dfe_engine::capability::registry::Capabilities| {
         let admission = pipeline.admission().clone();
-        let mut receiver = OTLPReceiver::from_config(pipeline, &node_config.config)?;
+        let config = node_config.component_config::<Config>()?;
+        let mut receiver = OTLPReceiver::new(pipeline, (*config).clone());
         receiver.authorizer = capabilities
             .optional_shared::<BearerTokenAuthorizerCapability>()
             .map_err(
@@ -236,15 +236,37 @@ pub static OTLP_RECEIVER: ReceiverFactory<OtapPdata> = ReceiverFactory {
         Ok(ReceiverWrapper::shared(
             receiver,
             node,
-            node_config,
+            node_config.effective(),
             receiver_config,
         ))
     },
     wiring_contract: otel_arrow_dfe_engine::wiring_contract::WiringContract::UNRESTRICTED,
-    validate_config: otel_arrow_dfe_config::validation::validate_typed_config::<Config>,
+    resolve_config: |config| {
+        let config: Config = serde_json::from_value(config.clone()).map_err(|error| {
+            otel_arrow_dfe_config::error::Error::InvalidUserConfig {
+                error: error.to_string(),
+            }
+        })?;
+        validate_receiver_config(&config)?;
+        otel_arrow_dfe_engine::component_config::ResolvedComponentConfig::typed_safe(config)
+    },
+    snapshot_policy: otel_arrow_dfe_engine::component_config::ConfigSnapshotPolicy::TypedSafe,
 };
 
 impl OTLPReceiver {
+    fn new(pipeline_ctx: PipelineContext, config: Config) -> Self {
+        Self {
+            config,
+            metrics: Arc::new(Mutex::new(OtlpReceiverMetrics::register(&pipeline_ctx))),
+            admission_state: SharedReceiverAdmissionState::from_process_state(
+                &pipeline_ctx.memory_pressure_state(),
+            ),
+            rate_limiter: None,
+            global_max_concurrent_requests: None,
+            authorizer: None,
+        }
+    }
+
     /// Creates a new OTLPReceiver from a configuration object.
     ///
     /// Returns an error if:
@@ -260,46 +282,8 @@ impl OTLPReceiver {
             }
         })?;
 
-        // Validate that at least one protocol is configured.
-        if !config.protocols.is_valid() {
-            return Err(otel_arrow_dfe_config::error::Error::InvalidUserConfig {
-                error: "At least one protocol (grpc or http) must be configured under 'protocols'"
-                    .to_string(),
-            });
-        }
-        // Validate that gRPC and HTTP do not have conflicting listening addresses.
-        // Conflicts occur when:
-        // - Same port with either IP being unspecified (0.0.0.0 or ::), since unspecified binds all interfaces
-        // - Same port with identical specific IPs
-        // Different specific IPs on the same port are allowed (different network interfaces).
-        if let (Some(grpc), Some(http)) = (&config.protocols.grpc, &config.protocols.http) {
-            if grpc.listening_addr.port() == http.listening_addr.port() {
-                let g_ip = grpc.listening_addr.ip();
-                let h_ip = http.listening_addr.ip();
-                if g_ip.is_unspecified() || h_ip.is_unspecified() || g_ip == h_ip {
-                    return Err(otel_arrow_dfe_config::error::Error::InvalidUserConfig {
-                        error: format!(
-                            "gRPC and HTTP protocols have conflicting listening addresses ({} and {})",
-                            grpc.listening_addr, http.listening_addr
-                        ),
-                    });
-                }
-            }
-        }
-
-        // Register OTLP receiver metrics for this node.
-        let metrics = Arc::new(Mutex::new(OtlpReceiverMetrics::register(&pipeline_ctx)));
-
-        Ok(Self {
-            config,
-            metrics,
-            admission_state: SharedReceiverAdmissionState::from_process_state(
-                &pipeline_ctx.memory_pressure_state(),
-            ),
-            rate_limiter: None,
-            global_max_concurrent_requests: None,
-            authorizer: None,
-        })
+        validate_receiver_config(&config)?;
+        Ok(Self::new(pipeline_ctx, config))
     }
 
     fn tune_max_concurrent_requests(&mut self, downstream_capacity: usize) {
@@ -459,6 +443,30 @@ impl OTLPReceiver {
             source_detail,
         }
     }
+}
+
+fn validate_receiver_config(config: &Config) -> Result<(), otel_arrow_dfe_config::error::Error> {
+    if !config.protocols.is_valid() {
+        return Err(otel_arrow_dfe_config::error::Error::InvalidUserConfig {
+            error: "At least one protocol (grpc or http) must be configured under 'protocols'"
+                .to_string(),
+        });
+    }
+    if let (Some(grpc), Some(http)) = (&config.protocols.grpc, &config.protocols.http)
+        && grpc.listening_addr.port() == http.listening_addr.port()
+    {
+        let grpc_ip = grpc.listening_addr.ip();
+        let http_ip = http.listening_addr.ip();
+        if grpc_ip.is_unspecified() || http_ip.is_unspecified() || grpc_ip == http_ip {
+            return Err(otel_arrow_dfe_config::error::Error::InvalidUserConfig {
+                error: format!(
+                    "gRPC and HTTP protocols have conflicting listening addresses ({} and {})",
+                    grpc.listening_addr, http.listening_addr
+                ),
+            });
+        }
+    }
+    Ok(())
 }
 
 /// Type alias for the gRPC server future.

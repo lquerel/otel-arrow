@@ -9,9 +9,9 @@ use crate::tls_utils;
 use http::header::HeaderValue;
 use hyper_util::rt::TokioIo;
 use otel_arrow_dfe_config::byte_units;
+use otel_arrow_dfe_config::secret::RedactedString;
 use otel_arrow_dfe_config::tls::TlsClientConfig;
-use secrecy::{ExposeSecret, SecretString};
-use serde::Deserialize;
+use serde::{Deserialize, Serialize};
 use std::collections::{HashMap, HashSet};
 use std::io;
 use std::sync::Arc;
@@ -30,7 +30,7 @@ use tower::service_fn;
 ///
 /// The default is [`StartupCheck::None`], which preserves the existing lazy-connection
 /// behaviour.
-#[derive(Debug, Clone, Copy, Default, Deserialize, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, Default, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "snake_case")]
 pub enum StartupCheck {
     /// No startup check; connections are fully lazy (existing behavior).
@@ -50,7 +50,7 @@ pub enum StartupCheck {
 }
 
 /// Common configuration shared across gRPC clients.
-#[derive(Debug, Deserialize, Clone)]
+#[derive(Debug, Serialize, Deserialize, Clone, PartialEq)]
 #[serde(deny_unknown_fields)]
 pub struct GrpcClientSettings {
     /// The gRPC endpoint to connect to (e.g. `"http://localhost:4317"`).
@@ -164,9 +164,9 @@ pub struct GrpcClientSettings {
     /// [`GrpcClientSettings::validate`]. These coexist with any header
     /// propagation policy configured on the exporter.
     ///
-    /// Values are wrapped in [`SecretString`] so a metadata credential is not
+    /// Values are wrapped in [`RedactedString`] so a metadata credential is not
     /// accidentally leaked through `Debug`/telemetry; the cleartext is reached
-    /// only through an explicit [`ExposeSecret::expose_secret`] call -- during
+    /// only through an explicit [`RedactedString::expose`] call -- during
     /// [`GrpcClientSettings::validate`] and at the metadata-construction site.
     ///
     /// `GrpcClientSettings` is shared by the OTLP/gRPC exporter and the OTAP
@@ -174,7 +174,7 @@ pub struct GrpcClientSettings {
     /// metadata; the OTAP exporter applies them once as the initial metadata of
     /// each Arrow stream (see [`build_static_metadata`]).
     #[serde(default)]
-    pub headers: HashMap<String, SecretString>,
+    pub headers: HashMap<String, RedactedString>,
 }
 
 /// Error returned when building a gRPC [`Endpoint`] (including TLS/mTLS setup).
@@ -281,7 +281,7 @@ impl GrpcClientSettings {
                 );
                 continue;
             };
-            let Ok(mut val) = MetadataValue::try_from(value.expose_secret()) else {
+            let Ok(mut val) = MetadataValue::try_from(value.expose()) else {
                 otel_arrow_dfe_telemetry::otel_debug!(
                     "grpc.client.static_header_skip",
                     reason = "invalid ascii metadata value",
@@ -363,7 +363,7 @@ impl GrpcClientSettings {
                      `headers`; it is managed by the exporter"
                 )));
             }
-            if MetadataValue::try_from(value.expose_secret()).is_err() {
+            if MetadataValue::try_from(value.expose()).is_err() {
                 return Err(GrpcEndpointError::InvalidConfig(format!(
                     "header \"{name}\" has a value that cannot be represented as ASCII gRPC \
                      metadata (must be visible ASCII)"
@@ -928,7 +928,7 @@ mod tests {
             settings
                 .headers
                 .get("authorization")
-                .map(|v| v.expose_secret()),
+                .map(RedactedString::expose),
             Some("Basic super-secret-token"),
             "the cleartext must remain reachable via the explicit accessor"
         );
@@ -1011,14 +1011,14 @@ mod tests {
             settings
                 .headers
                 .get("authorization")
-                .map(|v| v.expose_secret()),
+                .map(RedactedString::expose),
             Some("Basic abc123")
         );
         assert_eq!(
             settings
                 .headers
                 .get("x-scope-orgid")
-                .map(|v| v.expose_secret()),
+                .map(RedactedString::expose),
             Some("tenant-1")
         );
 
@@ -1195,8 +1195,7 @@ mod tests {
             tls: Some(TlsClientConfig {
                 config: TlsConfig {
                     key_pem: Some(
-                        "-----BEGIN PRIVATE KEY-----\nMIIB\n-----END PRIVATE KEY-----\n"
-                            .to_string(),
+                        "-----BEGIN PRIVATE KEY-----\nMIIB\n-----END PRIVATE KEY-----\n".into(),
                     ),
                     ..TlsConfig::default()
                 },

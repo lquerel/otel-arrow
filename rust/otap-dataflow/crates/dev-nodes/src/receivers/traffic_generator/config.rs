@@ -157,7 +157,7 @@ pub struct Config {
 }
 
 /// Configuration to describe the traffic being sent
-#[derive(Clone, Deserialize, Serialize)]
+#[derive(Clone, PartialEq, Deserialize, Serialize)]
 #[serde(deny_unknown_fields)]
 pub struct TrafficConfig {
     /// How signal batches are paced within each production run.
