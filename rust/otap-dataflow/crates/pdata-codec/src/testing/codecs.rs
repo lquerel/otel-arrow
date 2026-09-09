@@ -10,9 +10,7 @@ use otel_arrow_dfe_pdata::views::otlp::bytes::logs::RawLogsData;
 use otel_arrow_dfe_pdata::views::otlp::bytes::metrics::RawMetricsData;
 use otel_arrow_dfe_pdata::views::otlp::bytes::traces::RawTraceData;
 
-use crate::codecs::otlp::{
-    OtlpBatcher, OtlpBestEffortDecoder, OtlpEncoder, count_items,
-};
+use crate::codecs::otlp::{OtlpBatcher, OtlpBestEffortDecoder, OtlpEncoder, count_items};
 use crate::{
     BatchProfile, BatchSizer, BatchingSupport, CodecBatcherRegistration, CodecError, CodecMetadata,
     CodecOperation, CodecRegistration, PdataDecoder, PdataEncoding,

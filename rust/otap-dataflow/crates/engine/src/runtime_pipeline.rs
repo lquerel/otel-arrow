@@ -40,6 +40,7 @@ use crate::{exporter::ExporterWrapper, processor::ProcessorWrapper, receiver::Re
 use otel_arrow_dfe_config::DeployedPipelineKey;
 use otel_arrow_dfe_config::pipeline::PipelineConfig;
 use otel_arrow_dfe_config::policy::TelemetryPolicy;
+use otel_arrow_dfe_pdata_codec::DecodePolicy;
 use otel_arrow_dfe_telemetry::event::ObservedEventReporter;
 use otel_arrow_dfe_telemetry::metrics::{MeasurementMetricSet, MetricSetSnapshot};
 use otel_arrow_dfe_telemetry::reporter::{MetricsReporter, ReportOutcome};
@@ -239,6 +240,8 @@ pub struct RuntimePipeline<PData: Debug> {
     admission_metrics: Vec<crate::admission::metrics::AdmissionMetricsHandle>,
     /// Flags controlling pipeline-internal metrics collection/reporting.
     telemetry_policy: TelemetryPolicy,
+    /// Validation policy supplied to lazy pipeline-local pdata decoders.
+    decode_policy: DecodePolicy,
 }
 
 async fn flush_metrics_reporter(
@@ -370,6 +373,7 @@ impl<PData: 'static + Debug + Clone> RuntimePipeline<PData> {
         )>,
         nodes: NodeDefs<PData, PipeNode>,
         telemetry_policy: TelemetryPolicy,
+        decode_policy: DecodePolicy,
     ) -> Self {
         Self {
             config,
@@ -381,6 +385,7 @@ impl<PData: 'static + Debug + Clone> RuntimePipeline<PData> {
             channel_metrics: Default::default(),
             admission_metrics: Default::default(),
             telemetry_policy,
+            decode_policy,
         }
     }
 
@@ -438,6 +443,7 @@ impl<PData: 'static + Debug + Clone + ReceivedAtNode + Unwindable + FlowMetricHo
             channel_metrics,
             admission_metrics,
             telemetry_policy,
+            decode_policy,
         } = self;
 
         let metric_level = telemetry_policy.runtime_metrics;
@@ -471,7 +477,7 @@ impl<PData: 'static + Debug + Clone + ReceivedAtNode + Unwindable + FlowMetricHo
             .build()
             .expect("Failed to create runtime");
         let local_tasks = LocalSet::new();
-        let runtime_services = PipelineRuntimeServices::new(Default::default())?;
+        let runtime_services = PipelineRuntimeServices::new(decode_policy)?;
         // ToDo create an optimized version of FuturesUnordered that can be used for !Send, !Sync tasks
         let mut futures = FuturesUnordered::new();
 

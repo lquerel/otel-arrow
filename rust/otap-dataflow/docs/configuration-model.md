@@ -431,6 +431,7 @@ Optional observability policies are supported at:
 
 - `channel_capacity`
 - `health`
+- `pdata`
 - `telemetry`
 
 `resources` is intentionally not supported for observability and is rejected.
@@ -492,11 +493,14 @@ engine:
 
 ## Policy Hierarchy
 
-Policies include channel capacity, health, runtime telemetry, resources
-controls, runtime recovery, and transport headers:
+Policies include channel capacity, health, pdata decoding, runtime telemetry,
+resource controls, runtime recovery, and transport headers:
 
 ```yaml
 policies:
+  pdata:
+    # best_effort uses faster borrowed views; strict validates complete batches
+    decode_validation: best_effort
   channel_capacity:
       control:
         node: 256
@@ -545,6 +549,13 @@ policies:
           type: all_captured
 ```
 
+`pdata.decode_validation` controls conversion from encoded pdata into native
+OTAP records. The default `best_effort` mode permits codecs to use faster
+borrowed parsers that may not discover malformed content they do not visit.
+`strict` requires the decoder to validate the complete encoded batch before it
+returns records and can cost additional CPU and allocations. Encoded
+pass-through does not decode or validate a batch in either mode.
+
 For full transport header policy documentation, see
 [transport-headers.md](transport-headers.md).
 
@@ -562,6 +573,7 @@ Defaults at top-level:
 - `channel_capacity.control.pipeline = 256`
 - `channel_capacity.control.completion = 512`
 - `channel_capacity.pdata = 128`
+- `pdata.decode_validation = best_effort`
 - `telemetry.pipeline_metrics = true`
 - `telemetry.tokio_metrics = true`
 - `telemetry.runtime_metrics = basic`
@@ -713,7 +725,7 @@ Telemetry policy notes:
 Resolution semantics:
 
 - precedence is applied at policy-family level (`channel_capacity`, `health`,
-  `telemetry`, and others)
+  `pdata`, `telemetry`, and others)
 - selected lower scope replaces upper scope for that family
 - no cross-scope deep merge of nested fields
 - `resources` is the exception: `core_allocation`, `memory_limiter`, and

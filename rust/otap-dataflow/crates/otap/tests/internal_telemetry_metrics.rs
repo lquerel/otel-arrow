@@ -295,6 +295,7 @@ groups: {{}}
     let pipeline_id = observability_pipeline.pipeline_id.clone();
     let channel_capacity = observability_pipeline.policies.channel_capacity.clone();
     let telemetry_policy = observability_pipeline.policies.telemetry.clone();
+    let pdata_policy = observability_pipeline.policies.pdata.clone();
     let controller_context = ControllerContext::new(registry.clone());
     let pipeline_context = controller_context.pipeline_context_with(
         pipeline_group_id.clone(),
@@ -310,6 +311,7 @@ groups: {{}}
             observability_pipeline.pipeline,
             channel_capacity.clone(),
             telemetry_policy,
+            pdata_policy,
             None,
             std::collections::BTreeMap::new(),
             None,

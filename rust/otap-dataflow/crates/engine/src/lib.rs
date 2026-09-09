@@ -41,7 +41,8 @@ use otel_arrow_dfe_config::{
     node::NodeUserConfig,
     pipeline::{DispatchPolicy, PipelineConfig},
     policy::{
-        ChannelCapacityPolicy, RateLimiterDeclarationScope, RateLimiterPolicy, TelemetryPolicy,
+        ChannelCapacityPolicy, PdataPolicy, RateLimiterDeclarationScope, RateLimiterPolicy,
+        TelemetryPolicy,
     },
     transport_headers_policy::{
         HeaderCapturePolicy, HeaderPropagationPolicy, TransportHeadersPolicy,
@@ -765,6 +766,7 @@ impl<PData: 'static + Clone + Debug> PipelineFactory<PData> {
         mut config: PipelineConfig,
         channel_capacity_policy: ChannelCapacityPolicy,
         telemetry_policy: TelemetryPolicy,
+        pdata_policy: PdataPolicy,
         transport_headers_policy: Option<TransportHeadersPolicy>,
         rate_limiter_policies: BTreeMap<String, RateLimiterPolicy>,
         rate_limiter_scope: Option<RateLimiterDeclarationScope>,
@@ -1247,6 +1249,7 @@ impl<PData: 'static + Clone + Debug> PipelineFactory<PData> {
             extension_wrappers,
             nodes,
             telemetry_policy,
+            runtime_services::decode_policy_from_config(&pdata_policy),
         );
         let wirings = edges
             .into_iter()

@@ -1537,12 +1537,22 @@ mod test {
     #[test]
     fn encoded_conversion_failure_preserves_delivery_ownership() {
         use bytes::Bytes;
-        use otel_arrow_dfe_pdata_codec::{CodecService, PdataEncoding, PdataFormat};
+        use otel_arrow_dfe_pdata::proto::opentelemetry::logs::v1::LogsData;
+        use otel_arrow_dfe_pdata_codec::{
+            CodecServiceBuilder, DecodePolicy, DecodeValidation, PdataEncoding, PdataFormat,
+        };
+        use prost::Message;
 
         let peer = "127.0.0.1:4317".parse().expect("peer address");
-        let bytes = Bytes::from_static(&[0x0a, 0x05, 0x01]);
+        let mut malformed = LogsData::default().encode_to_vec();
+        // resource_logs { schema_url: <declared length 5, one byte present> }
+        malformed.extend_from_slice(&[0x0a, 0x03, 0x1a, 0x05, 0x00]);
+        let bytes = Bytes::from(malformed);
         let pointer = bytes.as_ptr();
-        let service = CodecService::new().expect("valid codec registry");
+        let service = CodecServiceBuilder::from_global_registry()
+            .expect("valid codec registry")
+            .with_decode_policy(DecodePolicy::new(DecodeValidation::Strict))
+            .build();
         let codec = service
             .registry()
             .resolve(&PdataEncoding::OTLP)

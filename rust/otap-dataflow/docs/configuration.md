@@ -469,11 +469,11 @@ engine:
 ```
 
 Observability pipelines use the same node and connection model as regular
-pipelines. They support `channel_capacity`, `health`, and `telemetry` policies,
-but resource policies are intentionally not supported there. The pipeline is
-mandatory and must contain exactly one connected internal telemetry receiver.
-The receiver defaults to `signals: [logs, metrics]`, while either signal can be
-selected independently. Logs must remain enabled
+pipelines. They support `channel_capacity`, `health`, `pdata`, and `telemetry`
+policies, but resource policies are intentionally not supported there. The
+pipeline is mandatory and must contain exactly one connected internal telemetry
+receiver. The receiver defaults to `signals: [logs, metrics]`, while either
+signal can be selected independently. Logs must remain enabled
 when a log provider uses `its`. Optional `metrics.interval` and `metrics.views`
 fields customize periodic export when metrics are selected. A logs-only
 receiver drains the private ITS metric accumulator without converting or

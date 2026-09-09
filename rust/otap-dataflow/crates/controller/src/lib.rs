@@ -55,7 +55,7 @@ use otel_arrow_dfe_config::pipeline::telemetry::AttributeValue;
 use otel_arrow_dfe_config::pipeline_group::PipelineGroupConfig;
 use otel_arrow_dfe_config::policy::MemoryLimiterMode;
 use otel_arrow_dfe_config::policy::{
-    ChannelCapacityPolicy, CoreAllocation, CoreAllocationStrategy, RateLimiterPolicy,
+    ChannelCapacityPolicy, CoreAllocation, CoreAllocationStrategy, PdataPolicy, RateLimiterPolicy,
     RuntimeRecoveryPolicy, TelemetryPolicy,
 };
 use otel_arrow_dfe_config::topic::{
@@ -1713,6 +1713,7 @@ impl<
                     pipeline_entry.pipeline.clone(),
                     pipeline_entry.policies.channel_capacity.clone(),
                     pipeline_entry.policies.telemetry.clone(),
+                    pipeline_entry.policies.pdata.clone(),
                     pipeline_entry.policies.transport_headers.clone(),
                     pipeline_entry.policies.rate_limiters.clone(),
                     pipeline_entry.policies.rate_limiter_scope.clone(),
@@ -2543,6 +2544,7 @@ impl<
         pipeline_config: PipelineConfig,
         channel_capacity_policy: ChannelCapacityPolicy,
         telemetry_policy: TelemetryPolicy,
+        pdata_policy: PdataPolicy,
         transport_headers_policy: Option<TransportHeadersPolicy>,
         rate_limiter_policies: BTreeMap<String, RateLimiterPolicy>,
         rate_limiter_scope: Option<otel_arrow_dfe_config::policy::RateLimiterDeclarationScope>,
@@ -2605,6 +2607,7 @@ impl<
                         pipeline_config,
                         channel_capacity_policy,
                         telemetry_policy,
+                        pdata_policy,
                         transport_headers_policy,
                         rate_limiter_policies,
                         rate_limiter_scope,
@@ -2678,6 +2681,7 @@ impl<
         );
         let channel_capacity_policy = observability_pipeline.policies.channel_capacity;
         let telemetry_policy = observability_pipeline.policies.telemetry;
+        let pdata_policy = observability_pipeline.policies.pdata;
         let pipeline_config = observability_pipeline.pipeline;
 
         let internal_telemetry_settings = telemetry_system.internal_telemetry_settings();
@@ -2694,6 +2698,7 @@ impl<
             pipeline_config,
             channel_capacity_policy,
             telemetry_policy,
+            pdata_policy,
             None,
             BTreeMap::new(),
             None,
@@ -2745,6 +2750,7 @@ impl<
         pipeline_config: PipelineConfig,
         channel_capacity_policy: ChannelCapacityPolicy,
         telemetry_policy: TelemetryPolicy,
+        pdata_policy: PdataPolicy,
         transport_headers_policy: Option<TransportHeadersPolicy>,
         rate_limiter_policies: BTreeMap<String, RateLimiterPolicy>,
         rate_limiter_scope: Option<otel_arrow_dfe_config::policy::RateLimiterDeclarationScope>,
@@ -2805,6 +2811,7 @@ impl<
                     pipeline_config.clone(),
                     channel_capacity_policy,
                     telemetry_policy,
+                    pdata_policy,
                     transport_headers_policy,
                     rate_limiter_policies,
                     rate_limiter_scope,
