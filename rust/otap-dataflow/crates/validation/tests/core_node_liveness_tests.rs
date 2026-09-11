@@ -213,6 +213,7 @@ fn run_pipeline_with_condition<F>(
             config,
             channel_capacity_policy.clone(),
             TelemetryPolicy::default(),
+            Default::default(),                // pdata_policy
             None,                              // transport_headers_policy
             std::collections::BTreeMap::new(), // rate_limiter_policies
             None,                              // rate_limiter_scope
@@ -362,6 +363,7 @@ where
             config,
             channel_capacity_policy.clone(),
             TelemetryPolicy::default(),
+            Default::default(),                // pdata_policy
             None,                              // transport_headers_policy
             std::collections::BTreeMap::new(), // rate_limiter_policies
             None,                              // rate_limiter_scope

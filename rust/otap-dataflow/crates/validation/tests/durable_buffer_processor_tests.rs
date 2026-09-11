@@ -18,7 +18,7 @@ use common::counting_exporter::{self, COUNTING_EXPORTER_URN};
 use common::flaky_exporter::{self, FLAKY_EXPORTER_URN};
 use otel_arrow_dfe_config::observed_state::{ObservedStateSettings, SendPolicy};
 use otel_arrow_dfe_config::pipeline::{PipelineConfig, PipelineConfigBuilder, PipelineType};
-use otel_arrow_dfe_config::policy::{ChannelCapacityPolicy, TelemetryPolicy};
+use otel_arrow_dfe_config::policy::{ChannelCapacityPolicy, PdataPolicy, TelemetryPolicy};
 use otel_arrow_dfe_config::{DeployedPipelineKey, PipelineGroupId, PipelineId};
 use otel_arrow_dfe_core_nodes::exporters::noop_exporter::NOOP_EXPORTER_URN;
 use otel_arrow_dfe_core_nodes::processors::durable_buffer_processor::DURABLE_BUFFER_URN;
@@ -469,6 +469,7 @@ where
             config.clone(),
             channel_capacity_policy.clone(),
             TelemetryPolicy::default(),
+            PdataPolicy::default(),
             None,                              // transport_headers_policy
             std::collections::BTreeMap::new(), // rate_limiter_policies
             None,                              // rate_limiter_scope
@@ -764,6 +765,7 @@ where
             config.clone(),
             channel_capacity_policy.clone(),
             TelemetryPolicy::default(),
+            PdataPolicy::default(),
             None,                              // transport_headers_policy
             std::collections::BTreeMap::new(), // rate_limiter_policies
             None,                              // rate_limiter_scope

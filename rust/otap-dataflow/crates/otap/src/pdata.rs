@@ -18,7 +18,7 @@ use std::num::NonZeroU64;
 
 use async_trait::async_trait;
 use otel_arrow_dfe_config::PortName;
-use otel_arrow_dfe_config::{SignalFormat, SignalType};
+use otel_arrow_dfe_config::SignalType;
 use otel_arrow_dfe_engine::_private::AckNackRouting;
 use otel_arrow_dfe_engine::control::{
     AckMsg, CallData, Frame, NackMsg, NodeControlMsg, RouteData, nanos_since_birth,
@@ -760,12 +760,6 @@ impl OtapPdata {
     #[must_use]
     pub fn signal_type(&self) -> SignalType {
         self.payload.signal_type()
-    }
-
-    /// Returns the format of signal represented by this `OtapPdata` instance.
-    #[must_use]
-    pub const fn signal_format(&self) -> SignalFormat {
-        self.payload.signal_format()
     }
 
     /// True if the payload is empty. By definition, we can skip sending an
@@ -1543,12 +1537,22 @@ mod test {
     #[test]
     fn encoded_conversion_failure_preserves_delivery_ownership() {
         use bytes::Bytes;
-        use otel_arrow_dfe_pdata_codec::{CodecService, PdataEncoding, PdataFormat};
+        use otel_arrow_dfe_pdata::proto::opentelemetry::logs::v1::LogsData;
+        use otel_arrow_dfe_pdata_codec::{
+            CodecServiceBuilder, DecodePolicy, DecodeValidation, PdataEncoding, PdataFormat,
+        };
+        use prost::Message;
 
         let peer = "127.0.0.1:4317".parse().expect("peer address");
-        let bytes = Bytes::from_static(&[0x0a, 0x05, 0x01]);
+        let mut malformed = LogsData::default().encode_to_vec();
+        // resource_logs { schema_url: <declared length 5, one byte present> }
+        malformed.extend_from_slice(&[0x0a, 0x03, 0x1a, 0x05, 0x00]);
+        let bytes = Bytes::from(malformed);
         let pointer = bytes.as_ptr();
-        let service = CodecService::new().expect("valid codec registry");
+        let service = CodecServiceBuilder::from_global_registry()
+            .expect("valid codec registry")
+            .with_decode_policy(DecodePolicy::new(DecodeValidation::Strict))
+            .build();
         let codec = service
             .registry()
             .resolve(&PdataEncoding::OTLP)
@@ -1583,10 +1587,12 @@ mod test {
     }
 
     fn create_test_otap_pdata() -> OtapPdata {
-        use otel_arrow_dfe_pdata::{OtapArrowRecords, TryIntoWithOptions};
+        use otel_arrow_dfe_pdata_codec::CodecService;
 
         let payload = create_test_pdata().into_parts().1;
-        let records: OtapArrowRecords = payload.try_into_with_default().expect("OTAP conversion");
+        let records = payload
+            .try_into_otap(&CodecService::new().expect("valid codec registry"))
+            .expect("OTAP conversion");
         OtapPdata::new_default(records.into())
     }
 

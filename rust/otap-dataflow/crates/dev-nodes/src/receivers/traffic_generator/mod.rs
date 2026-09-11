@@ -31,8 +31,6 @@ use otel_arrow_dfe_engine::{
 };
 use otel_arrow_dfe_otap::OTAP_RECEIVER_FACTORIES;
 use otel_arrow_dfe_otap::pdata::OtapPdata;
-#[cfg(test)]
-use otel_arrow_dfe_pdata::TryIntoWithOptions;
 use otel_arrow_dfe_pdata_codec::OtapPayload;
 use otel_arrow_dfe_telemetry::metrics::MetricSet;
 use serde_json::Value;
@@ -777,6 +775,16 @@ mod tests {
     use super::config::{DataSource, GenerationStrategy};
     use super::*;
 
+    fn into_otlp(payload: OtapPayload) -> OtlpProtoBytes {
+        let encoded = payload
+            .into_encoded_for_test(
+                otel_arrow_dfe_pdata_codec::PdataEncoding::OTLP,
+                Default::default(),
+            )
+            .expect("OTLP conversion");
+        OtlpProtoBytes::new_from_bytes(encoded.signal_type(), encoded.into_bytes())
+    }
+
     use crate::receivers::traffic_generator::config::{Config, TrafficConfig};
     use otel_arrow_dfe_config::node::NodeUserConfig;
     use otel_arrow_dfe_config::transport_headers::ValueKind;
@@ -892,10 +900,7 @@ mod tests {
 
     /// Convert OtapPdata signal to OtlpProtoMessage for testing purposes.
     fn pdata_to_otlp_message(value: OtapPdata) -> OtlpProtoMessage {
-        let otlp_bytes: OtlpProtoBytes = value
-            .payload()
-            .try_into_with_default()
-            .expect("can convert signal to otlp bytes");
+        let otlp_bytes = into_otlp(value.payload().clone());
         match otlp_bytes {
             OtlpProtoBytes::ExportLogsRequest(bytes) => {
                 OtlpProtoMessage::Logs(LogsData::decode(bytes.as_ref()).expect("can decode bytes"))
