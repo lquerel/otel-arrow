@@ -19,6 +19,7 @@ pub struct ArrowRecordsBuilder {
     curr_log_id: u16,
     logs: LogsRecordBatchBuilder,
     log_attrs: StrKeysAttributesRecordBatchBuilder<u16>,
+    observed_times: Vec<Option<i64>>,
 }
 
 impl Default for ArrowRecordsBuilder {
@@ -35,17 +36,29 @@ impl ArrowRecordsBuilder {
             curr_log_id: 0,
             logs: LogsRecordBatchBuilder::new(),
             log_attrs: StrKeysAttributesRecordBatchBuilder::<u16>::new(),
+            observed_times: Vec::new(),
         }
-    }
-
-    pub(crate) const fn len(&self) -> u16 {
-        // Current log record ID is incremented for each new log appended
-        // so it can be used to get the number of logs in the builder.
-        self.curr_log_id
     }
 
     /// Appends a parsed syslog message to the builder.
     pub fn append_syslog(&mut self, syslog_message: ParsedSyslogMessage<'_>) {
+        self.append_syslog_inner(syslog_message, None);
+    }
+
+    /// Appends a parsed message with its receiver-observed timestamp.
+    pub(crate) fn append_syslog_with_observed_time(
+        &mut self,
+        syslog_message: ParsedSyslogMessage<'_>,
+        observed_time: i64,
+    ) {
+        self.append_syslog_inner(syslog_message, Some(observed_time));
+    }
+
+    fn append_syslog_inner(
+        &mut self,
+        syslog_message: ParsedSyslogMessage<'_>,
+        observed_time: Option<i64>,
+    ) {
         self.logs
             .append_time_unix_nano(syslog_message.timestamp().map(|v| v as i64).unwrap_or(0));
 
@@ -73,6 +86,7 @@ impl ArrowRecordsBuilder {
         }
 
         self.logs.append_id(Some(self.curr_log_id));
+        self.observed_times.push(observed_time);
 
         self.curr_log_id += 1;
     }
@@ -97,9 +111,11 @@ impl ArrowRecordsBuilder {
             .scope
             .append_dropped_attributes_count_n(0, log_record_count);
 
-        let observed_time = Utc::now().timestamp_nanos_opt().unwrap_or(0);
-        self.logs
-            .append_observed_time_unix_nano_n(observed_time, log_record_count);
+        let build_time = Utc::now().timestamp_nanos_opt().unwrap_or(0);
+        for observed_time in self.observed_times {
+            self.logs
+                .append_observed_time_unix_nano(observed_time.unwrap_or(build_time));
+        }
         self.logs.append_schema_url_n(None, log_record_count);
         self.logs
             .append_dropped_attributes_count_n(0, log_record_count);
