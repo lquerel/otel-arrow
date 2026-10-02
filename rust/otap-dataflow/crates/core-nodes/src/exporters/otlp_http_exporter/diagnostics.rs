@@ -14,7 +14,7 @@ use otel_arrow_dfe_telemetry::attributes::AttributeEnum;
 use otel_arrow_dfe_telemetry::diagnostics::{
     DiagnosticErrorKind, DiagnosticReport, DiagnosticTracker, ReportKind,
 };
-use std::fmt::Display;
+use otel_arrow_dfe_telemetry::self_tracing::LogRecord;
 use std::time::Instant;
 
 #[cfg(test)]
@@ -60,12 +60,12 @@ impl DeliveryDiagnostic {
     /// routing. The tracker evaluates `detail` only when selecting a first
     /// failure or summary; only then is its matching retryability replaced.
     /// Suppressed failures return `None` and leave both sample values intact.
-    pub(super) fn failure<D: Display>(
+    pub(super) fn failure(
         &mut self,
         now: Instant,
         category: OtlpHttpExporterErrorType,
         retryable: bool,
-        detail: impl FnOnce() -> D,
+        detail: impl FnOnce() -> LogRecord,
     ) -> Option<DiagnosticReport<OtlpHttpExporterErrorType>> {
         let report = self.tracker.failure(now, category, detail);
         if report.is_some() {
@@ -112,14 +112,14 @@ impl DeliveryDiagnostic {
                 name: "otlp.exporter.http.export_recovered", report: &report,
                 diagnostic_kind = "recovery", signal = signal.as_str(), stage = "delivery",
                 message = "OTLP HTTP export recovered",
-                error = report.detail.as_str()
+                error = report.detail_str()
             );
         } else {
             otel_arrow_dfe_telemetry::otel_diagnostic_report!(
                 target: "otel.exporter.otlp_http", level: otel_warn,
                 name: "otlp.exporter.http.export_error", report: &report,
                 diagnostic_kind = diagnostic_kind(report.kind), signal = signal.as_str(), stage = "delivery",
-                message = report.detail.as_str(), retryable = self.sample_retryable
+                message = report.detail_str(), retryable = self.sample_retryable
             );
         }
     }
@@ -148,7 +148,7 @@ pub(super) fn emit_preparation(
             target: "otel.exporter.otlp_http", level: otel_warn,
             name: "otlp.exporter.http.preparation_error", report: &report,
             diagnostic_kind = diagnostic_kind(report.kind), signal = signal.as_str(), stage = "preparation",
-            message = "Failed to prepare OTLP HTTP export", error = report.detail.as_str()
+            message = "Failed to prepare OTLP HTTP export", error = report.detail_str()
         );
     }
 }
@@ -183,7 +183,7 @@ pub(super) fn emit_notification(
             target: "otel.exporter.otlp_http", level: otel_warn,
             name: "otlp.exporter.http.notification_error", report: &report,
             diagnostic_kind = diagnostic_kind(report.kind), signal = signal.as_str(), stage = "notification",
-            message = message, error = report.detail.as_str()
+            message = message, error = report.detail_str()
         );
     }
 }

@@ -43,7 +43,10 @@ fn suppression_precedes_all_subscribers() {
                     DiagnosticErrorKind::Transport,
                     || {
                         formats.set(formats.get() + 1);
-                        "connection refused"
+                        otel_arrow_dfe_telemetry::otel_diagnostic_detail!(
+                            "test.detail",
+                            message = "connection refused"
+                        )
                     },
                 ) {
                     otel_arrow_dfe_telemetry::otel_diagnostic_report!(
