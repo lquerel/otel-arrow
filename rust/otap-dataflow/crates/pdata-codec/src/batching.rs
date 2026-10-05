@@ -60,8 +60,9 @@ impl BatchSizer {
 #[derive(Clone, Debug, Deserialize, PartialEq, Eq)]
 #[serde(deny_unknown_fields)]
 pub struct BatchProfile {
-    /// Flush threshold in the selected sizing unit.
-    pub min_size: Option<NonZeroUsize>,
+    /// Lower bound for flushing and passthrough in the selected sizing unit.
+    /// Defaults to `max_size` when unset; zero allows any input up to `max_size`.
+    pub min_size: Option<usize>,
     /// Optional best-effort maximum output size in that same unit.
     pub max_size: Option<NonZeroUsize>,
     /// Unit supported by the selected native batcher or OTAP fallback.
@@ -89,7 +90,7 @@ impl BatchProfile {
     #[must_use]
     pub const fn otap() -> Self {
         Self {
-            min_size: NonZeroUsize::new(8192),
+            min_size: Some(8192),
             max_size: None,
             sizer: BatchSizer::Items,
             max_split_fragments: None,
@@ -102,7 +103,7 @@ impl BatchProfile {
     #[must_use]
     pub const fn otlp() -> Self {
         Self {
-            min_size: NonZeroUsize::new(262144),
+            min_size: Some(262144),
             max_size: None,
             sizer: BatchSizer::Bytes,
             max_split_fragments: default_fragments(),
@@ -113,11 +114,11 @@ impl BatchProfile {
 
     /// Checks representation-independent sizing constraints.
     pub fn validate(&self) -> Result<(), CodecError> {
-        if self.min_size.or(self.max_size).is_none() {
+        if self.min_size.is_none() && self.max_size.is_none() {
             return Err(format_error("max_size or min_size must be set"));
         }
         if let (Some(max), Some(min)) = (self.max_size, self.min_size)
-            && max < min
+            && max.get() < min
         {
             return Err(format_error("max_size must be >= min_size or unset"));
         }
@@ -131,9 +132,20 @@ impl BatchProfile {
     #[must_use]
     pub fn lower_limit(&self) -> usize {
         self.min_size
-            .or(self.max_size)
-            .expect("validated batching profile")
-            .get()
+            .or(self.max_size.map(NonZeroUsize::get))
+            .expect("validated batching profile has at least one size bound")
+    }
+
+    /// Whether an input is already within the inclusive accepted size range.
+    #[must_use]
+    pub fn in_passthrough_range(&self, size: usize) -> bool {
+        size >= self.lower_limit() && self.max_size.is_none_or(|max| size <= max.get())
+    }
+
+    /// Whether every input is forwarded without batching or splitting.
+    #[must_use]
+    pub const fn forwards_everything(&self) -> bool {
+        matches!(self.min_size, Some(0)) && self.max_size.is_none()
     }
 }
 
