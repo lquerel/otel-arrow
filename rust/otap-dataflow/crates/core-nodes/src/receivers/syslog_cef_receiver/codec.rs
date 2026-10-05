@@ -43,7 +43,7 @@ const MAX_NATIVE_LOGS: usize = 65_535;
 const MAX_PREDICTED_BATCH_CAPACITY: usize = 32 * 1024;
 
 const SYSLOG_BATCH_PROFILE: BatchProfile = BatchProfile {
-    min_size: NonZeroUsize::new(8192),
+    min_size: Some(8192),
     max_size: NonZeroUsize::new(MAX_NATIVE_LOGS),
     sizer: BatchSizer::Items,
     max_split_fragments: None,
@@ -748,7 +748,7 @@ mod tests {
         let first = batch(&[b"one", b"two"], 11);
         let second = batch(&[b"three"], 11);
         let profile = BatchProfile {
-            min_size: NonZeroUsize::new(4),
+            min_size: Some(4),
             max_size: NonZeroUsize::new(4),
             sizer: BatchSizer::Items,
             max_split_fragments: None,
@@ -787,7 +787,7 @@ mod tests {
         let first = batch(&[b"one", b"two"], 11);
         let second = batch(&[b"three"], 22);
         let profile = BatchProfile {
-            min_size: NonZeroUsize::new(2),
+            min_size: Some(2),
             max_size: NonZeroUsize::new(2),
             sizer: BatchSizer::Items,
             max_split_fragments: None,
