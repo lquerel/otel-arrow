@@ -164,6 +164,7 @@ pub static HOST_METRICS_RECEIVER: ReceiverFactory<OtapPdata> = ReceiverFactory {
          _capabilities: &otel_arrow_dfe_engine::capability::registry::Capabilities| {
             create_host_metrics_receiver(pipeline, node, node_config, receiver_config)
         },
+    context_declarations: None,
     wiring_contract: otel_arrow_dfe_engine::wiring_contract::WiringContract::UNRESTRICTED,
     resolve_config: resolve_host_metrics_config,
     snapshot_policy: otel_arrow_dfe_engine::component_config::ConfigSnapshotPolicy::CustomSafe,
@@ -183,7 +184,7 @@ fn create_host_metrics_receiver(
     }
     let resolved = node_config.component_config::<ResolvedHostMetricsConfig>()?;
     let mut receiver = HostMetricsReceiver::from_resolved(resolved.runtime.clone())?;
-    receiver.metrics = Some(pipeline.register_metrics::<HostMetricsReceiverMetrics>());
+    receiver.metrics = Some(HostMetricsReceiverMetrics::register(&pipeline));
     Ok(ReceiverWrapper::local(
         receiver,
         node,

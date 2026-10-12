@@ -107,6 +107,7 @@ pub static DEBUG_PROCESSOR_FACTORY: otel_arrow_dfe_engine::ProcessorFactory<Otap
              _capabilities: &otel_arrow_dfe_engine::capability::registry::Capabilities| {
                 create_debug_processor(pipeline_ctx, node, node_config, proc_cfg)
             },
+        context_declarations: None,
         wiring_contract: otel_arrow_dfe_engine::wiring_contract::WiringContract::UNRESTRICTED,
         resolve_config: resolve_typed_config::<Config>,
         snapshot_policy: ConfigSnapshotPolicy::TypedSafe,
@@ -904,12 +905,11 @@ mod tests {
                         .any(|(k, v)| *k == "signal" && v.eq_ignore_ascii_case("logs"));
                     if has_logs_signal {
                         for (field, value) in iter {
-                            if field.name == "consumed.events" {
-                                if let otel_arrow_dfe_telemetry::metrics::MetricValue::U64(c) =
+                            if field.name == "consumed.events"
+                                && let otel_arrow_dfe_telemetry::metrics::MetricValue::U64(c) =
                                     value
-                                {
-                                    expected_log_events = *c;
-                                }
+                            {
+                                expected_log_events = *c;
                             }
                         }
                     }

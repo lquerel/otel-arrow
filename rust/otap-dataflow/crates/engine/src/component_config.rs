@@ -383,6 +383,17 @@ impl ResolvedPipelineConfig {
         &self.effective
     }
 
+    /// Returns one factory-resolved node configuration by id.
+    #[must_use]
+    pub fn node(&self, id: &NodeId) -> Option<&Arc<ResolvedNodeConfig>> {
+        self.nodes.get(id)
+    }
+
+    /// Iterates over all factory-resolved node configurations.
+    pub fn nodes(&self) -> impl Iterator<Item = (&NodeId, &Arc<ResolvedNodeConfig>)> {
+        self.nodes.iter()
+    }
+
     /// Compares runtime semantics while ignoring only the pipeline policy block.
     #[must_use]
     pub fn eq_ignoring_policies(&self, other: &Self) -> bool {

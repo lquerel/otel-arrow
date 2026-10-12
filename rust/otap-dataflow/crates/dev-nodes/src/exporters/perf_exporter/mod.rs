@@ -85,6 +85,7 @@ pub static PERF_EXPORTER: ExporterFactory<OtapPdata> = ExporterFactory {
                 exporter_config,
             ))
         },
+    context_declarations: None,
     wiring_contract: otel_arrow_dfe_engine::wiring_contract::WiringContract::UNRESTRICTED,
     resolve_config: resolve_typed_config::<Config>,
     snapshot_policy: ConfigSnapshotPolicy::TypedSafe,

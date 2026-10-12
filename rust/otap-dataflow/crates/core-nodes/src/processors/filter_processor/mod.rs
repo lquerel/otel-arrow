@@ -14,7 +14,7 @@ otel_arrow_dfe_telemetry::otel_component_scope!(
 );
 
 use self::config::Config;
-use self::metrics::FilterPdataMetrics;
+use self::metrics::FilterDropMetrics;
 use async_trait::async_trait;
 use linkme::distributed_slice;
 use otel_arrow_dfe_config::SignalType;
@@ -53,7 +53,7 @@ pub const FILTER_PROCESSOR_URN: &str = "urn:otel:processor:filter";
 /// processor that outputs all data received to stdout
 pub struct FilterProcessor {
     config: Config,
-    metrics: MeasurementMetricSet<FilterPdataMetrics>,
+    metrics: MeasurementMetricSet<FilterDropMetrics>,
     compute_duration: ComputeDuration,
     /// Reusable paged-bitmap pool for filtering metric child batches across
     /// successive `Message::PData` calls. Storing the pool on the processor
@@ -97,6 +97,7 @@ pub static FILTER_PROCESSOR_FACTORY: otel_arrow_dfe_engine::ProcessorFactory<Ota
              _capabilities: &otel_arrow_dfe_engine::capability::registry::Capabilities| {
                 create_filter_processor(pipeline_ctx, node, node_config, proc_cfg)
             },
+        context_declarations: None,
         wiring_contract: otel_arrow_dfe_engine::wiring_contract::WiringContract::UNRESTRICTED,
         resolve_config: resolve_typed_config::<Config>,
         snapshot_policy: ConfigSnapshotPolicy::TypedSafe,
@@ -107,7 +108,7 @@ impl FilterProcessor {
     #[must_use]
     #[allow(dead_code)]
     pub fn new(config: Config, pipeline_ctx: PipelineContext) -> Self {
-        let metrics = FilterPdataMetrics::register(&pipeline_ctx);
+        let metrics = FilterDropMetrics::register(&pipeline_ctx);
         let compute_duration = ComputeDuration::new(&pipeline_ctx);
         FilterProcessor {
             config,
@@ -119,7 +120,7 @@ impl FilterProcessor {
 
     /// Creates a new FilterProcessor from a configuration object
     pub fn from_config(pipeline_ctx: PipelineContext, config: &Value) -> Result<Self, ConfigError> {
-        let metrics = FilterPdataMetrics::register(&pipeline_ctx);
+        let metrics = FilterDropMetrics::register(&pipeline_ctx);
         let compute_duration = ComputeDuration::new(&pipeline_ctx);
         let config: Config =
             serde_json::from_value(config.clone()).map_err(|e| ConfigError::InvalidUserConfig {
@@ -222,8 +223,10 @@ impl local::Processor<OtapPdata> for FilterProcessor {
                         }
                     })?;
 
-                let metric = self.metrics.with(SignalAttributes { signal });
-                metric.dropped_items.add(dropped_items);
+                self.metrics
+                    .with(SignalAttributes { signal })
+                    .dropped_items
+                    .add(dropped_items);
 
                 // Record the drop flow-metric. A no-op unless this node is
                 // a decision node in a flow that enables `dropped.items`.

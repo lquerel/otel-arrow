@@ -81,7 +81,7 @@ use otel_arrow_dfe_pdata_views::views::logs::{LogsDataView, ResourceLogsView};
 use otel_arrow_dfe_pdata_views::views::metrics::{MetricsView, ResourceMetricsView};
 use otel_arrow_dfe_pdata_views::views::resource::ResourceView;
 use otel_arrow_dfe_pdata_views::views::trace::{ResourceSpansView, TracesView};
-use otel_arrow_dfe_telemetry::metrics::MetricSet;
+use otel_arrow_dfe_telemetry_macros::AttributeEnum;
 use serde_json::Value;
 use std::borrow::Cow;
 use std::collections::HashSet;
@@ -111,7 +111,7 @@ pub enum AllowedValuesSource {
 }
 
 /// Validation result indicating why validation failed
-#[derive(Debug, Clone, Copy, PartialEq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, AttributeEnum)]
 pub enum ValidationFailure {
     /// The required attribute is missing from the resource
     MissingAttribute,
@@ -157,7 +157,7 @@ pub struct ResourceValidatorProcessor {
     /// Whether to perform case-sensitive comparison
     case_sensitive: bool,
     /// Telemetry metrics
-    metrics: MetricSet<ResourceValidatorMetrics>,
+    metrics: ResourceValidatorMetrics,
 }
 
 /// Factory function to create a Resource Validator processor
@@ -194,6 +194,7 @@ pub static RESOURCE_VALIDATOR_PROCESSOR_FACTORY: otel_arrow_dfe_engine::Processo
          _capabilities: &otel_arrow_dfe_engine::capability::registry::Capabilities| {
             create_resource_validator_processor(pipeline_ctx, node, node_config, proc_cfg)
         },
+    context_declarations: None,
     wiring_contract: otel_arrow_dfe_engine::wiring_contract::WiringContract::UNRESTRICTED,
     resolve_config: resolve_resource_validator_config,
     snapshot_policy: ConfigSnapshotPolicy::TypedSafe,
@@ -221,7 +222,7 @@ impl ResourceValidatorProcessor {
     }
 
     fn from_typed_config(pipeline_ctx: PipelineContext, config: &Config) -> Self {
-        let metrics = pipeline_ctx.register_metrics::<ResourceValidatorMetrics>();
+        let metrics = ResourceValidatorMetrics::new(&pipeline_ctx);
 
         Self {
             required_attribute_key: config.required_attribute_key.clone(),
@@ -241,7 +242,7 @@ impl ResourceValidatorProcessor {
         case_sensitive: bool,
         pipeline_ctx: PipelineContext,
     ) -> Self {
-        let metrics = pipeline_ctx.register_metrics::<ResourceValidatorMetrics>();
+        let metrics = ResourceValidatorMetrics::new(&pipeline_ctx);
         Self {
             required_attribute_key,
             allowed_values,
@@ -455,35 +456,15 @@ impl ResourceValidatorProcessor {
         }
     }
 
-    /// Updates metrics and logs warnings based on validation result
-    fn update_metrics(&mut self, result: &Result<(), (ValidationFailure, String)>, num_items: u64) {
-        match result {
-            Ok(()) => {
-                self.metrics.batches_accepted.add(1);
-                self.metrics.items_accepted.add(num_items);
-            }
-            Err((failure, msg)) => {
-                otel_warn!(
-                    "resource_validator_processor.validation.fail",
-                    failure_reason = %failure,
-                    message = msg.as_str()
-                );
-                self.metrics.items_rejected.add(num_items);
-                match failure {
-                    ValidationFailure::MissingAttribute => {
-                        self.metrics.batches_rejected_missing.add(1);
-                    }
-                    ValidationFailure::InvalidAttributeType => {
-                        self.metrics.batches_rejected_invalid_type.add(1);
-                    }
-                    ValidationFailure::ConversionError => {
-                        self.metrics.batches_rejected_conversion_error.add(1);
-                    }
-                    ValidationFailure::NotInAllowedList => {
-                        self.metrics.batches_rejected_not_allowed.add(1);
-                    }
-                }
-            }
+    /// Records and logs resource validation failures.
+    fn record_validation_failure(&mut self, result: &Result<(), (ValidationFailure, String)>) {
+        if let Err((failure, msg)) = result {
+            otel_warn!(
+                "resource_validator_processor.validation.fail",
+                failure_reason = %failure,
+                message = msg.as_str()
+            );
+            self.metrics.record_failure(*failure);
         }
     }
 }
@@ -501,11 +482,11 @@ impl local::Processor<OtapPdata> for ResourceValidatorProcessor {
                     mut metrics_reporter,
                 } = control
                 {
-                    let _ = metrics_reporter.report(&mut self.metrics);
+                    let _ = self.metrics.report(&mut metrics_reporter);
                 }
                 Ok(())
             }
-            Message::PData(mut pdata) => {
+            Message::PData(pdata) => {
                 let signal_type = pdata.signal_type();
 
                 // Get allowed values (extension point for future dynamic auth)
@@ -558,9 +539,7 @@ impl local::Processor<OtapPdata> for ResourceValidatorProcessor {
                     },
                 };
 
-                // Update metrics
-                let num_items = pdata.num_items() as u64;
-                self.update_metrics(&validation_result, num_items);
+                self.record_validation_failure(&validation_result);
 
                 match validation_result {
                     Ok(()) => {

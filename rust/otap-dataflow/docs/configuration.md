@@ -63,7 +63,8 @@ references, checks that every component type is registered in the binary, and
 requires every selected factory to resolve its component config into a typed
 runtime value and a safe effective snapshot. Resolution applies
 component-specific parsing, validation, defaults, and normalization before the
-configuration can be admitted.
+configuration can be admitted. It also compiles context bindings, including
+qualified propagation selectors.
 
 After loading, the CLI can override selected engine-level settings:
 
@@ -246,6 +247,54 @@ Policies are scoped by hierarchy. For regular pipelines, precedence is:
 Policy overrides apply by policy family rather than by deep-merging every
 nested field. The process-wide memory limiter is only supported at top-level
 `policies.resources.memory_limiter`.
+
+### Conditional Transport Header Propagation
+
+Composite context entries can conditionally select a captured transport header
+for exporter propagation:
+
+```yaml
+policies:
+    context:
+        entries:
+            tenant:
+                - type: transport_header
+                  name: workspace
+                  store_as: workspace_id
+                - type: transport_header_match
+                  name: environment
+                  value: production
+    transport_headers:
+        header_capture:
+            headers:
+                - match_names: [x-workspace]
+                  store_as: workspace
+                - match_names: [x-environment]
+                  store_as: environment
+        header_propagation:
+            default:
+                selector:
+                    type: named
+                    named: [tenant:workspace_id]
+                name: stored_name
+```
+
+The selected `workspace` header is emitted as `workspace_id` only when it exists
+and at least one captured `environment` value exactly matches `production`.
+Every configured match condition must pass. Header names are ASCII
+case-insensitive; values are exact byte matches. Other composite members are
+not evaluated for this transport-header binding. The selected source and every
+condition header must be captured; the example stores `x-workspace` as
+`workspace` and `x-environment` as `environment`.
+
+Qualified composite selectors cannot share a primitive source with another
+qualified or unqualified entry. Repeated unqualified entries, including ASCII
+case variants, are accepted as equivalent. Unknown composites, unknown members,
+authorized-identity members, and conflicting source bindings are rejected
+during startup. Exporter overrides retain precedence and can independently
+select the primitive header. See
+[Transport header policies](transport-headers.md#conditional-composite-members)
+for complete matching, naming, and override semantics.
 
 ### Pipeline Core Allocation
 
@@ -468,6 +517,12 @@ engine:
                     config: {}
                 otlp:
                     type: exporter:otlp_grpc
+                    capabilities:
+                        bearer_token_provider: auth
+                    config: {}
+            extensions:
+                auth:
+                    type: extension:oauth2_client_auth
                     config: {}
             connections:
                 - from: internal
@@ -475,11 +530,13 @@ engine:
 ```
 
 Observability pipelines use the same node and connection model as regular
-pipelines. They support `channel_capacity`, `health`, and `telemetry` policies,
-but resource policies are intentionally not supported there. The pipeline is
-mandatory and must contain exactly one connected internal telemetry receiver.
-The receiver defaults to `signals: [logs, metrics]`, while either signal can be
-selected independently. Logs must remain enabled
+pipelines. Pipeline-scoped extensions can provide capabilities to observability
+nodes and are declared in the pipeline's `extensions` section. They support
+`channel_capacity`, `health`, and `telemetry` policies, but resource policies
+are intentionally not supported there. The pipeline is mandatory and must
+contain exactly one connected internal telemetry receiver. The receiver
+defaults to `signals: [logs, metrics]`, while either signal can be selected
+independently. Logs must remain enabled
 when a log provider uses `its`. Optional `metrics.interval` and `metrics.views`
 fields customize periodic export when metrics are selected. A logs-only
 receiver drains the private ITS metric accumulator without converting or
@@ -648,6 +705,10 @@ Use `--validate-and-exit` while editing:
 ```bash
 cargo run -- --config path/to/config.yaml --validate-and-exit
 ```
+
+`--validate-and-exit` compiles context bindings and rejects qualified
+propagation selectors that reference unknown composites, unknown or unsupported
+members, or conflicting primitive transport-header sources.
 
 If validation fails inside a node config, open that node's README from the
 [core-node catalog](../crates/core-nodes/README.md) or

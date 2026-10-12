@@ -14,6 +14,33 @@
 
 use crate::error::Error;
 
+/// Deserializes configuration into `T`.
+pub fn deserialize_typed_config<T: serde::de::DeserializeOwned>(
+    config: &serde_json::Value,
+) -> Result<T, Error> {
+    serde_json::from_value(config.clone()).map_err(|error| Error::InvalidUserConfig {
+        error: error.to_string(),
+    })
+}
+
+/// Validates that a JSON config value can be deserialized into the expected
+/// configuration type `T`.
+///
+/// This is the most common validator: pass it as a monomorphised function
+/// pointer and the compiler ensures every component with a typed `Config`
+/// struct gets deserialization-level validation for free.
+///
+/// # Example
+/// ```ignore
+/// validate_config: validate_typed_config::<MyComponentConfig>,
+/// ```
+pub fn validate_typed_config<T: serde::de::DeserializeOwned>(
+    raw: &serde_json::Value,
+) -> Result<(), Error> {
+    let _: T = deserialize_typed_config(raw)?;
+    Ok(())
+}
+
 /// Validator for components that accept **no** user configuration.
 ///
 /// Accepts `Value::Null` (config key omitted / set to `null`) and empty

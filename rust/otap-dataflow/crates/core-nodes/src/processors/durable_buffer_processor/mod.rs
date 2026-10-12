@@ -1880,6 +1880,7 @@ pub fn create_durable_buffer(
 pub static DURABLE_BUFFER_FACTORY: ProcessorFactory<OtapPdata> = ProcessorFactory {
     name: DURABLE_BUFFER_URN,
     create: create_durable_buffer,
+    context_declarations: None,
     wiring_contract: otel_arrow_dfe_engine::wiring_contract::WiringContract::UNRESTRICTED,
     resolve_config: resolve_typed_config::<DurableBufferConfig>,
     snapshot_policy: ConfigSnapshotPolicy::TypedSafe,

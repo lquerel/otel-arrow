@@ -62,7 +62,9 @@ use otel_arrow_dfe_otap::pdata::OtapPdata;
 use otel_arrow_dfe_pdata::TryIntoWithOptions;
 use otel_arrow_dfe_pdata::otap::OtapArrowRecords;
 use otel_arrow_dfe_telemetry::common_attributes::{Outcome, SignalOutcomeAttributes};
-use otel_arrow_dfe_telemetry::metrics::{MeasurementMetricSet, MetricSet, MetricSetHandler};
+use otel_arrow_dfe_telemetry::metrics::{
+    MeasurementMetricSet, MetricSet, MetricSetHandler, MetricSetRegistrar,
+};
 use std::io::ErrorKind;
 use std::sync::Arc;
 use std::time::{Duration, Instant};
@@ -112,6 +114,7 @@ pub static PARQUET_EXPORTER: ExporterFactory<OtapPdata> = ExporterFactory {
             exporter_config,
         ))
     },
+    context_declarations: None,
     wiring_contract: otel_arrow_dfe_engine::wiring_contract::WiringContract::UNRESTRICTED,
     resolve_config: otel_arrow_dfe_engine::component_config::resolve_typed_config::<config::Config>,
     snapshot_policy: otel_arrow_dfe_engine::component_config::ConfigSnapshotPolicy::TypedSafe,
@@ -120,7 +123,7 @@ pub static PARQUET_EXPORTER: ExporterFactory<OtapPdata> = ExporterFactory {
 impl ParquetExporter {
     fn from_resolved(pipeline_ctx: PipelineContext, config: config::Config) -> Self {
         let pdata_metrics = ExporterExportMetrics::register(&pipeline_ctx);
-        let io_metrics = pipeline_ctx.register_metrics::<metrics::ParquetExporterMetrics>();
+        let io_metrics = pipeline_ctx.register_metric_set::<metrics::ParquetExporterMetrics>();
         Self {
             config,
             token_provider: None,
@@ -167,10 +170,10 @@ impl ParquetExporter {
             snapshots.extend(metrics.terminal_snapshots());
         }
 
-        if let Some(metrics) = &io_metrics {
-            if metrics.needs_flush() {
-                snapshots.push(metrics.snapshot());
-            }
+        if let Some(metrics) = &io_metrics
+            && metrics.needs_flush()
+        {
+            snapshots.push(metrics.snapshot());
         }
 
         TerminalState::new(deadline, snapshots)
@@ -1044,6 +1047,7 @@ mod test {
                     pipeline_completion_msg_tx,
                     metrics_reporter,
                     Interests::empty(),
+                    otel_arrow_dfe_engine::testing::test_pipeline_runtime_services(),
                 )
                 .await
                 .map(|_| ())
@@ -1206,6 +1210,7 @@ mod test {
                     pipeline_completion_msg_tx,
                     metrics_reporter,
                     Interests::empty(),
+                    otel_arrow_dfe_engine::testing::test_pipeline_runtime_services(),
                 )
                 .await
                 .map(|_| ())
@@ -1551,7 +1556,14 @@ mod test {
         let created = (PARQUET_EXPORTER.create)(
             pipeline_ctx,
             test_node("parquet_exporter"),
-            Arc::new(node_config),
+            Arc::new(
+                otel_arrow_dfe_engine::component_config::ResolvedNodeConfig::new(
+                    &node_config,
+                    (PARQUET_EXPORTER.resolve_config)(&node_config.config).unwrap(),
+                    PARQUET_EXPORTER.snapshot_policy,
+                )
+                .unwrap(),
+            ),
             &ExporterConfig::new("parquet_exporter"),
             &otel_arrow_dfe_engine::capability::registry::Capabilities::empty(),
         );
@@ -1632,6 +1644,7 @@ mod test {
                     pipeline_completion_msg_tx,
                     metrics_reporter,
                     Interests::empty(),
+                    otel_arrow_dfe_engine::testing::test_pipeline_runtime_services(),
                 )
                 .await
                 .map(|_| ())
