@@ -26,13 +26,12 @@ pub fn deserialize_typed_config<T: serde::de::DeserializeOwned>(
 /// Validates that a JSON config value can be deserialized into the expected
 /// configuration type `T`.
 ///
-/// This is the most common validator: pass it as a monomorphised function
-/// pointer and the compiler ensures every component with a typed `Config`
-/// struct gets deserialization-level validation for free.
+/// Resolver implementations may use this helper for an auxiliary static check.
+/// Factory registrations must return their typed value through a resolver.
 ///
 /// # Example
 /// ```ignore
-/// validate_config: validate_typed_config::<MyComponentConfig>,
+/// validate_typed_config::<AuxiliaryConfig>(raw)?;
 /// ```
 pub fn validate_typed_config<T: serde::de::DeserializeOwned>(
     raw: &serde_json::Value,

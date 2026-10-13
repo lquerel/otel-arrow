@@ -246,11 +246,11 @@ fn parse_core_id_range(s: &str) -> Result<CoreRange, String> {
 fn validate_engine_config_for_startup(
     engine_cfg: &OtelDataflowSpec,
     run_options: &ControllerRunOptions,
-) -> Result<(), Box<dyn std::error::Error>> {
-    startup::validate_engine_components(engine_cfg, &OTAP_PIPELINE_FACTORY)?;
-    startup::validate_controller_extensions(engine_cfg, &run_options.extensions)?;
-    _ = OTAP_PIPELINE_FACTORY.compile_initial_context(&engine_cfg.resolve())?;
-    Ok(())
+) -> Result<
+    otel_arrow_dfe_controller::PreparedEngineConfig<otel_arrow_dfe_otap::pdata::OtapPdata>,
+    Box<dyn std::error::Error>,
+> {
+    Ok(Controller::new(&OTAP_PIPELINE_FACTORY).prepare(engine_cfg.clone(), run_options.clone())?)
 }
 
 fn main() -> Result<(), Box<dyn std::error::Error>> {
@@ -302,7 +302,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         handle_os_signals: true,
         ..Default::default()
     };
-    validate_engine_config_for_startup(&engine_cfg, &run_options)?;
+    let prepared = validate_engine_config_for_startup(&engine_cfg, &run_options)?;
 
     if validate_and_exit {
         println!("Configuration '{}' is valid.", resolved.source);
@@ -311,10 +311,9 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     // Applied to the accepted configuration before any pipeline starts, so a
     // `pretty` console exporter never reaches a stdout that carries records.
-    claim_structured_stdout(&engine_cfg);
+    claim_structured_stdout(prepared.resolved_pipelines())?;
 
-    let controller = Controller::new(&OTAP_PIPELINE_FACTORY);
-    let result = controller.run_forever_with_options(engine_cfg, run_options);
+    let result = prepared.run_forever();
     #[cfg(all(not(tarpaulin_include), feature = "dhat-heap"))]
     {
         dhat_finish();

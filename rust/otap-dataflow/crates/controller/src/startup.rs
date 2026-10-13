@@ -15,10 +15,10 @@
 //!
 //! let mut cfg = OtelDataflowSpec::from_file(&path)?;
 //! startup::apply_cli_overrides(&mut cfg, num_cores, core_id_range, http_admin_bind);
-//! startup::validate_engine_components(&cfg, &MY_PIPELINE_FACTORY)?;
-//! startup::validate_controller_extensions(&cfg, &ControllerRunOptions::default().extensions)?;
+//! let prepared = Controller::new(&MY_PIPELINE_FACTORY)
+//!     .prepare(cfg, ControllerRunOptions::default())?;
 //! println!("{}", startup::system_info(&MY_PIPELINE_FACTORY, "system"));
-//! let result = Controller::new(&MY_PIPELINE_FACTORY).run_forever(cfg);
+//! let result = prepared.run_forever();
 //! startup::shutdown_console_and_exit(&result);
 //! ```
 
@@ -128,7 +128,7 @@ pub fn validate_pipeline_components<PData: 'static + Clone + Debug>(
         })
 }
 
-fn validate_rate_limiter_bindings(
+pub(crate) fn validate_rate_limiter_bindings(
     pipeline_group_id: &PipelineGroupId,
     pipeline_id: &PipelineId,
     pipeline_cfg: &PipelineConfig,
@@ -174,6 +174,10 @@ fn validate_rate_limiter_bindings(
 /// This is the top-level validation entry point that iterates over all
 /// pipeline groups, all pipelines within each group, and the observability
 /// pipeline.
+///
+/// This tooling helper discards resolved values. Hosts that subsequently start
+/// the engine should use [`crate::Controller::prepare`] and consume its result
+/// instead, so validation and runtime creation share one resolution pass.
 pub fn validate_engine_components<PData: 'static + Clone + Debug>(
     engine_cfg: &OtelDataflowSpec,
     factory: &PipelineFactory<PData>,

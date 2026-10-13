@@ -40,6 +40,9 @@ use tracing::{Event, Subscriber};
 use tracing_subscriber::Registry;
 use tracing_subscriber::layer::{Context, Layer, SubscriberExt};
 
+#[path = "live_control_resolution_tests.rs"]
+mod configuration_resolution;
+
 struct CountingLayer(Arc<AtomicUsize>);
 
 impl<S: Subscriber> Layer<S> for CountingLayer {
@@ -524,6 +527,7 @@ fn test_runtime_with_log_filter_and_topology(
         topology,
         log_filter,
         log_filter_handle,
+        ControllerExtensionRegistry::empty(),
     )
 }
 
@@ -533,6 +537,7 @@ fn test_runtime_with_supplied_log_filter_and_topology(
     topology: NumaTopology,
     log_filter: RuntimeLogFilter,
     log_filter_handle: RuntimeLogFilterHandle,
+    controller_extensions: ControllerExtensionRegistry,
 ) -> (
     Arc<ControllerRuntime<()>>,
     RuntimeLogFilterHandle,
@@ -548,7 +553,6 @@ fn test_runtime_with_supplied_log_filter_and_topology(
         Controller::<()>::declare_topics(config).expect("declared topics should be valid");
     let (memory_pressure_tx, _memory_pressure_rx) =
         tokio::sync::watch::channel(MemoryPressureChanged::initial());
-    let controller_extensions = ControllerExtensionRegistry::empty();
     let candidate = Controller::new(pipeline_factory)
         .resolve_engine_candidate(config.clone(), &controller_extensions)
         .expect("test engine config resolves");
@@ -575,6 +579,7 @@ fn test_runtime_with_supplied_log_filter_and_topology(
         Arc::new(ControllerRuntime::new(
             pipeline_factory,
             controller_extensions,
+            candidate.controller_extensions.clone(),
             ControllerContext::new(registry),
             observed_state_store,
             observed_state_handle,
@@ -4933,6 +4938,7 @@ fn initial_config_activation_applies_log_level_before_noop_reconciliation() {
             NumaTopology::unknown(),
             log_filter,
             log_filter_handle,
+            ControllerExtensionRegistry::empty(),
         );
 
     assert_eq!(log_filter_handle.effective_level().as_str(), "info");

@@ -90,11 +90,9 @@ pub struct NodeUserConfig {
 
     /// Node-specific configuration.
     ///
-    /// This configuration is interpreted by the node itself and is not interpreted and validated by
-    /// the pipeline engine.
-    ///
-    /// Note: A pre-validation step using a JSON schema or protobuf could be added to the
-    /// management plane to ensure that the configuration is valid.
+    /// This is an ingestion value. Before admission, the engine invokes the
+    /// registered factory resolver to parse, validate, default, and normalize it
+    /// into immutable typed runtime state and a safe effective snapshot.
     #[serde(default)]
     // The serde_json::Value serializes to an invalid schema as far as the kubernetes api is concerned.
     // The preserve-unknown-fields extension allows this to be correctly interpreted as "Any JSON type"

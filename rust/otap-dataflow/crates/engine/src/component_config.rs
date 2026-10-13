@@ -238,10 +238,17 @@ pub fn resolve_no_config(raw: &Value) -> Result<ResolvedComponentConfig, ConfigE
 }
 
 /// Runtime node envelope paired with its factory-resolved component config.
-#[derive(Clone, Debug, PartialEq)]
+#[derive(Clone, Debug)]
 pub struct ResolvedNodeConfig {
     effective: Arc<NodeUserConfig>,
+    envelope: NodeUserConfig,
     component: ResolvedComponentConfig,
+}
+
+impl PartialEq for ResolvedNodeConfig {
+    fn eq(&self, other: &Self) -> bool {
+        self.envelope == other.envelope && self.component == other.component
+    }
 }
 
 impl ResolvedNodeConfig {
@@ -261,8 +268,11 @@ impl ResolvedNodeConfig {
         }
         let mut effective = source.clone();
         effective.config = component.snapshot().clone();
+        let mut envelope = source.clone();
+        envelope.config = Value::Null;
         Ok(Self {
             effective: Arc::new(effective),
+            envelope,
             component,
         })
     }
@@ -295,10 +305,17 @@ impl ResolvedNodeConfig {
 }
 
 /// Runtime extension envelope paired with its factory-resolved component config.
-#[derive(Clone, Debug, PartialEq)]
+#[derive(Clone, Debug)]
 pub struct ResolvedExtensionConfig {
     effective: Arc<ExtensionUserConfig>,
+    envelope: ExtensionUserConfig,
     component: ResolvedComponentConfig,
+}
+
+impl PartialEq for ResolvedExtensionConfig {
+    fn eq(&self, other: &Self) -> bool {
+        self.envelope == other.envelope && self.component == other.component
+    }
 }
 
 impl ResolvedExtensionConfig {
@@ -318,8 +335,11 @@ impl ResolvedExtensionConfig {
         }
         let mut effective = source.clone();
         effective.config = component.snapshot().clone();
+        let mut envelope = source.clone();
+        envelope.config = Value::Null;
         Ok(Self {
             effective: Arc::new(effective),
+            envelope,
             component,
         })
     }
@@ -346,11 +366,20 @@ impl ResolvedExtensionConfig {
 }
 
 /// A pipeline whose component configs have all been resolved by their factories.
-#[derive(Clone, Debug, PartialEq)]
+#[derive(Clone, Debug)]
 pub struct ResolvedPipelineConfig {
     effective: PipelineConfig,
+    envelope: PipelineConfig,
     nodes: HashMap<NodeId, Arc<ResolvedNodeConfig>>,
     extensions: HashMap<ExtensionId, Arc<ResolvedExtensionConfig>>,
+}
+
+impl PartialEq for ResolvedPipelineConfig {
+    fn eq(&self, other: &Self) -> bool {
+        self.envelope == other.envelope
+            && self.nodes == other.nodes
+            && self.extensions == other.extensions
+    }
 }
 
 impl ResolvedPipelineConfig {
@@ -370,8 +399,17 @@ impl ResolvedPipelineConfig {
             .collect();
         let mut effective = source.clone();
         effective.replace_component_config_snapshots(&node_snapshots, &extension_snapshots)?;
+        let mut envelope = source.clone();
+        envelope.replace_component_config_snapshots(
+            &nodes.keys().map(|id| (id.clone(), Value::Null)).collect(),
+            &extensions
+                .keys()
+                .map(|id| (id.clone(), Value::Null))
+                .collect(),
+        )?;
         Ok(Self {
             effective,
+            envelope,
             nodes,
             extensions,
         })
@@ -397,7 +435,7 @@ impl ResolvedPipelineConfig {
     /// Compares runtime semantics while ignoring only the pipeline policy block.
     #[must_use]
     pub fn eq_ignoring_policies(&self, other: &Self) -> bool {
-        self.effective.eq_ignoring_policies(&other.effective)
+        self.envelope.eq_ignoring_policies(&other.envelope)
             && self.nodes == other.nodes
             && self.extensions == other.extensions
     }
@@ -595,5 +633,83 @@ mod tests {
             count: 3,
         });
         assert!(ResolvedNodeConfig::new(&source, component, ConfigSnapshotPolicy::Omit).is_err());
+    }
+
+    /// Scenario: Equal runtime values have different component-owned safe snapshots.
+    /// Guarantees: Node, extension, and pipeline equality ignore reporting output but retain metadata.
+    #[test]
+    fn runtime_equivalence_is_independent_of_snapshot_output() {
+        let source: PipelineConfig = serde_json::from_value(serde_json::json!({
+            "nodes": {"receiver": {"type": "urn:otel:receiver:test", "config": {}}},
+            "extensions": {"auth": {"type": "urn:otel:extension:test", "config": {}}}
+        }))
+        .unwrap();
+        let make = |label: &str| {
+            let node = source.nodes().get("receiver").unwrap();
+            let extension = source.extensions().get("auth").unwrap();
+            ResolvedPipelineConfig::new(
+                &source,
+                HashMap::from([(
+                    ("receiver".into()),
+                    Arc::new(
+                        ResolvedNodeConfig::new(
+                            node,
+                            ResolvedComponentConfig::custom_safe(
+                                42usize,
+                                Value::String(label.to_owned()),
+                            ),
+                            ConfigSnapshotPolicy::CustomSafe,
+                        )
+                        .unwrap(),
+                    ),
+                )]),
+                HashMap::from([(
+                    ("auth".into()),
+                    Arc::new(
+                        ResolvedExtensionConfig::new(
+                            extension,
+                            ResolvedComponentConfig::custom_safe(
+                                42usize,
+                                Value::String(label.to_owned()),
+                            ),
+                            ConfigSnapshotPolicy::CustomSafe,
+                        )
+                        .unwrap(),
+                    ),
+                )]),
+            )
+            .unwrap()
+        };
+        let first = make("first safe display");
+        let second = make("second safe display");
+        assert_ne!(first.effective(), second.effective());
+        assert_eq!(first, second);
+        assert!(first.eq_ignoring_policies(&second));
+        let mut changed = second.clone();
+        changed.envelope = serde_json::from_value(serde_json::json!({
+            "nodes": {"receiver": {"type": "urn:otel:receiver:test", "outputs": ["changed"]}},
+            "extensions": {"auth": {"type": "urn:otel:extension:test"}}
+        }))
+        .unwrap();
+        assert!(!first.eq_ignoring_policies(&changed));
+    }
+
+    /// Scenario: A resolver returns a policy different from the factory registration.
+    /// Guarantees: Admission rejects the mismatch without exposing the submitted secret.
+    #[test]
+    fn policy_mismatch_is_rejected_without_disclosing_source() {
+        let source = NodeUserConfig::with_user_config(
+            "urn:otel:receiver:test".into(),
+            serde_json::json!({"token": "private-input"}),
+        );
+        let error = ResolvedNodeConfig::new(
+            &source,
+            ResolvedComponentConfig::omitted(42usize),
+            ConfigSnapshotPolicy::TypedSafe,
+        )
+        .unwrap_err()
+        .to_string();
+        assert!(error.contains("snapshot policy"));
+        assert!(!error.contains("private-input"));
     }
 }

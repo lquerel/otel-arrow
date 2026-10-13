@@ -138,6 +138,8 @@ otel_arrow_dfe_telemetry::otel_component_scope!(
     target = "otel.controller.main",
 );
 
+#[cfg(test)]
+mod configuration_resolution_tests;
 mod live_control;
 mod placement;
 /// Reusable startup helpers (validation, CLI overrides, system info).
@@ -191,6 +193,60 @@ struct ResolvedEngineCandidate {
     pipelines: Vec<ResolvedRuntimePipeline>,
     observability: ResolvedRuntimePipeline,
     controller_extensions: HashMap<ExtensionId, Arc<ResolvedExtensionConfig>>,
+}
+
+/// A complete engine configuration resolved and validated before runtime admission.
+///
+/// The source stays private. Validation, host setup, and runtime creation share
+/// the same immutable component values and compiled context bindings.
+pub struct PreparedEngineConfig<PData: 'static + Clone + Send + Sync + std::fmt::Debug> {
+    pipeline_factory: &'static PipelineFactory<PData>,
+    candidate: ResolvedEngineCandidate,
+    context: otel_arrow_dfe_engine::context_declaration::PreparedContext,
+    options: ControllerRunOptions,
+}
+
+impl<PData: 'static + Clone + Send + Sync + std::fmt::Debug> std::fmt::Debug
+    for PreparedEngineConfig<PData>
+{
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        formatter
+            .debug_struct("PreparedEngineConfig")
+            .finish_non_exhaustive()
+    }
+}
+
+impl<
+    PData: 'static + Clone + Send + Sync + std::fmt::Debug + ReceivedAtNode + Unwindable + FlowMetricHook,
+> PreparedEngineConfig<PData>
+{
+    /// Returns the precomputed safe configuration for host setup and diagnostics.
+    #[must_use]
+    pub fn effective_config(&self) -> &OtelDataflowSpec {
+        &self.candidate.effective
+    }
+
+    /// Iterates over resolved regular and observability pipeline configurations.
+    pub fn resolved_pipelines(
+        &self,
+    ) -> impl Iterator<Item = &otel_arrow_dfe_engine::component_config::ResolvedPipelineConfig>
+    {
+        self.candidate
+            .pipelines
+            .iter()
+            .chain(std::iter::once(&self.candidate.observability))
+            .map(|pipeline| &pipeline.runtime)
+    }
+
+    /// Starts the prepared engine without resolving its components again.
+    pub fn run_forever(self) -> Result<(), Error> {
+        Controller::new(self.pipeline_factory).run_with_mode(self, RunMode::ParkMainThread)
+    }
+
+    /// Runs the prepared engine until shutdown without repeating resolution.
+    pub fn run_till_shutdown(self) -> Result<(), Error> {
+        Controller::new(self.pipeline_factory).run_with_mode(self, RunMode::ShutdownWhenDone)
+    }
 }
 
 /// Error type returned by controller extension startup and runtime tasks.
@@ -577,7 +633,7 @@ impl<
         engine_config: OtelDataflowSpec,
         options: ControllerRunOptions,
     ) -> Result<(), Error> {
-        self.run_with_mode(engine_config, RunMode::ParkMainThread, options)
+        self.prepare(engine_config, options)?.run_forever()
     }
 
     /// Starts the controller with the given engine configurations.
@@ -595,7 +651,48 @@ impl<
         engine_config: OtelDataflowSpec,
         options: ControllerRunOptions,
     ) -> Result<(), Error> {
-        self.run_with_mode(engine_config, RunMode::ShutdownWhenDone, options)
+        self.prepare(engine_config, options)?.run_till_shutdown()
+    }
+
+    /// Resolves and statically validates the complete candidate once, without starting services.
+    pub fn prepare(
+        &self,
+        source: OtelDataflowSpec,
+        options: ControllerRunOptions,
+    ) -> Result<PreparedEngineConfig<PData>, Error> {
+        let candidate = self
+            .resolve_engine_candidate(source, &options.extensions)
+            .map_err(|error| Error::InvalidConfiguration {
+                errors: vec![otel_arrow_dfe_config::error::Error::InvalidUserConfig {
+                    error: error.to_string(),
+                }],
+            })?;
+        let components = candidate
+            .pipelines
+            .iter()
+            .chain(std::iter::once(&candidate.observability))
+            .map(|pipeline| {
+                (
+                    PipelineKey::new(
+                        pipeline.policy.pipeline_group_id.clone(),
+                        pipeline.policy.pipeline_id.clone(),
+                    ),
+                    pipeline.runtime.clone(),
+                )
+            })
+            .collect();
+        let context = self
+            .pipeline_factory
+            .compile_initial_context_with_components(&candidate.source.resolve(), &components)
+            .map_err(|source| Error::PipelineRuntimeError {
+                source: Box::new(source),
+            })?;
+        Ok(PreparedEngineConfig {
+            pipeline_factory: self.pipeline_factory,
+            candidate,
+            context,
+            options,
+        })
     }
 
     fn map_topic_spec_to_options(
@@ -1347,6 +1444,12 @@ impl<
         let (engine, policy_pipelines, observability) = resolved.into_parts();
         let mut pipelines = Vec::with_capacity(policy_pipelines.len());
         for policy in policy_pipelines {
+            startup::validate_rate_limiter_bindings(
+                &policy.pipeline_group_id,
+                &policy.pipeline_id,
+                &policy.pipeline,
+                &policy.policies,
+            )?;
             let runtime = self
                 .pipeline_factory
                 .resolve_pipeline_config(&policy.pipeline)?;
@@ -1364,11 +1467,19 @@ impl<
         let observability = observability.ok_or_else(|| {
             std::io::Error::other("resolved configuration is missing the observability pipeline")
         })?;
+        startup::validate_rate_limiter_bindings(
+            &observability.pipeline_group_id,
+            &observability.pipeline_id,
+            &observability.pipeline,
+            &observability.policies,
+        )?;
         let observability_runtime = self
             .pipeline_factory
             .resolve_pipeline_config(&observability.pipeline)?;
         effective.engine.observability.pipeline.nodes =
             observability_runtime.effective().nodes().clone();
+        effective.engine.observability.pipeline.extensions =
+            observability_runtime.effective().extensions().clone();
 
         Ok(ResolvedEngineCandidate {
             source,
@@ -1385,9 +1496,8 @@ impl<
 
     fn run_with_mode(
         &self,
-        engine_config: OtelDataflowSpec,
+        prepared: PreparedEngineConfig<PData>,
         run_mode: RunMode,
-        options: ControllerRunOptions,
     ) -> Result<(), Error> {
         // Start the process-wide console writers before any pipeline or tracing
         // output exists, so every engine-owned frame is written contiguously and
@@ -1402,9 +1512,8 @@ impl<
         let run_console_baseline = OutputService::stats();
         let mut final_console_report = None;
         let result = self.run_pipelines(
-            engine_config,
+            prepared,
             run_mode,
-            options,
             run_console_baseline,
             &mut final_console_report,
         );
@@ -1537,38 +1646,28 @@ impl<
 
     fn run_pipelines(
         &self,
-        engine_config: OtelDataflowSpec,
+        prepared: PreparedEngineConfig<PData>,
         run_mode: RunMode,
-        options: ControllerRunOptions,
         console_baseline: ServiceStats,
         final_console_report: &mut Option<(ServiceStats, Duration)>,
     ) -> Result<(), Error> {
-        engine_config.validate().map_err(|error| match error {
-            otel_arrow_dfe_config::error::Error::InvalidConfiguration { errors } => {
-                Error::InvalidConfiguration { errors }
-            }
-            other => Error::InvalidConfiguration {
-                errors: vec![other],
-            },
-        })?;
+        let PreparedEngineConfig {
+            candidate: resolved_candidate,
+            context,
+            options,
+            ..
+        } = prepared;
 
         // Synchronous startup, before any pipeline or controller extension starts.
         // Retain this capability in every context across restarts and live rollouts.
-        let state_directory = engine_config
+        let state_directory = resolved_candidate
+            .source
             .engine
             .state_dir
             .as_deref()
             .map(otel_arrow_dfe_engine::state_dir::StateDirectory::provision)
             .transpose()?;
 
-        let resolved_candidate = self
-            .resolve_engine_candidate(engine_config, &options.extensions)
-            .map_err(|error| Error::InvalidConfiguration {
-                errors: vec![otel_arrow_dfe_config::error::Error::InvalidUserConfig {
-                    error: error.to_string(),
-                }],
-            })?;
-        let resolved_config = resolved_candidate.source.resolve();
         let resolved_component_configs: HashMap<_, _> = resolved_candidate
             .pipelines
             .iter()
@@ -1583,12 +1682,6 @@ impl<
                 )
             })
             .collect();
-        let context = self
-            .pipeline_factory
-            .compile_initial_context_with_components(&resolved_config, &resolved_component_configs)
-            .map_err(|source| Error::PipelineRuntimeError {
-                source: Box::new(source),
-            })?;
         let engine_config = resolved_candidate.source;
         let effective_config = resolved_candidate.effective;
         let mut engine = resolved_candidate.engine;
@@ -1829,6 +1922,7 @@ impl<
         let runtime = Arc::new(ControllerRuntime::new(
             self.pipeline_factory,
             options.extensions.clone(),
+            resolved_controller_extensions.clone(),
             controller_ctx.clone(),
             obs_state_store.clone(),
             obs_state_handle.clone(),
@@ -3166,7 +3260,7 @@ mod tests {
     use async_trait::async_trait;
     use otel_arrow_dfe_config::engine::{ResolvedPipelineConfig, ResolvedPipelineRole};
 
-    fn run_console_reporting_child(test_name: &str) {
+    pub(super) fn run_console_reporting_child(test_name: &str) {
         use std::process::{Command, Stdio};
 
         let mut child = Command::new(std::env::current_exe().expect("test binary path"))
@@ -4037,7 +4131,7 @@ connections:
         }
     }
 
-    fn create_test_observability_receiver(
+    pub(super) fn create_test_observability_receiver(
         _pipeline_ctx: PipelineContext,
         node: otel_arrow_dfe_engine::node::NodeId,
         node_config: Arc<otel_arrow_dfe_engine::component_config::ResolvedNodeConfig>,
@@ -4052,7 +4146,7 @@ connections:
         ))
     }
 
-    fn create_test_observability_processor(
+    pub(super) fn create_test_observability_processor(
         _pipeline_ctx: PipelineContext,
         node: otel_arrow_dfe_engine::node::NodeId,
         node_config: Arc<otel_arrow_dfe_engine::component_config::ResolvedNodeConfig>,
@@ -4067,7 +4161,7 @@ connections:
         ))
     }
 
-    fn create_test_observability_exporter(
+    pub(super) fn create_test_observability_exporter(
         _pipeline_ctx: PipelineContext,
         node: otel_arrow_dfe_engine::node::NodeId,
         node_config: Arc<otel_arrow_dfe_engine::component_config::ResolvedNodeConfig>,
@@ -4101,16 +4195,17 @@ connections:
         },
     ];
 
-    static TEST_OBSERVABILITY_PROCESSORS: &[ProcessorFactory<()>] = &[ProcessorFactory {
-        name: "urn:otel:processor:type_router",
-        create: create_test_observability_processor,
-        context_declarations: None,
-        wiring_contract: WiringContract::UNRESTRICTED,
-        resolve_config: resolve_any_test_config,
-        snapshot_policy: ConfigSnapshotPolicy::Omit,
-    }];
+    pub(super) static TEST_OBSERVABILITY_PROCESSORS: &[ProcessorFactory<()>] =
+        &[ProcessorFactory {
+            name: "urn:otel:processor:type_router",
+            create: create_test_observability_processor,
+            context_declarations: None,
+            wiring_contract: WiringContract::UNRESTRICTED,
+            resolve_config: resolve_any_test_config,
+            snapshot_policy: ConfigSnapshotPolicy::Omit,
+        }];
 
-    static TEST_OBSERVABILITY_EXPORTERS: &[ExporterFactory<()>] = &[
+    pub(super) static TEST_OBSERVABILITY_EXPORTERS: &[ExporterFactory<()>] = &[
         ExporterFactory {
             name: "urn:otel:exporter:console",
             create: create_test_observability_exporter,

@@ -16,6 +16,7 @@ mod record_json;
 use async_trait::async_trait;
 use linkme::distributed_slice;
 use otel_arrow_dfe_config::SignalType;
+#[cfg(test)]
 use otel_arrow_dfe_config::engine::OtelDataflowSpec;
 use otel_arrow_dfe_config::error::Error as ConfigError;
 use otel_arrow_dfe_engine::config::ExporterConfig;
@@ -327,7 +328,7 @@ pub static CONSOLE_EXPORTER: ExporterFactory<OtapPdata> = ExporterFactory {
     snapshot_policy: otel_arrow_dfe_engine::component_config::ConfigSnapshotPolicy::TypedSafe,
 };
 
-/// Claims stdout for records when `engine_cfg` deploys a `record_json` console exporter.
+/// Claims stdout for records when a resolved pipeline deploys a `record_json` console exporter.
 ///
 /// Pipelines are built on their own threads, so an exporter created late cannot
 /// stop an earlier `pretty` exporter from having already written to stdout. The
@@ -335,16 +336,33 @@ pub static CONSOLE_EXPORTER: ExporterFactory<OtapPdata> = ExporterFactory {
 /// pipeline starts, which keeps `pretty` output on stderr from its first
 /// payload. Validation stays free of side effects so a rejected candidate
 /// configuration never reroutes a running exporter.
-pub fn claim_structured_stdout(engine_cfg: &OtelDataflowSpec) {
-    if config_emits_records(engine_cfg) {
+/// Pass the accepted prepared engine's `resolved_pipelines()` iterator to reuse
+/// its typed configuration without parsing or resolving component values again.
+pub fn claim_structured_stdout<'a>(
+    pipelines: impl IntoIterator<
+        Item = &'a otel_arrow_dfe_engine::component_config::ResolvedPipelineConfig,
+    >,
+) -> Result<(), ConfigError> {
+    let mut emits_records = false;
+    for pipeline in pipelines {
+        for (_, node) in pipeline.nodes() {
+            if node.effective().r#type.as_str() == CONSOLE_EXPORTER_URN {
+                emits_records |= node.component_config::<ConsoleExporterConfig>()?.format
+                    == ConsoleOutputFormat::RecordJson;
+            }
+        }
+    }
+    if emits_records {
         OutputService::mark_structured_stdout();
     }
+    Ok(())
 }
 
 /// Returns true when any console exporter in `engine_cfg` emits record JSON.
 ///
 /// The engine's own observability pipeline carries a console exporter too, so it
 /// is scanned alongside the configured groups.
+#[cfg(test)]
 fn config_emits_records(engine_cfg: &OtelDataflowSpec) -> bool {
     let observability = engine_cfg
         .engine
@@ -376,7 +394,7 @@ fn require_structured_stdout_claim(
 ) -> Result<(), ConfigError> {
     if format == ConsoleOutputFormat::RecordJson && !structured_stdout {
         return Err(ConfigError::InvalidUserConfig {
-            error: "record_json console output was not claimed before pipeline startup; call claim_structured_stdout on the accepted engine configuration".to_owned(),
+            error: "record_json console output was not claimed before pipeline startup; call claim_structured_stdout with the prepared engine's resolved pipelines".to_owned(),
         });
     }
     Ok(())

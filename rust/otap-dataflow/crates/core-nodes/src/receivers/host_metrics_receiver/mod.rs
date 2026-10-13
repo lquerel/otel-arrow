@@ -85,20 +85,6 @@ use config::{RuntimeFamily, effective_root_path, normalized_root_path};
 /// The URN for the host metrics receiver.
 pub const HOST_METRICS_RECEIVER_URN: &str = "urn:otel:receiver:host_metrics";
 
-#[cfg(target_os = "linux")]
-#[derive(Clone)]
-struct ResolvedHostMetricsConfig {
-    runtime: RuntimeConfig,
-    equivalence: Value,
-}
-
-#[cfg(target_os = "linux")]
-impl PartialEq for ResolvedHostMetricsConfig {
-    fn eq(&self, other: &Self) -> bool {
-        self.equivalence == other.equivalence
-    }
-}
-
 /// Telemetry metrics for the host metrics receiver.
 #[metric_set(name = "receiver.host_metrics")]
 #[derive(Debug, Default, Clone)]
@@ -182,8 +168,8 @@ fn create_host_metrics_receiver(
             error: "host-wide collection must run in a one-core source pipeline; use receiver:host_metrics -> exporter:topic and fan out downstream".to_owned(),
         });
     }
-    let resolved = node_config.component_config::<ResolvedHostMetricsConfig>()?;
-    let mut receiver = HostMetricsReceiver::from_resolved(resolved.runtime.clone())?;
+    let resolved = node_config.component_config::<RuntimeConfig>()?;
+    let mut receiver = HostMetricsReceiver::from_resolved(resolved.as_ref().clone())?;
     receiver.metrics = Some(HostMetricsReceiverMetrics::register(&pipeline));
     Ok(ReceiverWrapper::local(
         receiver,
@@ -210,24 +196,22 @@ fn resolve_host_metrics_config(
     otel_arrow_dfe_engine::component_config::ResolvedComponentConfig,
     otel_arrow_dfe_config::error::Error,
 > {
-    let config: Config = serde_json::from_value(config.clone()).map_err(|e| {
+    let mut config: Config = serde_json::from_value(config.clone()).map_err(|e| {
         otel_arrow_dfe_config::error::Error::InvalidUserConfig {
             error: e.to_string(),
         }
     })?;
+    let runtime = RuntimeConfig::try_from(config.clone())?;
+    config.host_view.root_path = runtime.root_path.clone();
+    config.root_path = None;
     let snapshot = serde_json::to_value(&config).map_err(|error| {
         otel_arrow_dfe_config::error::Error::InvalidUserConfig {
             error: error.to_string(),
         }
     })?;
-    let runtime = RuntimeConfig::try_from(config)?;
     Ok(
         otel_arrow_dfe_engine::component_config::ResolvedComponentConfig::custom_safe(
-            ResolvedHostMetricsConfig {
-                runtime,
-                equivalence: snapshot.clone(),
-            },
-            snapshot,
+            runtime, snapshot,
         ),
     )
 }
@@ -807,6 +791,27 @@ fn encode_snapshot(snapshot: HostSnapshot) -> Result<OtapPdata, arrow::error::Ar
 
 #[cfg(test)]
 mod tests {
+    /// Scenario: Legacy root paths and default-equivalent family intervals are resolved.
+    /// Guarantees: Comparison uses the normalized runtime values rather than snapshot syntax.
+    #[cfg(target_os = "linux")]
+    #[test]
+    fn resolution_compares_normalized_runtime_values() {
+        let resolve = HOST_METRICS_RECEIVER.resolve_config;
+        let legacy = resolve(&serde_json::json!({"root_path": "/host"})).unwrap();
+        let canonical = resolve(&serde_json::json!({"host_view": {"root_path": "/host"}})).unwrap();
+        assert_eq!(legacy, canonical);
+        assert_eq!(legacy.snapshot(), canonical.snapshot());
+        let defaults = resolve(&serde_json::json!({})).unwrap();
+        // The default collection interval is used below rather than assuming a wall-clock value.
+        let mut explicit_config = serde_json::json!({"families": {"cpu": {}}});
+        explicit_config["families"]["cpu"]["interval"] =
+            defaults.snapshot()["collection_interval"].clone();
+        assert_eq!(defaults, resolve(&explicit_config).unwrap());
+        assert_ne!(
+            legacy,
+            resolve(&serde_json::json!({"root_path": "/other"})).unwrap()
+        );
+    }
     use super::*;
 
     #[test]

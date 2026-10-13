@@ -86,17 +86,6 @@ pub struct TrafficGeneratorReceiver {
     pending_completions: u64,
 }
 
-struct ResolvedTrafficGeneratorConfig {
-    config: Config,
-    normalized: Value,
-}
-
-impl PartialEq for ResolvedTrafficGeneratorConfig {
-    fn eq(&self, other: &Self) -> bool {
-        self.normalized == other.normalized
-    }
-}
-
 fn smooth_batch_interval(run_len: usize) -> Option<Duration> {
     if run_len == 0 {
         return None;
@@ -133,36 +122,22 @@ pub static TRAFFIC_GENERATOR_RECEIVER: ReceiverFactory<OtapPdata> = ReceiverFact
             Ok(ReceiverWrapper::local(
                 TrafficGeneratorReceiver::new(
                     pipeline,
-                    node_config
-                        .component_config::<ResolvedTrafficGeneratorConfig>()?
-                        .config
-                        .clone(),
+                    node_config.component_config::<Config>()?.as_ref().clone(),
                 )?,
                 node,
                 node_config.effective(),
                 receiver_config,
             ))
         },
-    context_declarations: Some(ContextDeclarationProvider::from_typed_config::<
-        ResolvedTrafficGeneratorConfig,
-    >()),
+    context_declarations: Some(ContextDeclarationProvider::from_typed_config::<Config>()),
     wiring_contract: otel_arrow_dfe_engine::wiring_contract::WiringContract::UNRESTRICTED,
     resolve_config: |value| {
-        let config = validate_config_impl(value)?;
-        let normalized = serde_json::to_value(&config).map_err(|e| {
-            otel_arrow_dfe_config::error::Error::InvalidUserConfig {
-                error: format!("failed to serialize traffic generator configuration: {e}"),
-            }
-        })?;
-        Ok(ResolvedComponentConfig::custom_safe(
-            ResolvedTrafficGeneratorConfig {
-                config,
-                normalized: normalized.clone(),
-            },
-            normalized,
-        ))
+        Ok(ResolvedComponentConfig::omitted(validate_config_impl(
+            value,
+        )?))
     },
-    snapshot_policy: ConfigSnapshotPolicy::CustomSafe,
+    // Resource attributes and registry URLs are free-form inputs and may carry secrets.
+    snapshot_policy: ConfigSnapshotPolicy::Omit,
 };
 
 fn validate_config_impl(config: &Value) -> Result<Config, otel_arrow_dfe_config::error::Error> {
@@ -563,7 +538,10 @@ impl TrafficGeneratorReceiver {
 ///
 /// Returns `None` when the config map is empty (zero overhead).
 fn build_transport_headers(
-    config_headers: &HashMap<ContextEntryName, Option<String>>,
+    config_headers: &HashMap<
+        ContextEntryName,
+        Option<otel_arrow_dfe_config::secret::RedactedString>,
+    >,
 ) -> Option<TransportHeaders> {
     if config_headers.is_empty() {
         return None;
@@ -575,7 +553,7 @@ fn build_transport_headers(
         // treated as binary (the gRPC binary metadata convention).
         if name.as_str().ends_with("-bin") {
             let resolved_value = match value {
-                Some(v) => v.as_bytes().to_vec(),
+                Some(v) => v.expose().as_bytes().to_vec(),
                 None => {
                     let mut buf = [0u8; 16];
                     rand::RngExt::fill(&mut rand::rng(), &mut buf);
@@ -585,7 +563,7 @@ fn build_transport_headers(
             headers.push(TransportHeader::binary(name.clone(), resolved_value));
         } else {
             let resolved_value = match value {
-                Some(v) => v.as_bytes().to_vec(),
+                Some(v) => v.expose().as_bytes().to_vec(),
                 None => {
                     // Generate bytes in ASCII printable range (space..tilde)
                     let mut rng = rand::rng();
@@ -845,14 +823,51 @@ impl ConfigNodeContextDeclaration for Config {
     }
 }
 
-impl ConfigNodeContextDeclaration for ResolvedTrafficGeneratorConfig {
-    fn context_declarations(&self) -> NodeContextDeclarations {
-        self.config.context_declarations()
-    }
-}
-
 #[cfg(test)]
 mod tests {
+    /// Scenario: Submitted generator headers contain credentials and resource attributes use aliases.
+    /// Guarantees: Snapshots omit the config; typed equality detects secrets and normalizes aliases.
+    #[test]
+    fn resolution_omits_secrets_and_compares_typed_values() {
+        let resolve = TRAFFIC_GENERATOR_RECEIVER.resolve_config;
+        let first = serde_json::json!({
+            "traffic_config": {"log_weight": 1}, "data_source": "synthetic",
+            "transport_headers": {"authorization": "Bearer private-token"},
+            "resource_attributes": {"tenant.id": "private-tenant"}
+        });
+        let original = resolve(&first).unwrap();
+        assert_eq!(
+            original.snapshot(),
+            otel_arrow_dfe_config::secret::OMITTED_VALUE
+        );
+        let typed = original.get::<Config>().unwrap();
+        assert_eq!(
+            typed
+                .transport_headers()
+                .values()
+                .next()
+                .unwrap()
+                .as_ref()
+                .unwrap()
+                .expose(),
+            "Bearer private-token"
+        );
+        assert!(
+            !serde_json::to_string(typed.as_ref())
+                .unwrap()
+                .contains("private-token")
+        );
+        let mut alias = first.clone();
+        alias["resource_attributes"] =
+            serde_json::json!([{"attrs": {"tenant.id": "private-tenant"}, "weight": 1}]);
+        assert_eq!(original, resolve(&alias).unwrap());
+        alias["transport_headers"]["authorization"] = "Bearer replacement-token".into();
+        let replacement = resolve(&alias).unwrap();
+        assert_eq!(original.snapshot(), replacement.snapshot());
+        assert_ne!(original, replacement);
+        alias["transport_headers"]["authorization"] = "[REDACTED]".into();
+        assert!(resolve(&alias).is_err());
+    }
     use super::config::{DataSource, GenerationStrategy};
     use super::*;
 
@@ -2036,8 +2051,8 @@ mod tests {
     #[test]
     fn traffic_gen_headers_preserve_logical_names() {
         let headers = build_transport_headers(&HashMap::from([
-            (context_name("X-Request-Id"), Some("request".to_string())),
-            (context_name("X-Trace-Bin"), Some("trace".to_string())),
+            (context_name("X-Request-Id"), Some("request".into())),
+            (context_name("X-Trace-Bin"), Some("trace".into())),
         ]))
         .expect("configured headers produce transport headers");
         let request_header = headers

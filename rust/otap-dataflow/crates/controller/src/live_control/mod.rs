@@ -84,6 +84,8 @@ pub(super) struct ControllerRuntime<PData: 'static + Clone + Send + Sync + std::
     /// Factory used to build runtime pipelines for new instances.
     pipeline_factory: &'static PipelineFactory<PData>,
     controller_extensions: ControllerExtensionRegistry,
+    /// Factory-resolved controller extensions installed at startup.
+    resolved_controller_extensions: HashMap<ExtensionId, Arc<ResolvedExtensionConfig>>,
     /// Static controller context cloned into launched pipeline threads.
     controller_context: ControllerContext,
     /// Mutable observed-state store used for compaction and status updates.
@@ -173,6 +175,7 @@ impl<
     pub(super) fn new(
         pipeline_factory: &'static PipelineFactory<PData>,
         controller_extensions: ControllerExtensionRegistry,
+        resolved_controller_extensions: HashMap<ExtensionId, Arc<ResolvedExtensionConfig>>,
         controller_context: ControllerContext,
         observed_state_store: ObservedStateStore,
         observed_state_handle: ObservedStateHandle,
@@ -199,6 +202,7 @@ impl<
         Self {
             pipeline_factory,
             controller_extensions,
+            resolved_controller_extensions,
             controller_context,
             observed_state_store,
             observed_state_handle,

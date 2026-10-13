@@ -969,24 +969,23 @@ impl<
             .filter(|core_id| !target_core_set.contains(core_id))
             .collect();
         let action = if let Some(record) = current_deployment.as_ref() {
-            let identical_update = current_core_set == target_core_set
-                && active_core_set == target_core_set
-                && !active_runtime_state.has_foreign_active_generations
-                && record.resolved.runtime_matches(&resolved_pipeline)
+            let same_runtime_shape = record.resolved.role == resolved_pipeline.role
+                && record.resolved.topic_scope == resolved_pipeline.topic_scope
                 && record
                     .runtime_resolved
                     .eq_ignoring_policies(&runtime_resolved_pipeline);
+            let identical_update = current_core_set == target_core_set
+                && active_core_set == target_core_set
+                && !active_runtime_state.has_foreign_active_generations
+                && record.resolved.policies == resolved_pipeline.policies
+                && same_runtime_shape;
             let resize_only = current_core_set != target_core_set
                 && !active_runtime_state.has_foreign_active_generations
                 // Listener snapshots are immutable per worker. Retained cores cannot
                 // participate in an in-place resize without keeping stale membership.
                 && !target_has_listener_groups
-                && record
-                    .resolved
-                    .runtime_shape_matches_ignoring_resources(&resolved_pipeline)
-                && record
-                    .runtime_resolved
-                    .eq_ignoring_policies(&runtime_resolved_pipeline);
+                && record.resolved.policies.eq_ignoring_resources(&resolved_pipeline.policies)
+                && same_runtime_shape;
             if identical_update {
                 RolloutAction::NoOp
             } else if resize_only {
@@ -2250,6 +2249,28 @@ impl<
             .map_err(|error| ControlPlaneError::InvalidRequest {
                 message: error.to_string(),
             })?;
+        let (_, _, current_observability) = live_config.resolve().into_parts();
+        let current_observability =
+            current_observability.ok_or_else(|| ControlPlaneError::Internal {
+                message: "committed observability pipeline is missing".to_owned(),
+            })?;
+        if desired_candidate.controller_extensions != self.resolved_controller_extensions {
+            return Err(ControlPlaneError::InvalidRequest {
+                message: "controller extensions cannot be added, removed, or changed at runtime; restart the engine".to_owned(),
+            });
+        }
+        if !desired_candidate
+            .observability
+            .runtime
+            .eq_ignoring_policies(&self.observability_component_config)
+            || desired_candidate.observability.policy.policies != current_observability.policies
+        {
+            return Err(ControlPlaneError::InvalidRequest {
+                message:
+                    "the observability pipeline cannot be changed at runtime; restart the engine"
+                        .to_owned(),
+            });
+        }
         let mut desired_runtime_by_key: HashMap<_, _> = desired_candidate
             .pipelines
             .iter()

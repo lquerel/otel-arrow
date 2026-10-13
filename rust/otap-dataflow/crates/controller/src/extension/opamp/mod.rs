@@ -1611,7 +1611,7 @@ fn set_health_and_status_from_components(group_health: &mut ComponentHealth) {
 }
 
 /// Serialize the current applied config as the effective config for the AgentToServer message
-fn effective_config(context: &ControllerExtensionContext) -> EffectiveConfig {
+pub(crate) fn effective_config(context: &ControllerExtensionContext) -> EffectiveConfig {
     let config_result = context
         .control_plane
         .effective_config_snapshot()

@@ -83,6 +83,14 @@ value and safe snapshot are reused across pipeline cores, runtime creation,
 Admin requests, and OpAMP heartbeats. Those consumers do not parse the
 submitted JSON again.
 
+Embedded hosts use `Controller::prepare(source, options)` to obtain a
+`PreparedEngineConfig`. Validation-only execution may discard it; startup
+consumes it through `run_forever()` or `run_till_shutdown()`. Host setup, such as
+console stdout ownership, inspects `resolved_pipelines()` without re-resolving
+the submitted configuration. Standalone validation helpers are intended for
+tooling; calling them before preparing the same candidate would repeat
+resolution.
+
 ## Factory Resolver Contract
 
 Every receiver, processor, exporter, pipeline extension, and controller
@@ -128,8 +136,10 @@ effective representation replaces the component's complete `config` value with
 the string `[OMITTED]`.
 
 Examples that require conservative omission include Kafka arbitrary
-properties, free-form plugin configuration, and raw `serde_json::Value`
-payloads. Omission is preferred over partially inspecting an uncertain schema.
+properties, free-form plugin configuration, attribute-processor literals and
+hash salts, traffic-generator resource attributes and registry locations, and
+raw `serde_json::Value` payloads. Omission is preferred over partially
+inspecting an uncertain schema.
 
 There is no fallback to the submitted JSON for any policy. A factory policy is
 mandatory, and the policy returned by its resolver must match the policy in the
@@ -149,6 +159,10 @@ has two important consequences:
 - changing only a secret still changes runtime semantics even if both effective
   snapshots contain the same `[REDACTED]` marker.
 
+Runtime equivalence excludes component snapshot output entirely. Changing the
+safe display of an otherwise equivalent typed value does not itself require a
+rollout. Graph metadata and normalized runtime policies are compared separately.
+
 For a live update, the controller first builds and resolves all three candidate
 forms. A pipeline rollout commits its source pipeline, effective pipeline, and
 resolved runtime record together only after the rollout succeeds. A failed
@@ -161,6 +175,13 @@ pipeline operations. If an earlier pipeline rollout succeeds and a later one
 fails, the earlier committed pipeline remains applied. Each committed pipeline
 still has mutually consistent source, effective, and resolved state. Engine and
 group metadata are committed only after the overall reconciliation succeeds.
+
+Controller extensions and the engine observability pipeline do not currently
+have a live replacement lifecycle. Full-engine reconciliation rejects additions,
+removals, or runtime-significant changes to either before starting pipeline
+operations; operators must restart the engine to apply them. Alias- or
+default-equivalent changes remain acceptable because this boundary also uses
+resolved typed values and normalized policies, not submitted syntax.
 
 For rollout sequencing, failure handling, and the current consistency scope,
 see [Live Pipeline Reconfiguration](admin/live-reconfiguration.md).

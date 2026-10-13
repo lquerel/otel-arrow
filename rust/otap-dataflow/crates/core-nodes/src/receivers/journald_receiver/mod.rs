@@ -83,20 +83,6 @@ pub use config::{
 /// URN for the journald receiver.
 pub const JOURNALD_RECEIVER_URN: &str = "urn:otel:receiver:journald";
 
-#[cfg(target_os = "linux")]
-#[derive(Clone)]
-struct ResolvedJournaldConfig {
-    runtime: RuntimeConfig,
-    equivalence: Value,
-}
-
-#[cfg(target_os = "linux")]
-impl PartialEq for ResolvedJournaldConfig {
-    fn eq(&self, other: &Self) -> bool {
-        self.equivalence == other.equivalence
-    }
-}
-
 /// Telemetry metrics for the journald receiver.
 ///
 /// Tracks lifecycle transitions, downstream delivery, Ack/Nack handling, and
@@ -146,8 +132,8 @@ fn create_journald_receiver(
                 .to_owned(),
         });
     }
-    let resolved = node_config.component_config::<ResolvedJournaldConfig>()?;
-    let mut receiver = JournaldReceiver::from_runtime(resolved.runtime.clone())?;
+    let resolved = node_config.component_config::<RuntimeConfig>()?;
+    let mut receiver = JournaldReceiver::from_runtime(resolved.as_ref().clone())?;
     receiver.checkpoint_path = checkpoint::checkpoint_path(
         &receiver.config.checkpoint.directory,
         pipeline.pipeline_group_id().as_ref(),
@@ -181,24 +167,27 @@ fn resolve_journald_config(
     otel_arrow_dfe_engine::component_config::ResolvedComponentConfig,
     otel_arrow_dfe_config::error::Error,
 > {
-    let parsed: Config = serde_json::from_value(config.clone()).map_err(|e| {
+    let mut parsed: Config = serde_json::from_value(config.clone()).map_err(|e| {
         otel_arrow_dfe_config::error::Error::InvalidUserConfig {
             error: e.to_string(),
         }
     })?;
+    let runtime = RuntimeConfig::try_from(parsed.clone())?;
+    parsed.journal = runtime.journal.clone();
+    parsed.units = runtime.units.clone();
+    parsed.identifiers = runtime.identifiers.clone();
+    parsed.priorities = runtime
+        .priority_filter_enabled
+        .then(|| runtime.priorities.clone());
+    parsed.max_priority = None;
     let snapshot = serde_json::to_value(&parsed).map_err(|error| {
         otel_arrow_dfe_config::error::Error::InvalidUserConfig {
             error: error.to_string(),
         }
     })?;
-    let runtime = RuntimeConfig::try_from(parsed)?;
     Ok(
         otel_arrow_dfe_engine::component_config::ResolvedComponentConfig::custom_safe(
-            ResolvedJournaldConfig {
-                runtime,
-                equivalence: snapshot.clone(),
-            },
-            snapshot,
+            runtime, snapshot,
         ),
     )
 }
@@ -1192,6 +1181,30 @@ impl Drop for SourceLease {
 
 #[cfg(test)]
 mod tests {
+    /// Scenario: Equivalent journal paths and priority shorthand resolve to the same reader.
+    /// Guarantees: Normalization controls runtime equality and effective snapshots.
+    #[cfg(target_os = "linux")]
+    #[test]
+    fn resolution_compares_normalized_runtime_values() {
+        let resolve = JOURNALD_RECEIVER.resolve_config;
+        let shorthand = resolve(&serde_json::json!({
+            "journal": {"root_path": "/host/./"}, "max_priority": "warning"
+        }))
+        .unwrap();
+        let expanded = resolve(&serde_json::json!({
+            "journal": {"root_path": "/host"}, "priorities": [4, 3, 2, 1, 0, 4]
+        }))
+        .unwrap();
+        assert_eq!(shorthand, expanded);
+        assert_eq!(shorthand.snapshot(), expanded.snapshot());
+        assert_ne!(
+            shorthand,
+            resolve(&serde_json::json!({
+                "journal": {"root_path": "/host"}, "priorities": [3, 2, 1, 0]
+            }))
+            .unwrap()
+        );
+    }
     use super::*;
     use std::collections::BTreeMap;
 

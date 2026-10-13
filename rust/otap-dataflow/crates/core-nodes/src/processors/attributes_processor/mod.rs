@@ -48,7 +48,7 @@ use otel_arrow_dfe_config::error::Error as ConfigError;
 use otel_arrow_dfe_config::node::NodeUserConfig;
 use otel_arrow_dfe_engine::MessageSourceLocalEffectHandlerExtension;
 use otel_arrow_dfe_engine::component_config::{
-    ConfigSnapshotPolicy, ResolvedNodeConfig, resolve_typed_config,
+    ConfigSnapshotPolicy, ResolvedComponentConfig, ResolvedNodeConfig,
 };
 use otel_arrow_dfe_engine::config::ProcessorConfig;
 use otel_arrow_dfe_engine::context::PipelineContext;
@@ -181,6 +181,21 @@ pub struct Config {
     pub apply_to: Option<Vec<String>>,
 }
 
+#[derive(Clone)]
+struct ResolvedAttributesConfig {
+    semantic_config: Config,
+    transform: Arc<AttributesTransform>,
+    has_resource_domain: bool,
+    has_scope_domain: bool,
+    has_signal_domain: bool,
+}
+
+impl PartialEq for ResolvedAttributesConfig {
+    fn eq(&self, other: &Self) -> bool {
+        self.semantic_config == other.semantic_config
+    }
+}
+
 /// Processor that applies attribute transformations to OTAP attribute batches.
 ///
 /// Implements the OpenTelemetry Collector's attributes processor functionality using
@@ -188,7 +203,7 @@ pub struct Config {
 /// signal-specific attributes) for logs, metrics, and traces telemetry.
 pub struct AttributesProcessor {
     // Pre-computed transform to avoid rebuilding per message
-    transform: AttributesTransform,
+    transform: Arc<AttributesTransform>,
     // Pre-computed flags for domain lookup
     has_resource_domain: bool,
     has_scope_domain: bool,
@@ -221,6 +236,24 @@ impl AttributesProcessor {
         pipeline_ctx: PipelineContext,
         config: Config,
     ) -> Result<Self, otel_arrow_dfe_config::error::Error> {
+        Ok(Self::from_resolved(
+            pipeline_ctx,
+            &Self::resolve_config(config)?,
+        ))
+    }
+
+    fn resolve_config(mut config: Config) -> Result<ResolvedAttributesConfig, ConfigError> {
+        let domains = parse_apply_to(config.apply_to.as_ref());
+        let mut normalized_domains = domains
+            .iter()
+            .map(|domain| match domain {
+                ApplyDomain::Signal => "signal".to_owned(),
+                ApplyDomain::Resource => "resource".to_owned(),
+                ApplyDomain::Scope => "scope".to_owned(),
+            })
+            .collect::<Vec<_>>();
+        normalized_domains.sort();
+        config.apply_to = Some(normalized_domains);
         let mut renames = BTreeMap::new();
         let mut deletes = BTreeSet::new();
         let mut inserts = BTreeMap::new();
@@ -228,7 +261,7 @@ impl AttributesProcessor {
         let mut updates = BTreeMap::new();
         let mut hashes = BTreeMap::new();
 
-        for action in config.actions {
+        for action in config.actions.clone() {
             match action {
                 Action::Delete { key } => {
                     let _ = deletes.insert(key);
@@ -261,8 +294,6 @@ impl AttributesProcessor {
                 Action::Unsupported => {}
             }
         }
-
-        let domains = parse_apply_to(config.apply_to.as_ref());
 
         // Pre-compute domain checks
         let has_resource_domain = domains.contains(&ApplyDomain::Resource);
@@ -315,18 +346,28 @@ impl AttributesProcessor {
             }
         })?;
 
-        Ok(Self {
-            transform,
+        Ok(ResolvedAttributesConfig {
+            semantic_config: config,
+            transform: Arc::new(transform),
             has_resource_domain,
             has_scope_domain,
             has_signal_domain,
-            metrics: metrics::AttributesProcessorMetrics::new(&pipeline_ctx),
-            compute_duration: ComputeDuration::new(&pipeline_ctx),
         })
     }
 
+    fn from_resolved(pipeline_ctx: PipelineContext, config: &ResolvedAttributesConfig) -> Self {
+        Self {
+            transform: Arc::clone(&config.transform),
+            has_resource_domain: config.has_resource_domain,
+            has_scope_domain: config.has_scope_domain,
+            has_signal_domain: config.has_signal_domain,
+            metrics: metrics::AttributesProcessorMetrics::new(&pipeline_ctx),
+            compute_duration: ComputeDuration::new(&pipeline_ctx),
+        }
+    }
+
     #[inline]
-    const fn is_noop(&self) -> bool {
+    fn is_noop(&self) -> bool {
         self.transform.rename.is_none()
             && self.transform.delete.is_none()
             && self.transform.insert.is_none()
@@ -543,10 +584,12 @@ pub fn create_attributes_processor(
     node_config: Arc<ResolvedNodeConfig>,
     processor_config: &ProcessorConfig,
 ) -> Result<ProcessorWrapper<OtapPdata>, ConfigError> {
-    let proc = AttributesProcessor::new(
+    let proc = AttributesProcessor::from_resolved(
         pipeline_ctx,
-        (*node_config.component_config::<Config>()?).clone(),
-    )?;
+        node_config
+            .component_config::<ResolvedAttributesConfig>()?
+            .as_ref(),
+    );
     Ok(ProcessorWrapper::local(
         proc,
         node,
@@ -572,8 +615,15 @@ pub static ATTRIBUTES_PROCESSOR_FACTORY: otel_arrow_dfe_engine::ProcessorFactory
             },
         context_declarations: None,
         wiring_contract: otel_arrow_dfe_engine::wiring_contract::WiringContract::UNRESTRICTED,
-        resolve_config: resolve_typed_config::<Config>,
-        snapshot_policy: ConfigSnapshotPolicy::TypedSafe,
+        resolve_config: |raw| {
+            let config =
+                otel_arrow_dfe_config::validation::deserialize_typed_config::<Config>(raw)?;
+            Ok(ResolvedComponentConfig::omitted(
+                AttributesProcessor::resolve_config(config)?,
+            ))
+        },
+        // Literal attribute values and hash salts can contain private operational data.
+        snapshot_policy: ConfigSnapshotPolicy::Omit,
     };
 
 // Per-domain payload slices used by apply_transform_with_stats.
@@ -601,6 +651,33 @@ mod payload_sets {
 
 #[cfg(test)]
 mod tests {
+    /// Scenario: An attribute action conflicts with another action before pipeline creation.
+    /// Guarantees: The resolver rejects the transform during admission and omits private literals.
+    #[test]
+    fn resolver_validates_transforms_before_creation() {
+        let resolve = ATTRIBUTES_PROCESSOR_FACTORY.resolve_config;
+        assert!(
+            resolve(&serde_json::json!({"actions": [
+                {"action": "rename", "source_key": "old", "destination_key": "new"},
+                {"action": "delete", "key": "old"}
+            ]}))
+            .is_err()
+        );
+        let raw = serde_json::json!({"actions": [
+            {"action": "insert", "key": "tenant", "value": "private-literal"}
+        ]});
+        let default = resolve(&raw).unwrap();
+        let mut explicit = raw;
+        explicit["apply_to"] = serde_json::json!(["signal", "signal"]);
+        assert_eq!(default, resolve(&explicit).unwrap());
+        assert_eq!(
+            default.snapshot(),
+            otel_arrow_dfe_config::secret::OMITTED_VALUE
+        );
+        let first = default.get::<ResolvedAttributesConfig>().unwrap();
+        let second = default.clone().get::<ResolvedAttributesConfig>().unwrap();
+        assert!(Arc::ptr_eq(&first.transform, &second.transform));
+    }
     use super::*;
     use bytes::BytesMut;
     use otel_arrow_dfe_engine::context::ControllerContext;

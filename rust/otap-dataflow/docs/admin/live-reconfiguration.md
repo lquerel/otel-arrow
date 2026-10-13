@@ -480,6 +480,11 @@ Behavior:
   effective, and resolved representations together.
 - Runtime topic profile mutation is rejected with `422 Unprocessable Entity`.
 - Runtime memory limiter mutation is rejected with `422 Unprocessable Entity`.
+- Controller-extension additions, removals, or runtime-significant changes are
+  rejected with `422 Unprocessable Entity`; restart the engine to apply them.
+- Runtime-significant changes to the engine observability pipeline are rejected
+  with `422 Unprocessable Entity` and require a restart. Default- or
+  alias-equivalent inputs remain acceptable for these engine-scoped components.
 
 Response body is an `EngineConfigReconcileStatus` with:
 
