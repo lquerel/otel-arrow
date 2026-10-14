@@ -110,7 +110,7 @@ pub static PARQUET_EXPORTER: ExporterFactory<OtapPdata> = ExporterFactory {
         Ok(ExporterWrapper::local(
             exporter,
             node,
-            node_config.effective(),
+            node_config.safe_config_snapshot(),
             exporter_config,
         ))
     },

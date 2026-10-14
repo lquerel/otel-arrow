@@ -570,7 +570,7 @@ pub static SYSLOG_CEF_RECEIVER: ReceiverFactory<OtapPdata> = ReceiverFactory {
             Ok(ReceiverWrapper::local(
                 receiver,
                 node,
-                node_config.effective(),
+                node_config.safe_config_snapshot(),
                 receiver_config,
             ))
         },

@@ -53,7 +53,7 @@ pub static FANOUT_PROCESSOR_FACTORY: ProcessorFactory<OtapPdata> = ProcessorFact
             Ok(ProcessorWrapper::local(
                 FanoutProcessor { metrics },
                 node,
-                node_config.effective(),
+                node_config.safe_config_snapshot(),
                 processor_config,
             ))
         },

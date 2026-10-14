@@ -86,7 +86,7 @@ pub static AZURE_MONITOR_EXPORTER: ExporterFactory<OtapPdata> = ExporterFactory 
                 },
             )?,
             node,
-            node_config.effective(),
+            node_config.safe_config_snapshot(),
             exporter_config,
         ))
     },

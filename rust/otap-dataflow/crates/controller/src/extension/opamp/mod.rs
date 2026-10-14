@@ -1195,7 +1195,7 @@ fn initial_message(
         agent_description: agent_description(config),
         capabilities: capabilities(),
         health: Some(component_health(session_state, &status_snapshot)),
-        effective_config: Some(effective_config(context)),
+        effective_config: Some(opamp_effective_config(context)),
         flags: AgentToServerFlags::Unspecified as u64,
         custom_capabilities: Some(custom_capabilities()),
         remote_config_status: Some(RemoteConfigStatus {
@@ -1250,7 +1250,7 @@ fn applying_message(
     };
 
     if reply_to_server.report_full_state {
-        message.effective_config = Some(effective_config(context));
+        message.effective_config = Some(opamp_effective_config(context));
         message.agent_description = agent_description(config);
         message.custom_capabilities = Some(custom_capabilities());
 
@@ -1288,7 +1288,7 @@ fn applied_result_message(
         flags: AgentToServerFlags::Unspecified as u64,
         capabilities: capabilities(),
         health: Some(component_health(session_state, &status_snapshot)),
-        effective_config: Some(effective_config(context)),
+        effective_config: Some(opamp_effective_config(context)),
         remote_config_status: Some(remote_config_status),
         custom_message: pipeline_status_custom_message(&status_snapshot),
         ..Default::default()
@@ -1351,7 +1351,7 @@ fn full_state_reply_message(
         sequence_num: session_state.sequence_num,
         capabilities: capabilities(),
         health: Some(component_health(session_state, &status_snapshot)),
-        effective_config: Some(effective_config(context)),
+        effective_config: Some(opamp_effective_config(context)),
         agent_description: agent_description(config),
         custom_capabilities: Some(custom_capabilities()),
         remote_config_status: Some(remote_config_status),
@@ -1610,11 +1610,11 @@ fn set_health_and_status_from_components(group_health: &mut ComponentHealth) {
     group_health.status = status;
 }
 
-/// Serialize the current applied config as the effective config for the AgentToServer message
-pub(crate) fn effective_config(context: &ControllerExtensionContext) -> EffectiveConfig {
+/// Serializes the SafeConfigSnapshot into OpAMP's unchanged `effective_config` field.
+pub(crate) fn opamp_effective_config(context: &ControllerExtensionContext) -> EffectiveConfig {
     let config_result = context
         .control_plane
-        .effective_config_snapshot()
+        .safe_config_snapshot()
         .map_err(|e| format!("Failed to get engine config snapshot: {e:?}"))
         .and_then(|config| {
             serde_json::to_vec(&config)
@@ -1638,7 +1638,7 @@ pub(crate) fn effective_config(context: &ControllerExtensionContext) -> Effectiv
         Err(e) => {
             otel_error!(
                 "opamp.controller_extension.effective_config.error",
-                message = "Could not build effective config",
+                message = "Could not serialize safe config snapshot for OpAMP",
                 error = e.as_str(),
             );
             EffectiveConfig { config_map: None }
@@ -1866,6 +1866,58 @@ mod test {
         client_handle.await.unwrap().unwrap();
     }
 
+    /// Scenario: A SafeConfigSnapshot is serialized into an OpAMP AgentToServer report.
+    /// Guarantees: The effective_config field remains at wire tag 6 with the unchanged JSON envelope.
+    #[test]
+    fn safe_config_snapshot_uses_unchanged_opamp_effective_config_field() {
+        #[derive(Clone, PartialEq, prost::Message)]
+        struct ExistingWireReport {
+            #[prost(message, optional, tag = "6")]
+            effective_config: Option<EffectiveConfig>,
+        }
+
+        let mut reporting_config = empty_engine_config();
+        _ = reporting_config
+            .engine
+            .custom
+            .insert("private".into(), "[OMITTED]".into());
+        let control_plane = Arc::new(MockControlPlane::new(reporting_config.clone()));
+        let registry = TelemetryRegistryHandle::default();
+        let observed = ObservedStateStore::new(&ObservedStateSettings::default(), registry.clone());
+        let config: Config = serde_json::from_value(serde_json::json!({
+            "instance_uid": EXPECTED_INSTANCE_UID_STR,
+            "endpoint": "ws://127.0.0.1:1/v1/opamp"
+        }))
+        .unwrap();
+        let context = ControllerExtensionContext {
+            extension_id: "opamp".into(),
+            extension: Arc::new(resolved_test_extension(&config)),
+            control_plane,
+            observed_state: observed.handle(),
+            telemetry_registry: registry,
+            engine_config: empty_engine_config(),
+        };
+        let report = opamp_effective_config(&context);
+        let message = AgentToServer {
+            effective_config: Some(report.clone()),
+            ..Default::default()
+        };
+        let bytes = prost::Message::encode_to_vec(&message);
+        let wire_report = <ExistingWireReport as prost::Message>::decode(bytes.as_slice()).unwrap();
+        assert_eq!(wire_report.effective_config, Some(report.clone()));
+        let file = &report.config_map.as_ref().unwrap().config_map["state"];
+        assert_eq!(file.content_type, "application/json");
+        assert_eq!(
+            serde_json::from_slice::<serde_json::Value>(&file.body).unwrap(),
+            serde_json::to_value(
+                otel_arrow_dfe_engine::component_config::SafeConfigSnapshot::from_source_omitted(
+                    reporting_config
+                )
+            )
+            .unwrap()
+        );
+    }
+
     #[tokio::test]
     async fn test_config_update() {
         let control_plane = Arc::new(MockControlPlane::new(empty_engine_config()));
@@ -2080,7 +2132,7 @@ mod test {
             );
             assert_eq!(
                 control_plane
-                    .effective_config_snapshot()
+                    .safe_config_snapshot()
                     .unwrap()
                     .engine
                     .state_dir,
@@ -2259,9 +2311,13 @@ mod test {
         );
         assert_eq!(
             control_plane
-                .effective_config_snapshot()
-                .expect("effective config should be available"),
-            desired
+                .safe_config_snapshot()
+                .expect("safe config snapshot should be available")
+                .as_config(),
+            otel_arrow_dfe_engine::component_config::SafeConfigSnapshot::from_source_omitted(
+                desired
+            )
+            .as_config()
         );
     }
 

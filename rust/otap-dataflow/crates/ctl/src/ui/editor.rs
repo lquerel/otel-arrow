@@ -24,7 +24,18 @@ pub(super) async fn stage_pipeline_editor_draft(
     pipeline_id: &str,
 ) -> Result<(), CliError> {
     let details = load_pipeline_details(client, app, group_id, pipeline_id).await?;
-    let original_yaml = serialize_pipeline_config_yaml(&details.pipeline)?;
+    // Retain the draft's original baseline and revision when reopening it.
+    // Fetching a newer safe view must not silently rebase an existing edit.
+    let original_yaml = match app.pipelines.config_draft.as_ref() {
+        Some(draft) => draft.original_yaml.clone(),
+        None => serialize_pipeline_config_yaml(&details.pipeline)?,
+    };
+    let config_revision = app
+        .pipelines
+        .config_draft
+        .as_ref()
+        .and_then(|draft| draft.config_revision)
+        .unwrap_or(details.config_revision);
     let initial_yaml = app
         .pipelines
         .config_draft
@@ -64,6 +75,10 @@ pub(super) async fn stage_pipeline_editor_draft(
                 Some(err.to_string()),
             );
         }
+    }
+
+    if let Some(draft) = app.pipelines.config_draft.as_mut() {
+        draft.config_revision = Some(config_revision);
     }
 
     app.view = View::Pipelines;

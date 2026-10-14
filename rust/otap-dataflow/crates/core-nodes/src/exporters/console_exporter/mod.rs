@@ -316,7 +316,7 @@ pub static CONSOLE_EXPORTER: ExporterFactory<OtapPdata> = ExporterFactory {
             Ok(ExporterWrapper::local(
                 ConsoleExporter::new(&pipeline, (*config).clone()),
                 node,
-                node_config.effective(),
+                node_config.safe_config_snapshot(),
                 exporter_config,
             ))
         },
@@ -346,7 +346,7 @@ pub fn claim_structured_stdout<'a>(
     let mut emits_records = false;
     for pipeline in pipelines {
         for (_, node) in pipeline.nodes() {
-            if node.effective().r#type.as_str() == CONSOLE_EXPORTER_URN {
+            if node.safe_config_snapshot().r#type.as_str() == CONSOLE_EXPORTER_URN {
                 emits_records |= node.component_config::<ConsoleExporterConfig>()?.format
                     == ConsoleOutputFormat::RecordJson;
             }

@@ -93,15 +93,17 @@ pub static FILE_EXPORTER: ExporterFactory<OtapPdata> = ExporterFactory {
             Ok(ExporterWrapper::local(
                 exporter,
                 node,
-                node_config.effective(),
+                node_config.safe_config_snapshot(),
                 exporter_config,
             ))
         },
     context_declarations: None,
     wiring_contract: otel_arrow_dfe_engine::wiring_contract::WiringContract::UNRESTRICTED,
-    resolve_config: otel_arrow_dfe_engine::component_config::resolve_typed_config::<
-        FileExporterConfig,
-    >,
+    resolve_config: |value| {
+        otel_arrow_dfe_engine::component_config::ResolvedComponentConfig::typed_safe(
+            FileExporterConfig::parse(value)?,
+        )
+    },
     snapshot_policy: otel_arrow_dfe_engine::component_config::ConfigSnapshotPolicy::TypedSafe,
 };
 
@@ -434,6 +436,7 @@ fn exporter_error(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use otel_arrow_dfe_config::node::NodeUserConfig;
     use otel_arrow_dfe_engine::Interests;
     use otel_arrow_dfe_engine::control::PipelineCompletionMsg;
     use otel_arrow_dfe_engine::testing::exporter::{
@@ -457,6 +460,91 @@ mod tests {
     use serde_json::json;
     use std::time::{Duration, Instant as StdInstant};
     use tempfile::tempdir;
+
+    /// Scenario: Structurally valid file configs violate ownership, frame limits, or mode constraints.
+    /// Guarantees: The registered resolver rejects them before creation or any file is opened.
+    #[test]
+    fn factory_resolution_preserves_semantic_validation() {
+        let dir = tempdir().unwrap();
+        let path = |name: &str| dir.path().join(name).to_string_lossy().into_owned();
+        let valid_path = path("capture-{signal}-{core_id}-{generation}.jsonl");
+        for (config, expected) in [
+            (
+                json!({"path": path("capture-{signal}-{generation}.jsonl")}),
+                "{core_id}",
+            ),
+            (
+                json!({"path": path("capture-{signal}-{core_id}.jsonl")}),
+                "{generation}",
+            ),
+            (
+                json!({"path": path("capture-{core_id}-{generation}.jsonl")}),
+                "{signal}",
+            ),
+            (
+                json!({"path": path("{signal}-{signal}-{core_id}-{generation}.jsonl")}),
+                "exactly once",
+            ),
+            (
+                json!({"path": path("{signal}-{core_id}-{generation}-{unknown}.jsonl")}),
+                "unknown or malformed",
+            ),
+            (
+                json!({"path": "relative/{signal}-{core_id}-{generation}.jsonl"}),
+                "absolute",
+            ),
+            (
+                json!({"path": path("{core_id}/../{signal}-{generation}.jsonl")}),
+                "lexical normalization",
+            ),
+            (
+                json!({"path": valid_path, "max_frame_bytes": 0}),
+                "max_frame_bytes",
+            ),
+            (
+                json!({"path": valid_path, "max_frame_bytes": 268435457}),
+                "max_frame_bytes",
+            ),
+            (
+                json!({"path": valid_path, "open_mode": "truncate", "tail_recovery": "fail"}),
+                "only valid",
+            ),
+        ] {
+            let mut source = NodeUserConfig::new_exporter_config(FILE_EXPORTER_URN);
+            source.config = config;
+            let error = FILE_EXPORTER
+                .resolve_node_config(source)
+                .unwrap_err()
+                .to_string();
+            assert!(error.contains(expected), "{error}");
+        }
+        assert_eq!(std::fs::read_dir(dir.path()).unwrap().count(), 0);
+    }
+
+    /// Scenario: A minimal valid file config is resolved by its registered factory.
+    /// Guarantees: Validated defaults and unique core/generation paths remain available to creation.
+    #[test]
+    fn factory_resolution_keeps_validated_defaults_and_runtime_paths() {
+        let dir = tempdir().unwrap();
+        let path = dir
+            .path()
+            .join("capture-{signal}-{core_id}-{generation}.jsonl");
+        let mut source = NodeUserConfig::new_exporter_config(FILE_EXPORTER_URN);
+        source.config = json!({"path": path.to_string_lossy()});
+        let resolved = FILE_EXPORTER.resolve_node_config(source.clone()).unwrap();
+        let typed = resolved.component_config::<FileExporterConfig>().unwrap();
+        assert_eq!(*typed, FileExporterConfig::parse(&source.config).unwrap());
+        assert_eq!(resolved.safe_component_snapshot()["open_mode"], "append");
+        assert!(typed.max_frame_bytes > 0);
+        let first = typed.render_paths(0, 1).unwrap();
+        let other_core = typed.render_paths(1, 1).unwrap();
+        let other_generation = typed.render_paths(0, 2).unwrap();
+        for signal in [SignalType::Logs, SignalType::Metrics, SignalType::Traces] {
+            assert_ne!(first.get(signal), other_core.get(signal));
+            assert_ne!(first.get(signal), other_generation.get(signal));
+        }
+        assert_eq!(std::fs::read_dir(dir.path()).unwrap().count(), 0);
+    }
 
     fn encoded<M: prost::Message>(message: &M) -> Vec<u8> {
         let mut bytes = Vec::new();

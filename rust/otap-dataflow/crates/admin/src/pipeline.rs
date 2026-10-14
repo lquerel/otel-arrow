@@ -54,7 +54,10 @@ pub(crate) fn routes() -> Router<AppState> {
     Router::new()
         .route(
             "/groups/{pipeline_group_id}/pipelines/{pipeline_id}",
-            get(show_pipeline).put(put_pipeline).delete(delete_pipeline),
+            get(show_pipeline)
+                .put(put_pipeline)
+                .patch(patch_pipeline)
+                .delete(delete_pipeline),
         )
         // Returns the status of a specific pipeline.
         .route(
@@ -126,7 +129,7 @@ fn shutdown_is_success(state: &str) -> bool {
     state == "succeeded"
 }
 
-/// Returns committed effective configuration details for one logical pipeline.
+/// Returns the committed pipeline view of the SafeConfigSnapshot.
 pub async fn show_pipeline(
     Path((pipeline_group_id, pipeline_id)): Path<(String, String)>,
     State(state): State<AppState>,
@@ -149,36 +152,58 @@ pub async fn put_pipeline(
     Path((pipeline_group_id, pipeline_id)): Path<(String, String)>,
     Query(params): Query<WaitParams>,
     State(state): State<AppState>,
-    Json(request): Json<crate::ReconfigureRequest>,
+    crate::PrivateConfigJson(request): crate::PrivateConfigJson<crate::ReconfigureRequest>,
 ) -> impl IntoResponse {
-    let rollout =
-        match state
-            .controller
-            .reconfigure_pipeline(&pipeline_group_id, &pipeline_id, request)
-        {
-            Ok(rollout) => rollout,
-            Err(crate::ControlPlaneError::GroupNotFound) => {
-                return operation_error_response(
-                    StatusCode::NOT_FOUND,
-                    crate::ControlPlaneError::GroupNotFound,
-                );
-            }
-            Err(crate::ControlPlaneError::RolloutConflict) => {
-                return operation_error_response(
-                    StatusCode::CONFLICT,
-                    crate::ControlPlaneError::RolloutConflict,
-                );
-            }
-            Err(crate::ControlPlaneError::InvalidRequest { message }) => {
-                return operation_error_response(
-                    StatusCode::UNPROCESSABLE_ENTITY,
-                    crate::ControlPlaneError::InvalidRequest { message },
-                );
-            }
-            Err(other) => {
-                return operation_error_response(StatusCode::INTERNAL_SERVER_ERROR, other);
-            }
-        };
+    let result = state
+        .controller
+        .reconfigure_pipeline(&pipeline_group_id, &pipeline_id, request);
+    rollout_response(state, pipeline_group_id, pipeline_id, params, result).await
+}
+
+/// Applies explicit edits to private source; safe reporting values are not replayed.
+pub async fn patch_pipeline(
+    Path((pipeline_group_id, pipeline_id)): Path<(String, String)>,
+    Query(params): Query<WaitParams>,
+    State(state): State<AppState>,
+    crate::PrivateConfigJson(request): crate::PrivateConfigJson<crate::PipelineUpdateRequest>,
+) -> Response {
+    let result = state
+        .controller
+        .update_pipeline(&pipeline_group_id, &pipeline_id, request);
+    rollout_response(state, pipeline_group_id, pipeline_id, params, result).await
+}
+
+async fn rollout_response(
+    state: AppState,
+    pipeline_group_id: String,
+    pipeline_id: String,
+    params: WaitParams,
+    result: Result<crate::RolloutStatus, crate::ControlPlaneError>,
+) -> Response {
+    let rollout = match result {
+        Ok(rollout) => rollout,
+        Err(
+            error @ (crate::ControlPlaneError::GroupNotFound
+            | crate::ControlPlaneError::PipelineNotFound),
+        ) => {
+            return operation_error_response(StatusCode::NOT_FOUND, error);
+        }
+        Err(crate::ControlPlaneError::RolloutConflict) => {
+            return operation_error_response(
+                StatusCode::CONFLICT,
+                crate::ControlPlaneError::RolloutConflict,
+            );
+        }
+        Err(crate::ControlPlaneError::InvalidRequest { message }) => {
+            return operation_error_response(
+                StatusCode::UNPROCESSABLE_ENTITY,
+                crate::ControlPlaneError::InvalidRequest { message },
+            );
+        }
+        Err(other) => {
+            return operation_error_response(StatusCode::INTERNAL_SERVER_ERROR, other);
+        }
+    };
 
     if !params.wait {
         let status = if rollout_is_terminal(rollout.state) {
@@ -698,9 +723,9 @@ mod tests {
     }
 
     /// Scenario: pipeline details contain a precomputed omitted component config.
-    /// Guarantees: `show_pipeline` serializes the effective representation directly.
+    /// Guarantees: `show_pipeline` serializes the SafeConfigSnapshot representation directly.
     #[tokio::test]
-    async fn show_pipeline_serializes_precomputed_effective_config() {
+    async fn show_pipeline_serializes_precomputed_safe_config_snapshot() {
         let details: PipelineDetails = serde_json::from_value(json!({
             "pipelineGroupId": "default",
             "pipelineId": "main",
@@ -735,6 +760,45 @@ mod tests {
         );
     }
 
+    /// Scenario: Full or partial pipeline HTTP input contains an invalid scalar that is itself private.
+    /// Guarantees: JSON admission errors preserve status without echoing submitted values in response bodies.
+    #[tokio::test]
+    async fn configuration_json_rejections_do_not_echo_private_values() {
+        use tower::ServiceExt;
+        let state = test_app_state(Arc::new(StubControlPlane {
+            replace_result: Ok(rollout_status(PipelineRolloutState::Succeeded)),
+            rollout_status_result: Ok(None),
+            shutdown_result: Ok(shutdown_status("succeeded")),
+            shutdown_status_result: Ok(None),
+            delete_result: Ok(delete_status("succeeded")),
+        }));
+        for (method, body) in [
+            ("PUT", json!({"pipeline": "private-invalid-scalar"})),
+            (
+                "PATCH",
+                json!({"expectedRevision": "private-invalid-scalar", "changes": []}),
+            ),
+        ] {
+            let response = routes()
+                .with_state(state.clone())
+                .oneshot(
+                    axum::http::Request::builder()
+                        .method(method)
+                        .uri("/groups/default/pipelines/main")
+                        .header("content-type", "application/json")
+                        .body(axum::body::Body::from(body.to_string()))
+                        .unwrap(),
+                )
+                .await
+                .unwrap();
+            assert_eq!(response.status(), StatusCode::UNPROCESSABLE_ENTITY);
+            let body = to_bytes(response.into_body(), usize::MAX).await.unwrap();
+            assert!(!String::from_utf8_lossy(&body).contains("private-invalid-scalar"));
+            let error: OperationError = serde_json::from_slice(&body).unwrap();
+            assert_eq!(error.kind, OperationErrorKind::InvalidRequest);
+        }
+    }
+
     /// Scenario: the control plane rejects a pipeline reconfigure request
     /// before rollout work starts.
     /// Guarantees: the admin handler converts that rejection into a structured
@@ -756,7 +820,7 @@ mod tests {
                 shutdown_status_result: Ok(None),
                 delete_result: Ok(delete_status("succeeded")),
             }))),
-            Json(request()),
+            crate::PrivateConfigJson(request()),
         )
         .await
         .into_response();
@@ -790,7 +854,7 @@ mod tests {
                 shutdown_status_result: Ok(None),
                 delete_result: Ok(delete_status("succeeded")),
             }))),
-            Json(request()),
+            crate::PrivateConfigJson(request()),
         )
         .await
         .into_response();

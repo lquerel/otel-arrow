@@ -229,12 +229,11 @@ pub(crate) fn resolve_controller_extensions(
                 .into());
             }
             Some(factory) => {
-                let component = (factory.resolve_config)(&extension.config).map_err(|e| {
+                let component = (factory.resolve_config)(&extension.config).map_err(|_| {
                     std::io::Error::other(format!(
-                        "Invalid config for controller extension `{}` in engine.controller.extensions extension={}: {}",
+                        "Invalid config for controller extension `{}` in engine.controller.extensions extension={}; check its configuration against the component schema",
                         urn_str,
-                        extension_id.as_ref(),
-                        e
+                        extension_id.as_ref()
                     ))
                 })?;
                 let extension_config =

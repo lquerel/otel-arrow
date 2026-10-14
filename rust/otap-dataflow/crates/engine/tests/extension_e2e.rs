@@ -302,7 +302,7 @@ fn probe_receiver_create(
     receiver_config: &ReceiverConfig,
     capabilities: &Capabilities,
 ) -> Result<ReceiverWrapper<()>, otel_arrow_dfe_config::error::Error> {
-    let effective = node_config.effective();
+    let safe_config_snapshot = node_config.safe_config_snapshot();
     let component = node_config.component_config::<serde_json::Value>()?;
     let key = component
         .get("probe_key")
@@ -448,7 +448,7 @@ fn probe_receiver_create(
             probe_key: Some(key.to_owned()),
         },
         node,
-        effective,
+        safe_config_snapshot,
         receiver_config,
     ))
 }
@@ -499,7 +499,7 @@ fn noop_exporter_create(
     Ok(ExporterWrapper::local(
         NoopExporter,
         node,
-        node_config.effective(),
+        node_config.safe_config_snapshot(),
         exporter_config,
     ))
 }
@@ -588,14 +588,15 @@ fn passive_extension_create(
     user_config: Arc<ResolvedExtensionConfig>,
     extension_config: &ExtensionConfig,
 ) -> Result<ExtensionBundle, otel_arrow_dfe_config::error::Error> {
-    let bundle = ExtensionWrapper::builder(name, user_config.effective(), extension_config)
-        .passive()
-        .cloned()
-        .shared::<NoOpStatelessImpl>(NoOpStatelessImpl {
-            name: "passive-noop",
-        })
-        .build()
-        .expect("passive extension bundle builds");
+    let bundle =
+        ExtensionWrapper::builder(name, user_config.safe_config_snapshot(), extension_config)
+            .passive()
+            .cloned()
+            .shared::<NoOpStatelessImpl>(NoOpStatelessImpl {
+                name: "passive-noop",
+            })
+            .build()
+            .expect("passive extension bundle builds");
     Ok(bundle)
 }
 
@@ -622,13 +623,14 @@ fn dual_extension_create(
     user_config: Arc<ResolvedExtensionConfig>,
     extension_config: &ExtensionConfig,
 ) -> Result<ExtensionBundle, otel_arrow_dfe_config::error::Error> {
-    let bundle = ExtensionWrapper::builder(name, user_config.effective(), extension_config)
-        .passive()
-        .cloned()
-        .shared::<NoOpStatelessImpl>(NoOpStatelessImpl { name: "dual-noop" })
-        .local::<NoOpStatelessImplLocal>(NoOpStatelessImplLocal { name: "dual-noop" })
-        .build()
-        .expect("dual extension bundle builds");
+    let bundle =
+        ExtensionWrapper::builder(name, user_config.safe_config_snapshot(), extension_config)
+            .passive()
+            .cloned()
+            .shared::<NoOpStatelessImpl>(NoOpStatelessImpl { name: "dual-noop" })
+            .local::<NoOpStatelessImplLocal>(NoOpStatelessImplLocal { name: "dual-noop" })
+            .build()
+            .expect("dual extension bundle builds");
     Ok(bundle)
 }
 
@@ -742,11 +744,12 @@ fn active_extension_create(
         start_at: Arc::clone(&probe.start_at),
         shutdown_at: Arc::clone(&probe.shutdown_at),
     };
-    let bundle = ExtensionWrapper::builder(name, user_config.effective(), extension_config)
-        .active()
-        .shared::<ActiveExtImpl>(impl_)
-        .build()
-        .expect("active extension bundle builds");
+    let bundle =
+        ExtensionWrapper::builder(name, user_config.safe_config_snapshot(), extension_config)
+            .active()
+            .shared::<ActiveExtImpl>(impl_)
+            .build()
+            .expect("active extension bundle builds");
     Ok(bundle)
 }
 
@@ -839,11 +842,12 @@ fn active_shared_counter_extension_create(
         counter: Arc::clone(&probe.counter),
         bumps,
     };
-    let bundle = ExtensionWrapper::builder(name, user_config.effective(), extension_config)
-        .active()
-        .shared::<ActiveSharedCounterImpl>(impl_)
-        .build()
-        .expect("active shared counter extension bundle builds");
+    let bundle =
+        ExtensionWrapper::builder(name, user_config.safe_config_snapshot(), extension_config)
+            .active()
+            .shared::<ActiveSharedCounterImpl>(impl_)
+            .build()
+            .expect("active shared counter extension bundle builds");
     Ok(bundle)
 }
 
@@ -901,11 +905,12 @@ fn failing_extension_create(
     user_config: Arc<ResolvedExtensionConfig>,
     extension_config: &ExtensionConfig,
 ) -> Result<ExtensionBundle, otel_arrow_dfe_config::error::Error> {
-    let bundle = ExtensionWrapper::builder(name, user_config.effective(), extension_config)
-        .active()
-        .shared::<FailingExtImpl>(FailingExtImpl)
-        .build()
-        .expect("failing extension bundle builds");
+    let bundle =
+        ExtensionWrapper::builder(name, user_config.safe_config_snapshot(), extension_config)
+            .active()
+            .shared::<FailingExtImpl>(FailingExtImpl)
+            .build()
+            .expect("failing extension bundle builds");
     Ok(bundle)
 }
 
@@ -963,11 +968,12 @@ fn immediate_ok_extension_create(
     user_config: Arc<ResolvedExtensionConfig>,
     extension_config: &ExtensionConfig,
 ) -> Result<ExtensionBundle, otel_arrow_dfe_config::error::Error> {
-    let bundle = ExtensionWrapper::builder(name, user_config.effective(), extension_config)
-        .active()
-        .shared::<ImmediateOkExtImpl>(ImmediateOkExtImpl)
-        .build()
-        .expect("immediate-ok extension bundle builds");
+    let bundle =
+        ExtensionWrapper::builder(name, user_config.safe_config_snapshot(), extension_config)
+            .active()
+            .shared::<ImmediateOkExtImpl>(ImmediateOkExtImpl)
+            .build()
+            .expect("immediate-ok extension bundle builds");
     Ok(bundle)
 }
 
@@ -1075,11 +1081,12 @@ fn shutdown_recording_extension_create(
     let impl_ = ShutdownRecordingExtImpl {
         shutdown_at: Arc::clone(&probe.shutdown_at),
     };
-    let bundle = ExtensionWrapper::builder(name, user_config.effective(), extension_config)
-        .active()
-        .shared::<ShutdownRecordingExtImpl>(impl_)
-        .build()
-        .expect("shutdown_recording extension bundle builds");
+    let bundle =
+        ExtensionWrapper::builder(name, user_config.safe_config_snapshot(), extension_config)
+            .active()
+            .shared::<ShutdownRecordingExtImpl>(impl_)
+            .build()
+            .expect("shutdown_recording extension bundle builds");
     Ok(bundle)
 }
 
@@ -1182,12 +1189,13 @@ fn dual_active_extension_create(
         shutdown_at: Arc::clone(&shared_probe.shutdown_at),
     };
 
-    let bundle = ExtensionWrapper::builder(name, user_config.effective(), extension_config)
-        .active()
-        .shared::<ActiveExtImpl>(shared_impl)
-        .local::<ActiveLocalExtImpl>(Rc::new(local_impl))
-        .build()
-        .expect("dual-active extension bundle builds");
+    let bundle =
+        ExtensionWrapper::builder(name, user_config.safe_config_snapshot(), extension_config)
+            .active()
+            .shared::<ActiveExtImpl>(shared_impl)
+            .local::<ActiveLocalExtImpl>(Rc::new(local_impl))
+            .build()
+            .expect("dual-active extension bundle builds");
     Ok(bundle)
 }
 
@@ -1283,11 +1291,12 @@ fn background_extension_create(
         started: Arc::clone(&probe.started),
         shutdown_at: Arc::clone(&probe.shutdown_at),
     };
-    let bundle = ExtensionWrapper::builder(name, user_config.effective(), extension_config)
-        .background()
-        .shared::<BackgroundExtImpl>(impl_)
-        .build()
-        .expect("background extension bundle builds");
+    let bundle =
+        ExtensionWrapper::builder(name, user_config.safe_config_snapshot(), extension_config)
+            .background()
+            .shared::<BackgroundExtImpl>(impl_)
+            .build()
+            .expect("background extension bundle builds");
     Ok(bundle)
 }
 
@@ -1407,12 +1416,13 @@ fn shared_counter_extension_create(
     // prototype. The `Arc<AtomicU64>` field means clones all point at
     // the same underlying counter, which is the explicit
     // share-state-via-`Arc` pattern documented in the architecture.
-    let bundle = ExtensionWrapper::builder(name, user_config.effective(), extension_config)
-        .passive()
-        .cloned()
-        .local::<SharedCounterImpl>(impl_)
-        .build()
-        .expect("shared counter extension bundle builds");
+    let bundle =
+        ExtensionWrapper::builder(name, user_config.safe_config_snapshot(), extension_config)
+            .passive()
+            .cloned()
+            .local::<SharedCounterImpl>(impl_)
+            .build()
+            .expect("shared counter extension bundle builds");
     Ok(bundle)
 }
 
@@ -1453,12 +1463,13 @@ fn shared_counter_shared_extension_create(
     let impl_ = SharedCounterImpl {
         counter: Arc::clone(&probe.counter),
     };
-    let bundle = ExtensionWrapper::builder(name, user_config.effective(), extension_config)
-        .passive()
-        .cloned()
-        .shared::<SharedCounterImpl>(impl_)
-        .build()
-        .expect("shared counter (shared variant) extension bundle builds");
+    let bundle =
+        ExtensionWrapper::builder(name, user_config.safe_config_snapshot(), extension_config)
+            .passive()
+            .cloned()
+            .shared::<SharedCounterImpl>(impl_)
+            .build()
+            .expect("shared counter (shared variant) extension bundle builds");
     Ok(bundle)
 }
 
@@ -1550,15 +1561,16 @@ fn constructed_extension_create(
     // gets a fresh `ConstructedNoOpImpl` value, demonstrating
     // per-consumer instantiation.
     let counter = Arc::clone(&probe.closure_invocations);
-    let bundle = ExtensionWrapper::builder(name, user_config.effective(), extension_config)
-        .passive()
-        .constructed()
-        .local::<ConstructedNoOpImpl, _>(move || {
-            let _ = counter.fetch_add(1, Ordering::SeqCst);
-            ConstructedNoOpImpl
-        })
-        .build()
-        .expect("constructed extension bundle builds");
+    let bundle =
+        ExtensionWrapper::builder(name, user_config.safe_config_snapshot(), extension_config)
+            .passive()
+            .constructed()
+            .local::<ConstructedNoOpImpl, _>(move || {
+                let _ = counter.fetch_add(1, Ordering::SeqCst);
+                ConstructedNoOpImpl
+            })
+            .build()
+            .expect("constructed extension bundle builds");
     Ok(bundle)
 }
 
@@ -1623,12 +1635,13 @@ fn rc_counter_extension_create(
     let impl_ = RcCounterImpl {
         counter: Rc::new(std::cell::RefCell::new(0)),
     };
-    let bundle = ExtensionWrapper::builder(name, user_config.effective(), extension_config)
-        .passive()
-        .cloned()
-        .local::<RcCounterImpl>(impl_)
-        .build()
-        .expect("rc counter extension bundle builds");
+    let bundle =
+        ExtensionWrapper::builder(name, user_config.safe_config_snapshot(), extension_config)
+            .passive()
+            .cloned()
+            .local::<RcCounterImpl>(impl_)
+            .build()
+            .expect("rc counter extension bundle builds");
     Ok(bundle)
 }
 
@@ -1726,7 +1739,7 @@ fn probe_processor_create(
     processor_config: &otel_arrow_dfe_engine::config::ProcessorConfig,
     capabilities: &Capabilities,
 ) -> Result<ProcessorWrapper<()>, otel_arrow_dfe_config::error::Error> {
-    let effective = node_config.effective();
+    let safe_config_snapshot = node_config.safe_config_snapshot();
     let component = node_config.component_config::<serde_json::Value>()?;
     let probe_key = component.get("probe_key").and_then(|v| v.as_str());
     let lifecycle_key = component.get("lifecycle_key").and_then(|v| v.as_str());
@@ -1755,7 +1768,7 @@ fn probe_processor_create(
     Ok(ProcessorWrapper::local(
         ProbeProcessor { lifecycle },
         node,
-        effective,
+        safe_config_snapshot,
         processor_config,
     ))
 }
@@ -1813,7 +1826,7 @@ fn probe_exporter_create(
     exporter_config: &ExporterConfig,
     capabilities: &Capabilities,
 ) -> Result<ExporterWrapper<()>, otel_arrow_dfe_config::error::Error> {
-    let effective = node_config.effective();
+    let safe_config_snapshot = node_config.safe_config_snapshot();
     let component = node_config.component_config::<serde_json::Value>()?;
     let probe_key = component.get("probe_key").and_then(|v| v.as_str());
     let lifecycle_key = component.get("lifecycle_key").and_then(|v| v.as_str());
@@ -1840,7 +1853,7 @@ fn probe_exporter_create(
     Ok(ExporterWrapper::local(
         ProbeExporter { lifecycle },
         node,
-        effective,
+        safe_config_snapshot,
         exporter_config,
     ))
 }
@@ -4288,7 +4301,8 @@ fn ready_gate_extension_create(
     };
 
     let builder =
-        ExtensionWrapper::builder(name, user_config.effective(), extension_config).active();
+        ExtensionWrapper::builder(name, user_config.safe_config_snapshot(), extension_config)
+            .active();
     let builder = match readiness_timeout {
         Some(t) => builder.with_readiness_probe_timeout_override(t),
         None => builder,
@@ -4340,7 +4354,8 @@ fn ready_gate_bg_extension_create(
     };
 
     let builder =
-        ExtensionWrapper::builder(name, user_config.effective(), extension_config).background();
+        ExtensionWrapper::builder(name, user_config.safe_config_snapshot(), extension_config)
+            .background();
     let builder = match readiness_timeout {
         Some(t) => builder.with_readiness_probe_timeout_override(t),
         None => builder,

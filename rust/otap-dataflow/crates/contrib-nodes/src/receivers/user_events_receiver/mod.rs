@@ -598,7 +598,7 @@ pub static USER_EVENTS_RECEIVER: ReceiverFactory<OtapPdata> = ReceiverFactory {
                         .clone(),
                 )?,
                 node,
-                node_config.effective(),
+                node_config.safe_config_snapshot(),
                 receiver_config,
             ))
         },

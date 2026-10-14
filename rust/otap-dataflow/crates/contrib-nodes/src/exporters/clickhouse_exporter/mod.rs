@@ -265,7 +265,7 @@ pub static CLICKHOUSE_EXPORTER: ExporterFactory<OtapPdata> = ExporterFactory {
                     node_config.component_config::<Config>()?.as_ref().clone(),
                 ),
                 node,
-                node_config.effective(),
+                node_config.safe_config_snapshot(),
                 exporter_config,
             ))
         },

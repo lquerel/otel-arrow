@@ -1,6 +1,6 @@
 change_type: enhancement
 component: engine
-note: "Resolve component configuration through factories before runtime admission and expose only safe effective configuration snapshots."
+note: "Resolve component configuration through factories before runtime admission and expose only safe configuration snapshots."
 issues: [3848]
 subtext: |
   Secrets are redacted and unsafe or free-form component configuration is omitted from Admin and OpAMP output. Live updates compare runtime meaning, including hidden credentials. Changes to controller extensions or the observability pipeline require a restart.

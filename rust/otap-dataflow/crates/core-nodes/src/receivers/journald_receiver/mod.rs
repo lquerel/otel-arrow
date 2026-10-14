@@ -145,7 +145,7 @@ fn create_journald_receiver(
     Ok(ReceiverWrapper::local(
         receiver,
         node,
-        node_config.effective(),
+        node_config.safe_config_snapshot(),
         receiver_config,
     ))
 }
@@ -1182,7 +1182,7 @@ impl Drop for SourceLease {
 #[cfg(test)]
 mod tests {
     /// Scenario: Equivalent journal paths and priority shorthand resolve to the same reader.
-    /// Guarantees: Normalization controls runtime equality and effective snapshots.
+    /// Guarantees: Normalization controls runtime equality and safe config snapshots.
     #[cfg(target_os = "linux")]
     #[test]
     fn resolution_compares_normalized_runtime_values() {
@@ -1196,7 +1196,10 @@ mod tests {
         }))
         .unwrap();
         assert_eq!(shorthand, expanded);
-        assert_eq!(shorthand.snapshot(), expanded.snapshot());
+        assert_eq!(
+            shorthand.safe_config_snapshot(),
+            expanded.safe_config_snapshot()
+        );
         assert_ne!(
             shorthand,
             resolve(&serde_json::json!({

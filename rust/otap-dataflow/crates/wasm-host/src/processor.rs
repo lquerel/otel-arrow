@@ -556,7 +556,7 @@ fn create_wasm_processor(
     Ok(ProcessorWrapper::local(
         processor,
         node,
-        node_config.effective(),
+        node_config.safe_config_snapshot(),
         processor_config,
     ))
 }

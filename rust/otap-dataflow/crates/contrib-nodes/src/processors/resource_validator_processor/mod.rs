@@ -173,7 +173,7 @@ pub fn create_resource_validator_processor(
             node_config.component_config::<Config>()?.as_ref(),
         ),
         node,
-        node_config.effective(),
+        node_config.safe_config_snapshot(),
         processor_config,
     ))
 }

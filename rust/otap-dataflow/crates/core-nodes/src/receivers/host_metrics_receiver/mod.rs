@@ -174,7 +174,7 @@ fn create_host_metrics_receiver(
     Ok(ReceiverWrapper::local(
         receiver,
         node,
-        node_config.effective(),
+        node_config.safe_config_snapshot(),
         receiver_config,
     ))
 }
@@ -800,12 +800,15 @@ mod tests {
         let legacy = resolve(&serde_json::json!({"root_path": "/host"})).unwrap();
         let canonical = resolve(&serde_json::json!({"host_view": {"root_path": "/host"}})).unwrap();
         assert_eq!(legacy, canonical);
-        assert_eq!(legacy.snapshot(), canonical.snapshot());
+        assert_eq!(
+            legacy.safe_config_snapshot(),
+            canonical.safe_config_snapshot()
+        );
         let defaults = resolve(&serde_json::json!({})).unwrap();
         // The default collection interval is used below rather than assuming a wall-clock value.
         let mut explicit_config = serde_json::json!({"families": {"cpu": {}}});
         explicit_config["families"]["cpu"]["interval"] =
-            defaults.snapshot()["collection_interval"].clone();
+            defaults.safe_config_snapshot()["collection_interval"].clone();
         assert_eq!(defaults, resolve(&explicit_config).unwrap());
         assert_ne!(
             legacy,

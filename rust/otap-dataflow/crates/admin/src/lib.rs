@@ -22,12 +22,43 @@ pub use otel_arrow_dfe_admin_types::engine::{
 };
 use otel_arrow_dfe_admin_types::operations::{OperationError, OperationErrorKind};
 pub use otel_arrow_dfe_admin_types::pipelines::{
-    PipelineDetails, PipelineRolloutState, PipelineRolloutSummary, PipelineShutdownInitiator,
-    ReconfigureRequest, RolloutCoreStatus, RolloutStatus, ShutdownCoreStatus, ShutdownStatus,
+    PipelineConfigChange, PipelineDetails, PipelineRolloutState, PipelineRolloutSummary,
+    PipelineShutdownInitiator, PipelineUpdateRequest, ReconfigureRequest, RolloutCoreStatus,
+    RolloutStatus, ShutdownCoreStatus, ShutdownStatus,
 };
 use serde::Serialize;
 use std::collections::HashMap;
 use std::net::SocketAddr;
+
+/// JSON admission for private configuration. Axum's normal JSON rejection can
+/// echo invalid scalar values; retain only status and a value-free diagnostic.
+pub(crate) struct PrivateConfigJson<T>(pub T);
+
+impl<S: Send + Sync, T: serde::de::DeserializeOwned> axum::extract::FromRequest<S>
+    for PrivateConfigJson<T>
+{
+    type Rejection = Response;
+
+    async fn from_request(
+        request: axum::extract::Request,
+        state: &S,
+    ) -> Result<Self, Self::Rejection> {
+        use axum::response::IntoResponse;
+        match axum::Json::<T>::from_request(request, state).await {
+            Ok(axum::Json(value)) => Ok(Self(value)),
+            Err(error) => Err((
+                error.status(),
+                axum::Json(
+                    OperationError::new(OperationErrorKind::InvalidRequest).with_message(
+                        "invalid configuration request; check JSON syntax, field names, and types"
+                            .to_owned(),
+                    ),
+                ),
+            )
+                .into_response()),
+        }
+    }
+}
 use std::sync::Arc;
 use tokio::net::TcpListener;
 use tokio::sync::Semaphore;
@@ -35,9 +66,10 @@ use tokio_util::sync::CancellationToken;
 use tower::ServiceBuilder;
 
 use crate::error::Error;
-use otel_arrow_dfe_config::engine::{HttpAdminSettings, OtelDataflowSpec};
+use otel_arrow_dfe_config::engine::HttpAdminSettings;
 use otel_arrow_dfe_config::pipeline::telemetry::AttributeValue as ResourceAttributeValue;
 use otel_arrow_dfe_config::pipeline_group::PipelineGroupConfig;
+pub use otel_arrow_dfe_engine::component_config::SafeConfigSnapshot;
 use otel_arrow_dfe_engine::memory_limiter::MemoryPressureState;
 use otel_arrow_dfe_state::store::ObservedStateHandle;
 use otel_arrow_dfe_telemetry::log_tap::InternalLogTapHandle;
@@ -136,7 +168,19 @@ pub trait ControlPlane: Send + Sync {
         request: ReconfigureRequest,
     ) -> Result<RolloutStatus, ControlPlaneError>;
 
-    /// Returns the live active config for a logical pipeline.
+    /// Applies explicit revision-guarded edits to private source, then resolves and rolls out.
+    fn update_pipeline(
+        &self,
+        _pipeline_group_id: &str,
+        _pipeline_id: &str,
+        _request: PipelineUpdateRequest,
+    ) -> Result<RolloutStatus, ControlPlaneError> {
+        Err(ControlPlaneError::InvalidRequest {
+            message: "partial pipeline updates are not supported by this control plane".to_owned(),
+        })
+    }
+
+    /// Returns the safe active config for a logical pipeline, never private source.
     fn pipeline_details(
         &self,
         pipeline_group_id: &str,
@@ -182,8 +226,8 @@ pub trait ControlPlane: Send + Sync {
         })
     }
 
-    /// Returns the full effective engine configuration known to the controller.
-    fn effective_config_snapshot(&self) -> Result<OtelDataflowSpec, ControlPlaneError> {
+    /// Returns the committed SafeConfigSnapshot for control-plane reporting.
+    fn safe_config_snapshot(&self) -> Result<SafeConfigSnapshot, ControlPlaneError> {
         let _ = self;
         Err(ControlPlaneError::Internal {
             message: "engine config snapshots are not supported by this control plane".to_owned(),

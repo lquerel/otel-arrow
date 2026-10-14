@@ -59,12 +59,24 @@ async fn submit_pipeline_scale(
     }
 
     let details = load_pipeline_details(client, app, group_id, pipeline_id).await?;
-    submit_pipeline_reconfigure(
+    submit_pipeline_update(
         client,
         app,
         group_id,
         pipeline_id,
-        resize_pipeline_config(details.pipeline, target_cores)?,
+        pipelines::PipelineUpdateRequest {
+            expected_revision: details.config_revision,
+            changes: vec![pipelines::PipelineConfigChange::Set {
+                path: vec![
+                    "policies".into(),
+                    "resources".into(),
+                    "core_allocation".into(),
+                ],
+                value: json!({"type": "core_count", "count": target_cores}),
+            }],
+            step_timeout_secs: 60,
+            drain_timeout_secs: 60,
+        },
     )
     .await
 }
@@ -80,32 +92,50 @@ async fn submit_pipeline_config_draft(
             "no staged pipeline config draft is available",
         ));
     };
-    let Some(pipeline) = draft.parsed.clone() else {
+    let request = draft_update_request(draft, group_id, pipeline_id)?;
+    submit_pipeline_update(client, app, group_id, pipeline_id, request).await?;
+    app.pipelines.config_draft = None;
+    Ok(())
+}
+
+pub(super) fn draft_update_request(
+    draft: &app::PipelineConfigDraft,
+    group_id: &str,
+    pipeline_id: &str,
+) -> Result<pipelines::PipelineUpdateRequest, CliError> {
+    let Some(pipeline) = draft.parsed.as_ref() else {
         return Err(CliError::invalid_usage(
             "the staged pipeline config draft is not valid",
         ));
     };
 
-    submit_pipeline_reconfigure(client, app, group_id, pipeline_id, pipeline).await?;
-    app.pipelines.config_draft = None;
-    Ok(())
+    let original = parse_pipeline_config_content(&draft.original_yaml, group_id, pipeline_id)?;
+    let changes = pipelines::pipeline_config_changes(
+        &serde_json::to_value(original)
+            .map_err(|_| CliError::config("failed to encode original config"))?,
+        &serde_json::to_value(pipeline)
+            .map_err(|_| CliError::config("failed to encode edited config"))?,
+    );
+    Ok(pipelines::PipelineUpdateRequest {
+        expected_revision: draft.config_revision.ok_or_else(|| {
+            CliError::config("reopen the editor to obtain a current config revision")
+        })?,
+        changes,
+        step_timeout_secs: 60,
+        drain_timeout_secs: 60,
+    })
 }
 
-async fn submit_pipeline_reconfigure(
+async fn submit_pipeline_update(
     client: &AdminClient,
     app: &mut AppState,
     group_id: &str,
     pipeline_id: &str,
-    pipeline: PipelineConfig,
+    request: pipelines::PipelineUpdateRequest,
 ) -> Result<(), CliError> {
-    let request = pipelines::ReconfigureRequest {
-        pipeline,
-        step_timeout_secs: 60,
-        drain_timeout_secs: 60,
-    };
     let outcome = client
         .pipelines()
-        .reconfigure(
+        .update(
             group_id,
             pipeline_id,
             &request,
@@ -237,44 +267,6 @@ pub(super) async fn load_pipeline_details(
         .ok_or_else(|| {
             CliError::not_found(format!("pipeline '{group_id}/{pipeline_id}' was not found"))
         })
-}
-
-fn resize_pipeline_config(
-    pipeline: PipelineConfig,
-    target_cores: usize,
-) -> Result<PipelineConfig, CliError> {
-    let mut value = serde_json::to_value(&pipeline).map_err(|err| {
-        CliError::config(format!(
-            "failed to serialize pipeline config for resize: {err}"
-        ))
-    })?;
-    let root = value
-        .as_object_mut()
-        .ok_or_else(|| CliError::config("failed to edit pipeline config: root is not an object"))?;
-    let policies = root
-        .entry("policies".to_string())
-        .or_insert_with(|| json!({}));
-    let policies = policies.as_object_mut().ok_or_else(|| {
-        CliError::config("failed to edit pipeline config: policies is not an object")
-    })?;
-    let resources = policies
-        .entry("resources".to_string())
-        .or_insert_with(|| json!({}));
-    let resources = resources.as_object_mut().ok_or_else(|| {
-        CliError::config("failed to edit pipeline config: resources is not an object")
-    })?;
-    let _ = resources.insert(
-        "core_allocation".to_string(),
-        json!({
-            "type": "core_count",
-            "count": target_cores,
-        }),
-    );
-    serde_json::from_value(value).map_err(|err| {
-        CliError::config(format!(
-            "failed to rebuild pipeline config after resizing to {target_cores} cores: {err}"
-        ))
-    })
 }
 
 fn ui_operation_options(wait: bool) -> OperationOptions {

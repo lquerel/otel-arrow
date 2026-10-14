@@ -3,6 +3,7 @@
 
 use std::num::NonZeroUsize;
 
+use otel_arrow_dfe_config::secret::RedactedString;
 use otel_arrow_dfe_otap::otlp_exporter::default_max_in_flight;
 use serde::{Deserialize, Serialize};
 
@@ -10,6 +11,7 @@ use otel_arrow_dfe_otap::otlp_http::client_settings::HttpClientSettings;
 
 /// Configuration for OTLP HTTP Exporter
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct Config {
     /// Configuration for the HTTP client that will be used by this exporter
     pub http: HttpClientSettings,
@@ -19,25 +21,26 @@ pub struct Config {
     /// automatically for each batch of signals depending on the signal type.
     ///
     /// Example: "http://localhost:4318" or "https://otel-collector:4318"
-    pub endpoint: String,
+    /// The entire URL is sensitive: credentials can appear in its authority, path, or query.
+    pub endpoint: RedactedString,
 
     /// The target URL to send trace data to, including the path. If this setting is present the
     /// endpoint setting is ignored for traces.
     ///
     /// Example: https://example.com:4318/v1/traces
-    pub traces_endpoint: Option<String>,
+    pub traces_endpoint: Option<RedactedString>,
 
     /// The target URL to send metric data to, including the path. If this setting is present the
     /// endpoint setting is ignored for metrics.
     ///
     /// Example: https://example.com:4318/v1/metrics
-    pub metrics_endpoint: Option<String>,
+    pub metrics_endpoint: Option<RedactedString>,
 
     /// The target URL to send log data to, including the path. If this setting is present the
     /// endpoint setting is ignored for logs.
     ///
     /// Example: https://example.com:4318/v1/logs
-    pub logs_endpoint: Option<String>,
+    pub logs_endpoint: Option<RedactedString>,
 
     /// Maximum allowed size for the body of OTLP HTTP responses. This is used to prevent unbounded
     /// memory usage when receiving responses from the OTLP server. If a response exceeds this size,

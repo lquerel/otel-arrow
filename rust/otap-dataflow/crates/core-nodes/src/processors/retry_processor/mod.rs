@@ -370,7 +370,7 @@ pub fn create_retry_processor(
     Ok(ProcessorWrapper::local(
         retry,
         node,
-        node_config.effective(),
+        node_config.safe_config_snapshot(),
         processor_config,
     ))
 }

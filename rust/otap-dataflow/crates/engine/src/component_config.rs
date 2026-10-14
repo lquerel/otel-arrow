@@ -3,12 +3,14 @@
 
 //! Factory-owned component configuration resolution.
 
+use otel_arrow_dfe_config::engine::OtelDataflowSpec;
 use otel_arrow_dfe_config::error::Error as ConfigError;
 use otel_arrow_dfe_config::extension::ExtensionUserConfig;
 use otel_arrow_dfe_config::node::{NodeKind, NodeUserConfig};
 use otel_arrow_dfe_config::pipeline::PipelineConfig;
+use otel_arrow_dfe_config::pipeline_group::PipelineGroupConfig;
 use otel_arrow_dfe_config::secret::OMITTED_VALUE;
-use otel_arrow_dfe_config::{ExtensionId, NodeId};
+use otel_arrow_dfe_config::{ExtensionId, NodeId, PipelineGroupId, PipelineId};
 use serde::Serialize;
 use serde::de::DeserializeOwned;
 use serde_json::Value;
@@ -19,6 +21,179 @@ use std::sync::Arc;
 
 type ErasedConfig = dyn Any + Send + Sync;
 type EquivalentFn = dyn Fn(&ErasedConfig, &ErasedConfig) -> bool + Send + Sync;
+
+/// Produces a control-plane diagnostic without trusting a component's error text.
+/// Parser, validator, serializer, and creation errors can echo submitted values.
+#[must_use]
+pub fn safe_component_error(component: &str, phase: &str) -> ConfigError {
+    ConfigError::InvalidUserConfig {
+        error: format!(
+            "component {component} failed {phase}; check its configuration against the component schema"
+        ),
+    }
+}
+
+/// A precomputed, privacy-preserving engine configuration view for reporting.
+///
+/// "Safe" means safe for control-plane reporting under the declared factory
+/// snapshot policies. This value is not a runtime configuration or a replayable
+/// source artifact, and it does not replace access control.
+///
+/// Serialization retains the existing engine/group/pipeline JSON envelopes.
+#[derive(Clone, Debug, PartialEq, Serialize)]
+#[serde(transparent)]
+pub struct SafeConfigSnapshot {
+    config: OtelDataflowSpec,
+}
+
+impl SafeConfigSnapshot {
+    /// Creates a conservative safe view with every component config omitted.
+    /// Factory-produced typed snapshots can then be installed through the
+    /// scoped methods below. There is no constructor for an unsanitized envelope.
+    #[must_use]
+    pub fn from_source_omitted(mut config: OtelDataflowSpec) -> Self {
+        fn omit_pipeline(pipeline: &mut PipelineConfig) {
+            let nodes = pipeline
+                .node_iter()
+                .map(|(id, _)| (id.clone(), Value::String(OMITTED_VALUE.to_owned())))
+                .collect();
+            let extensions = pipeline
+                .extension_iter()
+                .map(|(id, _)| (id.clone(), Value::String(OMITTED_VALUE.to_owned())))
+                .collect();
+            pipeline
+                .replace_component_config_snapshots(&nodes, &extensions)
+                .expect("omission maps contain exactly the source component IDs");
+        }
+        for group in config.groups.values_mut() {
+            for pipeline in group.pipelines.values_mut() {
+                omit_pipeline(pipeline);
+            }
+        }
+        let mut observability = config
+            .engine
+            .observability
+            .pipeline
+            .clone()
+            .into_pipeline_config();
+        omit_pipeline(&mut observability);
+        config.engine.observability.pipeline.nodes = observability.nodes().clone();
+        config.engine.observability.pipeline.extensions = observability.extensions().clone();
+        let extensions = config
+            .engine
+            .controller
+            .extensions
+            .iter()
+            .map(|(id, _)| (id.clone(), Value::String(OMITTED_VALUE.to_owned())))
+            .collect();
+        config
+            .engine
+            .controller
+            .extensions
+            .replace_config_snapshots(&extensions)
+            .expect("omission map contains exactly the controller extension IDs");
+        for value in config.engine.custom.values_mut() {
+            *value = Value::String(OMITTED_VALUE.to_owned());
+        }
+        Self { config }
+    }
+
+    /// Returns the reporting envelope, not a replayable source configuration.
+    #[must_use]
+    pub const fn as_config(&self) -> &OtelDataflowSpec {
+        &self.config
+    }
+
+    /// Installs a factory-resolved pipeline snapshot, never a submitted pipeline.
+    pub fn insert_pipeline(
+        &mut self,
+        group: PipelineGroupId,
+        id: PipelineId,
+        resolved: &ResolvedPipelineConfig,
+    ) {
+        _ = self
+            .config
+            .groups
+            .entry(group)
+            .or_default()
+            .pipelines
+            .insert(id, resolved.safe_config_snapshot().clone());
+    }
+
+    /// Installs factory-resolved engine-scoped components during candidate assembly.
+    pub fn install_engine_components(
+        &mut self,
+        observability: &ResolvedPipelineConfig,
+        extensions: &HashMap<ExtensionId, Arc<ResolvedExtensionConfig>>,
+    ) -> Result<(), ConfigError> {
+        self.config.engine.observability.pipeline.nodes =
+            observability.safe_config_snapshot().nodes().clone();
+        self.config.engine.observability.pipeline.extensions =
+            observability.safe_config_snapshot().extensions().clone();
+        let snapshots = extensions
+            .iter()
+            .map(|(id, config)| (id.clone(), config.safe_component_snapshot().clone()))
+            .collect();
+        self.config
+            .engine
+            .controller
+            .extensions
+            .replace_config_snapshots(&snapshots)
+    }
+
+    /// Adds public group metadata; non-empty groups must use resolved pipeline insertion.
+    pub fn insert_empty_group(
+        &mut self,
+        id: PipelineGroupId,
+        group: PipelineGroupConfig,
+    ) -> Result<(), ConfigError> {
+        if !group.pipelines.is_empty() {
+            return Err(ConfigError::InvalidUserConfig {
+                error: "safe group insertion requires an empty pipeline set".to_owned(),
+            });
+        }
+        _ = self.config.groups.insert(id, group);
+        Ok(())
+    }
+
+    /// Removes a drained pipeline from reporting.
+    pub fn remove_pipeline(&mut self, group: &PipelineGroupId, id: &PipelineId) {
+        if let Some(group) = self.config.groups.get_mut(group) {
+            _ = group.pipelines.remove(id);
+        }
+    }
+
+    /// Removes a drained group from reporting.
+    pub fn remove_group(&mut self, id: &PipelineGroupId) {
+        _ = self.config.groups.remove(id);
+    }
+
+    /// Merges only an already safe candidate after successful reconciliation.
+    pub fn merge_committed(&mut self, desired: &Self, delete_missing: bool) {
+        if delete_missing {
+            *self = desired.clone();
+            return;
+        }
+        self.config.version = desired.config.version.clone();
+        self.config.policies = desired.config.policies.clone();
+        self.config.topics = desired.config.topics.clone();
+        self.config.engine = desired.config.engine.clone();
+        for (id, desired_group) in &desired.config.groups {
+            let group = self.config.groups.entry(id.clone()).or_default();
+            group.policies = desired_group.policies.clone();
+            group.topics = desired_group.topics.clone();
+            group.pipelines.extend(desired_group.pipelines.clone());
+        }
+    }
+}
+
+impl std::ops::Deref for SafeConfigSnapshot {
+    type Target = OtelDataflowSpec;
+
+    fn deref(&self) -> &Self::Target {
+        self.as_config()
+    }
+}
 
 /// The snapshot behavior explicitly declared by a component factory.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -196,7 +371,7 @@ impl ResolvedComponentConfig {
 
     /// Returns the precomputed safe snapshot value.
     #[must_use]
-    pub const fn snapshot(&self) -> &Value {
+    pub const fn safe_config_snapshot(&self) -> &Value {
         &self.snapshot
     }
 
@@ -240,7 +415,7 @@ pub fn resolve_no_config(raw: &Value) -> Result<ResolvedComponentConfig, ConfigE
 /// Runtime node envelope paired with its factory-resolved component config.
 #[derive(Clone, Debug)]
 pub struct ResolvedNodeConfig {
-    effective: Arc<NodeUserConfig>,
+    safe_config_snapshot: Arc<NodeUserConfig>,
     envelope: NodeUserConfig,
     component: ResolvedComponentConfig,
 }
@@ -266,21 +441,21 @@ impl ResolvedNodeConfig {
                         .to_owned(),
             });
         }
-        let mut effective = source.clone();
-        effective.config = component.snapshot().clone();
+        let mut safe_config_snapshot = source.clone();
+        safe_config_snapshot.config = component.safe_config_snapshot().clone();
         let mut envelope = source.clone();
         envelope.config = Value::Null;
         Ok(Self {
-            effective: Arc::new(effective),
+            safe_config_snapshot: Arc::new(safe_config_snapshot),
             envelope,
             component,
         })
     }
 
-    /// Returns the safe effective node envelope used by engine metadata paths.
+    /// Returns the safe configuration snapshot node envelope used by engine metadata paths.
     #[must_use]
-    pub fn effective(&self) -> Arc<NodeUserConfig> {
-        Arc::clone(&self.effective)
+    pub fn safe_config_snapshot(&self) -> Arc<NodeUserConfig> {
+        Arc::clone(&self.safe_config_snapshot)
     }
 
     /// Returns the resolved component-specific configuration as `T`.
@@ -294,20 +469,20 @@ impl ResolvedNodeConfig {
     /// Returns the node kind.
     #[must_use]
     pub fn kind(&self) -> NodeKind {
-        self.effective.kind()
+        self.safe_config_snapshot.kind()
     }
 
     /// Returns the precomputed component snapshot value.
     #[must_use]
-    pub const fn component_snapshot(&self) -> &Value {
-        self.component.snapshot()
+    pub const fn safe_component_snapshot(&self) -> &Value {
+        self.component.safe_config_snapshot()
     }
 }
 
 /// Runtime extension envelope paired with its factory-resolved component config.
 #[derive(Clone, Debug)]
 pub struct ResolvedExtensionConfig {
-    effective: Arc<ExtensionUserConfig>,
+    safe_config_snapshot: Arc<ExtensionUserConfig>,
     envelope: ExtensionUserConfig,
     component: ResolvedComponentConfig,
 }
@@ -333,21 +508,21 @@ impl ResolvedExtensionConfig {
                         .to_owned(),
             });
         }
-        let mut effective = source.clone();
-        effective.config = component.snapshot().clone();
+        let mut safe_config_snapshot = source.clone();
+        safe_config_snapshot.config = component.safe_config_snapshot().clone();
         let mut envelope = source.clone();
         envelope.config = Value::Null;
         Ok(Self {
-            effective: Arc::new(effective),
+            safe_config_snapshot: Arc::new(safe_config_snapshot),
             envelope,
             component,
         })
     }
 
-    /// Returns the safe effective extension envelope.
+    /// Returns the safe configuration snapshot extension envelope.
     #[must_use]
-    pub fn effective(&self) -> Arc<ExtensionUserConfig> {
-        Arc::clone(&self.effective)
+    pub fn safe_config_snapshot(&self) -> Arc<ExtensionUserConfig> {
+        Arc::clone(&self.safe_config_snapshot)
     }
 
     /// Returns the resolved extension-specific configuration as `T`.
@@ -360,15 +535,15 @@ impl ResolvedExtensionConfig {
 
     /// Returns the precomputed component snapshot value.
     #[must_use]
-    pub const fn component_snapshot(&self) -> &Value {
-        self.component.snapshot()
+    pub const fn safe_component_snapshot(&self) -> &Value {
+        self.component.safe_config_snapshot()
     }
 }
 
 /// A pipeline whose component configs have all been resolved by their factories.
 #[derive(Clone, Debug)]
 pub struct ResolvedPipelineConfig {
-    effective: PipelineConfig,
+    safe_config_snapshot: PipelineConfig,
     envelope: PipelineConfig,
     nodes: HashMap<NodeId, Arc<ResolvedNodeConfig>>,
     extensions: HashMap<ExtensionId, Arc<ResolvedExtensionConfig>>,
@@ -383,7 +558,7 @@ impl PartialEq for ResolvedPipelineConfig {
 }
 
 impl ResolvedPipelineConfig {
-    /// Creates a resolved pipeline and materializes its safe effective representation.
+    /// Creates a resolved pipeline and materializes its safe configuration snapshot representation.
     pub fn new(
         source: &PipelineConfig,
         nodes: HashMap<NodeId, Arc<ResolvedNodeConfig>>,
@@ -391,14 +566,15 @@ impl ResolvedPipelineConfig {
     ) -> Result<Self, ConfigError> {
         let node_snapshots = nodes
             .iter()
-            .map(|(id, resolved)| (id.clone(), resolved.component_snapshot().clone()))
+            .map(|(id, resolved)| (id.clone(), resolved.safe_component_snapshot().clone()))
             .collect();
         let extension_snapshots = extensions
             .iter()
-            .map(|(id, resolved)| (id.clone(), resolved.component_snapshot().clone()))
+            .map(|(id, resolved)| (id.clone(), resolved.safe_component_snapshot().clone()))
             .collect();
-        let mut effective = source.clone();
-        effective.replace_component_config_snapshots(&node_snapshots, &extension_snapshots)?;
+        let mut safe_config_snapshot = source.clone();
+        safe_config_snapshot
+            .replace_component_config_snapshots(&node_snapshots, &extension_snapshots)?;
         let mut envelope = source.clone();
         envelope.replace_component_config_snapshots(
             &nodes.keys().map(|id| (id.clone(), Value::Null)).collect(),
@@ -408,17 +584,17 @@ impl ResolvedPipelineConfig {
                 .collect(),
         )?;
         Ok(Self {
-            effective,
+            safe_config_snapshot,
             envelope,
             nodes,
             extensions,
         })
     }
 
-    /// Returns the safe effective pipeline representation.
+    /// Returns the safe configuration snapshot pipeline representation.
     #[must_use]
-    pub const fn effective(&self) -> &PipelineConfig {
-        &self.effective
+    pub const fn safe_config_snapshot(&self) -> &PipelineConfig {
+        &self.safe_config_snapshot
     }
 
     /// Returns one factory-resolved node configuration by id.
@@ -449,10 +625,15 @@ impl ResolvedPipelineConfig {
         HashMap<ExtensionId, Arc<ResolvedExtensionConfig>>,
         Vec<(NodeId, NodeKind)>,
     ) {
-        let removed = self.effective.remove_unconnected_nodes();
+        let removed = self.safe_config_snapshot.remove_unconnected_nodes();
         let removed_ids: HashSet<&NodeId> = removed.iter().map(|(id, _)| id).collect();
         self.nodes.retain(|id, _| !removed_ids.contains(id));
-        (self.effective, self.nodes, self.extensions, removed)
+        (
+            self.safe_config_snapshot,
+            self.nodes,
+            self.extensions,
+            removed,
+        )
     }
 }
 
@@ -472,6 +653,64 @@ mod tests {
     use serde::{Deserialize, Serialize};
     use std::sync::atomic::{AtomicUsize, Ordering};
 
+    /// Scenario: A named SafeConfigSnapshot contains precomputed reporting envelopes and markers.
+    /// Guarantees: Serialization preserves the engine JSON shape without an added wrapper field.
+    #[test]
+    fn safe_config_snapshot_preserves_reporting_json_envelope() {
+        let config: OtelDataflowSpec = serde_json::from_value(serde_json::json!({
+            "version": "otel_dataflow/v1",
+            "engine": {"custom": {"private": OMITTED_VALUE}},
+            "groups": {"g1": {"pipelines": {"p1": {"nodes": {
+                "exporter": {"type": "urn:test:exporter:example", "config": OMITTED_VALUE}
+            }}}}}
+        }))
+        .unwrap();
+        let snapshot = SafeConfigSnapshot::from_source_omitted(config);
+        let config = snapshot.as_config().clone();
+        let encoded = serde_json::to_value(&snapshot).unwrap();
+        assert_eq!(encoded, serde_json::to_value(&config).unwrap());
+        assert!(encoded.get("config").is_none());
+        assert_eq!(snapshot.as_config(), &config);
+        assert_eq!(encoded["engine"]["custom"]["private"], OMITTED_VALUE);
+        assert_eq!(
+            encoded["groups"]["g1"]["pipelines"]["p1"]["nodes"]["exporter"]["config"],
+            OMITTED_VALUE
+        );
+    }
+
+    /// Scenario: A source envelope contains arbitrary secrets in regular, controller, and observability components.
+    /// Guarantees: Safe snapshot construction omits every private subtree and rejects raw non-empty group insertion.
+    #[test]
+    fn snapshot_construction_cannot_wrap_raw_component_values() {
+        let config: OtelDataflowSpec = serde_json::from_value(serde_json::json!({
+            "version": "otel_dataflow/v1",
+            "engine": {"custom": {"private": {"nested": "private-custom"}},
+                "controller": {"extensions": {"private": {"type": "urn:test:extension:example", "config": {"value": "private-controller"}}}}},
+            "groups": {"g1": {"pipelines": {"p1": {"nodes": {
+                "exporter": {"type": "urn:test:exporter:example", "config": {"nested": ["private-node"]}}
+            }, "extensions": {"private": {"type": "urn:test:extension:example", "config": {"value": "private-pipeline-extension"}}}}}}}
+        })).unwrap();
+        let mut snapshot = SafeConfigSnapshot::from_source_omitted(config.clone());
+        let before = snapshot.clone();
+        assert!(
+            !serde_json::to_string(&snapshot)
+                .unwrap()
+                .contains("private-")
+        );
+        assert!(
+            snapshot
+                .insert_empty_group(
+                    "new".into(),
+                    config.groups[&PipelineGroupId::from("g1")].clone()
+                )
+                .is_err()
+        );
+        assert_eq!(snapshot, before);
+        for (_, node) in snapshot.engine.observability.pipeline.nodes.iter() {
+            assert_eq!(node.config, OMITTED_VALUE);
+        }
+    }
+
     #[derive(Debug, Deserialize, Serialize, PartialEq)]
     struct TestConfig {
         value: String,
@@ -486,7 +725,7 @@ mod tests {
     /// Scenario: A typed component config omits a field that has a serde default.
     /// Guarantees: Resolution materializes the default once and includes it in the snapshot.
     #[test]
-    fn typed_resolution_materializes_effective_defaults() {
+    fn typed_resolution_materializes_snapshot_defaults() {
         let resolved =
             resolve_typed_config::<TestConfig>(&serde_json::json!({"value": "x"})).unwrap();
         let explicit = resolve_typed_config::<TestConfig>(&serde_json::json!({
@@ -495,7 +734,7 @@ mod tests {
         }))
         .unwrap();
         assert_eq!(
-            resolved.snapshot(),
+            resolved.safe_config_snapshot(),
             &serde_json::json!({"value": "x", "count": 3})
         );
         assert_eq!(resolved.get::<TestConfig>().unwrap().count, 3);
@@ -515,8 +754,8 @@ mod tests {
             resolve_typed_config::<SecretConfig>(&serde_json::json!({"token": "first"})).unwrap();
         let second =
             resolve_typed_config::<SecretConfig>(&serde_json::json!({"token": "second"})).unwrap();
-        assert_eq!(first.snapshot(), second.snapshot());
-        assert_eq!(first.snapshot()["token"], REDACTED_VALUE);
+        assert_eq!(first.safe_config_snapshot(), second.safe_config_snapshot());
+        assert_eq!(first.safe_config_snapshot()["token"], REDACTED_VALUE);
         assert_ne!(first, second);
     }
 
@@ -566,7 +805,7 @@ mod tests {
         let clones = [resolved.clone(), resolved.clone(), resolved];
         for config in &clones {
             assert_eq!(config.get::<TestConfig>().unwrap().value, "shared");
-            assert_eq!(config.snapshot()["count"], 3);
+            assert_eq!(config.safe_config_snapshot()["count"], 3);
         }
         assert_eq!(RESOLUTION_COUNT.load(Ordering::Relaxed), 1);
     }
@@ -584,7 +823,7 @@ mod tests {
         .unwrap();
         let changed =
             resolve_omitted_config::<TestConfig>(&serde_json::json!({"value": "y"})).unwrap();
-        assert_eq!(first.snapshot(), OMITTED_VALUE);
+        assert_eq!(first.safe_config_snapshot(), OMITTED_VALUE);
         assert_eq!(first, same);
         assert_ne!(first, changed);
     }
@@ -682,7 +921,7 @@ mod tests {
         };
         let first = make("first safe display");
         let second = make("second safe display");
-        assert_ne!(first.effective(), second.effective());
+        assert_ne!(first.safe_config_snapshot(), second.safe_config_snapshot());
         assert_eq!(first, second);
         assert!(first.eq_ignoring_policies(&second));
         let mut changed = second.clone();

@@ -196,7 +196,7 @@ impl<
         telemetry_reporting_interval: Duration,
         memory_pressure_tx: tokio::sync::watch::Sender<MemoryPressureChanged>,
         live_config: OtelDataflowSpec,
-        effective_config: OtelDataflowSpec,
+        safe_config_snapshot: SafeConfigSnapshot,
     ) -> Self {
         log_filter_handle.apply(live_config.engine.telemetry.logs.level.as_ref());
         Self {
@@ -219,7 +219,7 @@ impl<
             memory_pressure_tx,
             state: Mutex::new(ControllerRuntimeState {
                 live_config,
-                effective_config,
+                safe_config_snapshot,
                 config_revision: 0,
                 latest_context_bindings: context_bindings,
                 logical_pipelines: HashMap::new(),
@@ -584,6 +584,16 @@ impl<
             .request_reconfigure_pipeline(pipeline_group_id, pipeline_id, &request)
     }
 
+    fn update_pipeline(
+        &self,
+        pipeline_group_id: &str,
+        pipeline_id: &str,
+        request: otel_arrow_dfe_admin::PipelineUpdateRequest,
+    ) -> Result<RolloutStatus, ControlPlaneError> {
+        self.runtime
+            .request_update_pipeline(pipeline_group_id, pipeline_id, &request)
+    }
+
     fn pipeline_details(
         &self,
         pipeline_group_id: &str,
@@ -654,8 +664,8 @@ impl<
         self.runtime.create_group(pipeline_group_id, group)
     }
 
-    fn effective_config_snapshot(&self) -> Result<OtelDataflowSpec, ControlPlaneError> {
-        Ok(self.runtime.effective_config_snapshot())
+    fn safe_config_snapshot(&self) -> Result<SafeConfigSnapshot, ControlPlaneError> {
+        Ok(self.runtime.safe_config_snapshot())
     }
 
     fn reconcile_engine_config(

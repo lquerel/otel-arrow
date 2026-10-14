@@ -271,7 +271,7 @@ fn create_log_sampling_processor(
             (*node_config.component_config::<Config>()?).clone(),
         )?,
         node,
-        node_config.effective(),
+        node_config.safe_config_snapshot(),
         processor_config,
     ))
 }

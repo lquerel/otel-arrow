@@ -627,6 +627,114 @@ impl<
         self.spawn_rollout(plan)
     }
 
+    /// Applies sparse edits to a reserved pipeline's private source before normal admission.
+    pub(super) fn request_update_pipeline(
+        self: &Arc<Self>,
+        pipeline_group_id: &str,
+        pipeline_id: &str,
+        request: &otel_arrow_dfe_admin::PipelineUpdateRequest,
+    ) -> Result<RolloutStatus, ControlPlaneError> {
+        use otel_arrow_dfe_admin::PipelineConfigChange;
+        use otel_arrow_dfe_config::secret::{OMITTED_VALUE, REDACTED_VALUE};
+
+        fn contains_marker(value: &serde_json::Value) -> bool {
+            match value {
+                serde_json::Value::String(value) => {
+                    value == OMITTED_VALUE || value == REDACTED_VALUE
+                }
+                serde_json::Value::Array(values) => values.iter().any(contains_marker),
+                serde_json::Value::Object(values) => values.values().any(contains_marker),
+                _ => false,
+            }
+        }
+        let invalid = || {
+            ControlPlaneError::InvalidRequest {
+            message: "invalid partial update: use non-empty object paths and source values without snapshot markers"
+                .to_owned(),
+        }
+        };
+        let key = PipelineKey::new(
+            pipeline_group_id.to_owned().into(),
+            pipeline_id.to_owned().into(),
+        );
+        let _reservation =
+            self.begin_pipeline_operation_reservation(key.clone(), PipelineOperationKind::Rollout)?;
+        let mut value = {
+            let state = self
+                .state
+                .lock()
+                .unwrap_or_else(|poisoned| poisoned.into_inner());
+            if state.config_revision != request.expected_revision {
+                return Err(ControlPlaneError::RolloutConflict);
+            }
+            let group = state
+                .live_config
+                .groups
+                .get(key.pipeline_group_id())
+                .ok_or(ControlPlaneError::GroupNotFound)?;
+            let pipeline = group
+                .pipelines
+                .get(key.pipeline_id())
+                .ok_or(ControlPlaneError::PipelineNotFound)?;
+            serde_json::to_value(pipeline).map_err(|_| invalid())?
+        };
+        'changes: for change in &request.changes {
+            let path = match change {
+                PipelineConfigChange::Set { path, value } => {
+                    if contains_marker(value) {
+                        return Err(invalid());
+                    }
+                    path
+                }
+                PipelineConfigChange::Remove { path } => path,
+            };
+            let (field, parents) = path.split_last().ok_or_else(invalid)?;
+            let mut parent = &mut value;
+            for key in parents {
+                let object = parent.as_object_mut().ok_or_else(invalid)?;
+                if matches!(change, PipelineConfigChange::Remove { .. })
+                    && !object.contains_key(key)
+                {
+                    continue 'changes;
+                }
+                parent = object
+                    .entry(key.clone())
+                    .or_insert_with(|| serde_json::json!({}));
+            }
+            let object = parent.as_object_mut().ok_or_else(invalid)?;
+            match change {
+                PipelineConfigChange::Set { value, .. } => {
+                    _ = object.insert(field.clone(), value.clone());
+                }
+                PipelineConfigChange::Remove { .. } => {
+                    _ = object.remove(field);
+                }
+            }
+        }
+        let pipeline = serde_json::from_value(value).map_err(|_| invalid())?;
+        let full_request = ReconfigureRequest {
+            pipeline,
+            step_timeout_secs: request.step_timeout_secs,
+            drain_timeout_secs: request.drain_timeout_secs,
+        };
+        let plan = self.prepare_rollout_plan_for_engine_operation(
+            pipeline_group_id,
+            pipeline_id,
+            &full_request,
+            None,
+            None,
+            None,
+            None,
+            None,
+        )?;
+        // Another pipeline may commit while this one is resolving. A partial edit
+        // must never silently rebase onto a newer private source revision.
+        if plan.base_config_revision != request.expected_revision {
+            return Err(ControlPlaneError::RolloutConflict);
+        }
+        self.spawn_rollout(plan)
+    }
+
     /// Classifies a reconfigure request and prepares the rollout state machine inputs.
     #[cfg(test)]
     pub(super) fn prepare_rollout_plan(
@@ -876,6 +984,15 @@ impl<
             .ok_or_else(|| ControlPlaneError::Internal {
                 message: "candidate pipeline disappeared during resolution".to_owned(),
             })?;
+        startup::validate_rate_limiter_bindings(
+            &pipeline_group_id,
+            &pipeline_id,
+            &resolved_pipeline.pipeline,
+            &resolved_pipeline.policies,
+        )
+        .map_err(|error| ControlPlaneError::InvalidRequest {
+            message: error.to_string(),
+        })?;
         let runtime_resolved_pipeline =
             match pre_resolved_runtime.and_then(|pipelines| pipelines.get(&pipeline_key)) {
                 Some(resolved) => resolved.clone(),
@@ -899,7 +1016,6 @@ impl<
                 policy
             }
         };
-        let effective_pipeline = runtime_resolved_pipeline.effective().clone();
         let current_pipeline_placement = current_deployment
             .as_ref()
             .map(|record| record.placement.clone());
@@ -1154,7 +1270,6 @@ impl<
             pipeline_group_id,
             pipeline_id,
             action,
-            effective_pipeline,
             base_config_revision,
             current_deployment,
             target_deployment,
@@ -1350,13 +1465,11 @@ impl<
                     plan.pipeline_id.clone(),
                     plan.target_deployment.resolved.pipeline.clone(),
                 );
-            _ = state
-                .effective_config
-                .groups
-                .entry(plan.pipeline_group_id.clone())
-                .or_default()
-                .pipelines
-                .insert(plan.pipeline_id.clone(), plan.effective_pipeline.clone());
+            state.safe_config_snapshot.insert_pipeline(
+                plan.pipeline_group_id.clone(),
+                plan.pipeline_id.clone(),
+                &plan.target_deployment.runtime_resolved,
+            );
             _ = state
                 .logical_pipelines
                 .insert(plan.pipeline_key.clone(), plan.target_deployment.clone());
@@ -1621,10 +1734,11 @@ impl<
             .and_then(|rollout_id| state.rollouts.get(rollout_id))
             .map(RolloutRecord::api_summary);
         Ok(Some(PipelineDetails {
+            config_revision: state.config_revision,
             pipeline_group_id: pipeline_key.pipeline_group_id().clone(),
             pipeline_id: pipeline_key.pipeline_id().clone(),
             active_generation: Some(record.baseline_generation),
-            pipeline: record.runtime_resolved.effective().clone(),
+            pipeline: record.runtime_resolved.safe_config_snapshot().clone(),
             rollout,
         }))
     }
@@ -1639,7 +1753,7 @@ impl<
             .lock()
             .unwrap_or_else(|poisoned| poisoned.into_inner());
         state
-            .effective_config
+            .safe_config_snapshot
             .groups
             .get(pipeline_group_id)
             .cloned()
@@ -1692,11 +1806,13 @@ impl<
             .map_err(|err| ControlPlaneError::InvalidRequest {
                 message: err.to_string(),
             })?;
+        state
+            .safe_config_snapshot
+            .insert_empty_group(pipeline_group_id.clone(), group.clone())
+            .map_err(|_| ControlPlaneError::InvalidRequest {
+                message: "safe group insertion requires an empty pipeline set".to_owned(),
+            })?;
         state.live_config = candidate_config;
-        _ = state
-            .effective_config
-            .groups
-            .insert(pipeline_group_id.clone(), group.clone());
         state.config_revision += 1;
         Ok(group)
     }
@@ -1710,19 +1826,19 @@ impl<
         state.live_config.clone()
     }
 
-    /// Returns the safe effective representation for control-plane reporting.
-    pub(super) fn effective_config_snapshot(&self) -> OtelDataflowSpec {
+    /// Returns the SafeConfigSnapshot for control-plane reporting.
+    pub(super) fn safe_config_snapshot(&self) -> SafeConfigSnapshot {
         let state = self
             .state
             .lock()
             .unwrap_or_else(|poisoned| poisoned.into_inner());
-        state.effective_config.clone()
+        state.safe_config_snapshot.clone()
     }
 
     fn apply_reconcile_success(
         &self,
         desired_config: &OtelDataflowSpec,
-        desired_effective_config: &OtelDataflowSpec,
+        desired_safe_config_snapshot: &SafeConfigSnapshot,
         delete_missing: bool,
     ) {
         self.log_filter_handle
@@ -1732,11 +1848,9 @@ impl<
             .lock()
             .unwrap_or_else(|poisoned| poisoned.into_inner());
         Self::merge_reconcile_config(&mut state.live_config, desired_config, delete_missing);
-        Self::merge_reconcile_config(
-            &mut state.effective_config,
-            desired_effective_config,
-            delete_missing,
-        );
+        state
+            .safe_config_snapshot
+            .merge_committed(desired_safe_config_snapshot, delete_missing);
         state.config_revision += 1;
     }
 
@@ -1858,13 +1972,9 @@ impl<
             {
                 let _ = group.pipelines.remove(pipeline_key.pipeline_id());
             }
-            if let Some(group) = state
-                .effective_config
-                .groups
-                .get_mut(pipeline_key.pipeline_group_id())
-            {
-                let _ = group.pipelines.remove(pipeline_key.pipeline_id());
-            }
+            state
+                .safe_config_snapshot
+                .remove_pipeline(pipeline_key.pipeline_group_id(), pipeline_key.pipeline_id());
             let context_bindings = if state
                 .latest_context_bindings
                 .eq(&candidate_context_bindings)
@@ -2208,7 +2318,7 @@ impl<
                 });
             }
             let _ = state.live_config.groups.remove(&pipeline_group_id);
-            let _ = state.effective_config.groups.remove(&pipeline_group_id);
+            state.safe_config_snapshot.remove_group(&pipeline_group_id);
             state.config_revision += 1;
         }
 
@@ -2295,7 +2405,7 @@ impl<
             ),
             desired_candidate.observability.runtime.clone(),
         );
-        let desired_effective_config = desired_candidate.effective;
+        let desired_safe_config_snapshot = desired_candidate.safe_config_snapshot;
         let desired_config = desired_candidate.source;
 
         let current_profiles = Self::pipeline_topic_profiles(&live_config)?;
@@ -2529,7 +2639,7 @@ impl<
 
         self.apply_reconcile_success(
             &desired_config,
-            &desired_effective_config,
+            &desired_safe_config_snapshot,
             request.delete_missing,
         );
         status.state = EngineConfigReconcileState::Succeeded;

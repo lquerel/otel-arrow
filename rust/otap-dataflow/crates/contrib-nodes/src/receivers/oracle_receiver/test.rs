@@ -2260,7 +2260,7 @@ fn emits_oracle_rows_when_live_test_is_enabled() {
     )
     .expect("receiver config should build");
     let test_runtime = TestRuntime::<OtapPdata>::new();
-    let node_config = resolved_node_config(config).effective();
+    let node_config = resolved_node_config(config).safe_config_snapshot();
     let receiver_wrapper = ReceiverWrapper::local(
         receiver,
         test_node(test_runtime.config().name.clone()),

@@ -78,7 +78,7 @@ static COUNTING_EXPORTER: ExporterFactory<OtapPdata> = ExporterFactory {
             Ok(ExporterWrapper::local(
                 CountingExporter { counter },
                 node,
-                node_config.effective(),
+                node_config.safe_config_snapshot(),
                 exporter_config,
             ))
         },

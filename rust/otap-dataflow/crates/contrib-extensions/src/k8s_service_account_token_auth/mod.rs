@@ -94,7 +94,7 @@ fn create(
 
     // The extension is passive: it exposes the authorizer capability and builds
     // its Kubernetes client lazily on first use.
-    ExtensionWrapper::builder(name, ext_config.effective(), extension_config)
+    ExtensionWrapper::builder(name, ext_config.safe_config_snapshot(), extension_config)
         .passive()
         .cloned()
         .shared::<SharedK8sServiceAccountTokenAuth>(shared)

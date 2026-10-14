@@ -25,7 +25,7 @@ use bytes::Bytes;
 use futures_util::{SinkExt, StreamExt};
 use otel_arrow_dfe_admin::{
     ControlPlane, ControlPlaneError, EngineConfigReconcileRequest, EngineConfigReconcileState,
-    EngineConfigReconcileStatus,
+    EngineConfigReconcileStatus, SafeConfigSnapshot,
 };
 use otel_arrow_dfe_config::{
     engine::{EngineConfig, OtelDataflowSpec},
@@ -84,8 +84,10 @@ impl MockControlPlane {
 }
 
 impl ControlPlane for MockControlPlane {
-    fn effective_config_snapshot(&self) -> Result<OtelDataflowSpec, ControlPlaneError> {
-        Ok(self.current_config.lock().unwrap().clone())
+    fn safe_config_snapshot(&self) -> Result<SafeConfigSnapshot, ControlPlaneError> {
+        Ok(SafeConfigSnapshot::from_source_omitted(
+            self.current_config.lock().unwrap().clone(),
+        ))
     }
 
     fn reconcile_engine_config(

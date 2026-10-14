@@ -128,7 +128,7 @@ pub static TOPIC_EXPORTER: ExporterFactory<OtapPdata> = ExporterFactory {
                     metrics,
                 },
                 node,
-                node_config.effective(),
+                node_config.safe_config_snapshot(),
                 exporter_config,
             ))
         },

@@ -32,6 +32,42 @@ pub(crate) struct HttpBackend {
 }
 
 impl HttpBackend {
+    async fn submit_pipeline_rollout(
+        &self,
+        group_id: &str,
+        pipeline_id: &str,
+        method: Method,
+        body: Vec<u8>,
+        options: &operations::OperationOptions,
+    ) -> Result<pipelines::ReconfigureOutcome, Error> {
+        let (status, body) = self
+            .request_raw(
+                method,
+                &["api", "v1", "groups", group_id, "pipelines", pipeline_id],
+                &options.to_query_pairs(),
+                Some(body),
+                &[200, 202, 404, 409, 422, 500, 504],
+            )
+            .await?;
+        match status {
+            200 => self
+                .decode_json(&body)
+                .map(pipelines::ReconfigureOutcome::Completed),
+            202 => self
+                .decode_json(&body)
+                .map(pipelines::ReconfigureOutcome::Accepted),
+            409 => match self.decode_json::<pipelines::RolloutStatus>(&body) {
+                Ok(status) => Ok(pipelines::ReconfigureOutcome::Failed(status)),
+                Err(_) => Err(self.decode_operation_error(status, &body)?),
+            },
+            504 => self
+                .decode_json(&body)
+                .map(pipelines::ReconfigureOutcome::TimedOut),
+            404 | 422 | 500 => Err(self.decode_operation_error(status, &body)?),
+            _ => unreachable!("request_raw filters unexpected statuses"),
+        }
+    }
+
     pub(crate) fn from_settings(settings: HttpAdminClientSettings) -> Result<Self, Error> {
         settings.endpoint.validate()?;
         let client = build_http_client(&settings)?;
@@ -308,45 +344,35 @@ impl AdminBackend for HttpBackend {
         request: &pipelines::ReconfigureRequest,
         options: &operations::OperationOptions,
     ) -> Result<pipelines::ReconfigureOutcome, Error> {
-        let query = options.to_query_pairs();
-        let (status, body) = self
-            .request_raw(
-                Method::PUT,
-                &[
-                    "api",
-                    "v1",
-                    "groups",
-                    pipeline_group_id,
-                    "pipelines",
-                    pipeline_id,
-                ],
-                &query,
-                Some(
-                    serde_json::to_vec(request).map_err(|err| Error::ClientConfig {
-                        details: format!("failed to encode reconfigure request: {err}"),
-                    })?,
-                ),
-                &[200, 202, 404, 409, 422, 500, 504],
-            )
-            .await?;
+        self.submit_pipeline_rollout(
+            pipeline_group_id,
+            pipeline_id,
+            Method::PUT,
+            serde_json::to_vec(request).map_err(|_| Error::ClientConfig {
+                details: "failed to encode reconfigure request".to_owned(),
+            })?,
+            options,
+        )
+        .await
+    }
 
-        match status {
-            200 => self
-                .decode_json(&body)
-                .map(pipelines::ReconfigureOutcome::Completed),
-            202 => self
-                .decode_json(&body)
-                .map(pipelines::ReconfigureOutcome::Accepted),
-            409 => match self.decode_json::<pipelines::RolloutStatus>(&body) {
-                Ok(status) => Ok(pipelines::ReconfigureOutcome::Failed(status)),
-                Err(_) => Err(self.decode_operation_error(status, &body)?),
-            },
-            504 => self
-                .decode_json(&body)
-                .map(pipelines::ReconfigureOutcome::TimedOut),
-            404 | 422 | 500 => Err(self.decode_operation_error(status, &body)?),
-            _ => unreachable!("request_raw should have filtered unexpected statuses"),
-        }
+    async fn pipeline_update(
+        &self,
+        pipeline_group_id: &str,
+        pipeline_id: &str,
+        request: &pipelines::PipelineUpdateRequest,
+        options: &operations::OperationOptions,
+    ) -> Result<pipelines::ReconfigureOutcome, Error> {
+        self.submit_pipeline_rollout(
+            pipeline_group_id,
+            pipeline_id,
+            Method::PATCH,
+            serde_json::to_vec(request).map_err(|_| Error::ClientConfig {
+                details: "failed to encode pipeline update".to_owned(),
+            })?,
+            options,
+        )
+        .await
     }
 
     async fn pipeline_rollout_status(
@@ -1356,6 +1382,54 @@ mod tests {
             .expect("pipeline details should decode");
 
         assert!(response.is_some());
+    }
+
+    /// Scenario: An SDK client sends a revision-guarded policy-only update to a secret-bearing pipeline.
+    /// Guarantees: PATCH carries only explicit fields/revision and uses the normal rollout outcome contract.
+    #[tokio::test]
+    async fn pipeline_update_encodes_sparse_request_and_decodes_rollout() {
+        let server = MockServer::start().await;
+        let request = pipelines::PipelineUpdateRequest {
+            expected_revision: 7,
+            changes: vec![pipelines::PipelineConfigChange::Set {
+                path: vec![
+                    "policies".into(),
+                    "resources".into(),
+                    "core_allocation".into(),
+                ],
+                value: json!({"type": "core_count", "count": 2}),
+            }],
+            step_timeout_secs: 45,
+            drain_timeout_secs: 30,
+        };
+        Mock::given(method("PATCH"))
+            .and(path("/api/v1/groups/default/pipelines/main"))
+            .and(body_json(serde_json::to_value(&request).unwrap()))
+            .respond_with(ResponseTemplate::new(202).set_body_json(json!({
+                "rolloutId": "rollout-3", "pipelineGroupId": "default", "pipelineId": "main",
+                "action": "resize", "state": "running", "targetGeneration": 2,
+                "previousGeneration": 2, "startedAt": "2026-01-01T00:00:00Z",
+                "updatedAt": "2026-01-01T00:00:01Z", "cores": []
+            })))
+            .expect(1)
+            .mount(&server)
+            .await;
+        let outcome = client(&server)
+            .pipelines()
+            .update(
+                "default",
+                "main",
+                &request,
+                &operations::OperationOptions {
+                    wait: false,
+                    timeout_secs: 60,
+                },
+            )
+            .await
+            .unwrap();
+        assert!(
+            matches!(outcome, pipelines::ReconfigureOutcome::Accepted(status) if status.action == "resize")
+        );
     }
 
     /// Scenario: a caller submits an asynchronous reconfigure request through

@@ -71,7 +71,7 @@ use otel_arrow_dfe_engine::PipelineFactory;
 use otel_arrow_dfe_engine::ReceivedAtNode;
 use otel_arrow_dfe_engine::Unwindable;
 use otel_arrow_dfe_engine::component_config::{
-    ConfigSnapshotPolicy, ResolveConfigFn, ResolvedExtensionConfig,
+    ConfigSnapshotPolicy, ResolveConfigFn, ResolvedExtensionConfig, SafeConfigSnapshot,
 };
 use otel_arrow_dfe_engine::context::{ControllerContext, PipelineContext};
 use otel_arrow_dfe_engine::context_declaration::{
@@ -188,7 +188,7 @@ struct ResolvedRuntimePipeline {
 #[derive(Clone, Debug)]
 struct ResolvedEngineCandidate {
     source: OtelDataflowSpec,
-    effective: OtelDataflowSpec,
+    safe_config_snapshot: SafeConfigSnapshot,
     engine: otel_arrow_dfe_config::engine::EngineConfig,
     pipelines: Vec<ResolvedRuntimePipeline>,
     observability: ResolvedRuntimePipeline,
@@ -222,8 +222,8 @@ impl<
 {
     /// Returns the precomputed safe configuration for host setup and diagnostics.
     #[must_use]
-    pub fn effective_config(&self) -> &OtelDataflowSpec {
-        &self.candidate.effective
+    pub fn safe_config_snapshot(&self) -> &SafeConfigSnapshot {
+        &self.candidate.safe_config_snapshot
     }
 
     /// Iterates over resolved regular and observability pipeline configurations.
@@ -1426,19 +1426,7 @@ impl<
         }
 
         let controller_extensions = startup::resolve_controller_extensions(&source, extensions)?;
-        let mut effective = source.clone();
-        let extension_snapshots = controller_extensions
-            .iter()
-            .map(|(id, config)| (id.clone(), config.component_snapshot().clone()))
-            .collect();
-        effective
-            .engine
-            .controller
-            .extensions
-            .replace_config_snapshots(&extension_snapshots)?;
-        for value in effective.engine.custom.values_mut() {
-            *value = serde_json::Value::String(OMITTED_VALUE.to_owned());
-        }
+        let mut safe_config_snapshot = SafeConfigSnapshot::from_source_omitted(source.clone());
 
         let resolved = source.resolve();
         let (engine, policy_pipelines, observability) = resolved.into_parts();
@@ -1453,14 +1441,11 @@ impl<
             let runtime = self
                 .pipeline_factory
                 .resolve_pipeline_config(&policy.pipeline)?;
-            let effective_pipeline = runtime.effective().clone();
-            let group = effective
-                .groups
-                .get_mut(&policy.pipeline_group_id)
-                .ok_or_else(|| std::io::Error::other("resolved pipeline group disappeared"))?;
-            _ = group
-                .pipelines
-                .insert(policy.pipeline_id.clone(), effective_pipeline);
+            safe_config_snapshot.insert_pipeline(
+                policy.pipeline_group_id.clone(),
+                policy.pipeline_id.clone(),
+                &runtime,
+            );
             pipelines.push(ResolvedRuntimePipeline { policy, runtime });
         }
 
@@ -1476,14 +1461,12 @@ impl<
         let observability_runtime = self
             .pipeline_factory
             .resolve_pipeline_config(&observability.pipeline)?;
-        effective.engine.observability.pipeline.nodes =
-            observability_runtime.effective().nodes().clone();
-        effective.engine.observability.pipeline.extensions =
-            observability_runtime.effective().extensions().clone();
+        safe_config_snapshot
+            .install_engine_components(&observability_runtime, &controller_extensions)?;
 
         Ok(ResolvedEngineCandidate {
             source,
-            effective,
+            safe_config_snapshot,
             engine,
             pipelines,
             observability: ResolvedRuntimePipeline {
@@ -1683,7 +1666,7 @@ impl<
             })
             .collect();
         let engine_config = resolved_candidate.source;
-        let effective_config = resolved_candidate.effective;
+        let safe_config_snapshot = resolved_candidate.safe_config_snapshot;
         let mut engine = resolved_candidate.engine;
         let runtime_pipelines = resolved_candidate.pipelines;
         let pipelines: Vec<_> = runtime_pipelines
@@ -1940,7 +1923,7 @@ impl<
             telemetry_reporting_interval,
             memory_pressure_tx.clone(),
             engine_config.clone(),
-            effective_config.clone(),
+            safe_config_snapshot.clone(),
         ));
 
         let controller_telemetry_guard = runtime.hold_controller_telemetry();
@@ -1951,7 +1934,7 @@ impl<
         // extension tasks are spawned later, after bootstrap pipelines have been
         // registered, to preserve the runtime lifecycle view exposed to them.
         let prepared_controller_extensions = Self::prepare_controller_extensions(
-            &effective_config,
+            &safe_config_snapshot,
             &resolved_controller_extensions,
             &options,
             Arc::clone(&control_plane),
@@ -2347,10 +2330,10 @@ impl<
                 telemetry_registry: telemetry_registry.clone(),
                 engine_config: engine_config.clone(),
             };
-            let task_factory = (factory.start)(context).map_err(|source| {
+            let task_factory = (factory.start)(context).map_err(|_| {
                 Error::ControllerExtensionStartError {
                     extension_id: extension_id.to_string(),
-                    source,
+                    source: Box::new(std::io::Error::other("controller extension creation failed; check its configuration and runtime prerequisites")),
                 }
             })?;
             prepared_extensions.push(PreparedControllerExtension {
@@ -4141,7 +4124,7 @@ connections:
         Ok(ReceiverWrapper::local(
             TestObservabilityReceiver,
             node,
-            node_config.effective(),
+            node_config.safe_config_snapshot(),
             receiver_config,
         ))
     }
@@ -4156,7 +4139,7 @@ connections:
         Ok(ProcessorWrapper::local(
             TestObservabilityProcessor,
             node,
-            node_config.effective(),
+            node_config.safe_config_snapshot(),
             processor_config,
         ))
     }
@@ -4171,7 +4154,7 @@ connections:
         Ok(ExporterWrapper::local(
             TestObservabilityExporter,
             node,
-            node_config.effective(),
+            node_config.safe_config_snapshot(),
             exporter_config,
         ))
     }
@@ -4272,7 +4255,7 @@ connections:
             Ok(ReceiverWrapper::local(
                 TestObservabilityReceiver,
                 node,
-                node_config.effective(),
+                node_config.safe_config_snapshot(),
                 receiver_config,
             ))
         }
@@ -4905,6 +4888,8 @@ groups: {{}}
         assert!(message.contains("controller_monitor"));
     }
 
+    /// Scenario: Static controller extension resolution receives an invalid zero monitor interval.
+    /// Guarantees: Admission rejects the extension without forwarding component-owned error text.
     #[test]
     fn validate_controller_extensions_rejects_invalid_monitor_config() {
         let err = startup::validate_controller_extensions(
@@ -4917,7 +4902,7 @@ groups: {{}}
         .expect_err("invalid controller monitor config should fail static validation");
         let message = err.to_string();
         assert!(message.contains("Invalid config for controller extension"));
-        assert!(message.contains("greater than zero"));
+        assert!(message.contains("check its configuration against the component schema"));
     }
 
     #[test]
@@ -4953,6 +4938,8 @@ groups: {{}}
         assert!(message.contains("controller_monitor"));
     }
 
+    /// Scenario: Controller startup receives an invalid monitor extension interval.
+    /// Guarantees: Startup fails with extension attribution before running pipelines.
     #[test]
     fn controller_monitor_rejects_invalid_config_at_startup() {
         let controller = Controller::new(test_pipeline_factory());
@@ -4968,9 +4955,11 @@ groups: {{}}
 
         let message = err.to_string();
         assert!(message.contains("controller_monitor"));
-        assert!(message.contains("greater than zero"));
+        assert!(message.contains("check its configuration against the component schema"));
     }
 
+    /// Scenario: A controller extension fails creation before bootstrap pipeline registration.
+    /// Guarantees: Startup fails without pipeline registration or forwarding arbitrary creation error text.
     #[test]
     fn controller_extension_start_error_prevents_bootstrap_pipeline_registration() {
         const START_FAILING_CONTROLLER_EXTENSION_URN: &str = "urn:test:extension:start_failing";
@@ -5016,7 +5005,7 @@ groups: {{}}
                 assert!(
                     source
                         .to_string()
-                        .contains("simulated controller extension start failure"),
+                        .contains("controller extension creation failed"),
                     "unexpected error: {source}"
                 );
             }

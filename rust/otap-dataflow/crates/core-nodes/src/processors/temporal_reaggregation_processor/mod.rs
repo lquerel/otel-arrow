@@ -171,7 +171,7 @@ pub fn create_temporal_reaggregation_processor(
             (*node_config.component_config::<Config>()?).clone(),
         )?,
         node,
-        node_config.effective(),
+        node_config.safe_config_snapshot(),
         processor_config,
     ))
 }

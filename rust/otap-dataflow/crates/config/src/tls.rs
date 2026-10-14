@@ -10,6 +10,7 @@ use crate::secret::RedactedString;
 
 /// Common TLS configuration for both client and server.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema, Default)]
+#[serde(deny_unknown_fields)]
 pub struct TlsConfig {
     /// Path to the TLS cert to use for TLS required connections.
     pub cert_file: Option<PathBuf>,
@@ -53,7 +54,7 @@ const fn default_reload_interval() -> Option<Duration> {
 /// This configuration is used by components that initiate TLS connections, such as:
 /// - **Exporters**: When sending telemetry to a backend.
 /// - **Scrapers/clients**: When pulling data from a target (e.g., Prometheus scrape, OTLP/HTTP client).
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema, Default)]
+#[derive(Debug, Clone, PartialEq, Serialize, JsonSchema, Default)]
 pub struct TlsClientConfig {
     /// Common TLS configuration (client certificate + key for mTLS).
     #[serde(flatten)]
@@ -97,7 +98,7 @@ pub struct TlsClientConfig {
 ///
 /// This configuration is used by components that accept inbound TLS connections, such as:
 /// - **Servers/receivers**: When accepting telemetry from agents or other collectors.
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema, Default)]
+#[derive(Debug, Clone, PartialEq, Serialize, JsonSchema, Default)]
 pub struct TlsServerConfig {
     /// Common TLS configuration.
     #[serde(flatten)]
@@ -129,4 +130,103 @@ pub struct TlsServerConfig {
 
 const fn default_handshake_timeout() -> Option<Duration> {
     Some(Duration::from_secs(10))
+}
+
+// Deserialize a closed, flat wire schema rather than combining flatten with
+// deny_unknown_fields (which serde does not support). Serialization and schema
+// generation retain the public flat TLS envelope.
+macro_rules! deserialize_tls {
+    ($target:ident { $($(#[$attr:meta])* $field:ident: $ty:ty),* $(,)? }) => {
+        impl<'de> Deserialize<'de> for $target {
+            fn deserialize<D: serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+                #[derive(Deserialize)]
+                #[serde(deny_unknown_fields)]
+                struct Wire {
+                    cert_file: Option<PathBuf>,
+                    cert_pem: Option<String>,
+                    key_file: Option<PathBuf>,
+                    key_pem: Option<RedactedString>,
+                    #[serde(default = "default_reload_interval", with = "humantime_serde")]
+                    reload_interval: Option<Duration>,
+                    $($(#[$attr])* $field: $ty),*
+                }
+                let wire = Wire::deserialize(deserializer)?;
+                Ok(Self {
+                    config: TlsConfig {
+                        cert_file: wire.cert_file,
+                        cert_pem: wire.cert_pem,
+                        key_file: wire.key_file,
+                        key_pem: wire.key_pem,
+                        reload_interval: wire.reload_interval,
+                    },
+                    $($field: wire.$field),*
+                })
+            }
+        }
+    };
+}
+
+deserialize_tls!(TlsClientConfig {
+    ca_file: Option<PathBuf>,
+    ca_pem: Option<String>,
+    include_system_ca_certs_pool: Option<bool>,
+    #[serde(rename = "server_name_override")]
+    server_name: Option<String>,
+    insecure: Option<bool>,
+    insecure_skip_verify: Option<bool>,
+});
+
+deserialize_tls!(TlsServerConfig {
+    client_ca_file: Option<PathBuf>,
+    client_ca_pem: Option<String>,
+    include_system_ca_certs_pool: Option<bool>,
+    #[serde(default)]
+    watch_client_ca: bool,
+    #[serde(default = "default_handshake_timeout", with = "humantime_serde")]
+    handshake_timeout: Option<Duration>,
+});
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// Scenario: Client/server TLS schemas receive misspelled security settings or common fields.
+    /// Guarantees: Unknown fields are rejected instead of silently dropping TLS intent.
+    #[test]
+    fn tls_wire_schemas_reject_unknown_fields() {
+        for value in [
+            serde_json::json!({"key_pm": "private-key"}),
+            serde_json::json!({"insecure_skip_verfy": true}),
+        ] {
+            assert!(serde_json::from_value::<TlsConfig>(value.clone()).is_err());
+            assert!(serde_json::from_value::<TlsClientConfig>(value.clone()).is_err());
+            assert!(serde_json::from_value::<TlsServerConfig>(value).is_err());
+        }
+    }
+
+    /// Scenario: Flat client/server TLS input includes inline keys, overrides, defaults, or explicit nulls.
+    /// Guarantees: Strict decoding preserves existing wire shape/defaults while serialization hides keys.
+    #[test]
+    fn strict_tls_decoding_preserves_flat_fields_and_defaults() {
+        let client: TlsClientConfig = serde_json::from_value(serde_json::json!({
+            "key_pem": "private-key", "cert_file": "cert.pem", "server_name_override": "public.example"
+        })).unwrap();
+        assert_eq!(
+            client.config.key_pem.as_ref().unwrap().expose(),
+            "private-key"
+        );
+        assert_eq!(
+            client.config.reload_interval,
+            Some(Duration::from_secs(300))
+        );
+        let encoded = serde_json::to_value(&client).unwrap();
+        assert_eq!(encoded["key_pem"], "[REDACTED]");
+        assert_eq!(encoded["server_name_override"], "public.example");
+        assert!(encoded.get("config").is_none());
+        let server: TlsServerConfig =
+            serde_json::from_value(serde_json::json!({"reload_interval": null})).unwrap();
+        assert_eq!(server.config.reload_interval, None);
+        assert_eq!(server.handshake_timeout, Some(Duration::from_secs(10)));
+        assert!(!server.watch_client_ca);
+    }
 }

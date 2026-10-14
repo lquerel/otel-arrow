@@ -498,7 +498,7 @@ fn create_transform_processor(
     Ok(ProcessorWrapper::local(
         processor,
         node_id,
-        user_config.effective(),
+        user_config.safe_config_snapshot(),
         processor_config,
     ))
 }

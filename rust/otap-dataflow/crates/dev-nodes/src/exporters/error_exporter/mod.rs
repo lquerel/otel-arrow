@@ -70,7 +70,7 @@ impl ErrorExporter {
         Ok(ExporterWrapper::local(
             exporter,
             node,
-            node_config.effective(),
+            node_config.safe_config_snapshot(),
             exporter_config,
         ))
     }

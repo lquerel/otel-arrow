@@ -597,7 +597,7 @@ uses the `otel` namespace (standard OAuth 2.0, not vendor-specific). The main
 binary links the crate with a side-effect import so the registration takes
 effect.
 
-The complete extension configuration is omitted from effective snapshots.
+The complete extension configuration is omitted from safe configuration snapshots.
 Although inline secrets use safe secret types, endpoints and free-form extra
 parameters may also carry credentials, so typed serialization is not a complete
 disclosure boundary for this schema.

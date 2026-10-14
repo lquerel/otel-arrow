@@ -652,7 +652,7 @@ pub fn create_signal_type_router(
     Ok(ProcessorWrapper::local(
         router,
         node,
-        node_config.effective(),
+        node_config.safe_config_snapshot(),
         processor_config,
     ))
 }
@@ -680,7 +680,7 @@ pub static SIGNAL_TYPE_ROUTER_FACTORY: ProcessorFactory<OtapPdata> = ProcessorFa
             Ok(ProcessorWrapper::local(
                 router,
                 node,
-                node_config.effective(),
+                node_config.safe_config_snapshot(),
                 proc_cfg,
             ))
         },

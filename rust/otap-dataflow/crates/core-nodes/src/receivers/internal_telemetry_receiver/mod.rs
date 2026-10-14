@@ -151,7 +151,7 @@ pub static INTERNAL_TELEMETRY_RECEIVER: ReceiverFactory<OtapPdata> = ReceiverFac
                     internal_telemetry,
                 ),
                 node,
-                node_config.effective(),
+                node_config.safe_config_snapshot(),
                 receiver_config,
             ))
         },

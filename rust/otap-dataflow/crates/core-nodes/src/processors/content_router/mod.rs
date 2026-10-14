@@ -1006,14 +1006,14 @@ pub fn create_content_router(
     processor_config: &ProcessorConfig,
 ) -> Result<ProcessorWrapper<OtapPdata>, ConfigError> {
     let router_config = (*node_config.component_config::<ContentRouterConfig>()?).clone();
-    router_config.validate(&node_config.effective().outputs)?;
+    router_config.validate(&node_config.safe_config_snapshot().outputs)?;
 
     let router = ContentRouter::new(router_config);
 
     Ok(ProcessorWrapper::local(
         router,
         node,
-        node_config.effective(),
+        node_config.safe_config_snapshot(),
         processor_config,
     ))
 }
@@ -1035,14 +1035,14 @@ pub static CONTENT_ROUTER_FACTORY: ProcessorFactory<OtapPdata> = ProcessorFactor
          proc_cfg: &ProcessorConfig,
          _capabilities: &otel_arrow_dfe_engine::capability::registry::Capabilities| {
             let router_config = (*node_config.component_config::<ContentRouterConfig>()?).clone();
-            router_config.validate(&node_config.effective().outputs)?;
+            router_config.validate(&node_config.safe_config_snapshot().outputs)?;
 
             let router = ContentRouter::with_pipeline_ctx(pipeline, router_config);
 
             Ok(ProcessorWrapper::local(
                 router,
                 node,
-                node_config.effective(),
+                node_config.safe_config_snapshot(),
                 proc_cfg,
             ))
         },

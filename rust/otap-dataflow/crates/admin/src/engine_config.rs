@@ -27,9 +27,9 @@ fn operation_error_response(status: StatusCode, error: crate::ControlPlaneError)
     (status, Json(error.as_operation_error())).into_response()
 }
 
-/// Returns the full effective engine configuration.
+/// Returns the committed SafeConfigSnapshot without changing its JSON envelope.
 pub async fn show_config(State(state): State<AppState>) -> impl IntoResponse {
-    match state.controller.effective_config_snapshot() {
+    match state.controller.safe_config_snapshot() {
         Ok(config) => (StatusCode::OK, Json(config)).into_response(),
         Err(error) => operation_error_response(StatusCode::INTERNAL_SERVER_ERROR, error),
     }
@@ -38,7 +38,9 @@ pub async fn show_config(State(state): State<AppState>) -> impl IntoResponse {
 /// Reconciles the running controller state to a desired full engine config.
 pub async fn reconcile_config(
     State(state): State<AppState>,
-    Json(request): Json<crate::EngineConfigReconcileRequest>,
+    crate::PrivateConfigJson(request): crate::PrivateConfigJson<
+        crate::EngineConfigReconcileRequest,
+    >,
 ) -> impl IntoResponse {
     otel_info!("config.reconcile.requested");
 
@@ -75,7 +77,7 @@ mod tests {
     use crate::{
         ControlPlane, ControlPlaneError, EngineConfigReconcileState, EngineConfigReconcileStatus,
         GroupDeleteStatus, PipelineDeleteStatus, PipelineDetails, ReconfigureRequest,
-        RolloutStatus, ShutdownStatus,
+        RolloutStatus, SafeConfigSnapshot, ShutdownStatus,
     };
     use axum::body::to_bytes;
     use otel_arrow_dfe_admin_types::operations::{OperationError, OperationErrorKind};
@@ -88,7 +90,7 @@ mod tests {
 
     #[derive(Clone)]
     struct StubControlPlane {
-        snapshot_result: Result<OtelDataflowSpec, ControlPlaneError>,
+        snapshot_result: Result<SafeConfigSnapshot, ControlPlaneError>,
         reconcile_result: Result<EngineConfigReconcileStatus, ControlPlaneError>,
     }
 
@@ -146,7 +148,7 @@ mod tests {
             Ok(None)
         }
 
-        fn effective_config_snapshot(&self) -> Result<OtelDataflowSpec, ControlPlaneError> {
+        fn safe_config_snapshot(&self) -> Result<SafeConfigSnapshot, ControlPlaneError> {
             self.snapshot_result.clone()
         }
 
@@ -226,7 +228,7 @@ mod tests {
         reconcile_result: Result<EngineConfigReconcileStatus, ControlPlaneError>,
     ) -> Arc<dyn ControlPlane> {
         Arc::new(StubControlPlane {
-            snapshot_result,
+            snapshot_result: snapshot_result.map(SafeConfigSnapshot::from_source_omitted),
             reconcile_result,
         })
     }
@@ -235,7 +237,7 @@ mod tests {
     /// configuration.
     /// Guarantees: the handler returns the config snapshot directly.
     #[tokio::test]
-    async fn show_config_returns_effective_config_snapshot() {
+    async fn show_config_returns_safe_config_snapshot() {
         let config = empty_engine_config();
         let response = show_config(State(test_app_state(stub(
             Ok(config.clone()),
@@ -250,13 +252,16 @@ mod tests {
             .expect("body should collect");
         let decoded: OtelDataflowSpec =
             serde_json::from_slice(&body).expect("config body should deserialize");
-        assert_eq!(decoded, config);
+        assert_eq!(
+            &decoded,
+            SafeConfigSnapshot::from_source_omitted(config).as_config()
+        );
     }
 
     /// Scenario: the control plane returns a precomputed omitted component config.
-    /// Guarantees: `show_config` serializes that effective representation directly.
+    /// Guarantees: `show_config` serializes that SafeConfigSnapshot representation directly.
     #[tokio::test]
-    async fn show_config_serializes_precomputed_effective_config() {
+    async fn show_config_serializes_precomputed_safe_config_snapshot() {
         let yaml = r#"
 version: otel_dataflow/v1
 engine: {}
@@ -326,7 +331,7 @@ groups:
                 Ok(empty_engine_config()),
                 Ok(reconcile_status(EngineConfigReconcileState::Succeeded)),
             ))),
-            Json(reconcile_request()),
+            crate::PrivateConfigJson(reconcile_request()),
         )
         .await
         .into_response();
@@ -350,7 +355,7 @@ groups:
                 Ok(empty_engine_config()),
                 Ok(reconcile_status(EngineConfigReconcileState::Failed)),
             ))),
-            Json(reconcile_request()),
+            crate::PrivateConfigJson(reconcile_request()),
         )
         .await
         .into_response();
@@ -377,7 +382,7 @@ groups:
                     message: "desired config is invalid".to_owned(),
                 }),
             ))),
-            Json(reconcile_request()),
+            crate::PrivateConfigJson(reconcile_request()),
         )
         .await
         .into_response();
@@ -402,7 +407,7 @@ groups:
                 Ok(empty_engine_config()),
                 Err(ControlPlaneError::RolloutConflict),
             ))),
-            Json(reconcile_request()),
+            crate::PrivateConfigJson(reconcile_request()),
         )
         .await
         .into_response();
@@ -432,9 +437,10 @@ groups:
             .try_acquire_owned()
             .expect("test should acquire the only terminal permit");
 
-        let response = reconcile_config(State(state), Json(reconcile_request()))
-            .await
-            .into_response();
+        let response =
+            reconcile_config(State(state), crate::PrivateConfigJson(reconcile_request()))
+                .await
+                .into_response();
 
         assert_eq!(response.status(), StatusCode::CONFLICT);
         let body = to_bytes(response.into_body(), usize::MAX)

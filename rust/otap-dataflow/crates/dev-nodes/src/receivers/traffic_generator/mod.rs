@@ -125,7 +125,7 @@ pub static TRAFFIC_GENERATOR_RECEIVER: ReceiverFactory<OtapPdata> = ReceiverFact
                     node_config.component_config::<Config>()?.as_ref().clone(),
                 )?,
                 node,
-                node_config.effective(),
+                node_config.safe_config_snapshot(),
                 receiver_config,
             ))
         },
@@ -837,7 +837,7 @@ mod tests {
         });
         let original = resolve(&first).unwrap();
         assert_eq!(
-            original.snapshot(),
+            original.safe_config_snapshot(),
             otel_arrow_dfe_config::secret::OMITTED_VALUE
         );
         let typed = original.get::<Config>().unwrap();
@@ -863,7 +863,10 @@ mod tests {
         assert_eq!(original, resolve(&alias).unwrap());
         alias["transport_headers"]["authorization"] = "Bearer replacement-token".into();
         let replacement = resolve(&alias).unwrap();
-        assert_eq!(original.snapshot(), replacement.snapshot());
+        assert_eq!(
+            original.safe_config_snapshot(),
+            replacement.safe_config_snapshot()
+        );
         assert_ne!(original, replacement);
         alias["transport_headers"]["authorization"] = "[REDACTED]".into();
         assert!(resolve(&alias).is_err());

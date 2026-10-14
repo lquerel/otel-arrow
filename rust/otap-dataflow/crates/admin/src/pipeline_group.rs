@@ -67,7 +67,7 @@ fn operation_error_response(status: StatusCode, error: crate::ControlPlaneError)
     (status, Json(error.as_operation_error())).into_response()
 }
 
-/// Returns the committed effective configuration for one pipeline group.
+/// Returns the committed group view of the SafeConfigSnapshot.
 pub async fn show_group(
     Path(pipeline_group_id): Path<String>,
     State(state): State<AppState>,
@@ -83,7 +83,7 @@ pub async fn show_group(
 pub async fn create_group(
     Path(pipeline_group_id): Path<String>,
     State(state): State<AppState>,
-    Json(group): Json<PipelineGroupConfig>,
+    crate::PrivateConfigJson(group): crate::PrivateConfigJson<PipelineGroupConfig>,
 ) -> impl IntoResponse {
     otel_info!(
         "group.create.requested",
@@ -413,9 +413,9 @@ mod tests {
     }
 
     /// Scenario: a pipeline group contains a precomputed omitted component config.
-    /// Guarantees: `show_group` serializes the effective representation directly.
+    /// Guarantees: `show_group` serializes the SafeConfigSnapshot representation directly.
     #[tokio::test]
-    async fn show_group_serializes_precomputed_effective_config() {
+    async fn show_group_serializes_precomputed_safe_config_snapshot() {
         let group: PipelineGroupConfig = serde_json::from_value(serde_json::json!({
             "pipelines": {
                 "main": {
@@ -467,7 +467,7 @@ mod tests {
                 Ok(group.clone()),
                 Ok(delete_status("succeeded")),
             ))),
-            Json(group.clone()),
+            crate::PrivateConfigJson(group.clone()),
         )
         .await
         .into_response();
@@ -481,10 +481,10 @@ mod tests {
         assert_eq!(decoded, group);
     }
 
-    /// Scenario: group creation returns a precomputed effective group from the control plane.
+    /// Scenario: group creation returns a precomputed safe group snapshot from the control plane.
     /// Guarantees: `create_group` serializes that safe representation directly.
     #[tokio::test]
-    async fn create_group_serializes_precomputed_effective_config() {
+    async fn create_group_serializes_precomputed_safe_config_snapshot() {
         let source_group: PipelineGroupConfig = serde_json::from_value(serde_json::json!({
             "pipelines": {
                 "main": {
@@ -500,7 +500,7 @@ mod tests {
             }
         }))
         .expect("group should deserialize");
-        let effective_group: PipelineGroupConfig = serde_json::from_value(serde_json::json!({
+        let safe_group_snapshot: PipelineGroupConfig = serde_json::from_value(serde_json::json!({
             "pipelines": {
                 "main": {
                     "nodes": {
@@ -512,16 +512,16 @@ mod tests {
                 }
             }
         }))
-        .expect("effective group should deserialize");
+        .expect("safe group snapshot should deserialize");
 
         let response = create_group(
             Path("default".to_string()),
             State(test_app_state(stub(
                 Ok(None),
-                Ok(effective_group),
+                Ok(safe_group_snapshot),
                 Ok(delete_status("succeeded")),
             ))),
-            Json(source_group),
+            crate::PrivateConfigJson(source_group),
         )
         .await
         .into_response();
@@ -550,7 +550,7 @@ mod tests {
                 }),
                 Ok(delete_status("succeeded")),
             ))),
-            Json(PipelineGroupConfig::new()),
+            crate::PrivateConfigJson(PipelineGroupConfig::new()),
         )
         .await
         .into_response();

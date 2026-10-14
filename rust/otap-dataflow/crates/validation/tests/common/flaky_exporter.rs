@@ -210,7 +210,7 @@ static FLAKY_EXPORTER: ExporterFactory<OtapPdata> = ExporterFactory {
                     auto_ack_after_nacks: auto_ack,
                 },
                 node,
-                node_config.effective(),
+                node_config.safe_config_snapshot(),
                 exporter_config,
             ))
         },

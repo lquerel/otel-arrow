@@ -1389,7 +1389,7 @@ pub fn create_otap_batch_processor(
     Ok(ProcessorWrapper::local(
         proc,
         node,
-        node_config.effective(),
+        node_config.safe_config_snapshot(),
         processor_config,
     ))
 }

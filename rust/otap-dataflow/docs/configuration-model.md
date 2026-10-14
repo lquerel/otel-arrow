@@ -466,7 +466,7 @@ explicit snapshot policy. Therefore, `--validate-and-exit` rejects unknown
 controller extension types, invalid extension-specific config, and unsafe
 snapshot failures without starting the extension. See
 [Factory-Resolved Configuration](configuration-resolution.md) for the resolver
-and effective-snapshot contracts.
+and `SafeConfigSnapshot` contracts.
 
 The built-in read-only controller monitor is available in the stock
 `df_engine` binary:

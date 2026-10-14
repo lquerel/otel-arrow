@@ -593,7 +593,7 @@ pub fn create_attributes_processor(
     Ok(ProcessorWrapper::local(
         proc,
         node,
-        node_config.effective(),
+        node_config.safe_config_snapshot(),
         processor_config,
     ))
 }
@@ -671,7 +671,7 @@ mod tests {
         explicit["apply_to"] = serde_json::json!(["signal", "signal"]);
         assert_eq!(default, resolve(&explicit).unwrap());
         assert_eq!(
-            default.snapshot(),
+            default.safe_config_snapshot(),
             otel_arrow_dfe_config::secret::OMITTED_VALUE
         );
         let first = default.get::<ResolvedAttributesConfig>().unwrap();

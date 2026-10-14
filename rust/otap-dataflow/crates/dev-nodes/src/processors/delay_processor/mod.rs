@@ -82,7 +82,7 @@ pub fn create_delay_processor(
             delay: config.delay,
         },
         node,
-        node_config.effective(),
+        node_config.safe_config_snapshot(),
         processor_config,
     ))
 }

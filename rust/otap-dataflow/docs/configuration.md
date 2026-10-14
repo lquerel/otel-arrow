@@ -61,7 +61,7 @@ cargo run -- --config configs/otlp-otlp.yaml --validate-and-exit
 Validation parses YAML or JSON, validates the root model, checks graph
 references, checks that every component type is registered in the binary, and
 requires every selected factory to resolve its component config into a typed
-runtime value and a safe effective snapshot. Resolution applies
+runtime value and a safe configuration snapshot. Resolution applies
 component-specific parsing, validation, defaults, and normalization before the
 configuration can be admitted. It also compiles context bindings, including
 qualified propagation selectors.
@@ -664,7 +664,7 @@ Useful adjacent docs:
 - [Configuration model reference](configuration-model.md): exact field
   semantics, defaults, precedence, and validation behavior.
 - [Factory-resolved configuration](configuration-resolution.md): typed
-  resolution, effective snapshots, reconciliation, and privacy boundaries.
+  resolution, SafeConfigSnapshot reporting, reconciliation, and privacy boundaries.
 - [Node and flow metrics](node-and-flow-metrics.md): configure and interpret
   node item metrics and processor flow metrics.
 - [URN reference](urns.md): node type and extension type syntax.

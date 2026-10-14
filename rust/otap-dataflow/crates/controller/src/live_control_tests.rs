@@ -171,7 +171,7 @@ fn context_bindings_test_receiver_create(
     Ok(ReceiverWrapper::local(
         RecoveryTestReceiver,
         node,
-        node_config.effective(),
+        node_config.safe_config_snapshot(),
         receiver_config,
     ))
 }
@@ -259,7 +259,7 @@ fn recovery_test_receiver_create(
     Ok(ReceiverWrapper::local(
         RecoveryTestReceiver,
         node,
-        node_config.effective(),
+        node_config.safe_config_snapshot(),
         receiver_config,
     ))
 }
@@ -274,7 +274,7 @@ fn recovery_test_exporter_create(
     Ok(ExporterWrapper::local(
         RecoveryTestExporter,
         node,
-        node_config.effective(),
+        node_config.safe_config_snapshot(),
         exporter_config,
     ))
 }
@@ -598,7 +598,7 @@ fn test_runtime_with_supplied_log_filter_and_topology(
             Duration::from_secs(1),
             memory_pressure_tx,
             candidate.source,
-            candidate.effective,
+            candidate.safe_config_snapshot,
         )),
         log_filter_handle,
         log_filter,
@@ -3335,9 +3335,9 @@ fn panic_report_formats_summary_and_detail() {
         Some(3),
     );
 
-    assert_eq!(report.summary_message(), "rollout worker panicked: boom");
+    assert_eq!(report.summary_message(), "rollout worker panicked");
     let detail = report.detail_message();
-    assert!(detail.contains("rollout worker panicked: boom"));
+    assert!(detail.contains("rollout worker panicked"));
     assert!(detail.contains("thread_name=rollout-g1-p1"));
     assert!(detail.contains("thread_id=17"));
     assert!(detail.contains("core_id=3"));
@@ -3345,16 +3345,12 @@ fn panic_report_formats_summary_and_detail() {
 }
 
 /// Scenario: a panic is raised with a non-string payload.
-/// Guarantees: the captured panic summary stays readable and avoids the older
-/// generic placeholder text.
+/// Guarantees: the captured summary identifies the worker without retaining any payload value.
 #[test]
 fn panic_report_non_string_payload_has_useful_fallback() {
     let report = PanicReport::capture("shutdown worker", Box::new(7usize), None, None, None);
 
-    assert_eq!(
-        report.summary_message(),
-        "shutdown worker panicked: non-string panic payload"
-    );
+    assert_eq!(report.summary_message(), "shutdown worker panicked");
     assert!(
         !report
             .summary_message()
@@ -3419,7 +3415,7 @@ connections:
         status
             .failure_reason
             .as_deref()
-            .is_some_and(|message| message.contains("rollout worker panicked: boom"))
+            .is_some_and(|message| message.contains("rollout worker panicked"))
     );
     assert!(
         status
@@ -3989,7 +3985,7 @@ fn create_group_adds_empty_group_to_live_config() {
     let group_id: PipelineGroupId = "g1".to_string().into();
     assert_eq!(created, group);
     assert_eq!(runtime.group_details_snapshot(&group_id), Some(group));
-    let snapshot = runtime.effective_config_snapshot();
+    let snapshot = runtime.safe_config_snapshot();
     assert!(snapshot.groups.contains_key(&group_id));
     assert!(snapshot.groups[&group_id].pipelines.is_empty());
 }
@@ -4052,7 +4048,7 @@ fn delete_pipeline_removes_stopped_pipeline_from_live_config() {
 
     assert_eq!(status.state, "succeeded");
     assert!(status.shutdown.is_none());
-    let snapshot = runtime.effective_config_snapshot();
+    let snapshot = runtime.safe_config_snapshot();
     let group_id: PipelineGroupId = "g1".into();
     let pipeline_id: PipelineId = "p1".into();
     assert!(snapshot.groups.contains_key(&group_id));
@@ -4601,7 +4597,7 @@ fn delete_pipeline_rejects_missing_targets() {
         .expect_err("missing pipeline should be rejected");
     assert_eq!(missing_pipeline, ControlPlaneError::PipelineNotFound);
 
-    let snapshot = runtime.effective_config_snapshot();
+    let snapshot = runtime.safe_config_snapshot();
     assert!(
         snapshot.groups[&PipelineGroupId::from("g1")]
             .pipelines
@@ -4734,7 +4730,7 @@ fn delete_group_removes_empty_group_from_live_config() {
     assert!(status.pipelines.is_empty());
     assert!(
         !runtime
-            .effective_config_snapshot()
+            .safe_config_snapshot()
             .groups
             .contains_key(&PipelineGroupId::from("g1"))
     );
@@ -4778,7 +4774,7 @@ groups:
     );
     assert!(
         !runtime
-            .effective_config_snapshot()
+            .safe_config_snapshot()
             .groups
             .contains_key(&PipelineGroupId::from("g1"))
     );
@@ -4824,7 +4820,7 @@ fn reconcile_engine_config_reports_noop_for_matching_live_config() {
     assert_eq!(status.changes[0].state, "succeeded");
     assert!(
         runtime
-            .effective_config_snapshot()
+            .safe_config_snapshot()
             .groups
             .contains_key(&PipelineGroupId::from("g1"))
     );
@@ -4996,7 +4992,7 @@ fn reconcile_engine_config_deletes_missing_resources_by_default() {
     );
     assert!(
         !runtime
-            .effective_config_snapshot()
+            .safe_config_snapshot()
             .groups
             .contains_key(&PipelineGroupId::from("g1"))
     );
@@ -5132,7 +5128,7 @@ fn reconcile_engine_config_preserves_missing_resources_when_requested() {
     assert_eq!(status.state, EngineConfigReconcileState::Succeeded);
     assert_eq!(status.changes.len(), 1);
     assert_eq!(status.changes[0].action, ConfigChangeAction::Noop);
-    let snapshot = runtime.effective_config_snapshot();
+    let snapshot = runtime.safe_config_snapshot();
     for pipeline_id in ["p1", "p2"] {
         assert!(
             snapshot.groups[&PipelineGroupId::from("g1")]
@@ -5177,14 +5173,14 @@ fn reconcile_engine_config_does_not_publish_scaffold_on_conflict() {
         .expect_err("active rollout should reject full-config reconciliation");
 
     assert_eq!(err, ControlPlaneError::RolloutConflict);
-    assert!(runtime.effective_config_snapshot().engine.custom.is_empty());
+    assert!(runtime.safe_config_snapshot().engine.custom.is_empty());
     assert_eq!(log_filter_handle.effective_level().as_str(), "warn");
 }
 
 /// Scenario: An engine custom value contains arbitrary secret-bearing data.
 /// Guarantees: Source retains it privately, effective output omits it, and replay is rejected.
 #[test]
-fn engine_custom_values_are_omitted_and_effective_snapshot_is_not_replayable() {
+fn engine_custom_values_are_omitted_and_safe_snapshot_is_not_replayable() {
     let mut config = empty_engine_config();
     _ = config.engine.custom.insert(
         "plugin".to_owned(),
@@ -5193,17 +5189,20 @@ fn engine_custom_values_are_omitted_and_effective_snapshot_is_not_replayable() {
     let runtime = test_runtime(&config);
 
     assert_eq!(runtime.source_config_snapshot(), config);
-    let effective = runtime.effective_config_snapshot();
-    assert_eq!(effective.engine.custom["plugin"], OMITTED_VALUE);
+    let safe_config_snapshot = runtime.safe_config_snapshot();
+    assert_eq!(safe_config_snapshot.engine.custom["plugin"], OMITTED_VALUE);
     assert!(
-        !serde_json::to_string(&effective)
+        !serde_json::to_string(&safe_config_snapshot)
             .unwrap()
             .contains("never-export-this")
     );
 
     let error = Controller::<()>::new(&TEST_PIPELINE_FACTORY)
-        .resolve_engine_candidate(effective, &ControllerExtensionRegistry::empty())
-        .expect_err("effective snapshots must not be accepted as source config");
+        .resolve_engine_candidate(
+            safe_config_snapshot.as_config().clone(),
+            &ControllerExtensionRegistry::empty(),
+        )
+        .expect_err("safe config snapshots must not be accepted as source config");
     assert!(error.to_string().contains("snapshot-only marker"));
 }
 
@@ -5590,7 +5589,7 @@ fn shutdown_worker_panic_marks_failed_and_clears_conflict() {
         status
             .failure_reason
             .as_deref()
-            .is_some_and(|message| message.contains("shutdown worker panicked: boom"))
+            .is_some_and(|message| message.contains("shutdown worker panicked"))
     );
     assert!(
         status
@@ -7267,7 +7266,7 @@ fn runtime_thread_panic_populates_error_source_in_observed_status() {
         "Pipeline encountered a runtime error."
     );
     assert_eq!(error["error_kind"], "panic");
-    assert_eq!(error["message"], "runtime thread panicked: boom");
+    assert_eq!(error["message"], "runtime thread panicked");
     let source = error["source"]
         .as_str()
         .expect("runtime panic source should be serialized");
@@ -7296,7 +7295,7 @@ fn blocking_create(
     Ok(ReceiverWrapper::local(
         RecoveryTestReceiver,
         node,
-        node_config.effective(),
+        node_config.safe_config_snapshot(),
         receiver_config,
     ))
 }

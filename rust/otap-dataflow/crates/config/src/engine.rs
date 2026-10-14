@@ -271,7 +271,7 @@ impl ControllerExtensions {
         self.0.iter()
     }
 
-    /// Replaces every extension config with its precomputed effective snapshot.
+    /// Replaces every extension config with its precomputed safe config snapshot.
     pub fn replace_config_snapshots(
         &mut self,
         snapshots: &HashMap<ExtensionId, Value>,
@@ -286,7 +286,7 @@ impl ControllerExtensions {
                 .get(extension_id)
                 .ok_or_else(|| Error::InvalidUserConfig {
                     error: format!(
-                        "missing effective snapshot for controller extension `{extension_id}`"
+                        "missing safe config snapshot for controller extension `{extension_id}`"
                     ),
                 })?;
             Arc::make_mut(extension).config = snapshot.clone();

@@ -77,7 +77,7 @@ pub fn create_filter_processor(
             pipeline_ctx,
         ),
         node,
-        node_config.effective(),
+        node_config.safe_config_snapshot(),
         processor_config,
     ))
 }

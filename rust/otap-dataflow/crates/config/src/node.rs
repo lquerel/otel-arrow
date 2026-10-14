@@ -92,7 +92,7 @@ pub struct NodeUserConfig {
     ///
     /// This is an ingestion value. Before admission, the engine invokes the
     /// registered factory resolver to parse, validate, default, and normalize it
-    /// into immutable typed runtime state and a safe effective snapshot.
+    /// into immutable typed runtime state and a safe configuration snapshot.
     #[serde(default)]
     // The serde_json::Value serializes to an invalid schema as far as the kubernetes api is concerned.
     // The preserve-unknown-fields extension allows this to be correctly interpreted as "Any JSON type"

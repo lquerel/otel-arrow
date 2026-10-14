@@ -1868,7 +1868,7 @@ pub fn create_durable_buffer(
     Ok(ProcessorWrapper::local(
         processor,
         node,
-        node_config.effective(),
+        node_config.safe_config_snapshot(),
         processor_config,
     ))
 }

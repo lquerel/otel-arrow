@@ -136,7 +136,7 @@ pub static OTLP_EXPORTER: ExporterFactory<OtapPdata> = ExporterFactory {
                 capabilities,
             )?,
             node,
-            node_config.effective(),
+            node_config.safe_config_snapshot(),
             exporter_config,
         ))
     },

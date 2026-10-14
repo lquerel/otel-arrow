@@ -1170,13 +1170,16 @@ pub fn create_fanout_processor(
     node_config: Arc<ResolvedNodeConfig>,
     processor_config: &ProcessorConfig,
 ) -> Result<ProcessorWrapper<OtapPdata>, ConfigError> {
-    let effective = node_config.effective();
+    let safe_config_snapshot = node_config.safe_config_snapshot();
     let config = (*node_config.component_config::<FanoutConfig>()?).clone();
-    let fanout = FanoutProcessor::new(pipeline_ctx.clone(), config.validate(&effective)?);
+    let fanout = FanoutProcessor::new(
+        pipeline_ctx.clone(),
+        config.validate(&safe_config_snapshot)?,
+    );
     Ok(ProcessorWrapper::local(
         fanout,
         node,
-        effective,
+        safe_config_snapshot,
         processor_config,
     ))
 }

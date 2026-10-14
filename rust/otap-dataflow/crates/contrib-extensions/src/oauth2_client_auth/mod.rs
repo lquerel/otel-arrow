@@ -107,7 +107,7 @@ fn create(
         tracker,
     );
 
-    ExtensionWrapper::builder(name, ext_config.effective(), extension_config)
+    ExtensionWrapper::builder(name, ext_config.safe_config_snapshot(), extension_config)
         .active()
         .with_readiness_probe_timeout_override(config.startup_timeout)
         .shared::<OAuth2ClientAuthExtension>(extension)

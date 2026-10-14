@@ -121,7 +121,7 @@ pub static VALIDATION_EXPORTER_FACTORY: ExporterFactory<OtapPdata> = ExporterFac
                     (*node_config.component_config::<ValidationExporterConfig>()?).clone(),
                 )?,
                 node,
-                node_config.effective(),
+                node_config.safe_config_snapshot(),
                 exporter_config,
             ))
         },

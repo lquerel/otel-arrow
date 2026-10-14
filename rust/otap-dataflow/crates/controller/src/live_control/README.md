@@ -46,10 +46,10 @@ threads receive a `Weak<ControllerRuntime<_>>` so they can report exits without
 extending the controller lifetime.
 
 The controller stores private source configuration, factory-resolved typed
-runtime state, and a safe effective snapshot as separate but coordinated
+runtime state, and a `SafeConfigSnapshot` as separate but coordinated
 representations. Planning resolves all three before admission, runtime
 equivalence uses the typed state, and Admin and OpAMP reads use only the
-effective state. See
+safe snapshot state. See
 [Factory-Resolved Configuration](../../../../docs/configuration-resolution.md)
 for the representation, reconciliation, and privacy contracts.
 
@@ -87,7 +87,7 @@ all active instances.
   no longer needs generation-specific entries.
 - The current consistency scope is one logical pipeline. Planning validates a
   candidate against a cloned full source config and resolves the complete
-  candidate, but commit patches only that pipeline's source, effective, and
+  candidate, but commit patches only that pipeline's source, safe snapshot, and
   resolved records into the latest live state. This intentionally does not
   provide whole-config serializability across concurrent operations on
   different logical pipelines.

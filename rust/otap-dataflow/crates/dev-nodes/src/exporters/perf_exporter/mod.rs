@@ -81,7 +81,7 @@ pub static PERF_EXPORTER: ExporterFactory<OtapPdata> = ExporterFactory {
                     (*node_config.component_config::<Config>()?).clone(),
                 ),
                 node,
-                node_config.effective(),
+                node_config.safe_config_snapshot(),
                 exporter_config,
             ))
         },

@@ -236,7 +236,7 @@ pub static OTLP_RECEIVER: ReceiverFactory<OtapPdata> = ReceiverFactory {
         Ok(ReceiverWrapper::shared(
             receiver,
             node,
-            node_config.effective(),
+            node_config.safe_config_snapshot(),
             receiver_config,
         ))
     },

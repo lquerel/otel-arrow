@@ -61,7 +61,7 @@ static REPLAY_TOPOLOGY_EXPORTER: ExporterFactory<OtapPdata> = ExporterFactory {
             Ok(ExporterWrapper::local(
                 ReplayTopologyExporter,
                 node,
-                node_config.effective(),
+                node_config.safe_config_snapshot(),
                 exporter_config,
             ))
         },

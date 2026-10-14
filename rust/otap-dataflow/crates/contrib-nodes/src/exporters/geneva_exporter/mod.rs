@@ -1269,7 +1269,7 @@ impl GenevaExporter {
         Self::from_parsed_config(
             pipeline_ctx,
             config.as_ref().clone(),
-            node_config.effective().as_ref(),
+            node_config.safe_config_snapshot().as_ref(),
             capabilities,
         )
     }
@@ -1662,7 +1662,7 @@ pub static GENEVA_EXPORTER: ExporterFactory<OtapPdata> = ExporterFactory {
         Ok(ExporterWrapper::local(
             GenevaExporter::from_node_config(pipeline, &node_config, capabilities)?,
             node,
-            node_config.effective(),
+            node_config.safe_config_snapshot(),
             exporter_config,
         ))
     },

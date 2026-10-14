@@ -32,7 +32,10 @@ fn create_semantic_receiver(
 ) -> Result<ReceiverWrapper<()>, otel_arrow_dfe_config::error::Error> {
     if config.component_config::<SemanticConfig>()?.fail_creation {
         return Err(otel_arrow_dfe_config::error::Error::InvalidUserConfig {
-            error: "intentional creation failure".to_owned(),
+            error: format!(
+                "intentional creation failure with {}",
+                config.component_config::<SemanticConfig>()?.token.expose()
+            ),
         });
     }
     recovery_test_receiver_create(context, node, config, receiver, capabilities)
@@ -101,13 +104,13 @@ fn committed(
     runtime: &ControllerRuntime<()>,
 ) -> (
     OtelDataflowSpec,
-    OtelDataflowSpec,
+    SafeConfigSnapshot,
     HashMap<PipelineKey, otel_arrow_dfe_engine::component_config::ResolvedPipelineConfig>,
 ) {
     let state = runtime.state.lock().unwrap();
     (
         state.live_config.clone(),
-        state.effective_config.clone(),
+        state.safe_config_snapshot.clone(),
         state.resolved_pipelines.clone(),
     )
 }
@@ -129,6 +132,391 @@ fn wait_for_terminal(runtime: &ControllerRuntime<()>, rollout_id: &str) -> Rollo
     }
 }
 
+fn update(
+    runtime: &ControllerRuntime<()>,
+    changes: Vec<otel_arrow_dfe_admin::PipelineConfigChange>,
+) -> otel_arrow_dfe_admin::PipelineUpdateRequest {
+    otel_arrow_dfe_admin::PipelineUpdateRequest {
+        expected_revision: runtime.state.lock().unwrap().config_revision,
+        changes,
+        step_timeout_secs: 2,
+        drain_timeout_secs: 2,
+    }
+}
+
+/// Scenario: A captured worker panic contains an arbitrary inline credential in its payload.
+/// Guarantees: Debug, rollout summaries, and observed-state diagnostic sources retain no payload values.
+#[test]
+fn panic_reports_do_not_retain_private_payload_values() {
+    let report = PanicReport::capture(
+        "rollout worker",
+        Box::new("private-panic-credential".to_owned()),
+        Some("public-worker".to_owned()),
+        Some(1),
+        Some(0),
+    );
+    for output in [
+        format!("{report:?}"),
+        report.summary_message(),
+        report.detail_message(),
+        serde_json::to_string(&report.error_summary()).unwrap(),
+    ] {
+        assert!(!output.contains("private-panic-credential"));
+    }
+    assert_eq!(report.summary_message(), "rollout worker panicked");
+    assert!(
+        report
+            .detail_message()
+            .contains("thread_name=public-worker")
+    );
+    assert!(report.detail_message().contains("backtrace:"));
+}
+
+/// Scenario: A TUI-style policy edit targets a pipeline with a typed secret and arbitrary omitted config.
+/// Guarantees: Updates use private source, preserve both private subtrees, and atomically commit safe/resolved state.
+#[test]
+fn partial_policy_update_preserves_secret_and_omitted_source() {
+    use otel_arrow_dfe_admin::PipelineConfigChange;
+    let mut config = source();
+    let mut value = serde_json::to_value(&config).unwrap();
+    value["groups"]["g1"]["pipelines"]["p1"]["nodes"]["exporter"]["config"] =
+        serde_json::json!({"arbitrary": "private-exporter"});
+    config = serde_json::from_value(value).unwrap();
+    let runtime = test_runtime_with_factory(&config, &FACTORY);
+    register_existing_pipeline(&runtime, &config);
+    let _messages =
+        register_runtime_instance(&runtime, "g1", "p1", 0, 0, RuntimeInstanceLifecycle::Active);
+    let status = runtime
+        .control_plane()
+        .update_pipeline(
+            "g1",
+            "p1",
+            update(
+                &runtime,
+                vec![
+                    PipelineConfigChange::Remove {
+                        path: vec![
+                            "nodes".into(),
+                            "receiver".into(),
+                            "config".into(),
+                            "absent".into(),
+                            "field".into(),
+                        ],
+                    },
+                    PipelineConfigChange::Set {
+                        path: vec![
+                            "policies".into(),
+                            "resources".into(),
+                            "core_allocation".into(),
+                        ],
+                        value: serde_json::json!({"type": "core_count", "count": 1}),
+                    },
+                ],
+            ),
+        )
+        .unwrap();
+    assert_eq!(status.state, ApiPipelineRolloutState::Succeeded);
+    assert_eq!(status.action, "noop");
+    let (source, safe, resolved) = committed(&runtime);
+    assert_eq!(source, config);
+    let key = PipelineKey::new("g1".into(), "p1".into());
+    let typed = resolved[&key]
+        .node(&"receiver".into())
+        .unwrap()
+        .component_config::<SemanticConfig>()
+        .unwrap();
+    assert_eq!(typed.token.expose(), "first-secret");
+    assert!(
+        !serde_json::to_string(&safe)
+            .unwrap()
+            .contains("private-exporter")
+    );
+    assert!(
+        !serde_json::to_string(&safe)
+            .unwrap()
+            .contains("first-secret")
+    );
+    assert_eq!(
+        safe.groups[&PipelineGroupId::from("g1")].pipelines[&PipelineId::from("p1")],
+        *resolved[&key].safe_config_snapshot()
+    );
+    assert_eq!(
+        runtime
+            .control_plane()
+            .pipeline_details("g1", "p1")
+            .unwrap()
+            .unwrap()
+            .config_revision,
+        1
+    );
+}
+
+/// Scenario: A running typed/omitted pipeline grows through a policy-only partial update.
+/// Guarantees: Real rollout admits the added core, keeps secret/omitted runtime values, and commits one coherent view.
+#[test]
+fn partial_resize_commits_private_source_after_added_core_readiness() {
+    use otel_arrow_dfe_admin::PipelineConfigChange;
+    let desired = source();
+    let mut pipeline = serde_json::to_value(
+        &desired.groups[&PipelineGroupId::from("g1")].pipelines[&PipelineId::from("p1")],
+    )
+    .unwrap();
+    pipeline["nodes"]["exporter"]["config"] = serde_json::json!({"arbitrary": "private-exporter"});
+    let pipeline: PipelineConfig = serde_json::from_value(pipeline).unwrap();
+    let mut initial = desired.clone();
+    initial
+        .groups
+        .get_mut(&PipelineGroupId::from("g1"))
+        .unwrap()
+        .pipelines
+        .clear();
+    let runtime = test_runtime_with_factory(&initial, &FACTORY);
+    let _runner = ObservedStateRunner::start(&runtime);
+    let created = runtime
+        .request_reconfigure_pipeline("g1", "p1", &request(pipeline))
+        .unwrap();
+    let created = wait_for_terminal(&runtime, &created.rollout_id);
+    assert_eq!(created.state, ApiPipelineRolloutState::Succeeded);
+    let resized = runtime
+        .control_plane()
+        .update_pipeline(
+            "g1",
+            "p1",
+            update(
+                &runtime,
+                vec![PipelineConfigChange::Set {
+                    path: vec![
+                        "policies".into(),
+                        "resources".into(),
+                        "core_allocation".into(),
+                    ],
+                    value: serde_json::json!({"type": "core_count", "count": 2}),
+                }],
+            ),
+        )
+        .unwrap();
+    let resized = wait_for_terminal(&runtime, &resized.rollout_id);
+    assert_eq!(resized.state, ApiPipelineRolloutState::Succeeded);
+    assert_eq!(resized.action, "resize");
+    assert_eq!(resized.target_generation, created.target_generation);
+    let (source, safe, resolved) = committed(&runtime);
+    let key = PipelineKey::new("g1".into(), "p1".into());
+    let source_pipeline =
+        &source.groups[&PipelineGroupId::from("g1")].pipelines[&PipelineId::from("p1")];
+    let raw = serde_json::to_value(source_pipeline).unwrap();
+    assert_eq!(raw["nodes"]["receiver"]["config"]["token"], "first-secret");
+    assert_eq!(
+        raw["nodes"]["exporter"]["config"]["arbitrary"],
+        "private-exporter"
+    );
+    assert_eq!(raw["policies"]["resources"]["core_allocation"]["count"], 2);
+    assert_eq!(
+        safe.groups[&PipelineGroupId::from("g1")].pipelines[&PipelineId::from("p1")],
+        *resolved[&key].safe_config_snapshot()
+    );
+    assert_eq!(
+        resolved[&key]
+            .node(&"receiver".into())
+            .unwrap()
+            .component_config::<SemanticConfig>()
+            .unwrap()
+            .token
+            .expose(),
+        "first-secret"
+    );
+    assert!(
+        !serde_json::to_string(&safe)
+            .unwrap()
+            .contains("private-exporter")
+    );
+    assert_eq!(runtime.state.lock().unwrap().config_revision, 2);
+    runtime.request_shutdown_all(2).unwrap();
+}
+
+/// Scenario: Partial updates use a stale revision, a display marker, or an invalid typed value.
+/// Guarantees: Rejection launches no runtime and preserves source, safe snapshot, resolved state, and revision.
+#[test]
+fn partial_updates_reject_stale_revisions_markers_and_invalid_values() {
+    use otel_arrow_dfe_admin::PipelineConfigChange;
+    let config = source();
+    let runtime = test_runtime_with_factory(&config, &FACTORY);
+    register_existing_pipeline(&runtime, &config);
+    let before = committed(&runtime);
+    let changes = [
+        serde_json::json!("[REDACTED]"),
+        serde_json::json!({"nested": ["[OMITTED]"]}),
+        serde_json::json!("private-invalid-scalar"),
+    ];
+    for value in changes {
+        let error = runtime
+            .control_plane()
+            .update_pipeline(
+                "g1",
+                "p1",
+                update(
+                    &runtime,
+                    vec![PipelineConfigChange::Set {
+                        path: vec![
+                            "nodes".into(),
+                            "receiver".into(),
+                            "config".into(),
+                            "attempts".into(),
+                        ],
+                        value,
+                    }],
+                ),
+            )
+            .unwrap_err();
+        assert!(matches!(error, ControlPlaneError::InvalidRequest { .. }));
+        assert!(!format!("{error:?}").contains("private-invalid-scalar"));
+        assert_eq!(committed(&runtime), before);
+    }
+    let mut stale = update(&runtime, Vec::new());
+    stale.expected_revision += 1;
+    assert!(matches!(
+        runtime.control_plane().update_pipeline("g1", "p1", stale),
+        Err(ControlPlaneError::RolloutConflict)
+    ));
+    assert_eq!(committed(&runtime), before);
+    let state = runtime.state.lock().unwrap();
+    assert_eq!(state.config_revision, 0);
+    assert!(state.rollouts.is_empty());
+    assert!(state.runtime_instances.is_empty());
+    assert!(state.pipeline_operation_reservations.is_empty());
+}
+
+/// Scenario: A sparse public-field edit reaches runtime creation but the factory echoes a secret in its failure.
+/// Guarantees: Rollback preserves all committed representations and reporting does not echo the factory error.
+#[test]
+fn failed_partial_rollout_preserves_state_and_hides_creation_diagnostics() {
+    use otel_arrow_dfe_admin::PipelineConfigChange;
+    let config = source();
+    let runtime = test_runtime_with_factory(&config, &FACTORY);
+    let _runner = ObservedStateRunner::start(&runtime);
+    register_existing_pipeline(&runtime, &config);
+    let _messages =
+        register_runtime_instance(&runtime, "g1", "p1", 0, 0, RuntimeInstanceLifecycle::Active);
+    let before = committed(&runtime);
+    let status = runtime
+        .control_plane()
+        .update_pipeline(
+            "g1",
+            "p1",
+            update(
+                &runtime,
+                vec![PipelineConfigChange::Set {
+                    path: vec![
+                        "nodes".into(),
+                        "receiver".into(),
+                        "config".into(),
+                        "fail_creation".into(),
+                    ],
+                    value: true.into(),
+                }],
+            ),
+        )
+        .unwrap();
+    let status = wait_for_terminal(&runtime, &status.rollout_id);
+    assert_eq!(status.state, ApiPipelineRolloutState::Failed);
+    assert!(
+        !serde_json::to_string(&status)
+            .unwrap()
+            .contains("first-secret")
+    );
+    assert!(status.failure_reason.as_ref().unwrap().contains("creation"));
+    assert_eq!(committed(&runtime), before);
+    assert_eq!(runtime.state.lock().unwrap().config_revision, 0);
+}
+
+fn assert_limiter_binding_rejected(bindings: serde_json::Value, expected: &str) {
+    for existing in [false, true] {
+        let mut config = source();
+        let mut pipeline = serde_json::to_value(
+            &config.groups[&PipelineGroupId::from("g1")].pipelines[&PipelineId::from("p1")],
+        )
+        .unwrap();
+        pipeline["nodes"]["receiver"]["rate_limiters"] = bindings.clone();
+        if !existing {
+            config
+                .groups
+                .get_mut(&PipelineGroupId::from("g1"))
+                .unwrap()
+                .pipelines
+                .clear();
+        }
+        let runtime = test_runtime_with_factory(&config, &FACTORY);
+        if existing {
+            register_existing_pipeline(&runtime, &config);
+        }
+        let _messages = existing.then(|| {
+            register_runtime_instance(&runtime, "g1", "p1", 0, 0, RuntimeInstanceLifecycle::Active)
+        });
+        let before = committed(&runtime);
+        let (revision, next_thread_id, generations, instances) = {
+            let state = runtime.state.lock().unwrap();
+            (
+                state.config_revision,
+                state.next_thread_id,
+                state.generation_counters.clone(),
+                state
+                    .runtime_instances
+                    .keys()
+                    .cloned()
+                    .collect::<HashSet<_>>(),
+            )
+        };
+        let error = runtime
+            .control_plane()
+            .reconfigure_pipeline(
+                "g1",
+                "p1",
+                request(serde_json::from_value(pipeline).unwrap()),
+            )
+            .unwrap_err();
+        assert!(
+            matches!(error, ControlPlaneError::InvalidRequest { ref message }
+            if message.contains(expected)),
+            "{error:?}"
+        );
+        assert_eq!(committed(&runtime), before);
+        let state = runtime.state.lock().unwrap();
+        assert_eq!(state.config_revision, revision);
+        assert_eq!(state.next_thread_id, next_thread_id);
+        assert_eq!(state.generation_counters, generations);
+        assert_eq!(
+            state
+                .runtime_instances
+                .keys()
+                .cloned()
+                .collect::<HashSet<_>>(),
+            instances
+        );
+        assert!(state.rollouts.is_empty());
+        assert!(state.active_rollouts.is_empty());
+        assert!(state.pipeline_operation_reservations.is_empty());
+    }
+}
+
+/// Scenario: A single-pipeline create or replacement request binds a receiver to an unknown limiter.
+/// Guarantees: Admission rejects it without launching cores or changing any committed representation.
+#[test]
+fn single_pipeline_admission_rejects_unknown_limiter_bindings() {
+    assert_limiter_binding_rejected(
+        serde_json::json!(["missing"]),
+        "does not name an effective limiter",
+    );
+}
+
+/// Scenario: A single-pipeline create or replacement request specifies multiple node limiter bindings.
+/// Guarantees: Cardinality validation rejects it before rollout, creation, or committed-state changes.
+#[test]
+fn single_pipeline_admission_rejects_multiple_limiter_bindings() {
+    assert_limiter_binding_rejected(
+        serde_json::json!(["first", "second"]),
+        "at most one rate limiter binding",
+    );
+}
+
 /// Scenario: Alias/default-equivalent input and secret-only changes are admitted for an active pipeline.
 /// Guarantees: Equivalent input commits as a no-op; a hidden credential change requires replacement.
 #[test]
@@ -138,7 +526,7 @@ fn typed_reconciliation_preserves_noops_and_detects_secret_changes() {
     register_existing_pipeline(&runtime, &config);
     let _messages =
         register_runtime_instance(&runtime, "g1", "p1", 0, 0, RuntimeInstanceLifecycle::Active);
-    let original_effective = runtime.effective_config_snapshot();
+    let original_safe_config_snapshot = runtime.safe_config_snapshot();
     let alias = pipeline_with(
         &config,
         serde_json::json!({"token": "first-secret", "retry_count": 3}),
@@ -149,28 +537,34 @@ fn typed_reconciliation_preserves_noops_and_detects_secret_changes() {
     assert_eq!(plan.action, RolloutAction::NoOp);
     let status = runtime.spawn_rollout(plan).unwrap();
     assert_eq!(status.state, ApiPipelineRolloutState::Succeeded);
-    let (source, effective, resolved) = committed(&runtime);
+    let (source, safe_config_snapshot, resolved) = committed(&runtime);
     let key = PipelineKey::new("g1".into(), "p1".into());
     assert_eq!(
         source.groups[&PipelineGroupId::from("g1")].pipelines[&PipelineId::from("p1")],
         alias
     );
-    assert_eq!(effective, original_effective);
+    assert_eq!(safe_config_snapshot, original_safe_config_snapshot);
     assert_eq!(
-        resolved[&key].effective(),
-        &effective.groups[&PipelineGroupId::from("g1")].pipelines[&PipelineId::from("p1")]
+        resolved[&key].safe_config_snapshot(),
+        &safe_config_snapshot.groups[&PipelineGroupId::from("g1")].pipelines
+            [&PipelineId::from("p1")]
     );
     let changed = pipeline_with(&config, serde_json::json!({"token": "second-secret"}));
     let plan = runtime
         .prepare_rollout_plan("g1", "p1", &request(changed))
         .unwrap();
     assert_eq!(plan.action, RolloutAction::Replace);
-    assert_eq!(plan.effective_pipeline, *resolved[&key].effective());
+    assert_eq!(
+        plan.target_deployment
+            .runtime_resolved
+            .safe_config_snapshot(),
+        resolved[&key].safe_config_snapshot()
+    );
     assert_ne!(plan.target_deployment.runtime_resolved, resolved[&key]);
 }
 
 /// Scenario: A candidate fails static admission or rolls back before replacing the old generation.
-/// Guarantees: Source, effective, and resolved state all retain the previous committed values.
+/// Guarantees: Source, safe snapshot, and resolved state all retain the previous committed values.
 #[test]
 fn failed_admission_and_rollback_preserve_all_representations() {
     let config = source();
@@ -233,15 +627,16 @@ fn successful_rollout_commits_all_representations() {
         ApiPipelineRolloutState::Succeeded,
         "{status:?}"
     );
-    let (source, effective, resolved) = committed(&runtime);
+    let (source, safe_config_snapshot, resolved) = committed(&runtime);
     let key = PipelineKey::new("g1".into(), "p1".into());
     assert_eq!(
         source.groups[&PipelineGroupId::from("g1")].pipelines[&PipelineId::from("p1")],
         pipeline
     );
     assert_eq!(
-        resolved[&key].effective(),
-        &effective.groups[&PipelineGroupId::from("g1")].pipelines[&PipelineId::from("p1")]
+        resolved[&key].safe_config_snapshot(),
+        &safe_config_snapshot.groups[&PipelineGroupId::from("g1")].pipelines
+            [&PipelineId::from("p1")]
     );
     assert_eq!(
         resolved[&key]
@@ -254,7 +649,7 @@ fn successful_rollout_commits_all_representations() {
         "new-secret"
     );
     assert!(
-        !serde_json::to_string(&effective)
+        !serde_json::to_string(&safe_config_snapshot)
             .unwrap()
             .contains("new-secret")
     );

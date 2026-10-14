@@ -89,7 +89,7 @@ fn create_extension(
 ) -> Result<ExtensionBundle, otel_arrow_dfe_config::error::Error> {
     let typed = config.component_config::<TestConfig>()?;
     assert_eq!(typed.token.expose(), SECRET);
-    ExtensionWrapper::builder(id, config.effective(), runtime)
+    ExtensionWrapper::builder(id, config.safe_config_snapshot(), runtime)
         .passive()
         .cloned()
         .shared(typed)
@@ -253,7 +253,7 @@ fn startup_and_reporting_reuse_one_resolved_candidate() {
         )
         .unwrap();
     assert_eq!(RESOLUTIONS.load(Ordering::SeqCst), 4);
-    let expected = serde_json::to_value(prepared.effective_config()).unwrap();
+    let expected = serde_json::to_value(prepared.safe_config_snapshot()).unwrap();
     assert_eq!(
         expected["engine"]["observability"]["pipeline"]["extensions"]["private"]["config"],
         OMITTED_VALUE
@@ -283,7 +283,7 @@ fn startup_and_reporting_reuse_one_resolved_candidate() {
             get_json(address, "/api/v1/groups/g1/pipelines/p1")["pipeline"],
             expected["groups"]["g1"]["pipelines"]["p1"]
         );
-        let report = extension::opamp::effective_config(&context);
+        let report = extension::opamp::opamp_effective_config(&context);
         let body = &report.config_map.unwrap().config_map["state"].body;
         assert_eq!(
             serde_json::from_slice::<serde_json::Value>(body).unwrap(),
@@ -345,7 +345,7 @@ fn startup_and_reporting_reuse_one_resolved_candidate() {
     );
     assert_eq!(RESOLUTIONS.load(Ordering::SeqCst), 12);
     assert_eq!(get_json(address, "/api/v1/config"), expected);
-    let report = extension::opamp::effective_config(&context);
+    let report = extension::opamp::opamp_effective_config(&context);
     assert_eq!(
         serde_json::from_slice::<serde_json::Value>(
             &report.config_map.unwrap().config_map["state"].body

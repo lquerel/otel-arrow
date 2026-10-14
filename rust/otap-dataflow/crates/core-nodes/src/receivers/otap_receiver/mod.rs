@@ -179,7 +179,7 @@ pub static OTAP_RECEIVER: ReceiverFactory<OtapPdata> = ReceiverFactory {
                     (*node_config.component_config::<Config>()?).clone(),
                 ),
                 node,
-                node_config.effective(),
+                node_config.safe_config_snapshot(),
                 receiver_config,
             ))
         },

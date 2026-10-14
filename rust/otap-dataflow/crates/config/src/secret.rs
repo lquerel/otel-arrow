@@ -8,7 +8,7 @@ use secrecy::{ExposeSecret, SecretString};
 use serde::{Deserialize, Deserializer, Serialize, Serializer};
 use std::fmt;
 
-/// Marker emitted for a secret value in an effective configuration snapshot.
+/// Marker emitted for a secret value in a safe configuration snapshot.
 pub const REDACTED_VALUE: &str = "[REDACTED]";
 
 /// Marker emitted when a component's snapshot policy omits its whole config.
@@ -103,7 +103,7 @@ mod tests {
         assert!(!format!("{value:?}").contains("top-secret"));
     }
 
-    /// Scenario: A redacted or omitted effective snapshot is submitted as source config.
+    /// Scenario: A redacted or omitted safe config snapshot is submitted as source config.
     /// Guarantees: Display-only markers cannot silently replace an operational credential.
     #[test]
     fn snapshot_markers_are_rejected_on_input() {

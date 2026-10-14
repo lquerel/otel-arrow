@@ -3,13 +3,14 @@
 This document describes the live reconfiguration and controller-owned
 configuration lifecycle flows exposed by the admin API.
 
-The feature lets a running OTel Dataflow Engine mutate one logical pipeline at
-a time without restarting the process or reloading the full startup file.
+The feature lets a running OTel Arrow Dataflow Engine mutate one logical
+pipeline at a time without restarting the process or reloading the full
+startup file.
 It also exposes controller-level primitives for reading the full committed
 engine config, reconciling against a desired full config, creating empty
 pipeline groups, and deleting committed pipelines or groups.
 
-For the source, resolved, and effective configuration representations used by
+For the source, resolved, and `SafeConfigSnapshot` representations used by
 these operations, see
 [Factory-Resolved Configuration](../configuration-resolution.md).
 
@@ -28,6 +29,8 @@ these operations, see
 
 - Create a new pipeline inside an existing pipeline group.
 - Replace an existing pipeline with a new topology or node configuration.
+- Apply revision-guarded partial edits to a pipeline's private source without
+  replaying safe snapshot markers.
 - Resize an existing pipeline when the only effective runtime change is
   `policies.resources.core_allocation`.
 - Accept an effectively identical update as a `noop`.
@@ -60,7 +63,7 @@ runtime state.
   observed state. During a rolling cutover, different cores may temporarily
   serve different generations.
 - Candidate pipeline config: the pipeline config submitted by the client. The
-  controller uses it to build source, resolved, and effective candidate forms
+  controller uses it to build source, resolved, and safe snapshot candidate forms
   before anything is committed into the live in-memory engine config.
 - Candidate generation: the target generation for a `create` or `replace`
   rollout while it is still being tested and has not yet been committed as the
@@ -113,8 +116,43 @@ traffic flip across the whole pipeline.
 - Per-pipeline reconfiguration does not mutate group-level or engine-level
   policy. Full-engine reconciliation can update those fields after all
   requested pipeline rollouts and deletions succeed.
-- There is no dedicated scale endpoint. Scale-only changes use the same `PUT`
-  endpoint as topology changes.
+- There is no dedicated scale endpoint. Source-backed scale changes can use
+  `PUT`; the TUI uses a policy-only `PATCH` on the same pipeline resource.
+
+### Partial Updates
+
+`PATCH /api/v1/groups/{group}/pipelines/{id}` updates an existing pipeline.
+Read `configRevision` from its safe details response, then submit only explicit
+edits to the private source, for example:
+
+```json
+{
+  "expectedRevision": 7,
+  "changes": [
+    {
+      "operation": "set",
+      "path": ["policies", "resources", "core_allocation"],
+      "value": {"type": "core_count", "count": 2}
+    }
+  ],
+  "stepTimeoutSecs": 60,
+  "drainTimeoutSecs": 60
+}
+```
+
+Paths are arrays of literal object keys, not JSON Pointer strings. `set` creates
+absent object parents; `remove` deletes a field if present. Arrays require full
+replacement. Empty paths and supplied snapshot markers are rejected. The
+candidate goes through the same typed resolution, validation, rollout, and
+atomic per-pipeline commit as full replacement. A stale engine-wide revision
+returns `409 Conflict`; missing groups/pipelines return `404 Not Found`.
+Waiting and rollout responses have the same contract as `PUT`.
+
+Do not turn redaction/omission markers into update instructions. Unchanged
+private fields must be absent from the edits. To replace an omitted subtree or
+an array containing markers, supply its real source value. See
+[Editing Without Snapshot Replay](../configuration-resolution.md#editing-without-snapshot-replay)
+for normalized defaults, authored aliases, and draft revision handling.
 
 ## Consistency Model
 
@@ -132,7 +170,7 @@ deletion from interleaving with each other or with per-pipeline rollouts.
 Rollout planning patches one source pipeline into the controller's private
 in-memory `OtelDataflowSpec`, resolves the complete candidate through the
 registered factories, and runs full engine validation. Resolution creates the
-typed runtime state and safe effective snapshot before admission. This does not
+typed runtime state and a `SafeConfigSnapshot` before admission. This does not
 make the operation a whole-config transaction: another logical pipeline can
 commit before this rollout commits, and commit applies only the accepted
 pipeline back into the latest live state.
@@ -325,9 +363,9 @@ Returns:
 - `pipeline`
 - optional `rollout` summary
 
-The `pipeline` field is the committed effective representation. Component
-defaults and normalization are materialized, secrets are redacted, and unsafe
-component config may be replaced with `[OMITTED]`.
+The `pipeline` field is the committed pipeline view of the `SafeConfigSnapshot`.
+Component defaults and normalization are materialized, secrets are redacted,
+and unsafe component config may be replaced with `[OMITTED]`.
 
 ### Create, replace, or resize a pipeline
 
@@ -418,7 +456,8 @@ older ids may return `404 Not Found` after eviction.
 
 `GET /config`
 
-Returns the committed effective `OtelDataflowSpec` currently stored in memory.
+Returns the committed `SafeConfigSnapshot` using the existing `OtelDataflowSpec`
+JSON envelope.
 Component defaults and normalization are materialized, secrets are redacted,
 and unsafe component config may be replaced with `[OMITTED]`. The parsed source
 used by the controller for later reconfiguration remains private. The startup
@@ -454,7 +493,7 @@ Request body:
 Behavior:
 
 - The desired full source config is completely resolved and validated before
-  any live work starts. This produces typed runtime state and a safe effective
+  any live work starts. This produces typed runtime state and a safe configuration
   snapshot for every desired component.
 - Desired pipelines are created, replaced, resized, or treated as `noop` using
   the same rollout machinery as `PUT /groups/{group}/pipelines/{id}`.
@@ -477,7 +516,7 @@ Behavior:
 - Reconciliation is not atomic across pipelines. Pipeline rollouts that
   succeeded before a later rollout failure remain applied and are reflected in
   the committed live config. Each committed pipeline still updates its source,
-  effective, and resolved representations together.
+  safe snapshot, and resolved representations together.
 - Runtime topic profile mutation is rejected with `422 Unprocessable Entity`.
 - Runtime memory limiter mutation is rejected with `422 Unprocessable Entity`.
 - Controller-extension additions, removals, or runtime-significant changes are
@@ -868,7 +907,7 @@ original state.
 - Full-config reconciliation, group creation, group deletion, and pipeline
   deletion use an engine-scoped lifecycle guard and return `409 Conflict` when
   another guarded operation is active.
-- `GET /groups/{group}/pipelines/{id}` always returns the committed effective
+- `GET /groups/{group}/pipelines/{id}` always returns the committed safe snapshot
   config, not private source config or an uncommitted candidate.
 - `GET /groups/{group}/pipelines/{id}/status` is the best endpoint
   for watching serving generations and per-instance phase changes during a

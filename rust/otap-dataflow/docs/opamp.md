@@ -118,7 +118,7 @@ engine:
             # Optional (default = true)
             reports_status: true
 
-            # whether the agent should report its current effective config
+            # whether the agent should report its safe configuration snapshot
             #
             # Optional (default = true)
             reports_effective_config: true
@@ -555,17 +555,19 @@ without collisions. The agent does not calculate hashes, it only stores and
 compares them. This is
 [recommended by the OpAMP spec as well](https://opentelemetry.io/docs/specs/opamp/#calculating-hashes).
 
-When `reports_effective_config` is enabled, the agent reports the controller's
-stored effective representation. It does not serialize the private submitted
-source. The effective config contains factory-resolved defaults and
-normalization, serializes typed secrets as `[REDACTED]`, replaces unsafe
+When `reports_effective_config` is enabled, the agent serializes the controller's
+stored `SafeConfigSnapshot` into OpAMP's protocol-defined `effective_config`
+field. The wire field, `EffectiveConfig` message, and capability names remain
+unchanged. It does not serialize the private submitted source. The snapshot
+contains factory-resolved defaults and normalization, serializes typed secrets
+as `[REDACTED]`, replaces unsafe
 component subtrees with `[OMITTED]`, and replaces each top-level
 `engine.custom` value with `[OMITTED]`.
 
-Effective reporting reuses the snapshot created during candidate resolution;
+Safe snapshot reporting reuses the value created during candidate resolution;
 an OpAMP heartbeat does not parse component configuration or perform a late
 redaction pass. The display-only redaction and omission markers are rejected
-when used as submitted operational values, so an effective report must not be
+when used as submitted operational values, so a safe snapshot report must not be
 sent back as desired state. See
 [Factory-Resolved Configuration](configuration-resolution.md) for the complete
 policy and replay rules.

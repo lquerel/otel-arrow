@@ -104,6 +104,10 @@ pub struct PipelineDetails {
     pub active_generation: Option<u64>,
     /// Current live pipeline configuration.
     pub pipeline: PipelineConfig,
+    /// Revision of the private source used to produce this safe view.
+    /// Partial updates must supply this revision to avoid stale edits.
+    #[serde(default)]
+    pub config_revision: u64,
     /// Optional rollout summary mirrored into `/status`.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub rollout: Option<PipelineRolloutSummary>,
@@ -121,6 +125,85 @@ pub struct ReconfigureRequest {
     /// Graceful drain timeout in seconds when shutting down the old generation.
     #[serde(default = "default_rollout_timeout_secs")]
     pub drain_timeout_secs: u64,
+}
+
+/// An explicit edit to controller-private source. Paths address object fields;
+/// arrays are replaced as a whole. Snapshot markers are never update values.
+#[derive(Clone, Serialize, Deserialize)]
+#[serde(tag = "operation", rename_all = "snake_case", deny_unknown_fields)]
+pub enum PipelineConfigChange {
+    /// Set a field, creating absent object parents as needed.
+    Set {
+        /// Object keys from the pipeline root to the field.
+        path: Vec<String>,
+        /// New submitted value, not a safe snapshot.
+        value: Value,
+    },
+    /// Remove a field if present, restoring its configured default.
+    Remove {
+        /// Object keys from the pipeline root to the field.
+        path: Vec<String>,
+    },
+}
+
+/// Generation-independent, revision-guarded edits to a pipeline's private source.
+#[derive(Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct PipelineUpdateRequest {
+    /// Revision returned with the safe pipeline details.
+    pub expected_revision: u64,
+    /// Only explicitly changed fields; unchanged secret/omitted fields are absent.
+    pub changes: Vec<PipelineConfigChange>,
+    /// Per-core admission/ready timeout in seconds.
+    #[serde(default = "default_rollout_timeout_secs")]
+    pub step_timeout_secs: u64,
+    /// Graceful drain timeout in seconds.
+    #[serde(default = "default_rollout_timeout_secs")]
+    pub drain_timeout_secs: u64,
+}
+
+/// Computes explicit edits between safe views without replaying unchanged fields.
+///
+/// The server rejects any newly supplied redaction/omission markers. Editing an
+/// array or an omitted subtree requires supplying its complete source value.
+#[must_use]
+pub fn pipeline_config_changes(before: &Value, after: &Value) -> Vec<PipelineConfigChange> {
+    fn diff(
+        before: &Value,
+        after: &Value,
+        path: &mut Vec<String>,
+        out: &mut Vec<PipelineConfigChange>,
+    ) {
+        if before == after {
+            return;
+        }
+        if let (Some(before), Some(after)) = (before.as_object(), after.as_object()) {
+            for key in before.keys().filter(|key| !after.contains_key(*key)) {
+                path.push(key.clone());
+                out.push(PipelineConfigChange::Remove { path: path.clone() });
+                _ = path.pop();
+            }
+            for (key, value) in after {
+                path.push(key.clone());
+                match before.get(key) {
+                    Some(previous) => diff(previous, value, path, out),
+                    None => out.push(PipelineConfigChange::Set {
+                        path: path.clone(),
+                        value: value.clone(),
+                    }),
+                }
+                _ = path.pop();
+            }
+        } else {
+            out.push(PipelineConfigChange::Set {
+                path: path.clone(),
+                value: after.clone(),
+            });
+        }
+    }
+    let mut changes = Vec::new();
+    diff(before, after, &mut Vec::new(), &mut changes);
+    changes
 }
 
 /// Detailed per-core rollout progress.
@@ -787,6 +870,32 @@ mod tests {
         assert_eq!(serialized, value);
     }
 
+    /// Scenario: An editor changes a public field while redacted/omitted subtrees remain unchanged.
+    /// Guarantees: Sparse edits omit unchanged markers and support literal keys plus field removal.
+    #[test]
+    fn pipeline_edits_do_not_replay_unchanged_snapshot_values() {
+        let before = json!({"nodes": {"receiver": {"config": {"token": "[REDACTED]", "attempts": 3}}, "exporter": {"config": "[OMITTED]"}}, "old": true});
+        let after = json!({"nodes": {"receiver": {"config": {"token": "[REDACTED]", "attempts": 4}}, "exporter": {"config": "[OMITTED]"}}, "literal/key": 2});
+        let encoded = serde_json::to_value(pipeline_config_changes(&before, &after)).unwrap();
+        assert_eq!(encoded.as_array().unwrap().len(), 3);
+        assert!(!encoded.to_string().contains("[REDACTED]"));
+        assert!(!encoded.to_string().contains("[OMITTED]"));
+        assert!(
+            encoded
+                .as_array()
+                .unwrap()
+                .iter()
+                .any(|change| change["path"] == json!(["literal/key"]))
+        );
+        assert!(
+            encoded
+                .as_array()
+                .unwrap()
+                .iter()
+                .any(|change| change["operation"] == "remove")
+        );
+    }
+
     #[test]
     fn status_roundtrips_current_wire_shape() {
         assert_roundtrip::<Status>(json!({
@@ -898,6 +1007,7 @@ mod tests {
             "pipelineGroupId": "default",
             "pipelineId": "main",
             "activeGeneration": 2,
+            "configRevision": 7,
             "pipeline": {
                 "type": "otap",
                 "nodes": {
