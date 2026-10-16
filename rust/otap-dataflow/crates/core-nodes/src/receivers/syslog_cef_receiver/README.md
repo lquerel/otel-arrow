@@ -533,7 +533,7 @@ See [Configuration](#configuration).
 
 ## Related Docs
 
-- [Configuration model](../../../../../docs/configuration-model.md)
+- [Configuration guide and reference](../../../../../docs/configuration.md)
 - [Parsing behavior](syslog-parsing-behavior.md)
 - [Telemetry](telemetry.md)
 - [Core node catalog](../../../README.md)

@@ -184,5 +184,5 @@ Events:
 - [Design](./design.md)
 - [Contrib extension catalog](../../README.md)
 - [Writing pipeline configuration](../../../../docs/configuration.md)
-- [Configuration model](../../../../docs/configuration-model.md)
+- [Configuration guide and reference](../../../../docs/configuration.md)
 - [Extension system architecture](../../../../docs/extension-system-architecture.md)

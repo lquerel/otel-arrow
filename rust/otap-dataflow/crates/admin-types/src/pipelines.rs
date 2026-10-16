@@ -984,7 +984,6 @@ mod tests {
     fn reconfigure_request_roundtrips_current_wire_shape() {
         assert_roundtrip::<ReconfigureRequest>(json!({
             "pipeline": {
-                "type": "otap",
                 "nodes": {
                     "recv": {
                         "type": "urn:otel:receiver:traffic_generator",
@@ -1009,7 +1008,6 @@ mod tests {
             "activeGeneration": 2,
             "configRevision": 7,
             "pipeline": {
-                "type": "otap",
                 "nodes": {
                     "recv": {
                         "type": "urn:otel:receiver:traffic_generator",

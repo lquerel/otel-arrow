@@ -1152,7 +1152,7 @@ an empty assignment resets it to zero.
 ## Related Docs
 
 - [Kafka receiver architecture](ARCHITECTURE.md)
-- [Configuration model](../../../../../docs/configuration-model.md)
+- [Configuration guide and reference](../../../../../docs/configuration.md)
 - [Transport headers](../../../../../docs/transport-headers.md)
 - [Contrib node catalog](../../../README.md)
 - [Retry processor](../../../../core-nodes/src/processors/retry_processor/README.md)

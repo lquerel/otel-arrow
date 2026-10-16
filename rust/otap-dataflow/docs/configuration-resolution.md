@@ -1,15 +1,18 @@
-# Factory-Resolved Configuration
+# Configuration Framework Design
 
 This document defines how the OTel Arrow Dataflow Engine turns submitted
 configuration into runtime state and safe control-plane snapshots. It is the
 architectural reference for component configuration resolution, live
 reconciliation, and configuration privacy.
 
-For the user-facing configuration format, see
-[Configuration](configuration.md) and the
-[configuration model reference](configuration-model.md). For rollout APIs and
-operational behavior, see
-[Live Pipeline Reconfiguration](admin/live-reconfiguration.md).
+Configuration documentation:
+
+- [Configuration Guide and Reference](configuration.md): author and validate
+  configuration.
+- [Configuration Framework Design](configuration-resolution.md): understand
+  resolution and privacy.
+- [Live Pipeline Reconfiguration](admin/live-reconfiguration.md): operate the
+  running engine.
 
 ## Goals and Boundaries
 
@@ -31,6 +34,84 @@ Snapshot safety is a disclosure boundary, not encryption. The controller's
 private source and resolved values can contain cleartext credentials needed by
 the runtime. They must still be protected with process isolation, access
 control, and appropriate operational handling.
+
+## Model Rationale
+
+The model follows the engine runtime rather than copying the OpenTelemetry
+Collector YAML shape. The intentional choices are:
+
+- A single root spec contains groups and pipelines. `(group_id, pipeline_id)`
+  is the stable deployment and operational address.
+- Nodes and explicit `connections` are separate. The resulting directed
+  acyclic graph supports fan-in, fan-out, competing consumers, and named
+  outputs instead of inferring execution from ordered component lists.
+- Each node or extension owns its component schema, semantic validation,
+  defaults, and disclosure policy; the engine owns the common envelope.
+- Explicit policies make channel capacity, telemetry, resource allocation,
+  and other bounded runtime behavior visible. Hierarchy resolution is
+  deterministic; exact precedence belongs to the
+  [operator reference](configuration.md#policy-hierarchy).
+- Named topics connect pipelines without direct cross-pipeline graph edges.
+  Topic hops must remain acyclic.
+- The mandatory observability pipeline uses the node/connection model, with
+  restricted policies appropriate to an engine-owned workload.
+- Structural checks and closed-schema validation reject mistakes before
+  admission. Stable identifiers support correlation with runtime telemetry.
+
+Collector concepts map to engine concepts as follows:
+
+| Collector concept | Engine concept |
+| --- | --- |
+| Receivers, processors, exporters | Pipeline-local `nodes` |
+| Ordered component lists | Explicit `connections` |
+| Component instance ID | Node ID under a pipeline |
+| Branch routing | Named outputs and source selectors |
+
+Protocol interoperability is a goal; identical YAML is not. Per-core pipeline
+instances, bounded channels, explicit Ack/Nack paths, topics, and multi-signal
+OTAP graphs require different configuration semantics. See
+[Design Principles](design-principles.md) and
+[issue #1970](https://github.com/open-telemetry/otel-arrow/issues/1970) for
+broader rationale and prior-art discussion.
+
+Reserved metadata maps, a generic global edge-defaults section, broader
+node-level lifecycle/tenancy policies, and additional topic delivery or
+persistence policies remain future directions, not supported v1 contracts.
+
+## Layering and Entry Points
+
+Configuration resolution has distinct stages; similarly named resolved types
+must not be confused:
+
+1. **Provider loading**: `config_provider::resolve_config` returns
+   `ResolvedConfig` containing private source URI/content and a detected
+   format. The CLI substitutes environment variables before parsing.
+1. **Model parsing**: `OtelDataflowSpec::from_yaml` / `from_json` deserialize,
+   canonicalize URNs, and perform structural and policy validation.
+   Omitted node and extension `config` fields become empty objects before
+   factory resolution; explicitly supplied values, including null, are retained.
+   `PipelineConfig` parsing APIs serve pipeline updates and tooling, not
+   standalone startup files.
+1. **Hierarchy resolution**: config-crate `OtelDataflowSpec::resolve()` yields
+   `ResolvedOtelDataflowSpec`, with deterministic regular-pipeline ordering,
+   resolved policies, topic scopes, and `Regular` / `ObservabilityInternal`
+   roles. `into_parts()` separates regular and observability pipelines. Its
+   component payloads are still ingestion values: it is neither typed
+   component runtime state nor a safe reporting snapshot.
+1. **Component resolution and preparation**: the engine-owned factory
+   registry produces immutable typed component configs and safe snapshots.
+   Controller preparation validates the complete candidate and compiles
+   context bindings before it can start or be admitted.
+
+The config crate owns ingestion models, policy resolution, providers, and
+secret-bearing primitives. The engine owns factory contracts and typed
+component state. The controller owns preparation, private source retention,
+rollout, and committed reporting state. Component creation consumes checked
+typed values; it does not repeat parsing.
+
+The embedding host selects `PipelineFactory<PData>`; `df_engine` uses
+`OTAP_PIPELINE_FACTORY`. Pipeline configuration has no `type` discriminator.
+Only node and extension envelopes use `type` to select implementations.
 
 ## Configuration Representations
 

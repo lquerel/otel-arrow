@@ -13,7 +13,7 @@ mod common;
 use common::counting_exporter::{self, COUNTING_EXPORTER_URN};
 use common::flaky_exporter::{self, FLAKY_EXPORTER_URN};
 use otel_arrow_dfe_config::observed_state::{ObservedStateSettings, SendPolicy};
-use otel_arrow_dfe_config::pipeline::{PipelineConfig, PipelineConfigBuilder, PipelineType};
+use otel_arrow_dfe_config::pipeline::{PipelineConfig, PipelineConfigBuilder};
 use otel_arrow_dfe_config::policy::{ChannelCapacityPolicy, TelemetryPolicy};
 use otel_arrow_dfe_config::{DeployedPipelineKey, PipelineGroupId, PipelineId};
 use otel_arrow_dfe_core_nodes::processors::batch_processor::OTAP_BATCH_PROCESSOR_URN;
@@ -102,11 +102,7 @@ fn build_retry_pipeline_config(
         )
         .one_of("fake_receiver", ["retry"])
         .one_of("retry", ["flaky_exporter"])
-        .build(
-            PipelineType::Otap,
-            pipeline_group_id.clone(),
-            pipeline_id.clone(),
-        )
+        .build(pipeline_group_id.clone(), pipeline_id.clone())
         .expect("failed to build retry liveness pipeline config")
 }
 
@@ -140,11 +136,7 @@ fn build_batch_pipeline_config(
         )
         .one_of("fake_receiver", ["batch"])
         .one_of("batch", ["counting_exporter"])
-        .build(
-            PipelineType::Otap,
-            pipeline_group_id.clone(),
-            pipeline_id.clone(),
-        )
+        .build(pipeline_group_id.clone(), pipeline_id.clone())
         .expect("failed to build batch liveness pipeline config")
 }
 
@@ -178,11 +170,7 @@ fn build_otlp_batch_local_wakeup_pipeline_config(
         )
         .one_of("fake_receiver", ["batch"])
         .one_of("batch", ["counting_exporter"])
-        .build(
-            PipelineType::Otap,
-            pipeline_group_id.clone(),
-            pipeline_id.clone(),
-        )
+        .build(pipeline_group_id.clone(), pipeline_id.clone())
         .expect("failed to build local wakeup batch liveness pipeline config")
 }
 

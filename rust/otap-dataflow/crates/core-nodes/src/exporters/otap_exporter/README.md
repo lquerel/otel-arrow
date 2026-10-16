@@ -155,7 +155,7 @@ unbounded telemetry state. Duration measurements are reported in seconds.
 
 ## Related Docs
 
-- [Configuration model](../../../../../docs/configuration-model.md)
+- [Configuration guide and reference](../../../../../docs/configuration.md)
 - [Proxy support](../../../../../docs/proxy-support.md)
 - [Transport headers](../../../../../docs/transport-headers.md)
 - [Core node catalog](../../../README.md)

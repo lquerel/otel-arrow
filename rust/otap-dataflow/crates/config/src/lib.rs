@@ -63,6 +63,11 @@ pub mod validation;
 pub use context::{ContextEntryName, ContextEntryRef};
 pub use conversion::ConversionOptions;
 
+/// Default ingestion payload when a node or extension omits its config field.
+pub(crate) fn default_component_config() -> serde_json::Value {
+    serde_json::Value::Object(serde_json::Map::new())
+}
+
 /// Signal types
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
 pub enum SignalType {

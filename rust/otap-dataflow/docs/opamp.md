@@ -6,7 +6,7 @@ Agent, implemented as a controller extension.
 
 For the configuration privacy and resolution contract behind OpAMP reporting
 and reconciliation, see
-[Factory-Resolved Configuration](configuration-resolution.md).
+[Configuration Framework Design](configuration-resolution.md).
 
 ## Problem
 
@@ -569,7 +569,7 @@ an OpAMP heartbeat does not parse component configuration or perform a late
 redaction pass. The display-only redaction and omission markers are rejected
 when used as submitted operational values, so a safe snapshot report must not be
 sent back as desired state. See
-[Factory-Resolved Configuration](configuration-resolution.md) for the complete
+[Configuration Framework Design](configuration-resolution.md) for the complete
 policy and replay rules.
 
 ### Engine Config Reconciliation

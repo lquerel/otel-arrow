@@ -497,7 +497,7 @@ impl PipelinesClient<'_> {
     ///
     /// ```rust
     /// # use otel_arrow_dfe_admin_api::{
-    /// #     config::pipeline::{PipelineConfigBuilder, PipelineType},
+    /// #     config::pipeline::PipelineConfigBuilder,
     /// #     operations, pipelines, AdminClient, AdminEndpoint, HttpAdminClientSettings,
     /// # };
     /// # async fn example() -> Result<(), Box<dyn std::error::Error>> {
@@ -512,7 +512,7 @@ impl PipelinesClient<'_> {
     /// #         .add_receiver("ingress", "receiver:otlp", None)
     /// #         .add_exporter("egress", "exporter:debug", None)
     /// #         .to("ingress", "egress")
-    /// #         .build(PipelineType::Otap, "tenant-a", "ingest")?,
+    /// #         .build("tenant-a", "ingest")?,
     /// #     step_timeout_secs: 60,
     /// #     drain_timeout_secs: 60,
     /// # };

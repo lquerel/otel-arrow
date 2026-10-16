@@ -113,7 +113,7 @@ The `reason` attribute is bounded to:
 
 ## Related Docs
 
-- [Configuration model](../../../../../docs/configuration-model.md)
+- [Configuration guide and reference](../../../../../docs/configuration.md)
 - [Processor taxonomy](../../../../../docs/processors.md)
 - [Durable buffer](../durable_buffer_processor/README.md)
 - [Core node catalog](../../../README.md)

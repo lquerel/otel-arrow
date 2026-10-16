@@ -31,13 +31,6 @@ use std::sync::Arc;
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, PartialEq)]
 #[serde(deny_unknown_fields)]
 pub struct PipelineConfig {
-    /// Type of the pipeline, which determines the type of PData it processes.
-    ///
-    /// Note: Even though technically our engine can support several types of pdata, we
-    /// are focusing our efforts on the OTAP pipeline (hence the default value).
-    #[serde(default = "default_pipeline_type")]
-    r#type: PipelineType,
-
     /// Optional policy set for this pipeline.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     policies: Option<Policies>,
@@ -64,22 +57,6 @@ pub struct PipelineConfig {
     /// the main pipeline graph.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     connections: Vec<PipelineConnection>,
-}
-
-const fn default_pipeline_type() -> PipelineType {
-    PipelineType::Otap
-}
-
-/// The type of pipeline, which can be either OTLP (OpenTelemetry Protocol) or
-/// OTAP (OpenTelemetry with Apache Arrow Protocol).
-#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, PartialEq)]
-#[serde(rename_all = "snake_case")]
-pub enum PipelineType {
-    /// OpenTelemetry Protocol (OTLP) pipeline.
-    /// ToDo: With the recent benchmark results on proto_bytes->views->OTAP, we could consider to get rid of the OTLP pipeline type.
-    Otlp,
-    /// OpenTelemetry with Apache Arrow Protocol (OTAP) pipeline.
-    Otap,
 }
 
 /// Connection source selector.
@@ -561,22 +538,19 @@ impl PipelineConfig {
     #[must_use]
     pub fn eq_ignoring_policies(&self, other: &Self) -> bool {
         let Self {
-            r#type: self_type,
             policies: _,
             nodes: self_nodes,
             extensions: self_extensions,
             connections: self_connections,
         } = self;
         let Self {
-            r#type: other_type,
             policies: _,
             nodes: other_nodes,
             extensions: other_extensions,
             connections: other_connections,
         } = other;
 
-        self_type == other_type
-            && self_nodes == other_nodes
+        self_nodes == other_nodes
             && self_extensions == other_extensions
             && self_connections == other_connections
     }
@@ -794,7 +768,6 @@ impl PipelineConfig {
         connections: Vec<PipelineConnection>,
     ) -> Self {
         Self {
-            r#type: PipelineType::Otap,
             policies,
             nodes,
             extensions,
@@ -1341,7 +1314,6 @@ impl PipelineConfigBuilder {
     /// fast on the first error.
     pub fn build<T, P>(
         mut self,
-        pipeline_type: PipelineType,
         pipeline_group_id: T,
         pipeline_id: P,
     ) -> Result<PipelineConfig, Error>
@@ -1457,7 +1429,6 @@ impl PipelineConfigBuilder {
                     .collect(),
                 connections: built_connections,
                 policies: None,
-                r#type: pipeline_type,
             };
 
             spec.canonicalize_plugin_urns(&pipeline_group_id, &pipeline_id)?;
@@ -1478,9 +1449,129 @@ mod tests {
     use crate::error::Error;
     use crate::node::NodeKind;
     use crate::pipeline::DispatchPolicy;
+    use crate::pipeline::PipelineConfigBuilder;
     use crate::pipeline::telemetry::{AttributeValue, TelemetryConfig};
-    use crate::pipeline::{PipelineConfigBuilder, PipelineType};
     use serde_json::json;
+
+    /// Scenario: YAML and JSON describe a pipeline without a pipeline-level type.
+    /// Guarantees: round trips omit that field while preserving node and extension types.
+    #[test]
+    fn pipeline_round_trips_without_type() {
+        let config = super::PipelineConfig::from_yaml(
+            "group".into(),
+            "pipeline".into(),
+            r#"
+policies: {}
+extensions:
+  auth:
+    type: extension:example
+    config: {}
+nodes:
+  receiver:
+    type: receiver:otlp
+    config: {}
+  exporter:
+    type: exporter:otlp_grpc
+    config: {}
+    capabilities:
+      bearer_token_provider: auth
+connections:
+  - from: receiver
+    to: exporter
+"#,
+        )
+        .expect("pipeline without a type should parse");
+        let value = serde_json::to_value(&config).expect("serialize pipeline");
+        assert!(value.get("type").is_none());
+        assert_eq!(value["nodes"]["receiver"]["type"], "urn:otel:receiver:otlp");
+        assert_eq!(
+            value["nodes"]["exporter"]["type"],
+            "urn:otel:exporter:otlp_grpc"
+        );
+        assert_eq!(
+            value["extensions"]["auth"]["type"],
+            "urn:otel:extension:example"
+        );
+
+        let from_json =
+            super::PipelineConfig::from_json("group".into(), "pipeline".into(), &value.to_string())
+                .expect("serialized JSON should parse");
+        let yaml = serde_yaml::to_string(&config).expect("serialize YAML pipeline");
+        let from_yaml = super::PipelineConfig::from_yaml("group".into(), "pipeline".into(), &yaml)
+            .expect("serialized YAML should parse");
+        assert_eq!(config, from_json);
+        assert_eq!(config, from_yaml);
+    }
+
+    /// Scenario: submitted YAML or JSON still contains the removed otap/otlp discriminator.
+    /// Guarantees: strict loading rejects pipeline type rather than silently ignoring it.
+    #[test]
+    fn pipeline_rejects_removed_type() {
+        for legacy_type in ["otap", "otlp"] {
+            let yaml = format!("type: {legacy_type}\nnodes: {{}}\n");
+            let json = json!({"type": legacy_type, "nodes": {}}).to_string();
+            for error in [
+                super::PipelineConfig::from_yaml("group".into(), "pipeline".into(), &yaml)
+                    .expect_err("removed YAML field should be rejected"),
+                super::PipelineConfig::from_json("group".into(), "pipeline".into(), &json)
+                    .expect_err("removed JSON field should be rejected"),
+            ] {
+                assert!(matches!(
+                    error,
+                    Error::DeserializationError { details, .. }
+                        if details.contains("unknown field `type`")
+                ));
+            }
+        }
+    }
+
+    /// Scenario: a root engine config contains an obsolete type inside a pipeline.
+    /// Guarantees: YAML and JSON root ingestion reject it before runtime preparation.
+    #[test]
+    fn engine_config_rejects_removed_pipeline_type() {
+        for legacy_type in ["otap", "otlp"] {
+            let config = json!({
+                "version": "otel_dataflow/v1",
+                "groups": {
+                    "default": {
+                        "pipelines": {"main": {"type": legacy_type, "nodes": {}}}
+                    }
+                }
+            });
+            let yaml = serde_yaml::to_string(&config).expect("serialize root fixture");
+            assert!(crate::engine::OtelDataflowSpec::from_json(&config.to_string()).is_err());
+            assert!(crate::engine::OtelDataflowSpec::from_yaml(&yaml).is_err());
+        }
+    }
+
+    /// Scenario: tooling generates the pipeline JSON schema for configuration validation.
+    /// Guarantees: only policies, extensions, nodes, and connections are allowed properties.
+    #[test]
+    fn pipeline_schema_excludes_type() {
+        let schema = serde_json::to_value(schemars::schema_for!(super::PipelineConfig))
+            .expect("serialize pipeline schema");
+        let properties = schema["properties"].as_object().expect("schema properties");
+        let mut fields: Vec<_> = properties.keys().map(String::as_str).collect();
+        fields.sort_unstable();
+        assert_eq!(fields, ["connections", "extensions", "nodes", "policies"]);
+        assert_eq!(schema["additionalProperties"], false);
+    }
+
+    /// Scenario: the engine constructs its internal observability pipeline envelope.
+    /// Guarantees: internal pipelines also serialize without a pipeline-level type.
+    #[test]
+    fn observability_pipeline_serializes_without_type() {
+        let config = super::PipelineConfig::for_observability_pipeline(
+            None,
+            super::PipelineNodes::default(),
+            super::PipelineExtensions::default(),
+            Vec::new(),
+        );
+        assert_eq!(
+            serde_json::to_value(config).expect("serialize observability pipeline"),
+            json!({"nodes": {}})
+        );
+    }
 
     #[test]
     fn eq_ignoring_policies_ignores_policy_only_changes() {
@@ -1575,12 +1666,14 @@ connections:
         assert!(!current.eq_ignoring_policies(&candidate));
     }
 
+    /// Scenario: a builder declares the same node ID twice.
+    /// Guarantees: duplicate node validation reports exactly the conflicting node.
     #[test]
     fn test_duplicate_node_errors() {
         let result = PipelineConfigBuilder::new()
             .add_receiver("A", "urn:test:receiver:example", None)
             .add_processor("A", "urn:test:processor:example", None) // duplicate
-            .build(PipelineType::Otap, "pgroup", "pipeline");
+            .build("pgroup", "pipeline");
 
         match result {
             Err(Error::InvalidConfiguration { errors }) => {
@@ -1595,6 +1688,8 @@ connections:
         }
     }
 
+    /// Scenario: a builder connects the same source output twice.
+    /// Guarantees: duplicate output validation identifies the source node and port.
     #[test]
     fn test_duplicate_output_port_errors() {
         let result = PipelineConfigBuilder::new()
@@ -1602,7 +1697,7 @@ connections:
             .add_exporter("B", "urn:test:exporter:example", None)
             .one_of_output("A", "p", ["B"])
             .one_of_output("A", "p", ["B"]) // duplicate port on A
-            .build(PipelineType::Otap, "pgroup", "pipeline");
+            .build("pgroup", "pipeline");
 
         match result {
             Err(Error::InvalidConfiguration { errors }) => {
@@ -1619,12 +1714,14 @@ connections:
         }
     }
 
+    /// Scenario: a builder connection references an undeclared source.
+    /// Guarantees: validation attributes the missing source without inventing missing targets.
     #[test]
     fn test_missing_source_error() {
         let result = PipelineConfigBuilder::new()
             .add_receiver("B", "urn:test:receiver:example", None)
             .connect("X", "out", ["B"], DispatchPolicy::Broadcast) // X does not exist
-            .build(PipelineType::Otap, "pgroup", "pipeline");
+            .build("pgroup", "pipeline");
 
         match result {
             Err(Error::InvalidConfiguration { errors }) => {
@@ -1645,12 +1742,14 @@ connections:
         }
     }
 
+    /// Scenario: a builder connection references an undeclared target.
+    /// Guarantees: validation preserves the source and reports the missing destination.
     #[test]
     fn test_missing_target_error() {
         let result = PipelineConfigBuilder::new()
             .add_receiver("A", "urn:test:receiver:example", None)
             .connect("A", "out", ["Y"], DispatchPolicy::Broadcast) // Y does not exist
-            .build(PipelineType::Otap, "pgroup", "pipeline");
+            .build("pgroup", "pipeline");
 
         match result {
             Err(Error::InvalidConfiguration { errors }) => {
@@ -1672,6 +1771,8 @@ connections:
         }
     }
 
+    /// Scenario: a builder connection has no destinations.
+    /// Guarantees: validation rejects the empty target set with endpoint attribution.
     #[test]
     fn test_builder_rejects_empty_target_set() {
         let result = PipelineConfigBuilder::new()
@@ -1682,7 +1783,7 @@ connections:
                 std::iter::empty::<&str>(),
                 DispatchPolicy::OneOf,
             )
-            .build(PipelineType::Otap, "pgroup", "pipeline");
+            .build("pgroup", "pipeline");
 
         match result {
             Err(Error::InvalidConfiguration { errors }) => {
@@ -1703,6 +1804,8 @@ connections:
         }
     }
 
+    /// Scenario: a builder connects processors into a cycle.
+    /// Guarantees: graph validation rejects the cycle and identifies its nodes.
     #[test]
     fn test_cycle_detection_error() {
         let result = PipelineConfigBuilder::new()
@@ -1710,7 +1813,7 @@ connections:
             .add_processor("B", "urn:test:processor:example", None)
             .one_of_output("A", "p", ["B"])
             .one_of_output("B", "p", ["A"])
-            .build(PipelineType::Otap, "pgroup", "pipeline");
+            .build("pgroup", "pipeline");
 
         match result {
             Err(Error::InvalidConfiguration { errors }) => {
@@ -1730,6 +1833,8 @@ connections:
         }
     }
 
+    /// Scenario: a builder creates a receiver-to-exporter pipeline without a type argument.
+    /// Guarantees: the resulting graph retains both nodes, its output port, and its connection.
     #[test]
     fn test_successful_simple_build() {
         let dag = PipelineConfigBuilder::new()
@@ -1740,7 +1845,7 @@ connections:
             )
             .add_exporter("End", "urn:test:exporter:example", None)
             .broadcast_output("Start", "out", ["End"])
-            .build(PipelineType::Otap, "pgroup", "pipeline");
+            .build("pgroup", "pipeline");
 
         match dag {
             Ok(pipeline_spec) => {
@@ -1772,6 +1877,8 @@ connections:
         }
     }
 
+    /// Scenario: the builder connects two nodes with the default-output helper.
+    /// Guarantees: the node declares default and the connection keeps an implicit source selector.
     #[test]
     fn test_builder_to_uses_default_output() {
         let dag = PipelineConfigBuilder::new()
@@ -1782,7 +1889,7 @@ connections:
             )
             .add_exporter("End", "urn:test:exporter:example", None)
             .to("Start", "End")
-            .build(PipelineType::Otap, "pgroup", "pipeline");
+            .build("pgroup", "pipeline");
 
         match dag {
             Ok(pipeline_spec) => {
@@ -1803,6 +1910,8 @@ connections:
         }
     }
 
+    /// Scenario: the builder connects a named source output.
+    /// Guarantees: the node and connection retain the selected output name.
     #[test]
     fn test_builder_to_output_uses_named_output() {
         let dag = PipelineConfigBuilder::new()
@@ -1813,7 +1922,7 @@ connections:
             )
             .add_exporter("End", "urn:test:exporter:example", None)
             .to_output("Start", "alt", "End")
-            .build(PipelineType::Otap, "pgroup", "pipeline");
+            .build("pgroup", "pipeline");
 
         match dag {
             Ok(pipeline_spec) => {
@@ -1834,6 +1943,8 @@ connections:
         }
     }
 
+    /// Scenario: the builder creates a multi-signal graph with branches and merges.
+    /// Guarantees: all declared nodes and graph connections survive a valid build.
     #[test]
     fn test_valid_complex_pipeline_spec() {
         let dag = PipelineConfigBuilder::new()
@@ -1953,7 +2064,7 @@ connections:
             .one_of("processor_logs_to_events", ["processor_enrich_events"])
             .one_of("processor_metrics_to_events", ["processor_enrich_events"])
             // Finalize build
-            .build(PipelineType::Otap, "pgroup", "pipeline");
+            .build("pgroup", "pipeline");
 
         // Assert the DAG is valid and acyclic
         match dag {
@@ -2810,6 +2921,8 @@ sink:
 
     // -- Extension config tests --------------------------------------
 
+    /// Scenario: a pipeline declares a node and a pipeline extension.
+    /// Guarantees: builder and parsing keep extension instances outside the data-path node map.
     #[test]
     fn test_extensions_parsed_separately_from_nodes() {
         let config = PipelineConfigBuilder::new()
@@ -2817,7 +2930,7 @@ sink:
             .add_exporter("exp", "urn:test:exporter:example", None)
             .add_extension("auth", "urn:test:extension:auth", None)
             .connect("recv", "", ["exp"], DispatchPolicy::Broadcast)
-            .build(PipelineType::Otap, "g", "p")
+            .build("g", "p")
             .unwrap();
 
         // Extensions should NOT appear in node_iter
@@ -2880,6 +2993,8 @@ connections:
         assert_eq!(urn.id(), "auth");
     }
 
+    /// Scenario: a node and extension share a local identifier.
+    /// Guarantees: their independent ID namespaces allow both instances in one pipeline.
     #[test]
     fn test_same_name_in_nodes_and_extensions_allowed() {
         // Nodes and extensions are separate namespaces -- same name is valid.
@@ -2888,7 +3003,7 @@ connections:
             .add_exporter("exp", "urn:test:exporter:example", None)
             .add_extension("myname", "urn:test:extension:auth", None)
             .connect("myname", "", ["exp"], DispatchPolicy::Broadcast)
-            .build(PipelineType::Otap, "g", "p")
+            .build("g", "p")
             .unwrap();
 
         assert!(config.nodes().contains_key("myname"));

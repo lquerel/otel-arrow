@@ -114,7 +114,7 @@ spans counted by universal channel item metrics.
 
 ## Related Docs
 
-- [Configuration model](../../../../../docs/configuration-model.md)
+- [Configuration guide and reference](../../../../../docs/configuration.md)
 - [Node and flow metrics](../../../../../docs/node-and-flow-metrics.md)
 - [Processor taxonomy](../../../../../docs/processors.md)
 - [Core node catalog](../../../README.md)

@@ -1835,6 +1835,29 @@ mod tests {
     use serde_json::json;
     use std::time::{Duration, Instant};
 
+    /// Scenario: batch configuration omits config instead of supplying an explicit empty object.
+    /// Guarantees: factory resolution applies identical typed defaults, snapshots, and runtime equivalence.
+    #[test]
+    fn omitted_config_resolves_to_batch_defaults() {
+        let omitted = serde_yaml::from_str("type: processor:batch").unwrap();
+        let explicit = serde_yaml::from_str("type: processor:batch\nconfig: {}").unwrap();
+        let omitted = OTAP_BATCH_PROCESSOR_FACTORY
+            .resolve_node_config(omitted)
+            .unwrap();
+        let explicit = OTAP_BATCH_PROCESSOR_FACTORY
+            .resolve_node_config(explicit)
+            .unwrap();
+        assert_eq!(
+            *omitted.component_config::<Config>().unwrap(),
+            Config::default()
+        );
+        assert_eq!(
+            omitted.safe_config_snapshot(),
+            explicit.safe_config_snapshot()
+        );
+        assert_eq!(omitted, explicit);
+    }
+
     /// Helper to create test pipeline context
     fn create_test_pipeline_context() -> (
         otel_arrow_dfe_engine::context::PipelineContext,

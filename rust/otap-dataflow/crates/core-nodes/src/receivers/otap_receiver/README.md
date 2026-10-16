@@ -115,6 +115,6 @@ not a terminal-only metric that cannot be handed off on an error return.
 
 ## Related Docs
 
-- [Configuration model](../../../../../docs/configuration-model.md)
+- [Configuration guide and reference](../../../../../docs/configuration.md)
 - [Transport headers](../../../../../docs/transport-headers.md)
 - [Core node catalog](../../../README.md)

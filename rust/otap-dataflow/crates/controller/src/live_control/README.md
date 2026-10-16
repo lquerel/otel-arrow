@@ -50,7 +50,7 @@ runtime state, and a `SafeConfigSnapshot` as separate but coordinated
 representations. Planning resolves all three before admission, runtime
 equivalence uses the typed state, and Admin and OpAMP reads use only the
 safe snapshot state. See
-[Factory-Resolved Configuration](../../../../docs/configuration-resolution.md)
+[Configuration Framework Design](../../../../docs/configuration-resolution.md)
 for the representation, reconciliation, and privacy contracts.
 
 ## Lifecycle Model

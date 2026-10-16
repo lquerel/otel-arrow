@@ -989,6 +989,25 @@ mod tests {
     use hyper_util::rt::TokioIo;
     use tokio::net::TcpStream;
 
+    /// Scenario: an OTLP receiver omits config or supplies an empty object without protocols.
+    /// Guarantees: factory resolution still rejects missing required settings and accepts an explicit protocol.
+    #[test]
+    fn omitted_config_still_requires_otlp_protocols() {
+        for yaml in ["type: receiver:otlp", "type: receiver:otlp\nconfig: {}"] {
+            let source = serde_yaml::from_str(yaml).unwrap();
+            let error = OTLP_RECEIVER
+                .resolve_node_config(source)
+                .unwrap_err()
+                .to_string();
+            assert!(error.contains("missing field `protocols`"), "{error}");
+        }
+        let source = serde_yaml::from_str(
+            "type: receiver:otlp\nconfig:\n  protocols:\n    grpc:\n      listening_addr: 127.0.0.1:4317",
+        )
+        .unwrap();
+        assert!(OTLP_RECEIVER.resolve_node_config(source).is_ok());
+    }
+
     struct CountingAuthorizer(Arc<AtomicUsize>);
 
     #[async_trait::async_trait]

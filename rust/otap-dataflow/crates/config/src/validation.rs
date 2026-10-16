@@ -42,7 +42,7 @@ pub fn validate_typed_config<T: serde::de::DeserializeOwned>(
 
 /// Validator for components that accept **no** user configuration.
 ///
-/// Accepts `Value::Null` (config key omitted / set to `null`) and empty
+/// Accepts `Value::Null` (config explicitly set to `null`) and empty
 /// objects `{}`. Rejects anything else so that typos or misplaced config
 /// blocks are caught early.
 ///

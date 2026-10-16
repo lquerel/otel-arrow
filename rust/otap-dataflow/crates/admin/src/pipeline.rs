@@ -611,7 +611,6 @@ mod tests {
     fn request() -> crate::ReconfigureRequest {
         crate::ReconfigureRequest {
             pipeline: serde_json::from_value(json!({
-                "type": "otap",
                 "nodes": {
                     "recv": {
                         "type": "receiver:traffic_generator",

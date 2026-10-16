@@ -1444,6 +1444,28 @@ mod tests {
     use tonic::codegen::tokio_stream::wrappers::TcpListenerStream;
     use tonic::transport::Server;
 
+    /// Scenario: an OTLP gRPC exporter omits config or supplies an empty object without an endpoint.
+    /// Guarantees: factory resolution still rejects missing required settings and accepts an explicit endpoint.
+    #[test]
+    fn omitted_config_still_requires_otlp_endpoint() {
+        for yaml in [
+            "type: exporter:otlp_grpc",
+            "type: exporter:otlp_grpc\nconfig: {}",
+        ] {
+            let source = serde_yaml::from_str(yaml).unwrap();
+            let error = OTLP_EXPORTER
+                .resolve_node_config(source)
+                .unwrap_err()
+                .to_string();
+            assert!(error.contains("missing field `grpc_endpoint`"), "{error}");
+        }
+        let source = serde_yaml::from_str(
+            "type: exporter:otlp_grpc\nconfig:\n  grpc_endpoint: http://127.0.0.1:4317",
+        )
+        .unwrap();
+        assert!(OTLP_EXPORTER.resolve_node_config(source).is_ok());
+    }
+
     fn context_name(raw: &str) -> ContextEntryName {
         ContextEntryName::try_from(raw).expect("valid test context entry name")
     }

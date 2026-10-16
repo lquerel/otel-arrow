@@ -62,7 +62,7 @@ completes successfully and `failure` when it returns an error.
 
 ## Related Docs
 
-- [Configuration model](../../../../../docs/configuration-model.md)
+- [Configuration guide and reference](../../../../../docs/configuration.md)
 - [Processor taxonomy](../../../../../docs/processors.md)
 - [Query engine](../../../../query-engine/README.md)
 - [Core node catalog](../../../README.md)

@@ -103,7 +103,7 @@ items, channel send failures, and downstream acknowledgement outcomes.
 
 ## Related Docs
 
-- [Configuration model](../../../../../docs/configuration-model.md)
+- [Configuration guide and reference](../../../../../docs/configuration.md)
 - [Processor taxonomy](../../../../../docs/processors.md)
 - [Query engine](../../../../query-engine/README.md)
 - [Core node catalog](../../../README.md)

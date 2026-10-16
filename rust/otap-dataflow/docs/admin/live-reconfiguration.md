@@ -10,9 +10,14 @@ It also exposes controller-level primitives for reading the full committed
 engine config, reconciling against a desired full config, creating empty
 pipeline groups, and deleting committed pipelines or groups.
 
-For the source, resolved, and `SafeConfigSnapshot` representations used by
-these operations, see
-[Factory-Resolved Configuration](../configuration-resolution.md).
+Configuration documentation:
+
+- [Configuration Guide and Reference](../configuration.md): author and validate
+  configuration.
+- [Configuration Framework Design](../configuration-resolution.md): understand
+  resolution and privacy.
+- [Live Pipeline Reconfiguration](live-reconfiguration.md): operate the running
+  engine.
 
 ## Goals
 
@@ -119,41 +124,6 @@ traffic flip across the whole pipeline.
 - There is no dedicated scale endpoint. Source-backed scale changes can use
   `PUT`; the TUI uses a policy-only `PATCH` on the same pipeline resource.
 
-### Partial Updates
-
-`PATCH /api/v1/groups/{group}/pipelines/{id}` updates an existing pipeline.
-Read `configRevision` from its safe details response, then submit only explicit
-edits to the private source, for example:
-
-```json
-{
-  "expectedRevision": 7,
-  "changes": [
-    {
-      "operation": "set",
-      "path": ["policies", "resources", "core_allocation"],
-      "value": {"type": "core_count", "count": 2}
-    }
-  ],
-  "stepTimeoutSecs": 60,
-  "drainTimeoutSecs": 60
-}
-```
-
-Paths are arrays of literal object keys, not JSON Pointer strings. `set` creates
-absent object parents; `remove` deletes a field if present. Arrays require full
-replacement. Empty paths and supplied snapshot markers are rejected. The
-candidate goes through the same typed resolution, validation, rollout, and
-atomic per-pipeline commit as full replacement. A stale engine-wide revision
-returns `409 Conflict`; missing groups/pipelines return `404 Not Found`.
-Waiting and rollout responses have the same contract as `PUT`.
-
-Do not turn redaction/omission markers into update instructions. Unchanged
-private fields must be absent from the edits. To replace an omitted subtree or
-an array containing markers, supply its real source value. See
-[Editing Without Snapshot Replay](../configuration-resolution.md#editing-without-snapshot-replay)
-for normalized defaults, authored aliases, and draft revision handling.
-
 ## Consistency Model
 
 The current API serializes normal rollout and shutdown operations per logical
@@ -167,13 +137,11 @@ other config-mutating lifecycle operations return `409 Conflict`. This prevents
 full-config reconciliation, group creation, group deletion, and pipeline
 deletion from interleaving with each other or with per-pipeline rollouts.
 
-Rollout planning patches one source pipeline into the controller's private
-in-memory `OtelDataflowSpec`, resolves the complete candidate through the
-registered factories, and runs full engine validation. Resolution creates the
-typed runtime state and a `SafeConfigSnapshot` before admission. This does not
-make the operation a whole-config transaction: another logical pipeline can
-commit before this rollout commits, and commit applies only the accepted
-pipeline back into the latest live state.
+Planning resolves and validates the candidate before admission. Independent
+pipelines may still commit concurrently; a pipeline commit applies to the
+latest live state, not to a stale whole-engine copy. The
+[framework design](../configuration-resolution.md#runtime-equivalence-and-live-reconciliation)
+defines typed equivalence and source/resolved/snapshot consistency.
 
 The API intentionally leaves room to adjust the consistency scope later. If
 group-level invariants become mutable outside full-engine reconciliation, the
@@ -184,7 +152,8 @@ the existing pipeline endpoint or response schema.
 ## How It Works
 
 1. The client submits a candidate pipeline config to
-   `PUT /groups/{group}/pipelines/{id}`.
+   `PUT /groups/{group}/pipelines/{id}` or explicit edits to `PATCH` on the
+   same resource.
 1. The controller patches exactly that pipeline into its live in-memory
    source `OtelDataflowSpec`.
 1. The complete candidate is resolved and validated before admission:
@@ -226,7 +195,7 @@ The request body carries two timeouts:
 
 The query string also supports an overall client wait timeout:
 
-- `timeout_secs` on the `PUT` request when `wait=true`.
+- `timeout_secs` on the `PUT` or `PATCH` request when `wait=true`.
 
 ### Failure Handling
 
@@ -351,6 +320,8 @@ growth.
 
 ## API Surface
 
+Endpoint paths in this section are relative to `/api/v1`.
+
 ### Read current pipeline config
 
 `GET /groups/{group}/pipelines/{id}`
@@ -361,11 +332,48 @@ Returns:
 - `pipelineId`
 - `activeGeneration`
 - `pipeline`
+- `configRevision`: engine-wide committed source revision for partial updates
 - optional `rollout` summary
 
 The `pipeline` field is the committed pipeline view of the `SafeConfigSnapshot`.
-Component defaults and normalization are materialized, secrets are redacted,
-and unsafe component config may be replaced with `[OMITTED]`.
+It is safe reporting output, not a full-replacement input. Use your original
+source for `PUT`, or explicit revision-guarded edits for `PATCH`.
+
+### Partial Updates
+
+`PATCH /groups/{group}/pipelines/{id}?wait=true|false&timeout_secs=<overall>`
+updates an existing pipeline.
+Read `configRevision` from its safe details response, then submit only explicit
+edits to the private source, for example:
+
+```json
+{
+  "expectedRevision": 7,
+  "changes": [
+    {
+      "operation": "set",
+      "path": ["policies", "resources", "core_allocation"],
+      "value": {"type": "core_count", "count": 2}
+    }
+  ],
+  "stepTimeoutSecs": 60,
+  "drainTimeoutSecs": 60
+}
+```
+
+Paths are arrays of literal object keys, not JSON Pointer strings. `set` creates
+absent object parents; `remove` deletes a field if present. Arrays require full
+replacement. Empty paths and supplied snapshot markers are rejected. The
+candidate goes through the same typed resolution, validation, rollout, and
+atomic per-pipeline commit as full replacement. A stale engine-wide revision
+returns `409 Conflict`; missing groups/pipelines return `404 Not Found`.
+Waiting and rollout responses have the same contract as `PUT`.
+
+Do not turn redaction/omission markers into update instructions. Unchanged
+private fields must be absent from the edits. To replace an omitted subtree or
+an array containing markers, supply its real source value. See
+[Editing Without Snapshot Replay](../configuration-resolution.md#editing-without-snapshot-replay)
+for normalized defaults, authored aliases, and draft revision handling.
 
 ### Create, replace, or resize a pipeline
 
@@ -410,8 +418,8 @@ Status codes:
 - `404 Not Found`: pipeline group does not exist
 - `409 Conflict`: another incompatible live operation is active in the
   controller's current consistency scope, or a waited rollout finished in
-  failure. In the current version of the API, that scope is one logical
-  pipeline.
+  failure. Per-pipeline operations conflict on the same logical pipeline; an
+  engine-scoped lifecycle operation also prevents admission.
 - `422 Unprocessable Entity`: validation failure or unsupported runtime
   mutation
 - `504 Gateway Timeout`: `wait=true` exceeded the overall wait timeout
@@ -553,7 +561,8 @@ Status codes:
 
 `GET /groups/{group}`
 
-Returns the committed `PipelineGroupConfig` for one group.
+Returns the committed group view of `SafeConfigSnapshot` in the
+`PipelineGroupConfig` envelope, not the private source.
 
 `POST /groups/{group}`
 
@@ -638,28 +647,31 @@ curl -s "$BASE/groups/$GROUP/pipelines/$PIPE/status" | jq .
 This example inserts a debug processor between the topic receiver and the retry
 processor.
 
-Build the request body from the live config:
+Read the current revision and submit only the new node and replacement graph.
+Unchanged component payloads stay in the private source; no snapshot markers
+are replayed:
 
 ```bash
 curl -s "$BASE/groups/$GROUP/pipelines/$PIPE" \
   | jq '
       {
-        pipeline: (
-          .pipeline
-          | .nodes += {
-              tenant_c_debug: {
-                type: "processor:debug",
-                config: {
-                  verbosity: "basic"
-                }
-              }
-            }
-          | .connections = [
+        expectedRevision: .configRevision,
+        changes: [
+          {
+            operation: "set",
+            path: ["nodes", "tenant_c_debug"],
+            value: {type: "processor:debug", config: {verbosity: "basic"}}
+          },
+          {
+            operation: "set",
+            path: ["connections"],
+            value: [
               {from: "tenant_c_receiver", to: "tenant_c_debug"},
               {from: "tenant_c_debug", to: "tenant_c_retry"},
               {from: "tenant_c_retry", to: "tenant_c_sink"}
             ]
-        ),
+          }
+        ],
         stepTimeoutSecs: 60,
         drainTimeoutSecs: 60
       }
@@ -670,7 +682,7 @@ curl -s "$BASE/groups/$GROUP/pipelines/$PIPE" \
 Submit the update and wait for completion:
 
 ```bash
-curl -sS -X PUT \
+curl -sS -X PATCH \
   "$BASE/groups/$GROUP/pipelines/$PIPE?wait=true&timeout_secs=120" \
   -H 'content-type: application/json' \
   --data-binary @/tmp/tenant_c_pipeline-debug.json | jq .
@@ -700,14 +712,22 @@ curl -s "$BASE/groups/$GROUP/pipelines/$PIPE/status" \
 
 ### Example: Async rollout tracking
 
-Use `wait=false` to return immediately, then poll the rollout resource:
+Use `wait=false` to return immediately, then poll the rollout resource. If the
+waited example already succeeded, explicitly reapply the known edits using
+the latest revision; an already-applied topology change can return `noop`:
+
+```bash
+REVISION=$(curl -sS "$BASE/groups/$GROUP/pipelines/$PIPE" | jq .configRevision)
+jq --argjson revision "$REVISION" '.expectedRevision = $revision' \
+  /tmp/tenant_c_pipeline-debug.json > /tmp/tenant_c_pipeline-debug-async.json
+```
 
 ```bash
 ROLLOUT_ID=$(
-  curl -sS -X PUT \
+  curl -sS -X PATCH \
     "$BASE/groups/$GROUP/pipelines/$PIPE?wait=false" \
     -H 'content-type: application/json' \
-    --data-binary @/tmp/tenant_c_pipeline-debug.json \
+    --data-binary @/tmp/tenant_c_pipeline-debug-async.json \
   | jq -r '.rolloutId'
 )
 
@@ -724,17 +744,21 @@ controller detects that the runtime shape is otherwise unchanged and executes a
 curl -s "$BASE/groups/$GROUP/pipelines/$PIPE" \
   | jq '
       {
-        pipeline: .pipeline,
+        expectedRevision: .configRevision,
+        changes: [{
+          operation: "set",
+          path: ["policies", "resources", "core_allocation"],
+          value: {type: "core_count", count: 2}
+        }],
         stepTimeoutSecs: 60,
         drainTimeoutSecs: 60
       }
-      | .pipeline.policies.resources.core_allocation.count = 2
     ' \
   > /tmp/tenant_c_pipeline-scale-up.json
 ```
 
 ```bash
-curl -sS -X PUT \
+curl -sS -X PATCH \
   "$BASE/groups/$GROUP/pipelines/$PIPE?wait=true&timeout_secs=120" \
   -H 'content-type: application/json' \
   --data-binary @/tmp/tenant_c_pipeline-scale-up.json | jq .
@@ -753,8 +777,8 @@ curl -s "$BASE/groups/$GROUP/pipelines/$PIPE/status" \
   | jq '{totalCores, runningCores, activeGeneration, servingGenerations, rollout}'
 ```
 
-Scale back down by setting `core_allocation.count = 1` in the same request body
-pattern.
+Scale back down by reading the new `configRevision` and setting the change
+value to `{type: "core_count", count: 1}` in the same request pattern.
 
 ### Example: Full-config and lifecycle endpoints
 
@@ -764,45 +788,47 @@ the current runtime-topic mutation boundary.
 Create a temporary config:
 
 ```bash
-cat >/tmp/otap-admin-lifecycle.yaml <<'YAML'
-version: otel_dataflow/v1
-engine:
-  http_admin:
-    bind_address: 127.0.0.1:18085
-groups:
-  default:
-    pipelines:
-      main:
-        policies:
-          resources:
-            core_allocation:
-              type: core_count
-              count: 1
-        nodes:
-          receiver:
-            type: receiver:traffic_generator
-            config:
-              data_source: synthetic
-              generation_strategy: pre_generated
-              traffic_config:
-                signals_per_second: 100
-                max_signal_count: null
-                metric_weight: 0
-                trace_weight: 0
-                log_weight: 100
-          exporter:
-            type: exporter:noop
-            config: null
-        connections:
-          - from: receiver
-            to: exporter
-YAML
+cat >/tmp/otel-admin-lifecycle.json <<'JSON'
+{
+  "version": "otel_dataflow/v1",
+  "engine": {"http_admin": {"bind_address": "127.0.0.1:18085"}},
+  "groups": {
+    "default": {
+      "pipelines": {
+        "main": {
+          "policies": {
+            "resources": {"core_allocation": {"type": "core_count", "count": 1}}
+          },
+          "nodes": {
+            "receiver": {
+              "type": "receiver:traffic_generator",
+              "config": {
+                "data_source": "synthetic",
+                "generation_strategy": "pre_generated",
+                "traffic_config": {
+                  "signals_per_second": 100,
+                  "max_signal_count": null,
+                  "metric_weight": 0,
+                  "trace_weight": 0,
+                  "log_weight": 100
+                }
+              }
+            },
+            "exporter": {"type": "exporter:noop", "config": null}
+          },
+          "connections": [{"from": "receiver", "to": "exporter"}]
+        }
+      }
+    }
+  }
+}
+JSON
 ```
 
 Start the engine:
 
 ```bash
-cargo run --bin df_engine -- -c /tmp/otap-admin-lifecycle.yaml
+cargo run --bin df_engine -- -c /tmp/otel-admin-lifecycle.json
 ```
 
 In another terminal:
@@ -813,7 +839,8 @@ GROUP=default
 PIPE=main
 ```
 
-Snapshot the committed full config:
+Save the committed safe view for comparison only. The original JSON file
+above remains the source for restore requests:
 
 ```bash
 curl -sS "$BASE/config" | jq -S . > /tmp/otap-engine-before.json
@@ -852,7 +879,8 @@ curl -sS -o /tmp/otap-deleted-pipeline.json -w 'HTTP %{http_code}\n' \
 The delete response should have `state: "succeeded"`, and the follow-up `GET`
 should return `HTTP 404`.
 
-Restore the deleted pipeline from the saved full config:
+Restore the deleted pipeline from the original source file, not the saved
+Admin snapshot (the traffic-generator config is omitted from that snapshot):
 
 ```bash
 jq '{
@@ -862,7 +890,7 @@ jq '{
       deleteTimeoutSecs: 30,
       deleteMissing: false
     }' \
-  /tmp/otap-engine-before.json > /tmp/otap-reconcile-restore.json
+  /tmp/otel-admin-lifecycle.json > /tmp/otap-reconcile-restore.json
 
 curl -sS -X POST "$BASE/config/reconcile" \
   -H 'content-type: application/json' \

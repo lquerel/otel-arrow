@@ -103,5 +103,5 @@ The bounded `result` values are `ack`, `nack`, `timeout`, `topic_closed`, and
 
 ## Related Docs
 
-- [Configuration model topics](../../../../../docs/configuration-model.md#topic-declarations)
+- [Configuration topics](../../../../../docs/configuration.md#topic-declarations)
 - [Core node catalog](../../../README.md)

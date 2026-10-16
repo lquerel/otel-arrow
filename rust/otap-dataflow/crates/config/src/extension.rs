@@ -27,7 +27,8 @@ pub struct ExtensionUserConfig {
     pub description: Option<String>,
 
     /// Extension-specific configuration (interpreted by the extension itself).
-    #[serde(default)]
+    /// Omitting this field is equivalent to specifying an empty object.
+    #[serde(default = "crate::default_component_config")]
     #[schemars(extend("x-kubernetes-preserve-unknown-fields" = true))]
     pub config: Value,
 }
@@ -44,13 +45,13 @@ impl ExtensionUserConfig {
     }
 
     /// Creates a new `ExtensionUserConfig` with the specified type URN and
-    /// default (null) config.
+    /// default empty-object config.
     #[must_use]
     pub fn with_type<U: Into<ExtensionUrn>>(r#type: U) -> Self {
         Self {
             r#type: r#type.into(),
             description: None,
-            config: Value::Null,
+            config: crate::default_component_config(),
         }
     }
 }
@@ -58,6 +59,63 @@ impl ExtensionUserConfig {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// Scenario: an extension omits the config field in YAML or JSON or uses the no-payload constructor.
+    /// Guarantees: all paths match an explicit empty object, including serialization and the schema default.
+    #[test]
+    fn omitted_extension_config_is_empty_object() {
+        let omitted = serde_json::json!({"type": "urn:test:extension:example"});
+        let explicit = serde_json::json!({"type": "urn:test:extension:example", "config": {}});
+        let expected: ExtensionUserConfig = serde_json::from_value(explicit).unwrap();
+        let from_json: ExtensionUserConfig = serde_json::from_value(omitted.clone()).unwrap();
+        let from_yaml: ExtensionUserConfig =
+            serde_yaml::from_str(&serde_yaml::to_string(&omitted).unwrap()).unwrap();
+        assert_eq!(from_json, expected);
+        assert_eq!(from_yaml, expected);
+        assert_eq!(
+            ExtensionUserConfig::with_type(expected.r#type.clone()),
+            expected
+        );
+        assert_eq!(
+            serde_json::to_value(from_json).unwrap()["config"],
+            serde_json::json!({})
+        );
+        let schema = serde_json::to_value(schemars::schema_for!(ExtensionUserConfig)).unwrap();
+        assert_eq!(
+            schema["properties"]["config"]["default"],
+            serde_json::json!({})
+        );
+    }
+
+    /// Scenario: an extension explicitly supplies null, an object, or a non-object component payload.
+    /// Guarantees: defaulting only applies to absent fields and preserves existing supplied values.
+    #[test]
+    fn explicit_extension_config_is_preserved() {
+        for payload in [
+            Value::Null,
+            serde_json::json!({}),
+            serde_json::json!({"nested": {"enabled": true}}),
+            serde_json::json!([1, 2]),
+            serde_json::json!("text"),
+            serde_json::json!(42),
+            serde_json::json!(false),
+        ] {
+            let input =
+                serde_json::json!({"type": "urn:test:extension:example", "config": payload});
+            let from_json: ExtensionUserConfig = serde_json::from_value(input.clone()).unwrap();
+            let from_yaml: ExtensionUserConfig =
+                serde_yaml::from_str(&serde_yaml::to_string(&input).unwrap()).unwrap();
+            assert_eq!(from_json.config, payload);
+            assert_eq!(from_yaml.config, payload);
+            assert_eq!(
+                ExtensionUserConfig::new(from_json.r#type, payload.clone()).config,
+                payload
+            );
+        }
+        let blank: ExtensionUserConfig =
+            serde_yaml::from_str("type: urn:test:extension:example\nconfig:").unwrap();
+        assert_eq!(blank.config, Value::Null);
+    }
 
     #[test]
     fn test_extension_user_config_deserialize() {
