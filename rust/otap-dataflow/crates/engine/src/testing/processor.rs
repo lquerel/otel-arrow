@@ -477,3 +477,46 @@ impl ValidationPhase {
         result
     }
 }
+
+/// Runs the production processor loop with flow metrics disabled.
+///
+/// Unlike [`TestContext::process`], this preserves the engine's inbox selection,
+/// processing-error exit policy, and final telemetry collection. Callers wire
+/// input/output channels and drive control/completion channels themselves.
+#[cfg(any(test, feature = "test-utils"))]
+pub async fn run_processor_loop<PData>(
+    processor: ProcessorWrapper<PData>,
+    runtime_sender: crate::control::RuntimeCtrlMsgSender<PData>,
+    completion_sender: crate::control::PipelineCompletionMsgSender<PData>,
+    metrics_reporter: MetricsReporter,
+) -> Result<(), Error>
+where
+    PData: crate::ReceivedAtNode + crate::processor::FlowMetricHook,
+{
+    let (_shutdown_trigger, shutdown_signal) =
+        crate::forced_shutdown::ForcedShutdownTrigger::pair();
+    processor
+        .start_with_completion_metrics(
+            runtime_sender,
+            completion_sender,
+            metrics_reporter,
+            Interests::empty(),
+            None,
+            false,
+            false,
+            None,
+            None,
+            None,
+            None,
+            None,
+            None,
+            None,
+            None,
+            false,
+            false,
+            crate::terminal_state::TerminalMetricsDeadline::default(),
+            shutdown_signal,
+            super::test_pipeline_runtime_services(),
+        )
+        .await
+}

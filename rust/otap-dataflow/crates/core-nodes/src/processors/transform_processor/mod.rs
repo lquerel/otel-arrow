@@ -62,7 +62,7 @@ use otel_arrow_dfe_engine::{
 use otel_arrow_dfe_otap::{
     OTAP_PROCESSOR_FACTORIES,
     accessory::{
-        context::split_contexts::{Contexts, OutboundError},
+        context::split_contexts::{Contexts, Inbound, OutboundError},
         slots::Key,
     },
     pdata::{OtapPdata, PdataDelivery, PdataEffectHandlerExtension},
@@ -110,6 +110,12 @@ pub struct TransformProcessor {
 
 struct Transform {
     pipeline: Pipeline,
+}
+
+/// Local completion distinguishes a recoverable refusal from a fatal processing error.
+enum TransformOperationOutcome {
+    Success,
+    Refused(TransformErrorType),
 }
 
 /// A processor error paired with its bounded internal telemetry classification.
@@ -222,7 +228,7 @@ impl TransformProcessor {
         pipeline_result: Result<OtapArrowRecords, TransformOperationError>,
         counters: ExecutionCounters,
         effect_handler: &mut EffectHandler<OtapPdata>,
-    ) -> Result<(), TransformOperationError> {
+    ) -> Result<TransformOperationOutcome, TransformOperationError> {
         let router_impl = self
             .execution_state
             .get_extension_mut::<RouterExtType>()
@@ -290,7 +296,7 @@ impl TransformProcessor {
                         TransformOperationError::new(TransformErrorType::OutputSend, error)
                     })?;
             }
-            return Ok(());
+            return Ok(TransformOperationOutcome::Success);
         }
 
         // Validate every route and sanitize its output before emitting anything or allocating
@@ -331,49 +337,33 @@ impl TransformProcessor {
         // frames, so cloning it per outbound batch is cheap.
         let outbound_context = delivery.context().clone_detached();
 
-        // keep error reason if there was an error, so we can send it to upstream in Nack once
-        // all routed outbound batches have been Ack/Nack'd
+        if delivery.context().needs_completion_tracking() && !self.contexts.has_inbound_capacity() {
+            effect_handler
+                .notify_nack(NackMsg::new_with_cause(
+                    "inbound slots not available",
+                    delivery.into_pdata(),
+                    NackCause::RouteFull,
+                ))
+                .await
+                .map_err(|error| {
+                    TransformOperationError::new(TransformErrorType::OutputSend, error)
+                })?;
+            return Ok(TransformOperationOutcome::Refused(
+                TransformErrorType::InboundCapacity,
+            ));
+        }
         let inbound_ctx_key = self
             .contexts
             .insert_inbound(delivery, None)
-            .ok_or_else(|| {
-                TransformOperationError::new(
-                    TransformErrorType::InboundCapacity,
-                    EngineError::ProcessorError {
-                        processor: effect_handler.processor_id(),
-                        kind: ProcessorErrorKind::Other,
-                        error: "inbound slots not available".into(),
-                        source_detail: "".into(),
-                    },
-                )
-            })?;
-        // If the default output is empty, the first named output becomes the
-        // request's first completion dependency.
-        let mut has_registered_outbound = false;
+            .expect("inbound capacity checked without yielding");
 
         // Track the default output only when it contains data. Routed outputs still share
         // the inbound context, so their ACK/NACKs determine completion when this is empty.
         if default_has_data {
             let mut pdata = OtapPdata::new(outbound_context.clone(), default_otap_batch.into());
-            let outbound_key = self
-                .contexts
-                .insert_outbound(inbound_ctx_key)
-                .ok_or_else(|| {
-                    // clear the inbound slot we allocated above as we haven't emitted anything
-                    // that would eventually get Ack/Nack'd to clear it later
-                    self.contexts.clear_inbound(inbound_ctx_key);
-
-                    TransformOperationError::new(
-                        TransformErrorType::OutboundCapacity,
-                        EngineError::ProcessorError {
-                            processor: effect_handler.processor_id(),
-                            kind: ProcessorErrorKind::Other,
-                            error: "outbound slots not available".into(),
-                            source_detail: "".into(),
-                        },
-                    )
-                })?;
-            has_registered_outbound = true;
+            let Some(outbound_key) = self.contexts.insert_outbound(inbound_ctx_key) else {
+                return self.refuse_outbound(inbound_ctx_key, effect_handler).await;
+            };
             if !outbound_key.is_null() {
                 effect_handler.subscribe_to(
                     Interests::NACKS | Interests::ACKS,
@@ -395,37 +385,9 @@ impl TransformProcessor {
             // setup the pdata with the new outbound context
             let payload = OtapPayload::from(otap_batch);
             let mut pdata = OtapPdata::new(outbound_context.clone(), payload);
-            let outbound_key = self
-                .contexts
-                .insert_outbound(inbound_ctx_key)
-                .ok_or_else(|| {
-                    if has_registered_outbound {
-                        // Earlier outputs will eventually close this inbound context;
-                        // record the partial-send failure so that closure sends a NACK.
-                        self.contexts.set_failed_inbound(
-                            inbound_ctx_key,
-                            OutboundError {
-                                reason: "outbound slots were not available".into(),
-                                cause: NackCause::RouteFull,
-                            },
-                        );
-                    } else {
-                        // No default or named output was registered, so nothing can
-                        // close an inbound context whose outbound count is still zero.
-                        self.contexts.clear_inbound(inbound_ctx_key);
-                    }
-
-                    TransformOperationError::new(
-                        TransformErrorType::OutboundCapacity,
-                        EngineError::ProcessorError {
-                            processor: effect_handler.processor_id(),
-                            kind: ProcessorErrorKind::Other,
-                            error: "outbound slots not available".into(),
-                            source_detail: "".into(),
-                        },
-                    )
-                })?;
-            has_registered_outbound = true;
+            let Some(outbound_key) = self.contexts.insert_outbound(inbound_ctx_key) else {
+                return self.refuse_outbound(inbound_ctx_key, effect_handler).await;
+            };
             if !outbound_key.is_null() {
                 effect_handler.subscribe_to(
                     Interests::NACKS | Interests::ACKS,
@@ -442,34 +404,60 @@ impl TransformProcessor {
                 })?;
         }
 
-        Ok(())
+        Ok(TransformOperationOutcome::Success)
     }
 
-    /// Clears the outbound context for the given key and send an Ack/Nack for the any
-    /// associated inbound if the inbound has no outstanding outbounds.
+    /// Records capacity refusal while retaining outstanding completion obligations.
+    async fn refuse_outbound(
+        &mut self,
+        inbound_key: Key,
+        effect_handler: &mut EffectHandler<OtapPdata>,
+    ) -> Result<TransformOperationOutcome, TransformOperationError> {
+        if let Some(inbound) = self.contexts.fail_inbound(
+            inbound_key,
+            OutboundError {
+                reason: "outbound slots were not available".into(),
+                cause: NackCause::RouteFull,
+            },
+        ) {
+            Self::notify_completion(inbound, effect_handler)
+                .await
+                .map_err(|error| {
+                    TransformOperationError::new(TransformErrorType::OutputSend, error)
+                })?;
+        }
+        Ok(TransformOperationOutcome::Refused(
+            TransformErrorType::OutboundCapacity,
+        ))
+    }
+
+    /// Settles an output and completes its inbound only after the last live result.
     async fn handle_ack_nack_inbound(
         &mut self,
         outbound_key: Key,
         effect_handler: &mut EffectHandler<OtapPdata>,
     ) -> Result<(), EngineError> {
-        // clear the outbound context.
         if let Some(inbound) = self.contexts.clear_outbound(outbound_key) {
-            // if here, we have cleared the final outbound context for some inbound batch,
-            // which means we can now Ack or Nack the inbound context
-            let pdata = inbound.delivery.into_pdata();
-            if let Some(error) = inbound.error {
-                let nack_msg = if inbound.outbound_all_transient_errors {
-                    // this constructor creates a non-permanent Nack
-                    NackMsg::new_with_cause(error.reason, pdata, error.cause)
-                } else {
-                    NackMsg::new_permanent_with_cause(error.reason, pdata, error.cause)
-                };
-                effect_handler.notify_nack(nack_msg).await
+            Self::notify_completion(inbound, effect_handler).await?;
+        }
+        Ok(())
+    }
+
+    /// Unwinds original delivery ownership and preserves aggregate retry semantics.
+    async fn notify_completion(
+        inbound: Inbound,
+        effect_handler: &mut EffectHandler<OtapPdata>,
+    ) -> Result<(), EngineError> {
+        let pdata = inbound.delivery.into_pdata();
+        if let Some(error) = inbound.error {
+            let nack = if inbound.outbound_all_transient_errors {
+                NackMsg::new_with_cause(error.reason, pdata, error.cause)
             } else {
-                effect_handler.notify_ack(AckMsg::new(pdata)).await
-            }
+                NackMsg::new_permanent_with_cause(error.reason, pdata, error.cause)
+            };
+            effect_handler.notify_nack(nack).await
         } else {
-            Ok(())
+            effect_handler.notify_ack(AckMsg::new(pdata)).await
         }
     }
 }
@@ -616,7 +604,10 @@ impl Processor<OtapPdata> for TransformProcessor {
                     .handle_exec_result(delivery, signal, result, counters, effect_handler)
                     .await
                 {
-                    Ok(()) => self.metrics.record_success(signal),
+                    Ok(TransformOperationOutcome::Success) => self.metrics.record_success(signal),
+                    Ok(TransformOperationOutcome::Refused(error_type)) => {
+                        self.metrics.record_failure(signal, error_type);
+                    }
                     Err(operation_error) => {
                         self.metrics
                             .record_failure(signal, operation_error.error_type);
@@ -632,6 +623,7 @@ impl Processor<OtapPdata> for TransformProcessor {
 
 #[cfg(test)]
 mod test {
+    mod capacity_tests;
     use super::*;
     use std::collections::BTreeMap;
 
@@ -2775,8 +2767,8 @@ mod test {
             .validate(|_ctx| async move {})
     }
 
-    /// Scenario: A routed transform exhausts its configured outbound context capacity.
-    /// Guarantees: The partial dispatch fails once with the outbound-capacity classification.
+    /// Scenario: a transform dispatches default output before exhausting routed-output capacity.
+    /// Guarantees: the processor stays live, records one capacity failure, and Nacks after the dispatched Ack.
     #[test]
     fn test_ack_nack_full_contexts_outbound_slots_for_routed_batch() {
         let runtime = TestRuntime::<OtapPdata>::new();
@@ -2822,13 +2814,10 @@ mod test {
                 let (inbound_context, payload) = pdata.into_parts();
                 let pdata = OtapPdata::new(inbound_context.clone(), payload);
 
-                // try to process the message. This should return an error b/c only 1
-                // outbound slot is available, but two outbound batches will be produced
-                let err = ctx
-                    .process(Message::PData(pdata))
+                // Refuse the second output without stopping completion of the first.
+                ctx.process(Message::PData(pdata))
                     .await
-                    .expect_err("process error");
-                assert!(err.to_string().contains("outbound slots not available"));
+                    .expect("capacity refusal must keep the processor alive");
 
                 // we should still have sent the first batch produced
                 let (outbound_ctx_default, _) = ctx.drain_pdata().await.pop().unwrap().into_parts();
@@ -2883,6 +2872,19 @@ mod test {
                         &[
                             ("language", "opl"),
                             ("signal", "logs"),
+                            ("outcome", "success"),
+                        ]
+                    ),
+                    None
+                );
+
+                assert_eq!(
+                    transform_metric_value(
+                        &points,
+                        "operations",
+                        &[
+                            ("language", "opl"),
+                            ("signal", "logs"),
                             ("outcome", "failure"),
                         ],
                     ),
@@ -2903,8 +2905,8 @@ mod test {
             })
     }
 
-    /// Scenario: Two named outputs share one outbound slot while the default output is empty.
-    /// Guarantees: ACKing the one dispatched route NACKs upstream after the second route fails.
+    /// Scenario: two named routes share one slot while default output is empty.
+    /// Guarantees: the processor stays live and Nacks only after the dispatched route completes.
     #[test]
     fn test_routed_only_partial_send_nacks_after_dispatched_route_completes() {
         let runtime = TestRuntime::<OtapPdata>::new();
@@ -2939,11 +2941,9 @@ mod test {
                 let pdata =
                     create_pdata_with_subscriber(input, Interests::ACKS | Interests::NACKS, 1, 999);
 
-                let error = ctx
-                    .process(Message::PData(pdata))
+                ctx.process(Message::PData(pdata))
                     .await
-                    .expect_err("second route must exhaust outbound capacity");
-                assert!(error.to_string().contains("outbound slots not available"));
+                    .expect("capacity refusal must keep the processor alive");
                 assert!(
                     ctx.drain_pdata().await.is_empty(),
                     "empty default output must not be forwarded"
@@ -2981,6 +2981,8 @@ mod test {
             .validate(|_ctx| async move {});
     }
 
+    /// Scenario: an earlier routed request occupies all outbound slots.
+    /// Guarantees: zero-send refusals Nack immediately and release their inbound slots for later requests.
     #[test]
     fn test_ack_nack_full_contexts_outbound_slots_for_default_batch() {
         let runtime = TestRuntime::<OtapPdata>::new();
@@ -3005,7 +3007,7 @@ mod test {
             .set_processor(processor)
             .run_test(|mut ctx| async move {
                 let (runtime_ctrl_tx, _runtime_ctrl_rx) = runtime_ctrl_msg_channel(10);
-                let (pipeline_completion_tx, _pipeline_completion_rx) =
+                let (pipeline_completion_tx, mut pipeline_completion_rx) =
                     pipeline_completion_msg_channel(10);
                 ctx.set_runtime_ctrl_sender(runtime_ctrl_tx);
                 ctx.set_pipeline_completion_sender(pipeline_completion_tx);
@@ -3024,17 +3026,27 @@ mod test {
                 // send a first batch that should fill up the slot map
                 ctx.process(Message::PData(pdata)).await.unwrap();
 
-                // send another pdata - this should fail b/c the outbound slot map is full
+                // Refuse another request immediately while all outbound slots are occupied.
                 let pdata = OtapPdata::new_default(input.clone().into()).test_subscribe_to(
                     Interests::ACKS | Interests::NACKS,
                     TestCallData::new_with(1, 0).into(),
                     upstream_node_id,
                 );
-                let err = ctx
-                    .process(Message::PData(pdata))
+                ctx.process(Message::PData(pdata))
                     .await
-                    .expect_err("process error");
-                assert!(err.to_string().contains("outbound slots not available"));
+                    .expect("capacity refusal must keep the processor alive");
+                let PipelineCompletionMsg::DeliverNack { nack } = pipeline_completion_rx
+                    .try_recv()
+                    .expect("immediate capacity Nack")
+                else {
+                    panic!("expected capacity Nack");
+                };
+                assert_eq!(nack.reason, "outbound slots were not available");
+                assert_eq!(nack.cause, NackCause::RouteFull);
+                assert!(
+                    !nack.permanent,
+                    "nothing was dispatched for the refused request"
+                );
 
                 // now drain and ack the messages from the first batch to clear out the slot map
                 let (outbound_ctx_default, _) = ctx.drain_pdata().await.pop().unwrap().into_parts();
@@ -3046,6 +3058,11 @@ mod test {
                         .unwrap();
                 }
 
+                assert!(matches!(
+                    pipeline_completion_rx.try_recv(),
+                    Ok(PipelineCompletionMsg::DeliverAck { .. })
+                ));
+
                 // send another pdata and it should succeed b/c the slot map is cleared out
                 let pdata = create_pdata_with_subscriber(
                     input.clone(),
@@ -3055,28 +3072,38 @@ mod test {
                 );
                 ctx.process(Message::PData(pdata)).await.unwrap();
 
-                // send yet another failed batch -- we do this to ensure that when we returned
-                // an error for the first failed batch, that we cleared the inbound slot. If
-                // we didn't, we'd see an error saying the inbound slot cannot be allocated
+                // Refuse another request to verify the earlier zero-send refusal freed its
+                // inbound slot instead of exhausting inbound capacity.
                 let pdata = create_pdata_with_subscriber(
                     input.clone(),
                     Interests::ACKS | Interests::NACKS,
                     1,
                     upstream_node_id,
                 );
-                let err = ctx
-                    .process(Message::PData(pdata))
+                ctx.process(Message::PData(pdata))
                     .await
-                    .expect_err("process error");
-                assert!(err.to_string().contains("outbound slots not available"));
+                    .expect("capacity refusal must keep the processor alive");
+                let PipelineCompletionMsg::DeliverNack { nack } = pipeline_completion_rx
+                    .try_recv()
+                    .expect("immediate capacity Nack")
+                else {
+                    panic!("expected capacity Nack");
+                };
+                assert_eq!(nack.reason, "outbound slots were not available");
+                assert_eq!(nack.cause, NackCause::RouteFull);
+                assert!(
+                    !nack.permanent,
+                    "nothing was dispatched for the refused request"
+                );
             })
             .validate(|_ctx| async move {})
     }
 
+    /// Scenario: a routed request occupies the only inbound slot.
+    /// Guarantees: new requests Nack without interrupting existing completion or leaking slots.
     #[test]
     fn test_ack_nack_full_contexts_inbound_slots() {
-        // Test that when inbound slots are full, the processor returns an error
-        // and properly cleans up so subsequent requests can succeed once slots are freed
+        // Inbound refusal must Nack without interrupting completion of existing requests.
         let runtime = TestRuntime::<OtapPdata>::new();
         let query = r#"logs
             | if (severity_text == "ERROR") {
@@ -3099,7 +3126,7 @@ mod test {
             .set_processor(processor)
             .run_test(|mut ctx| async move {
                 let (runtime_ctrl_tx, _runtime_ctrl_rx) = runtime_ctrl_msg_channel(10);
-                let (pipeline_completion_tx, _pipeline_completion_rx) =
+                let (pipeline_completion_tx, mut pipeline_completion_rx) =
                     pipeline_completion_msg_channel(10);
                 ctx.set_runtime_ctrl_sender(runtime_ctrl_tx);
                 ctx.set_pipeline_completion_sender(pipeline_completion_tx);
@@ -3125,14 +3152,20 @@ mod test {
                     2,
                     upstream_node_id,
                 );
-                let err = ctx
-                    .process(Message::PData(pdata2))
+                ctx.process(Message::PData(pdata2))
                     .await
-                    .expect_err("should fail when inbound slots full");
+                    .expect("capacity refusal must keep the processor alive");
+                let PipelineCompletionMsg::DeliverNack { nack } = pipeline_completion_rx
+                    .try_recv()
+                    .expect("immediate capacity Nack")
+                else {
+                    panic!("expected capacity Nack");
+                };
+                assert_eq!(nack.reason, "inbound slots not available");
+                assert_eq!(nack.cause, NackCause::RouteFull);
                 assert!(
-                    err.to_string().contains("inbound slots not available"),
-                    "Expected inbound slots error, got: {}",
-                    err
+                    !nack.permanent,
+                    "nothing was dispatched for the refused request"
                 );
 
                 // Collect the outbound messages from the first batch
@@ -3145,6 +3178,11 @@ mod test {
                         .await
                         .unwrap();
                 }
+
+                assert!(matches!(
+                    pipeline_completion_rx.try_recv(),
+                    Ok(PipelineCompletionMsg::DeliverAck { .. })
+                ));
 
                 // Now try again - should succeed because inbound slot was freed
                 let pdata3 = create_pdata_with_subscriber(
@@ -3164,14 +3202,20 @@ mod test {
                     4,
                     upstream_node_id,
                 );
-                let err = ctx
-                    .process(Message::PData(pdata4))
+                ctx.process(Message::PData(pdata4))
                     .await
-                    .expect_err("should fail again when inbound slot full");
+                    .expect("capacity refusal must keep the processor alive");
+                let PipelineCompletionMsg::DeliverNack { nack } = pipeline_completion_rx
+                    .try_recv()
+                    .expect("immediate capacity Nack")
+                else {
+                    panic!("expected capacity Nack");
+                };
+                assert_eq!(nack.reason, "inbound slots not available");
+                assert_eq!(nack.cause, NackCause::RouteFull);
                 assert!(
-                    err.to_string().contains("inbound slots not available"),
-                    "Expected inbound slots error, got: {}",
-                    err
+                    !nack.permanent,
+                    "nothing was dispatched for the refused request"
                 );
             })
             .validate(|_ctx| async move {})

@@ -69,6 +69,12 @@ impl Contexts {
         }
     }
 
+    /// Whether another inbound requiring completion tracking can be registered.
+    #[must_use]
+    pub fn has_inbound_capacity(&self) -> bool {
+        self.inbound.has_capacity()
+    }
+
     /// Insert an inbound batch into the context.
     ///
     /// If the inbound batch does not need completion tracking, it is not inserted
@@ -143,6 +149,19 @@ impl Contexts {
             if inbound.error.is_none() {
                 inbound.error = Some(error)
             }
+        }
+    }
+
+    /// Refuses further output for an inbound, preserving its first error.
+    ///
+    /// Returns the inbound for immediate completion if no outputs are pending.
+    /// Otherwise it stays live until its outstanding outputs settle.
+    pub fn fail_inbound(&mut self, inbound_key: Key, error: OutboundError) -> Option<Inbound> {
+        self.set_failed_inbound(inbound_key, error);
+        if self.inbound.get(inbound_key)?.num_outbound == 0 {
+            self.inbound.take(inbound_key)
+        } else {
+            None
         }
     }
 

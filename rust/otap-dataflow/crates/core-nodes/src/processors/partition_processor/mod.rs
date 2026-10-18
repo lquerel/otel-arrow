@@ -37,7 +37,7 @@ use otel_arrow_dfe_engine::{
     context::PipelineContext,
 };
 use otel_arrow_dfe_otap::OTAP_PROCESSOR_FACTORIES;
-use otel_arrow_dfe_otap::accessory::context::split_contexts::{Contexts, OutboundError};
+use otel_arrow_dfe_otap::accessory::context::split_contexts::{Contexts, Inbound, OutboundError};
 use otel_arrow_dfe_otap::accessory::slots::Key;
 use otel_arrow_dfe_otap::pdata::{OtapPdata, PdataEffectHandlerExtension};
 #[cfg(test)]
@@ -158,30 +158,33 @@ impl PartitionProcessor {
         })
     }
 
-    /// Clears the outbound context for the given key, and sends an Ack/Nack for the associated
-    /// inbound once there are no outstanding outbounds.
+    /// Settles an output and completes its inbound only after the last live result.
     async fn handle_ack_nack(
         &mut self,
         outbound_key: Key,
         effect_handler: &mut EffectHandler<OtapPdata>,
     ) -> Result<(), otel_arrow_dfe_engine::error::Error> {
-        // clear the outbound context
         if let Some(inbound) = self.contexts.clear_outbound(outbound_key) {
-            // if we're in this location, we've cleared the final outbound context for some inbound
-            // batch, which means we can now Ack or Nack the inbound context
-            let pdata = inbound.delivery.into_pdata();
-            if let Some(error) = inbound.error {
-                let nack_msg = if inbound.outbound_all_transient_errors {
-                    NackMsg::new_with_cause(error.reason, pdata, error.cause)
-                } else {
-                    NackMsg::new_permanent_with_cause(error.reason, pdata, error.cause)
-                };
-                effect_handler.notify_nack(nack_msg).await
+            Self::notify_completion(inbound, effect_handler).await?;
+        }
+        Ok(())
+    }
+
+    /// Unwinds original delivery ownership and preserves aggregate retry semantics.
+    async fn notify_completion(
+        inbound: Inbound,
+        effect_handler: &mut EffectHandler<OtapPdata>,
+    ) -> Result<(), otel_arrow_dfe_engine::error::Error> {
+        let pdata = inbound.delivery.into_pdata();
+        if let Some(error) = inbound.error {
+            let nack = if inbound.outbound_all_transient_errors {
+                NackMsg::new_with_cause(error.reason, pdata, error.cause)
             } else {
-                effect_handler.notify_ack(AckMsg::new(pdata)).await
-            }
+                NackMsg::new_permanent_with_cause(error.reason, pdata, error.cause)
+            };
+            effect_handler.notify_nack(nack).await
         } else {
-            Ok(())
+            effect_handler.notify_ack(AckMsg::new(pdata)).await
         }
     }
 }
@@ -322,52 +325,43 @@ impl Processor<OtapPdata> for PartitionProcessor {
                         // there are multiple partitions - need to emit while shuffling contexts..
 
                         let outbound_context = delivery.context().clone_detached();
-                        // create context key for inbound batch
+                        // Refuse new work without interrupting completion of earlier requests.
+                        if delivery.context().needs_completion_tracking()
+                            && !self.contexts.has_inbound_capacity()
+                        {
+                            effect_handler
+                                .notify_nack(NackMsg::new_with_cause(
+                                    "inbound slots not available",
+                                    delivery.into_pdata(),
+                                    NackCause::RouteFull,
+                                ))
+                                .await?;
+                            return Ok(());
+                        }
                         let inbound_ctx_key = self
                             .contexts
                             .insert_inbound(delivery, None)
-                            .ok_or_else(|| otel_arrow_dfe_engine::error::Error::ProcessorError {
-                                processor: effect_handler.processor_id(),
-                                kind: ProcessorErrorKind::Other,
-                                error: "inbound slots not available".into(),
-                                source_detail: "".into(),
-                            })?;
-
-                        let mut outbound_emitted_subscribed = 0;
+                            .expect("inbound capacity checked without yielding");
 
                         // send each partition with an outbound context and the partition value
                         // populated on the transport headers
                         for partition in partitions {
-                            let outbound_ctx_key = self
-                                .contexts
-                                .insert_outbound(inbound_ctx_key)
-                                .ok_or_else(|| {
-                                if outbound_emitted_subscribed == 0 {
-                                    // clear the inbound slot we allocated above as we haven't
-                                    // emitted anything that would eventually get Ack/Nack'd to
-                                    // clear it later
-                                    self.contexts.clear_inbound(inbound_ctx_key);
-                                } else {
-                                    // set inbound failed - when we receive the Ack/Nack for
-                                    // the outbound already routed, then we'll emit Nack
-                                    // indicating that some partition was not emitted.
-                                    self.contexts.set_failed_inbound(
-                                        inbound_ctx_key,
-                                        OutboundError {
-                                            reason: "insufficient outbound slots for partitions"
-                                                .into(),
-                                            cause: NackCause::RouteFull,
-                                        },
-                                    );
+                            let Some(outbound_ctx_key) =
+                                self.contexts.insert_outbound(inbound_ctx_key)
+                            else {
+                                // Keep the processor alive for already-dispatched results.
+                                // An idle inbound can Nack and release its slot immediately.
+                                if let Some(inbound) = self.contexts.fail_inbound(
+                                    inbound_ctx_key,
+                                    OutboundError {
+                                        reason: "insufficient outbound slots for partitions".into(),
+                                        cause: NackCause::RouteFull,
+                                    },
+                                ) {
+                                    Self::notify_completion(inbound, effect_handler).await?;
                                 }
-
-                                otel_arrow_dfe_engine::error::Error::ProcessorError {
-                                    processor: effect_handler.processor_id(),
-                                    kind: ProcessorErrorKind::Other,
-                                    error: "outbound slots not available".into(),
-                                    source_detail: "".into(),
-                                }
-                            })?;
+                                return Ok(());
+                            };
 
                             // set the transport header
                             let mut pdata_context = outbound_context.clone_detached();
@@ -417,10 +411,6 @@ impl Processor<OtapPdata> for PartitionProcessor {
                                 );
                             }
                             effect_handler.send_message_with_source_node(pdata).await?;
-
-                            if !outbound_ctx_key.is_null() {
-                                outbound_emitted_subscribed += 1;
-                            }
                         }
                     }
                 }
@@ -509,6 +499,7 @@ impl ConfigNodeContextDeclaration for Config {
 
 #[cfg(test)]
 mod test {
+    mod capacity_tests;
     use std::collections::{HashMap, VecDeque};
 
     use super::*;
@@ -1633,12 +1624,8 @@ mod test {
         );
     }
 
-    /// When the outbound slot limit is exhausted mid-way through emitting partitions,
-    /// the processor should:
-    /// 1. Return an error containing "outbound slots not available"
-    /// 2. Still have sent the partitions that were emitted before the failure
-    /// 3. When those already-emitted outbound batches are Ack'd, Nack the inbound with
-    ///    reason "insufficient outbound slots for partitions"
+    /// Scenario: partition emission exceeds outbound capacity after one output.
+    /// Guarantees: processing stays live and the last downstream reply produces the capacity Nack.
     #[test]
     fn test_full_outbound_slots_some_partitions_already_emitted() {
         let runtime = TestRuntime::<OtapPdata>::new();
@@ -1692,15 +1679,10 @@ mod test {
                     upstream_node_id,
                 );
 
-                // process should fail because the 2nd partition can't allocate an outbound slot
-                let err = ctx
-                    .process(Message::PData(pdata))
+                // The second partition is refused while the first remains pending.
+                ctx.process(Message::PData(pdata))
                     .await
-                    .expect_err("should fail when outbound slots exhausted");
-                assert!(
-                    err.to_string().contains("outbound slots not available"),
-                    "unexpected error: {err}",
-                );
+                    .expect("capacity refusal must keep the processor alive");
 
                 // the first partition should still have been sent
                 let out = ctx.drain_pdata().await;
@@ -1733,10 +1715,8 @@ mod test {
             .validate(|_ctx| async move {});
     }
 
-    /// When outbound slots are already fully consumed from a prior batch, the next batch's
-    /// very first outbound allocation fails (outbound_emitted_subscribed == 0). In this case
-    /// the processor should clear the inbound slot it just allocated, return an error, and
-    /// not leak the inbound slot so that subsequent batches can succeed once slots are freed.
+    /// Scenario: all output slots belong to an earlier partitioned request.
+    /// Guarantees: the new request Nacks immediately, releases its inbound slot, and later work can split.
     #[test]
     fn test_full_outbound_slots_no_partitions_emitted() {
         let runtime = TestRuntime::<OtapPdata>::new();
@@ -1759,6 +1739,11 @@ mod test {
             .set_processor(processor)
             .run_test(move |mut ctx| async move {
                 let upstream_node_id = 999;
+                let (runtime_ctrl_tx, _runtime_ctrl_rx) = runtime_ctrl_msg_channel(10);
+                let (pipeline_completion_tx, mut pipeline_completion_rx) =
+                    pipeline_completion_msg_channel(10);
+                ctx.set_runtime_ctrl_sender(runtime_ctrl_tx);
+                ctx.set_pipeline_completion_sender(pipeline_completion_tx);
 
                 // 2 distinct partition values -> 2 partitions -> fills 2 outbound slots
                 let otap_batch = otlp_to_otap(&OtlpProtoMessage::Logs(LogsData {
@@ -1799,24 +1784,26 @@ mod test {
                     2,
                     upstream_node_id,
                 );
-                let err = ctx
-                    .process(Message::PData(pdata2))
+                ctx.process(Message::PData(pdata2))
                     .await
-                    .expect_err("should fail when outbound slots full");
+                    .expect("capacity refusal must keep the processor alive");
+                let PipelineCompletionMsg::DeliverNack { nack } = pipeline_completion_rx
+                    .try_recv()
+                    .expect("immediate capacity Nack")
+                else {
+                    panic!("expected capacity Nack");
+                };
+                assert_eq!(nack.reason, "insufficient outbound slots for partitions");
+                assert_eq!(nack.cause, NackCause::RouteFull);
                 assert!(
-                    err.to_string().contains("outbound slots not available"),
-                    "unexpected error: {err}",
+                    !nack.permanent,
+                    "nothing was dispatched for the refused request"
                 );
 
                 // nothing new was emitted
                 assert!(ctx.drain_pdata().await.is_empty());
 
                 // now Ack the first batch's outbounds to free the slots
-                let (runtime_ctrl_tx, _runtime_ctrl_rx) = runtime_ctrl_msg_channel(10);
-                let (pipeline_completion_tx, _pipeline_completion_rx) =
-                    pipeline_completion_msg_channel(10);
-                ctx.set_runtime_ctrl_sender(runtime_ctrl_tx);
-                ctx.set_pipeline_completion_sender(pipeline_completion_tx);
 
                 for out in first_batch_out {
                     let (outbound_ctx, _) = out.into_parts();
@@ -1825,8 +1812,7 @@ mod test {
                         .unwrap();
                 }
 
-                // a new batch should now succeed -- verifying the inbound slot from the failed
-                // second batch was properly cleaned up (not leaked)
+                // A new batch can split after the refused second batch released its inbound slot.
                 let pdata3 = create_pdata_with_subscriber(
                     otap_batch,
                     Interests::ACKS_OR_NACKS,
@@ -1843,9 +1829,8 @@ mod test {
             .validate(|_ctx| async move {});
     }
 
-    /// When the inbound slot limit is exhausted, the processor should return an error.
-    /// After the outstanding inbound is cleared (via Ack'ing its outbounds), new batches
-    /// should succeed.
+    /// Scenario: the inbound slot is occupied and later reclaimed by downstream Acks.
+    /// Guarantees: new requests Nack without stopping the processor or leaking capacity.
     #[test]
     fn test_full_inbound_slots() {
         let runtime = TestRuntime::<OtapPdata>::new();
@@ -1891,7 +1876,7 @@ mod test {
                 }));
 
                 let (runtime_ctrl_tx, _runtime_ctrl_rx) = runtime_ctrl_msg_channel(10);
-                let (pipeline_completion_tx, _pipeline_completion_rx) =
+                let (pipeline_completion_tx, mut pipeline_completion_rx) =
                     pipeline_completion_msg_channel(10);
                 ctx.set_runtime_ctrl_sender(runtime_ctrl_tx);
                 ctx.set_pipeline_completion_sender(pipeline_completion_tx);
@@ -1912,13 +1897,20 @@ mod test {
                     2,
                     upstream_node_id,
                 );
-                let err = ctx
-                    .process(Message::PData(pdata2))
+                ctx.process(Message::PData(pdata2))
                     .await
-                    .expect_err("should fail when inbound slots full");
+                    .expect("capacity refusal must keep the processor alive");
+                let PipelineCompletionMsg::DeliverNack { nack } = pipeline_completion_rx
+                    .try_recv()
+                    .expect("immediate capacity Nack")
+                else {
+                    panic!("expected capacity Nack");
+                };
+                assert_eq!(nack.reason, "inbound slots not available");
+                assert_eq!(nack.cause, NackCause::RouteFull);
                 assert!(
-                    err.to_string().contains("inbound slots not available"),
-                    "unexpected error: {err}",
+                    !nack.permanent,
+                    "nothing was dispatched for the refused request"
                 );
 
                 // Ack the first batch's outbounds to free the inbound slot
@@ -1931,6 +1923,11 @@ mod test {
                         .await
                         .unwrap();
                 }
+
+                assert!(matches!(
+                    pipeline_completion_rx.try_recv(),
+                    Ok(PipelineCompletionMsg::DeliverAck { .. })
+                ));
 
                 // now a new batch should succeed
                 let pdata3 = create_pdata_with_subscriber(
@@ -1954,13 +1951,20 @@ mod test {
                     4,
                     upstream_node_id,
                 );
-                let err = ctx
-                    .process(Message::PData(pdata4))
+                ctx.process(Message::PData(pdata4))
                     .await
-                    .expect_err("should fail again when inbound slot re-filled");
+                    .expect("capacity refusal must keep the processor alive");
+                let PipelineCompletionMsg::DeliverNack { nack } = pipeline_completion_rx
+                    .try_recv()
+                    .expect("immediate capacity Nack")
+                else {
+                    panic!("expected capacity Nack");
+                };
+                assert_eq!(nack.reason, "inbound slots not available");
+                assert_eq!(nack.cause, NackCause::RouteFull);
                 assert!(
-                    err.to_string().contains("inbound slots not available"),
-                    "unexpected error: {err}",
+                    !nack.permanent,
+                    "nothing was dispatched for the refused request"
                 );
             })
             .validate(|_ctx| async move {});

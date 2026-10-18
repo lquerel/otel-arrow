@@ -48,3 +48,6 @@ pub mod temporal_reaggregation_processor;
 
 /// Retry processor.
 pub mod retry_processor;
+
+#[cfg(all(test, any(feature = "partition", feature = "transform")))]
+mod split_capacity_tests;
