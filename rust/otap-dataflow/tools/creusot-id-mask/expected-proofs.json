@@ -1,0 +1,175 @@
+{
+  "otel_arrow_dfe_id_mask_proof_rlib/id_bitmap/impl_Default_for_IdBitmapPool/default": [
+    "vc_default_IdBitmapPool",
+    "vc_new"
+  ],
+  "otel_arrow_dfe_id_mask_proof_rlib/id_bitmap/impl_Default_for_IdBitmapPool/default__refines": [
+    "refines"
+  ],
+  "otel_arrow_dfe_id_mask_proof_rlib/id_bitmap/impl_IdBitmap/clear": [
+    "vc_clear",
+    "vc_clear_words",
+    "vc_closure9",
+    "vc_deref_Vec_Option_Box_IdBitmapPage_Global_Global",
+    "vc_elim_Some",
+    "vc_index_mut_Vec_Option_Box_IdBitmapPage_Global_Global",
+    "vc_is_none_Box_IdBitmapPage_Global",
+    "vc_is_some_and_ref_Option_Box_IdBitmapPage_Global",
+    "vc_last_Option_Box_IdBitmapPage_Global",
+    "vc_len_Option_Box_IdBitmapPage_Global",
+    "vc_pop_Option_Box_IdBitmapPage_Global"
+  ],
+  "otel_arrow_dfe_id_mask_proof_rlib/id_bitmap/impl_IdBitmap/contains": [
+    "vc_contains",
+    "vc_contains_bit",
+    "vc_deref_Vec_Option_Box_IdBitmapPage_Global_Global",
+    "vc_elim_Some",
+    "vc_elim_Some'0",
+    "vc_get_Option_Box_IdBitmapPage_Global",
+    "vc_page_and_bit"
+  ],
+  "otel_arrow_dfe_id_mask_proof_rlib/id_bitmap/impl_IdBitmap/difference_with": [
+    "vc_combine_words",
+    "vc_deref_Vec_Option_Box_IdBitmapPage_Global_Global",
+    "vc_difference_with",
+    "vc_elim_Some",
+    "vc_elim_Some'0",
+    "vc_get_Option_Box_IdBitmapPage_Global",
+    "vc_index_mut_Vec_Option_Box_IdBitmapPage_Global_Global",
+    "vc_len_Option_Box_IdBitmapPage_Global"
+  ],
+  "otel_arrow_dfe_id_mask_proof_rlib/id_bitmap/impl_IdBitmap/ensure_page": [
+    "vc_closure0",
+    "vc_ensure_page",
+    "vc_get_or_insert_with_Box_IdBitmapPage_Global",
+    "vc_index_mut_Vec_Option_Box_IdBitmapPage_Global_Global",
+    "vc_len_Option_Box_IdBitmapPage_Global",
+    "vc_new",
+    "vc_push_Option_Box_IdBitmapPage_Global"
+  ],
+  "otel_arrow_dfe_id_mask_proof_rlib/id_bitmap/impl_IdBitmap/insert": [
+    "vc_ensure_page",
+    "vc_insert",
+    "vc_insert_bit",
+    "vc_page_and_bit"
+  ],
+  "otel_arrow_dfe_id_mask_proof_rlib/id_bitmap/impl_IdBitmap/intersect_with": [
+    "vc_clear_words",
+    "vc_combine_words",
+    "vc_deref_Vec_Option_Box_IdBitmapPage_Global_Global",
+    "vc_elim_Some",
+    "vc_elim_Some'0",
+    "vc_get_Option_Box_IdBitmapPage_Global",
+    "vc_index_mut_Vec_Option_Box_IdBitmapPage_Global_Global",
+    "vc_intersect_with",
+    "vc_len_Option_Box_IdBitmapPage_Global"
+  ],
+  "otel_arrow_dfe_id_mask_proof_rlib/id_bitmap/impl_IdBitmap/is_empty": [
+    "vc_elim_Some",
+    "vc_index_Vec_Option_Box_IdBitmapPage_Global_Global",
+    "vc_is_empty",
+    "vc_len_Option_Box_IdBitmapPage_Global",
+    "vc_words_empty"
+  ],
+  "otel_arrow_dfe_id_mask_proof_rlib/id_bitmap/impl_IdBitmap/new": [
+    "vc_new",
+    "vc_new_Option_Box_IdBitmapPage_Global"
+  ],
+  "otel_arrow_dfe_id_mask_proof_rlib/id_bitmap/impl_IdBitmap/page_and_bit": [
+    "vc_page_and_bit"
+  ],
+  "otel_arrow_dfe_id_mask_proof_rlib/id_bitmap/impl_IdBitmap/union_with": [
+    "vc_combine_words",
+    "vc_elim_Some",
+    "vc_ensure_page",
+    "vc_index_Vec_Option_Box_IdBitmapPage_Global_Global",
+    "vc_len_Option_Box_IdBitmapPage_Global",
+    "vc_union_with"
+  ],
+  "otel_arrow_dfe_id_mask_proof_rlib/id_bitmap/impl_IdBitmapPage/new": [
+    "vc_new",
+    "vc_zero_word"
+  ],
+  "otel_arrow_dfe_id_mask_proof_rlib/id_bitmap/impl_IdBitmapPool/acquire": [
+    "vc_acquire",
+    "vc_clear",
+    "vc_elim_Some",
+    "vc_new",
+    "vc_pop_IdBitmap"
+  ],
+  "otel_arrow_dfe_id_mask_proof_rlib/id_bitmap/impl_IdBitmapPool/new": [
+    "vc_new",
+    "vc_new_IdBitmap"
+  ],
+  "otel_arrow_dfe_id_mask_proof_rlib/id_bitmap/impl_IdBitmapPool/release": [
+    "vc_push_IdBitmap",
+    "vc_release"
+  ],
+  "otel_arrow_dfe_id_mask_proof_rlib/id_bitmap/words/clear_words": [
+    "vc_clear_words",
+    "vc_len_u64",
+    "vc_zero_word"
+  ],
+  "otel_arrow_dfe_id_mask_proof_rlib/id_bitmap/words/combine_word": [
+    "vc_combine_word"
+  ],
+  "otel_arrow_dfe_id_mask_proof_rlib/id_bitmap/words/combine_words": [
+    "vc_combine_word",
+    "vc_combine_words",
+    "vc_len_u64"
+  ],
+  "otel_arrow_dfe_id_mask_proof_rlib/id_bitmap/words/contains_bit": [
+    "vc_contains_bit"
+  ],
+  "otel_arrow_dfe_id_mask_proof_rlib/id_bitmap/words/impl_Clone_for_Operation/clone": [
+    "vc_clone_Operation"
+  ],
+  "otel_arrow_dfe_id_mask_proof_rlib/id_bitmap/words/insert_bit": [
+    "vc_insert_bit"
+  ],
+  "otel_arrow_dfe_id_mask_proof_rlib/id_bitmap/words/word_empty": [
+    "vc_word_empty"
+  ],
+  "otel_arrow_dfe_id_mask_proof_rlib/id_bitmap/words/words_empty": [
+    "vc_len_u64",
+    "vc_word_empty",
+    "vc_words_empty"
+  ],
+  "otel_arrow_dfe_id_mask_proof_rlib/id_bitmap/words/zero_word": [
+    "vc_zero_word"
+  ],
+  "otel_arrow_dfe_id_mask_proof_rlib/id_mask/impl_IdMask/combine_and": [
+    "vc_combine_and",
+    "vc_difference_with",
+    "vc_elim_NotSome",
+    "vc_elim_Some",
+    "vc_intersect_with",
+    "vc_is_empty",
+    "vc_release",
+    "vc_release_to",
+    "vc_union_with"
+  ],
+  "otel_arrow_dfe_id_mask_proof_rlib/id_mask/impl_IdMask/combine_or": [
+    "vc_combine_or",
+    "vc_difference_with",
+    "vc_elim_NotSome",
+    "vc_elim_Some",
+    "vc_intersect_with",
+    "vc_is_empty",
+    "vc_release",
+    "vc_release_to",
+    "vc_union_with"
+  ],
+  "otel_arrow_dfe_id_mask_proof_rlib/id_mask/impl_IdMask/contains": [
+    "vc_contains",
+    "vc_contains'0",
+    "vc_elim_NotSome",
+    "vc_elim_Some"
+  ],
+  "otel_arrow_dfe_id_mask_proof_rlib/id_mask/impl_IdMask/release_to": [
+    "vc_elim_NotSome",
+    "vc_elim_Some",
+    "vc_release",
+    "vc_release_to"
+  ]
+}

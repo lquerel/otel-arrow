@@ -7,13 +7,18 @@
 //! parent IDs have been selected by some predicate. It supports efficient boolean combination
 //! (AND, OR, NOT) via bitmap algebra without materializing intermediate arrays.
 
+#[cfg(creusot)]
+use crate::id_bitmap::{IdBitmap, IdBitmapPool};
+#[cfg(creusot)]
+use creusot_std::prelude::*;
+#[cfg(not(creusot))]
 use otel_arrow_dfe_pdata::otap::filter::{IdBitmap, IdBitmapPool};
 
 /// This represents which IDs have been selected by some filter operation.
 ///
 /// For example it can be used as the return type from filtering attributes to represent
 /// values from the parent_id column matched some filter that was applied.
-#[derive(Debug, PartialEq)]
+#[cfg_attr(not(creusot), derive(Debug, PartialEq))]
 pub(crate) enum IdMask {
     // All IDs are selected
     All,
@@ -29,7 +34,19 @@ pub(crate) enum IdMask {
 }
 
 impl IdMask {
+    #[cfg(creusot)]
+    #[logic(open(crate))]
+    pub(crate) fn has(self, id: u32) -> bool {
+        match self {
+            Self::All => true,
+            Self::None => false,
+            Self::Some(bitmap) => bitmap.has(id),
+            Self::NotSome(bitmap) => !bitmap.has(id),
+        }
+    }
+
     #[allow(dead_code)] // used by the execute_as_id_mask path in bitmap.rs
+    #[cfg_attr(creusot, ensures(result == self.has(id)))]
     pub(crate) fn contains(&self, id: u32) -> bool {
         match self {
             Self::All => true,
@@ -48,6 +65,7 @@ impl IdMask {
     }
 
     /// Combines two masks with OR logic, returning spare bitmaps to the pool.
+    #[cfg_attr(creusot, ensures(forall<id: u32> result.has(id) == (self.has(id) || rhs.has(id))))]
     pub(crate) fn combine_or(self, rhs: Self, pool: &mut IdBitmapPool) -> Self {
         match (self, rhs) {
             (Self::All, other) | (other, Self::All) => {
@@ -87,6 +105,7 @@ impl IdMask {
     }
 
     /// Combines two masks with AND logic, returning spare bitmaps to the pool.
+    #[cfg_attr(creusot, ensures(forall<id: u32> result.has(id) == (self.has(id) && rhs.has(id))))]
     pub(crate) fn combine_and(self, rhs: Self, pool: &mut IdBitmapPool) -> Self {
         match (self, rhs) {
             (Self::None, other) | (other, Self::None) => {

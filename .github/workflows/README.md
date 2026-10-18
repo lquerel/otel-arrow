@@ -77,9 +77,11 @@ but are omitted from merge-queue runs.
 
 `creusot.yml` runs on relevant pull requests and main pushes, manual dispatch,
 and weekly upstream main checks. It builds a pinned verifier container locally
-on the runner and checks the shared rate-bucket arithmetic with fresh proofs
-and negative controls. It does not publish an image. Failures are visible, but
-this pilot is outside the required Rust aggregate during rollout.
+on the runner and checks shared rate-bucket arithmetic plus IdMask/bitmap
+selection with fresh proofs and negative controls. Both targets reuse one
+checksum-verified toolchain image and upload separate evidence artifacts.
+Failures are visible, and the pilot remains outside the required Rust aggregate
+during rollout. The workflow does not publish an image.
 
 PRs restore the dedicated Docker cache; only main runs write it. Max mode keeps
 the intermediate compiler/OCaml layers. Monitor its size within the repository's

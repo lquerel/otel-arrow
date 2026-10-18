@@ -41,6 +41,8 @@ mod expr;
 mod filter;
 mod fork;
 mod functions;
+// The standalone proof target enables annotations only within this module.
+#[allow(unexpected_cfgs)]
 pub(crate) mod id_mask;
 mod planner;
 mod project;
