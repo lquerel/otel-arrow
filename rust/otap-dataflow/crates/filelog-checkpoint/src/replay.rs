@@ -6,8 +6,15 @@
 use std::collections::{HashMap, HashSet};
 
 #[allow(unexpected_cfgs)]
+mod ownership;
+use ownership::{claim_available, effective_owner, live_locator, replacement_allowed};
+
+#[allow(unexpected_cfgs)]
 mod transitions;
 use transitions::apply_progress_fields;
+
+#[cfg(test)]
+mod transaction_tests;
 
 use crate::primitives::quarantine_reason_reserved;
 use crate::{
@@ -314,11 +321,14 @@ impl ReplayState {
                     let _ = claims.insert(locator, None);
                 }
                 if let Some(locator) = new_locator {
-                    let owner = claims
-                        .get(&locator)
-                        .copied()
-                        .unwrap_or_else(|| self.live_locators.get(&locator).copied());
-                    if owner.is_some_and(|owner| owner != id) {
+                    let staged_owner = claims.get(&locator).copied();
+                    let base_owner = if staged_owner.is_none() {
+                        self.live_locators.get(&locator).copied()
+                    } else {
+                        None
+                    };
+                    let owner = effective_owner(base_owner, staged_owner);
+                    if !claim_available(owner.is_some(), owner == Some(id)) {
                         return Err(invalid(id, "locator already has a live owner"));
                     }
                     let _ = claims.insert(locator, Some(id));
@@ -334,9 +344,12 @@ impl ReplayState {
         }
         for (removed, locator) in replacements {
             let replacement = claims.get(&locator).copied().flatten();
-            if !replacement.is_some_and(|id| {
-                id != removed && registrations.contains(&id) && !self.records.contains_key(&id)
-            }) {
+            if !replacement_allowed(
+                removed,
+                replacement,
+                replacement.is_some_and(|id| registrations.contains(&id)),
+                replacement.is_some_and(|id| self.records.contains_key(&id)),
+            ) {
                 return Err(invalid(
                     removed,
                     "non-administrative removal requires a new same-locator registration",
@@ -421,10 +434,6 @@ impl ReplayState {
 
 fn invalid(file_id: FileId, reason: &'static str) -> ReplayError {
     ReplayError::InvalidState { file_id, reason }
-}
-
-fn live_locator(record: &SnapshotRecord) -> Option<Locator> {
-    (record.lifecycle_state != LifecycleState::RotatedFinalized).then_some(record.locator)
 }
 
 fn profile_compatible(record: &SnapshotRecord, config: &ReplayConfig) -> bool {

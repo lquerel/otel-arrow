@@ -37,6 +37,7 @@ pub enum LifecycleState {
 
 /// Normalized platform-neutral file locator.
 #[cfg_attr(not(creusot), derive(Debug, Clone, Copy, PartialEq, Eq, Hash))]
+#[cfg_attr(creusot, derive(DeepModel, Clone, Copy, PartialEq, Eq))]
 pub enum Locator {
     /// No locator is available. Version 1 snapshot and registration state
     /// rejects this value, but the discriminant remains part of the codec.

@@ -8,7 +8,7 @@ from pathlib import Path
 import tempfile
 import unittest
 
-from verify import MUTATIONS, REPO, require_proved, require_rejected, require_selected_proved
+from verify import CONTRACT_CONTROLS, MUTATIONS, PROOF, REPO, require_proved, require_rejected, require_selected_proved
 
 
 class VerificationEvidenceTests(unittest.TestCase):
@@ -71,6 +71,16 @@ class VerificationEvidenceTests(unittest.TestCase):
         for label, relative, old, _, _ in MUTATIONS:
             with self.subTest(label=label):
                 self.assertEqual((REPO / relative).read_text().count(old), 1)
+
+    # Scenario: a contract control drifts from its source or reviewed proof inventory.
+    # Guarantees: every producer and consumer is uniquely selected and each weakening has one site.
+    def test_contract_controls_select_reviewed_functions(self):
+        expected = json.loads((PROOF / "expected-proofs.json").read_text())
+        for label, relative, contract, producer, consumer in CONTRACT_CONTROLS:
+            with self.subTest(label=label):
+                self.assertEqual((REPO / relative).read_text().count(contract), 1)
+                for function in (producer, consumer):
+                    self.assertEqual(sum(path.endswith("/" + function) for path in expected), 1)
 
 
 if __name__ == "__main__":

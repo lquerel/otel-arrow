@@ -10,8 +10,13 @@ pub use replay_values::*;
 #[path = "../../../crates/filelog-checkpoint/src/replay/transitions.rs"]
 mod transitions;
 
+#[path = "../../../crates/filelog-checkpoint/src/replay/ownership.rs"]
+mod ownership;
+
 #[cfg(creusot)]
 mod requirements;
+#[cfg(creusot)]
+mod transaction;
 
 #[cfg(test)]
 mod tests;

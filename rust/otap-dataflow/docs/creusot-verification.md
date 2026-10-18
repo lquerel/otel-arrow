@@ -10,7 +10,8 @@ its nightly compiler. Proof targets are standalone Cargo workspaces under
 | Target | Production source | Established properties | Important exclusions |
 | --- | --- | --- | --- |
 | [Rate bucket](../tools/creusot-rate-bucket/README.md) | `crates/engine/src/admission/bucket/math.rs` | Exact saturated rate cost; monotonic, bounded arrival-time transition; arithmetic panic safety | Atomic protocol, clocks, scheduling, end-to-end admission, and performance |
-| [Checkpoint transitions](../tools/creusot-checkpoint/README.md) | `crates/filelog-checkpoint/src/replay/transitions.rs` and `replay_values.rs` | Progress acceptance, continuation boundaries, reset epochs, rejected-reset preservation, terminal finalization, full keep-failed no-op | Record selection, transaction staging/rollback, sequence and locator indices, source evidence, codecs, filesystem durability, and concurrency |
+| [Checkpoint transitions](../tools/creusot-checkpoint/README.md) | `crates/filelog-checkpoint/src/replay/{transitions,ownership}.rs` and `replay_values.rs` | Progress, continuation boundaries, reset epochs, rejected-reset preservation, finalization, keep-failed no-op, tombstones, claim and replacement decisions | Record selection, concrete map orchestration, source evidence, codecs, filesystem durability, and concurrency |
+| [Checkpoint transaction model](../tools/creusot-checkpoint/README.md#transaction-rollback-and-ownership) | `tools/creusot-checkpoint/src/transaction.rs`; runtime conformance tests in the checkpoint crate | Arbitrary finite ordered edits; full rejection rollback; exactly-once sequence advancement; final admission; bidirectional locator ownership | Model-to-HashMap refinement is tested, not formally proved; validation flags, snapshot initialization, progress fast path, prepared/base binding, crash durability |
 
 The production crate and proof target compile the same function bodies. Proof
 annotations and logical definitions are conditional on `cfg(creusot)`. Keep
@@ -21,8 +22,12 @@ A separate model proves properties of its own transitions. It requires an
 explicit connection to production through shared implementation or conformance
 checks. A passing model proof is not a claim that surrounding async code is
 verified. Partition and transform lifecycle behavior and ID selection are outside
-these targets. Checkpoint transaction staging, sequence/index invariants,
-source evidence, and filesystem behavior are not formally covered.
+these targets. Checkpoint transaction rollback and sequence/index invariants
+are proved at the finite-map protocol level. The concrete adapter's connection
+is covered by 11,100 bounded record-scanning conformance cases and existing
+replay tests. The pinned library lacks the required `HashMap` mutation specs;
+there is no formal refinement proof for that adapter. Source evidence and
+filesystem behavior remain outside the proof.
 
 ## Local and CI workflow
 
@@ -38,7 +43,10 @@ fresh verification output, rejects deliberate bugs, and rechecks the original
 source. The [target README](../tools/creusot-rate-bucket/README.md) documents
 prerequisites, exact pins, trusted specifications, and evidence locations.
 The [checkpoint target](../tools/creusot-checkpoint/README.md) reuses that
-tooling and documents its additional state-transition contracts and controls.
+tooling and documents its state-transition contracts, transaction model,
+conformance boundary, and controls. A separate advisory job runs the production
+checkpoint tests, including the private-index conformance checks, with Rust
+1.98.1; both job results matter.
 
 [Creusot CI](../../../.github/workflows/creusot.yml) runs on relevant pull
 requests, relevant pushes to main, manual dispatch, and weekly upstream main

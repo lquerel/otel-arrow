@@ -183,3 +183,57 @@ fn zero_delta_and_finalization() {
         transitions::check_progress(&record, &update(&record, 110, FramingResume::Clean)).is_err()
     );
 }
+
+/// Scenario: A staged release or replacement overrides an existing base owner.
+/// Guarantees: Tombstones mask the base; fresh claims and replacement eligibility use value equality.
+#[test]
+fn ownership_decisions_preserve_overlay_and_freshness() {
+    use crate::ownership::{claim_available, effective_owner, replacement_allowed};
+    let old = FileId([1; 16]);
+    let new = FileId([2; 16]);
+    assert_eq!(effective_owner(Some(old), None), Some(old));
+    assert_eq!(effective_owner(Some(old), Some(None)), None);
+    assert_eq!(effective_owner(Some(old), Some(Some(new))), Some(new));
+    for occupied in [false, true] {
+        for same in [false, true] {
+            assert_eq!(claim_available(occupied, same), !occupied || same);
+        }
+    }
+    assert!(replacement_allowed(old, Some(new), true, false));
+    for replacement in [None, Some(old), Some(new)] {
+        for registered in [false, true] {
+            for existed in [false, true] {
+                assert_eq!(
+                    replacement_allowed(old, replacement, registered, existed),
+                    replacement == Some(new) && registered && !existed
+                );
+            }
+        }
+    }
+}
+
+/// Scenario: Active and quarantined records share the same platform locator shapes as finalized records.
+/// Guarantees: Only finalization releases ownership, including Windows identities compared by byte value.
+#[test]
+fn lifecycle_ownership_includes_quarantined_windows_records() {
+    for locator in [
+        Locator::PosixDevIno { dev: 7, ino: 9 },
+        Locator::WindowsVolumeFileId {
+            volume_serial: 11,
+            file_id: [255; 16],
+        },
+    ] {
+        for lifecycle in [
+            LifecycleState::Active,
+            LifecycleState::Quarantined,
+            LifecycleState::RotatedFinalized,
+        ] {
+            let mut r = record(1, 10, FramingResume::Clean, lifecycle);
+            r.locator = locator;
+            assert_eq!(
+                ownership::live_locator(&r),
+                (lifecycle != LifecycleState::RotatedFinalized).then_some(locator)
+            );
+        }
+    }
+}

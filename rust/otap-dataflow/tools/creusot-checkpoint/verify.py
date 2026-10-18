@@ -22,7 +22,11 @@ RELATIVE = PROOF.relative_to(REPO)
 INFRA = PROOF.parent / "creusot-rate-bucket"
 VALUES = Path("rust/otap-dataflow/crates/filelog-checkpoint/src/replay_values.rs")
 KERNEL = Path("rust/otap-dataflow/crates/filelog-checkpoint/src/replay/transitions.rs")
-SOURCES = (VALUES, KERNEL)
+OWNERSHIP = Path("rust/otap-dataflow/crates/filelog-checkpoint/src/replay/ownership.rs")
+MODEL = RELATIVE / "src/transaction.rs"
+ADAPTER = Path("rust/otap-dataflow/crates/filelog-checkpoint/src/replay.rs")
+RUNTIME_TESTS = ADAPTER.parent / "replay/transaction_tests.rs"
+SOURCES = (VALUES, KERNEL, OWNERSHIP)
 
 # Share the image pin, logging, timeout, and proof-rejection checks with the rate target.
 _spec = importlib.util.spec_from_file_location("rate_verifier", INFRA / "verify.py")
@@ -32,7 +36,7 @@ IMAGE = _infra.IMAGE
 run = _infra.run
 require_rejected = _infra.require_rejected
 
-# Mutate only executable production code, keeping the contracts intact.
+# Mutate shared executable decisions and the protocol model, keeping contracts intact.
 MUTATIONS = (
     ("stale-epoch-accepted", KERNEL,
      "require(record, LifecycleState::Active, op.expected_file_epoch)?;",
@@ -56,8 +60,33 @@ MUTATIONS = (
     ("finalization-leaves-active", KERNEL,
      "record.lifecycle_state = LifecycleState::RotatedFinalized;",
      "record.lifecycle_state = LifecycleState::Active;", "apply_progress_fields"),
+    ("tombstone-reuses-base-owner", OWNERSHIP,
+     "        Some(owner) => owner,\n        None => base,",
+     "        Some(None) => base,\n        Some(owner) => owner,\n        None => base,", "effective_owner"),
+    ("claim-steals-live-locator", OWNERSHIP,
+     "    !occupied || same_owner\n}", "    occupied || same_owner\n}", "claim_available"),
+    ("replacement-reuses-existing-id", OWNERSHIP,
+     "        Some(id) => id != removed && registered && !existed,\n    }\n}",
+     "        Some(id) => id != removed && registered,\n    }\n}", "replacement_allowed"),
+    ("quarantine-releases-locator", OWNERSHIP,
+     "record.lifecycle_state != LifecycleState::RotatedFinalized).then_some(record.locator)",
+     "record.lifecycle_state == LifecycleState::Active).then_some(record.locator)", "live_locator"),
+    ("model-leaks-released-claim", MODEL,
+     "let _ = t.owners.remove_ghost(&loc);", "let _ = loc;", "stage_edit"),
+    ("model-publishes-rejected-prefix", MODEL,
+     "if !stage_all(&mut staged, edits) {\n        return false;",
+     "if !stage_all(&mut staged, edits) {\n        state.tables = staged;\n        return false;", "replay_transaction"),
+    ("model-advances-sequence-before-validation", MODEL,
+     "let mut staged = Tables", "state.sequence = sequence;\n    let mut staged = Tables", "replay_transaction"),
+    ("model-ignores-final-admission", MODEL,
+     "if !tail_valid || staged.records.len_ghost() > limit {", "if !tail_valid {", "replay_transaction"),
 )
 CONTRACT = "ensures((result == Ok(())) == progress_allowed(*record, *op))"
+CONTRACT_CONTROLS = (
+    ("progress-acceptance", KERNEL, CONTRACT, "check_progress", "accepted_progress_applies_atomically"),
+    ("transaction-rollback", MODEL, "ensures(!result ==> ^state == *state)",
+     "replay_transaction", "rejected_tail_rolls_back"),
+)
 
 
 
@@ -112,7 +141,7 @@ def main():
     dirty = bool(subprocess.check_output(["git", "status", "--porcelain"], cwd=REPO, text=True))
     image_id = subprocess.check_output(
         ["docker", "image", "inspect", args.image, "--format", "{{.Id}}"], text=True).strip()
-    inputs = [*(REPO / relative for relative in SOURCES), *sorted(PROOF.glob("src/*.rs")),
+    inputs = [*(REPO / relative for relative in (*SOURCES, ADAPTER, RUNTIME_TESTS)), *sorted(PROOF.glob("src/*.rs")),
               *(PROOF / name for name in ("Cargo.toml", "Cargo.lock", "rust-toolchain.toml",
                                            "why3find.json", "why3find-negative.json", "verify.py", "expected-proofs.json")),
               *(INFRA / name for name in ("Dockerfile", ".dockerignore", "provers.sha256",
@@ -160,7 +189,7 @@ def main():
         negative_config = (target / "why3find-negative.json").read_text()
         config_path.write_text(negative_config)
         positive_controls = sorted({entry[4] for entry in MUTATIONS} |
-                                   {"accepted_progress_applies_atomically"})
+                                   {entry[4] for entry in CONTRACT_CONTROLS})
         for function in positive_controls:
             require_selected_proved(*prove(f"positive-control-{function}", (function,)),
                                     target / "verif", expected, function)
@@ -173,28 +202,27 @@ def main():
             require_rejected(*prove(label, (function,)), function)
             path.write_text(original)
             print(f"PASS: rejected {label}", flush=True)
+        for label, relative, contract, producer, consumer in CONTRACT_CONTROLS:
+            config_path.write_text(original_config)
+            path = root / relative
+            original = path.read_text()
+            if original.count(contract) != 1:
+                raise RuntimeError(f"Contract mutation anchor is not unique: {label}")
+            path.write_text(original.replace(contract, "ensures(true)"))
+            require_selected_proved(*prove(f"weakened-{label}-producer", (producer,)),
+                                    target / "verif", expected, producer)
+            config_path.write_text(negative_config)
+            require_rejected(*prove(f"weakened-{label}-consumer", (consumer,)), consumer)
+            path.write_text(original)
+            print(f"PASS: weakened {label} contract rejected by its consumer", flush=True)
         config_path.write_text(original_config)
-        # A vacuous producer contract must still prove, while its requirement consumer fails.
-        kernel = root / KERNEL
-        original = kernel.read_text()
-        if original.count(CONTRACT) != 1:
-            raise RuntimeError("Contract mutation anchor is not unique")
-        kernel.write_text(original.replace(CONTRACT, "ensures(true)"))
-        require_selected_proved(*prove("weakened-contract-producer", ("check_progress",)),
-                                target / "verif", expected, "check_progress")
-        config_path.write_text(negative_config)
-        require_rejected(*prove("weakened-contract-consumer", ("accepted_progress_applies_atomically",)),
-                         "accepted_progress_applies_atomically")
-        kernel.write_text(original)
-        config_path.write_text(original_config)
-        print("PASS: weakened contract rejected by its requirement consumer", flush=True)
         require_proved(*prove("restored"), target / "verif", expected)
     report["status"] = "proved"
     report["proof_files"] = len(expected)
     report["negative_budget_positive_controls"] = positive_controls
-    report["negative_controls"] = [entry[0] for entry in MUTATIONS] + ["weakened-contract"]
+    report["negative_controls"] = [entry[0] for entry in MUTATIONS] + [f"weakened-{entry[0]}" for entry in CONTRACT_CONTROLS]
     report_path.write_text(json.dumps(report, indent=2) + "\n")
-    print(f"All {len(expected)} proof files proved; all {len(MUTATIONS) + 1} negative controls rejected. "
+    print(f"All {len(expected)} proof files proved; all {len(MUTATIONS) + len(CONTRACT_CONTROLS)} negative controls rejected. "
           f"Reports: {reports}")
 
 

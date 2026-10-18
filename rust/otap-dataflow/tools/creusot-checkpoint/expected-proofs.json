@@ -1,4 +1,21 @@
 {
+  "otel_arrow_dfe_checkpoint_proof_rlib/ownership/claim_available": [
+    "vc_claim_available"
+  ],
+  "otel_arrow_dfe_checkpoint_proof_rlib/ownership/effective_owner": [
+    "vc_effective_owner_I",
+    "vc_elim_Some"
+  ],
+  "otel_arrow_dfe_checkpoint_proof_rlib/ownership/live_locator": [
+    "vc_live_locator",
+    "vc_ne_LifecycleState",
+    "vc_then_some_Locator"
+  ],
+  "otel_arrow_dfe_checkpoint_proof_rlib/ownership/replacement_allowed": [
+    "vc_elim_Some",
+    "vc_ne_I",
+    "vc_replacement_allowed_I"
+  ],
   "otel_arrow_dfe_checkpoint_proof_rlib/replay_values/EMPTY_FRONTIER_GUARD_DIGEST": [
     "vc_const_EMPTY_FRONTIER_GUARD_DIGEST_def"
   ],
@@ -23,6 +40,20 @@
   "otel_arrow_dfe_checkpoint_proof_rlib/replay_values/impl_Clone_for_LifecycleState/clone": [
     "vc_clone_LifecycleState"
   ],
+  "otel_arrow_dfe_checkpoint_proof_rlib/replay_values/impl_Clone_for_Locator/clone": [
+    "vc_clone_Locator",
+    "vc_clone_array_u8_16",
+    "vc_clone_u64",
+    "vc_clone_u8",
+    "vc_elim_PosixDevIno",
+    "vc_elim_WindowsVolumeFileId"
+  ],
+  "otel_arrow_dfe_checkpoint_proof_rlib/replay_values/impl_Clone_for_Locator/clone__refines": [
+    "refines",
+    "vc_clone_array_u8_16",
+    "vc_clone_u64",
+    "vc_clone_u8"
+  ],
   "otel_arrow_dfe_checkpoint_proof_rlib/replay_values/impl_Clone_for_ResetQuarantineAction/clone": [
     "vc_clone_ResetQuarantineAction"
   ],
@@ -45,6 +76,9 @@
   ],
   "otel_arrow_dfe_checkpoint_proof_rlib/replay_values/impl_Eq_for_LifecycleState/assert_fields_are_eq": [
     "vc_assert_fields_are_eq_LifecycleState"
+  ],
+  "otel_arrow_dfe_checkpoint_proof_rlib/replay_values/impl_Eq_for_Locator/assert_fields_are_eq": [
+    "vc_assert_fields_are_eq_Locator"
   ],
   "otel_arrow_dfe_checkpoint_proof_rlib/replay_values/impl_Eq_for_ResetQuarantineAction/assert_fields_are_eq": [
     "vc_assert_fields_are_eq_ResetQuarantineAction"
@@ -71,6 +105,15 @@
     "vc_eq_LifecycleState"
   ],
   "otel_arrow_dfe_checkpoint_proof_rlib/replay_values/impl_PartialEq_for_LifecycleState/eq__refines": [
+    "refines"
+  ],
+  "otel_arrow_dfe_checkpoint_proof_rlib/replay_values/impl_PartialEq_for_Locator/eq": [
+    "vc_elim_PosixDevIno",
+    "vc_elim_WindowsVolumeFileId",
+    "vc_eq_Locator",
+    "vc_eq_array_u8_16"
+  ],
+  "otel_arrow_dfe_checkpoint_proof_rlib/replay_values/impl_PartialEq_for_Locator/eq__refines": [
     "refines"
   ],
   "otel_arrow_dfe_checkpoint_proof_rlib/replay_values/impl_PartialEq_for_ResetQuarantineAction/eq": [
@@ -121,6 +164,81 @@
     "vc_reset_after_truncate",
     "vc_reset_rejects_late_progress",
     "vc_set_EMPTY_FRONTIER_GUARD_DIGEST"
+  ],
+  "otel_arrow_dfe_checkpoint_proof_rlib/transaction/accepts_unchanged_transaction": [
+    "vc_accepts_unchanged_transaction",
+    "vc_replay_transaction"
+  ],
+  "otel_arrow_dfe_checkpoint_proof_rlib/transaction/collision_rolls_back": [
+    "vc_collision_rolls_back",
+    "vc_replay_transaction"
+  ],
+  "otel_arrow_dfe_checkpoint_proof_rlib/transaction/evaluate": [
+    "vc_evaluate"
+  ],
+  "otel_arrow_dfe_checkpoint_proof_rlib/transaction/impl_Clone_for_Edit/clone": [
+    "vc_clone_Edit",
+    "vc_clone_Int",
+    "vc_clone_Option_Int",
+    "vc_clone_Option_Record",
+    "vc_clone_Record",
+    "vc_clone_bool"
+  ],
+  "otel_arrow_dfe_checkpoint_proof_rlib/transaction/impl_Clone_for_Record/clone": [
+    "vc_clone_Int",
+    "vc_clone_Option_Int",
+    "vc_clone_Record"
+  ],
+  "otel_arrow_dfe_checkpoint_proof_rlib/transaction/overlay": [
+    "vc_overlay_V"
+  ],
+  "otel_arrow_dfe_checkpoint_proof_rlib/transaction/rejected_tail_rolls_back": [
+    "vc_rejected_tail_rolls_back",
+    "vc_replay_transaction"
+  ],
+  "otel_arrow_dfe_checkpoint_proof_rlib/transaction/released_overlay_hides_owner": [
+    "vc_effective_owner_u64",
+    "vc_released_overlay_hides_owner"
+  ],
+  "otel_arrow_dfe_checkpoint_proof_rlib/transaction/replay_preserves_unique_owners": [
+    "vc_replay_preserves_unique_owners",
+    "vc_replay_transaction"
+  ],
+  "otel_arrow_dfe_checkpoint_proof_rlib/transaction/replay_transaction": [
+    "vc_checked_add",
+    "vc_elim_Some",
+    "vc_gt_Int",
+    "vc_len_ghost_Int",
+    "vc_replay_transaction",
+    "vc_stage_all"
+  ],
+  "otel_arrow_dfe_checkpoint_proof_rlib/transaction/sequence_exhaustion_rolls_back": [
+    "vc_replay_transaction",
+    "vc_sequence_exhaustion_rolls_back"
+  ],
+  "otel_arrow_dfe_checkpoint_proof_rlib/transaction/stage_all": [
+    "vc_elim_Some",
+    "vc_pop_front_ghost_Edit",
+    "vc_stage_all",
+    "vc_stage_all'0",
+    "vc_stage_edit"
+  ],
+  "otel_arrow_dfe_checkpoint_proof_rlib/transaction/stage_edit": [
+    "vc_claim_available",
+    "vc_copied_Int",
+    "vc_copied_Record",
+    "vc_elim_Some",
+    "vc_elim_Some'0",
+    "vc_eq_Int",
+    "vc_get_ghost_Int",
+    "vc_get_ghost_Int'0",
+    "vc_insert_ghost_Int",
+    "vc_insert_ghost_Int'0",
+    "vc_is_some_Int",
+    "vc_ne_Int",
+    "vc_remove_ghost_Int",
+    "vc_remove_ghost_Int'0",
+    "vc_stage_edit"
   ],
   "otel_arrow_dfe_checkpoint_proof_rlib/transitions/apply_progress_fields": [
     "vc_apply_progress_fields"
