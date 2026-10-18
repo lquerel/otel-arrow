@@ -9460,3 +9460,257 @@ fn state_dir_untrusted_ancestor_rejected_at_startup() {
     assert!(matches!(error, Error::StateDirectory(_)));
     assert!(!path.exists());
 }
+
+fn seed_runtime_recovery_promotion(runtime: &ControllerRuntime<()>, pipeline_key: &PipelineKey) {
+    let mut state = runtime.state.lock().unwrap();
+    let context_bindings = Arc::clone(&state.latest_context_bindings);
+    let _ = state.generation_counters.insert(pipeline_key.clone(), 2);
+    let _ = state.runtime_recoveries.insert(
+        (pipeline_key.clone(), 0),
+        RuntimeRecoveryState {
+            serving_generation: 0,
+            context_bindings,
+            restart_count: 1,
+            ready_since: None,
+            worker_id: Some(7),
+            candidate_generation: Some(1),
+            cancel_requested: false,
+        },
+    );
+}
+
+/// Scenario: Recovery pauses immediately before publishing generation 1 while a rollout requests lifecycle ownership, then the rollout commits generation 2 before the old worker finishes.
+/// Guarantees: Publication retains the controller lock through the handoff; the old worker's continuation cannot overwrite the newer serving generation.
+#[test]
+fn runtime_recovery_publication_is_atomic_with_rollout_handoff() {
+    let config = engine_config_with_pipeline(&rollback_test_pipeline_yaml(1, false));
+    let runtime = test_runtime(&config);
+    let _runner = ObservedStateRunner::start(&runtime);
+    register_existing_pipeline(&runtime, &config);
+    let pipeline_key = PipelineKey::new("g1".into(), "p1".into());
+    let candidate_key = deployed_key("g1", "p1", 0, 1);
+    let _candidate_rx =
+        register_runtime_instance(&runtime, "g1", "p1", 0, 1, RuntimeInstanceLifecycle::Active);
+    report_ready(&runtime, candidate_key.clone());
+    let _ = wait_for_observed_status(&runtime, &pipeline_key, |status| {
+        status
+            .instance_status(0, 1)
+            .is_some_and(|instance| matches!(instance.phase(), PipelinePhase::Running))
+    });
+    seed_runtime_recovery_promotion(&runtime, &pipeline_key);
+    let (publishing_tx, publishing_rx) = std::sync::mpsc::channel();
+    let (publish_tx, publish_rx) = std::sync::mpsc::channel();
+    let (promoted_tx, promoted_rx) = std::sync::mpsc::channel();
+    let (finish_tx, finish_rx) = std::sync::mpsc::channel();
+    let worker_runtime = Arc::clone(&runtime);
+    let worker_key = pipeline_key.clone();
+    let worker_candidate = candidate_key.clone();
+    let worker = thread::spawn(move || {
+        let promoted =
+            worker_runtime.promote_runtime_recovery(&worker_key, 0, 7, &worker_candidate, || {
+                publishing_tx.send(()).unwrap();
+                publish_rx.recv_timeout(Duration::from_secs(10)).unwrap();
+                worker_runtime
+                    .observed_state_store
+                    .set_pipeline_serving_generation(worker_key.clone(), 0, 1);
+            });
+        worker_runtime.state_changed.notify_all();
+        promoted_tx.send(promoted).unwrap();
+        finish_rx.recv_timeout(Duration::from_secs(10)).unwrap();
+        // This is the real worker's only state-changing continuation after promotion.
+        worker_runtime.prune_pipeline_runtime_and_history(&worker_key);
+    });
+    publishing_rx.recv_timeout(Duration::from_secs(10)).unwrap();
+    // Publication is paused, so this is a deterministic check of the ownership gap.
+    let publication_holds_ownership = matches!(
+        runtime.state.try_lock(),
+        Err(std::sync::TryLockError::WouldBlock)
+    );
+    let (reservation_tx, reservation_rx) = std::sync::mpsc::channel();
+    let rollout_runtime = Arc::clone(&runtime);
+    let rollout_key = pipeline_key.clone();
+    let rollout = thread::spawn(move || {
+        let reservation = rollout_runtime
+            .begin_pipeline_operation_reservation(
+                rollout_key.clone(),
+                PipelineOperationKind::Rollout,
+            )
+            .unwrap();
+        rollout_runtime.cancel_runtime_recoveries_for_pipeline(&rollout_key);
+        reservation_tx.send(reservation).unwrap();
+    });
+    publish_tx.send(()).unwrap();
+    assert_eq!(
+        promoted_rx.recv_timeout(Duration::from_secs(10)).unwrap(),
+        Some(true)
+    );
+    let reservation = reservation_rx
+        .recv_timeout(Duration::from_secs(10))
+        .unwrap();
+    rollout.join().unwrap();
+    assert_eq!(
+        runtime
+            .observed_state_handle
+            .pipeline_status(&pipeline_key)
+            .unwrap()
+            .serving_generations()
+            .get(&0),
+        Some(&1)
+    );
+    let plan = runtime
+        .prepare_rollout_plan(
+            "g1",
+            "p1",
+            &ReconfigureRequest {
+                pipeline: rollback_test_pipeline_config(1, true),
+                step_timeout_secs: 2,
+                drain_timeout_secs: 2,
+            },
+        )
+        .unwrap();
+    assert_eq!(plan.target_deployment.baseline_generation, 2);
+    runtime
+        .insert_rollout(&pipeline_key, plan.rollout.clone())
+        .unwrap();
+    drop(reservation);
+    let _new_rx =
+        register_runtime_instance(&runtime, "g1", "p1", 0, 2, RuntimeInstanceLifecycle::Active);
+    report_ready(&runtime, deployed_key("g1", "p1", 0, 2));
+    let _ = wait_for_observed_status(&runtime, &pipeline_key, |status| {
+        status
+            .instance_status(0, 2)
+            .is_some_and(|instance| matches!(instance.phase(), PipelinePhase::Running))
+    });
+    runtime.note_instance_exit(candidate_key, RuntimeInstanceExit::Success);
+    runtime.commit_pipeline_deployment(&plan);
+    runtime.clear_pipeline_serving_generations(&pipeline_key, [0]);
+    runtime.update_rollout(&pipeline_key, &plan.rollout.rollout_id, |rollout| {
+        rollout.state = RolloutLifecycleState::Succeeded
+    });
+    runtime.finish_rollout(&pipeline_key, &plan.rollout.rollout_id);
+    finish_tx.send(()).unwrap();
+    worker.join().unwrap();
+    assert!(
+        publication_holds_ownership,
+        "recovery released lifecycle ownership before publishing its serving generation"
+    );
+    let status = runtime
+        .observed_state_handle
+        .pipeline_status(&pipeline_key)
+        .unwrap();
+    assert_eq!(status.active_generation(), Some(2));
+    assert_eq!(
+        status.serving_generations().get(&0),
+        None,
+        "old recovery worker restored a stale serving override after rollout commit"
+    );
+    assert!(status.readiness());
+}
+
+/// Scenario: A ready recovery candidate loses worker ownership, is cancelled or preempted, exits, or is removed before promotion.
+/// Guarantees: Rejected promotions never invoke the status publisher or change the previously selected serving generation.
+#[test]
+fn runtime_recovery_rejected_promotion_does_not_publish() {
+    for reason in [
+        "stale",
+        "cancelled",
+        "rollout",
+        "shutdown",
+        "global_shutdown",
+        "rollout_reservation",
+        "shutdown_reservation",
+        "engine",
+        "exited",
+        "missing",
+    ] {
+        let config = engine_config_with_pipeline(&rollback_test_pipeline_yaml(1, false));
+        let runtime = test_runtime(&config);
+        register_existing_pipeline(&runtime, &config);
+        let pipeline_key = PipelineKey::new("g1".into(), "p1".into());
+        let target = deployed_key("g1", "p1", 0, 1);
+        let _rx =
+            register_runtime_instance(&runtime, "g1", "p1", 0, 1, RuntimeInstanceLifecycle::Active);
+        seed_runtime_recovery_promotion(&runtime, &pipeline_key);
+        {
+            let mut state = runtime.state.lock().unwrap();
+            match reason {
+                "stale" => {
+                    state
+                        .runtime_recoveries
+                        .get_mut(&(pipeline_key.clone(), 0))
+                        .unwrap()
+                        .worker_id = Some(8)
+                }
+                "cancelled" => {
+                    state
+                        .runtime_recoveries
+                        .get_mut(&(pipeline_key.clone(), 0))
+                        .unwrap()
+                        .cancel_requested = true
+                }
+                "rollout" => {
+                    let _ = state
+                        .active_rollouts
+                        .insert(pipeline_key.clone(), "new-rollout".into());
+                }
+                "shutdown" => {
+                    let _ = state
+                        .active_shutdowns
+                        .insert(pipeline_key.clone(), "shutdown".into());
+                }
+                "rollout_reservation" | "shutdown_reservation" => {
+                    let _ = state.pipeline_operation_reservations.insert(
+                        pipeline_key.clone(),
+                        PipelineOperationReservationState {
+                            reservation_id: 9,
+                            kind: if reason == "rollout_reservation" {
+                                PipelineOperationKind::Rollout
+                            } else {
+                                PipelineOperationKind::Shutdown
+                            },
+                        },
+                    );
+                }
+                "global_shutdown" => state.global_shutdown_requested = true,
+                "engine" => state.active_engine_operation = Some("reconcile".into()),
+                "exited" => {
+                    state.runtime_instances.get_mut(&target).unwrap().lifecycle =
+                        RuntimeInstanceLifecycle::Exited(RuntimeInstanceExit::Success)
+                }
+                "missing" => {
+                    let _ = state.runtime_recoveries.remove(&(pipeline_key.clone(), 0));
+                }
+                _ => unreachable!(),
+            }
+        }
+        assert_eq!(
+            runtime.promote_runtime_recovery(&pipeline_key, 0, 7, &target, || panic!(
+                "rejected {reason} recovery published status"
+            )),
+            if reason == "missing" {
+                None
+            } else {
+                Some(false)
+            },
+            "{reason}"
+        );
+        let status = runtime
+            .observed_state_handle
+            .pipeline_status(&pipeline_key)
+            .unwrap();
+        assert_eq!(status.active_generation(), Some(0));
+        assert!(status.serving_generations().is_empty(), "{reason}");
+        let state = runtime.state.lock().unwrap();
+        if let Some(recovery) = state.runtime_recoveries.get(&(pipeline_key.clone(), 0)) {
+            assert_eq!(recovery.serving_generation, 0, "{reason}");
+            assert_eq!(recovery.restart_count, 1, "{reason}");
+            assert!(recovery.ready_since.is_none(), "{reason}");
+            assert_eq!(recovery.candidate_generation, Some(1), "{reason}");
+            assert_eq!(
+                recovery.worker_id,
+                Some(if reason == "stale" { 8 } else { 7 }),
+                "{reason}"
+            );
+        }
+    }
+}
