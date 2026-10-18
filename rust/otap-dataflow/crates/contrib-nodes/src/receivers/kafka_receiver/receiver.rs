@@ -12,7 +12,7 @@ use super::identity::OwnershipGeneration;
 use super::metrics::{KafkaReceiverMetrics, KafkaReceiverRejectionReason};
 use super::offset_tracker::OffsetTracker;
 use super::rebalance::{RebalanceState, RebalancingConsumerContext};
-use super::retry::RetryManager;
+use super::retry::{DeliveryGenerationExhausted, RetryManager};
 #[cfg(feature = "aws")]
 use crate::common::kafka::security::build_aws_msk_context;
 use async_trait::async_trait;
@@ -159,6 +159,18 @@ pub static KAFKA_RECEIVER: ReceiverFactory<OtapPdata> = ReceiverFactory {
 };
 
 impl KafkaReceiver {
+    fn delivery_generation_error(
+        error: DeliveryGenerationExhausted,
+        receiver_id: &NodeId,
+    ) -> EngineError {
+        EngineError::ReceiverError {
+            receiver: receiver_id.clone(),
+            kind: ReceiverErrorKind::Other,
+            error: error.to_string(),
+            source_detail: String::new(),
+        }
+    }
+
     /// Create a new kafka receiver from the config.
     ///
     /// Config is already validated via [`KafkaReceiverConfig`]'s `TryFrom`
@@ -755,7 +767,7 @@ impl KafkaReceiver {
                                     self.handle_transient_nack(
                                         &nack_msg.unwind.route.calldata,
                                         consumer.as_ref(),
-                                    );
+                                    ).map_err(|error| Self::delivery_generation_error(error, &receiver_id))?;
                                 } else {
                                     self.handle_terminal_offset_feedback(
                                         &nack_msg.unwind.route.calldata,
@@ -900,13 +912,15 @@ impl KafkaReceiver {
                                 self.rebalance_state.current_generation(&topic, partition);
                             let ownership_generation =
                                 OwnershipGeneration::from_raw(ownership_generation_raw);
-                            let delivery_generation = manual_commit.then(|| {
-                                self.retry_manager.delivery_generation(
+                            let delivery_generation = if manual_commit {
+                                Some(self.retry_manager.delivery_generation(
                                     &topic,
                                     partition,
                                     ownership_generation,
-                                )
-                            });
+                                ).map_err(|error| Self::delivery_generation_error(error, &receiver_id))?)
+                            } else {
+                                None
+                            };
                             let deliberate_replay = delivery_generation.is_some_and(|generation| {
                                 self.retry_manager.is_replay_delivery(
                                     &topic,

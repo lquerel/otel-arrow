@@ -266,10 +266,10 @@ fn reconcile_revocation_drops_active_retry_without_advancing_offset() {
     receiver
         .offset_tracker
         .track("traces", 0, 12, ownership_raw);
-    let original_delivery =
-        receiver
-            .retry_manager
-            .delivery_generation("traces", 0, ownership_generation);
+    let original_delivery = receiver
+        .retry_manager
+        .delivery_generation("traces", 0, ownership_generation)
+        .expect("delivery generation available");
     let rewind = receiver
         .offset_tracker
         .prepare_replay("traces", 0, 12, ownership_raw)
@@ -279,18 +279,21 @@ fn reconcile_revocation_drops_active_retry_without_advancing_offset() {
         .replay_backoff()
         .expect("replay config")
         .clone();
-    let replay_delivery = receiver.retry_manager.begin_retry(
-        BeginRetry {
-            topic: "traces",
-            partition: 0,
-            ownership_generation,
-            failed_offset: 12,
-            rewind_offset: rewind,
-            paused: true,
-            now: Instant::now(),
-        },
-        &retry_config,
-    );
+    let replay_delivery = receiver
+        .retry_manager
+        .begin_retry(
+            BeginRetry {
+                topic: "traces",
+                partition: 0,
+                ownership_generation,
+                failed_offset: 12,
+                rewind_offset: rewind,
+                paused: true,
+                now: Instant::now(),
+            },
+            &retry_config,
+        )
+        .expect("delivery generation available");
     assert_ne!(original_delivery, replay_delivery);
 
     receiver
@@ -361,7 +364,8 @@ fn replay_operation_failures_preserve_failed_offset_watermark() {
         assert!(!receiver.offset_tracker.acknowledge("traces", 0, 13));
         let _ = receiver
             .retry_manager
-            .delivery_generation("traces", 0, ownership_generation);
+            .delivery_generation("traces", 0, ownership_generation)
+            .expect("delivery generation available");
         let rewind = receiver
             .offset_tracker
             .prepare_replay("traces", 0, 12, ownership_raw)
@@ -371,18 +375,21 @@ fn replay_operation_failures_preserve_failed_offset_watermark() {
             .replay_backoff()
             .expect("replay config")
             .clone();
-        let _ = receiver.retry_manager.begin_retry(
-            BeginRetry {
-                topic: "traces",
-                partition: 0,
-                ownership_generation,
-                failed_offset: 12,
-                rewind_offset: rewind,
-                paused: initially_paused,
-                now: Instant::now() - Duration::from_secs(1),
-            },
-            &retry_config,
-        );
+        let _ = receiver
+            .retry_manager
+            .begin_retry(
+                BeginRetry {
+                    topic: "traces",
+                    partition: 0,
+                    ownership_generation,
+                    failed_offset: 12,
+                    rewind_offset: rewind,
+                    paused: initially_paused,
+                    now: Instant::now() - Duration::from_secs(1),
+                },
+                &retry_config,
+            )
+            .expect("delivery generation available");
         let consumer = FailingReplayConsumer::new(failed_operation);
 
         receiver.process_due_replays(&consumer);
@@ -445,7 +452,8 @@ fn replay_phase_ownership_change_discards_stale_state_without_advancing_offset()
             assert!(!receiver.offset_tracker.acknowledge("traces", 0, 13));
             let _ = receiver
                 .retry_manager
-                .delivery_generation("traces", 0, ownership_generation);
+                .delivery_generation("traces", 0, ownership_generation)
+                .expect("delivery generation available");
             let rewind = receiver
                 .offset_tracker
                 .prepare_replay("traces", 0, 12, ownership_raw)
@@ -455,18 +463,21 @@ fn replay_phase_ownership_change_discards_stale_state_without_advancing_offset()
                 .replay_backoff()
                 .expect("replay config")
                 .clone();
-            let replay_delivery = receiver.retry_manager.begin_retry(
-                BeginRetry {
-                    topic: "traces",
-                    partition: 0,
-                    ownership_generation,
-                    failed_offset: 12,
-                    rewind_offset: rewind,
-                    paused: *initially_paused,
-                    now: Instant::now() - Duration::from_secs(1),
-                },
-                &retry_config,
-            );
+            let replay_delivery = receiver
+                .retry_manager
+                .begin_retry(
+                    BeginRetry {
+                        topic: "traces",
+                        partition: 0,
+                        ownership_generation,
+                        failed_offset: 12,
+                        rewind_offset: rewind,
+                        paused: *initially_paused,
+                        now: Instant::now() - Duration::from_secs(1),
+                    },
+                    &retry_config,
+                )
+                .expect("delivery generation available");
             let consumer = OwnershipChangingReplayConsumer::new(
                 *change_during,
                 change,
@@ -1099,4 +1110,109 @@ async fn transient_nack_reassignment_to_same_consumer_redelivers_failed_offset()
         },
     )
     .await;
+}
+
+/// Scenario: Current transient feedback arrives after the final delivery token has been issued.
+/// Guarantees: The error occurs before offset rewind, snapshot changes, pause/seek/resume, or retry scheduling.
+#[test]
+fn exhausted_generation_rejects_replay_before_side_effects() {
+    let cfg = manual_traces_config_with_replay("unused:9092", "g", "traces");
+    let mut receiver = KafkaReceiver::new(make_pipeline_ctx(0, 1, 0), cfg).unwrap();
+    let mut assignment = TopicPartitionList::new();
+    let _ = assignment.add_partition("traces", 0);
+    receiver
+        .rebalance_state
+        .set_assignment_for_test(&assignment);
+    let ownership_raw = receiver.rebalance_state.current_generation("traces", 0);
+    receiver
+        .retry_manager
+        .set_next_delivery_generation_for_test(u64::MAX);
+    let token = receiver
+        .retry_manager
+        .delivery_generation("traces", 0, OwnershipGeneration::from_raw(ownership_raw))
+        .unwrap();
+    let topic_id = receiver.topic_registry.get_or_assign("traces").unwrap();
+    let calldata = encode_calldata(topic_id, 0, 5, token);
+    receiver.offset_tracker.track("traces", 0, 5, ownership_raw);
+    receiver.offset_tracker.track("traces", 0, 6, ownership_raw);
+    receiver.refresh_committable_snapshot();
+    let before = receiver.offset_tracker.committable_snapshot();
+    let consumer = FailingReplayConsumer::new(ReplayOperation::Pause);
+    assert_eq!(
+        receiver.handle_transient_nack(&calldata, &consumer),
+        Err(DeliveryGenerationExhausted)
+    );
+    assert!(consumer.calls.borrow().is_empty());
+    assert_eq!(receiver.offset_tracker.total_pending(), 2);
+    assert_eq!(receiver.offset_tracker.committable_snapshot(), before);
+    assert_eq!(receiver.retry_manager.paused_count(), 0);
+    assert!(receiver.retry_manager.next_deadline().is_none());
+}
+
+/// Scenario: New delivery admission or transient-Nack replay needs a token after the final one has been issued.
+/// Guarantees: Both receive-loop callers return a receiver error within the deadline and leave the failed record uncommitted.
+#[tokio::test]
+async fn receiver_stops_when_delivery_generation_space_is_exhausted() {
+    for exhaust_on_replay in [false, true] {
+        with_cluster(
+            KafkaTestCluster::builder().topic("generation-exhaustion"),
+            |cluster| async move {
+                let producer = cluster.producer().build();
+                produce_records(
+                    &producer,
+                    "generation-exhaustion",
+                    1,
+                    "rec",
+                    &encoded_trace_fixture(),
+                )
+                .await;
+                let group = "generation-exhaustion-group";
+                let cfg = manual_traces_config_with_replay(
+                    cluster.bootstrap_servers(),
+                    group,
+                    "generation-exhaustion",
+                );
+                let mut node = KafkaReceiver::new(make_pipeline_ctx(0, 1, 0), cfg).unwrap();
+                node.retry_manager
+                    .set_next_delivery_generation_for_test(u64::MAX);
+                if !exhaust_on_replay {
+                    let _ = node
+                        .retry_manager
+                        .delivery_generation("already-issued", 0, OwnershipGeneration::from_raw(1))
+                        .unwrap();
+                }
+                let mut receiver = KafkaReceiverHarness::start_prepared(node, None);
+                if exhaust_on_replay {
+                    let pdata = receiver.recv_pdata().await;
+                    let (_, _, _, token) = decode_calldata(&pdata.source_route().unwrap().calldata);
+                    assert_eq!(token.raw(), u64::MAX);
+                    receiver.nack_transient("retry after token exhaustion", pdata);
+                }
+                let error = tokio::time::timeout(Duration::from_secs(30), receiver.await_failure())
+                    .await
+                    .expect("receiver must stop after token exhaustion");
+                assert!(matches!(
+                    error,
+                    EngineError::ReceiverError {
+                        kind: ReceiverErrorKind::Other,
+                        ..
+                    }
+                ));
+                assert!(
+                    error
+                        .to_string()
+                        .contains("delivery generation space exhausted")
+                );
+                assert!(
+                    probe_committed_offset(
+                        cluster.bootstrap_servers(),
+                        group,
+                        "generation-exhaustion"
+                    )
+                    .is_none_or(|offset| offset <= 0)
+                );
+            },
+        )
+        .await;
+    }
 }

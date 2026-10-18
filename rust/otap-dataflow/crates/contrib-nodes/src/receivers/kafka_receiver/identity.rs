@@ -41,9 +41,12 @@ impl DeliveryGeneration {
         self.0
     }
 
-    /// Advance to the next representable generation without wrapping.
+    /// Advance to a fresh generation, or report that no successor exists.
     #[must_use]
-    pub(crate) const fn saturating_next(self) -> Self {
-        Self(self.0.saturating_add(1))
+    pub(crate) const fn checked_next(self) -> Option<Self> {
+        match self.0.checked_add(1) {
+            Some(next) => Some(Self(next)),
+            None => None,
+        }
     }
 }

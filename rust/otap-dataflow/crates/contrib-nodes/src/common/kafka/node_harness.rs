@@ -585,9 +585,17 @@ mod receiver_harness {
             generation: u64,
         ) -> Self {
             let pipeline_ctx = test_pipeline_context_with_generation(generation);
-            let node_config = Arc::new(NodeUserConfig::new_receiver_config(KAFKA_RECEIVER_URN));
             let receiver =
                 KafkaReceiver::new(pipeline_ctx, cfg).expect("kafka receiver config is valid");
+            Self::start_prepared(receiver, capture_policy)
+        }
+
+        /// Starts an already constructed receiver, allowing boundary-state fixtures.
+        pub(crate) fn start_prepared(
+            receiver: KafkaReceiver,
+            capture_policy: Option<HeaderCapturePolicy>,
+        ) -> Self {
+            let node_config = Arc::new(NodeUserConfig::new_receiver_config(KAFKA_RECEIVER_URN));
             let rebalance_state = receiver.rebalance_state_for_test();
             let receiver = Box::new(receiver);
 
@@ -833,6 +841,15 @@ mod receiver_harness {
                     reason: "kafka-test drain".to_string(),
                 })
                 .expect("send drain ingress to receiver");
+        }
+
+        /// Awaits an expected receiver error and rejects panics or a clean stop.
+        pub(crate) async fn await_failure(self) -> EngineError {
+            match self.join.await {
+                Ok(Err(error)) => error,
+                Ok(Ok(_)) => panic!("kafka-test: receiver unexpectedly succeeded"),
+                Err(error) => panic!("kafka-test: receiver task panicked: {error}"),
+            }
         }
 
         /// Awaits the spawned receiver task's completion.

@@ -9,6 +9,13 @@ use super::scheduling::{DeadlineIndex, capped_exponential_backoff, checked_deadl
 use std::collections::{HashMap, VecDeque};
 use std::time::{Duration, Instant};
 
+/// Fresh delivery identities are exhausted for this receiver lifetime.
+#[derive(Debug, PartialEq, Eq, thiserror::Error)]
+#[error(
+    "Kafka delivery generation space exhausted; receiver must stop before issuing another delivery identity"
+)]
+pub(crate) struct DeliveryGenerationExhausted;
+
 /// Maximum revoked delivery identities retained for late-feedback classification.
 const MAX_FEEDBACK_TOMBSTONES: usize = 1_024;
 
@@ -98,7 +105,8 @@ pub(crate) struct RetryManager {
     scheduled_replays: DeadlineIndex<ReplayKey, DeliveryGeneration>,
     /// Bounded identities for classifying feedback received after revocation.
     feedback_tombstones: VecDeque<FeedbackTombstone>,
-    next_delivery_generation: DeliveryGeneration,
+    /// None permanently closes allocation after the final token is issued.
+    next_delivery_generation: Option<DeliveryGeneration>,
     paused_partitions: usize,
 }
 
@@ -110,15 +118,33 @@ impl RetryManager {
             partitions: HashMap::new(),
             scheduled_replays: DeadlineIndex::new(),
             feedback_tombstones: VecDeque::with_capacity(MAX_FEEDBACK_TOMBSTONES),
-            next_delivery_generation: DeliveryGeneration::FIRST,
+            next_delivery_generation: Some(DeliveryGeneration::FIRST),
             paused_partitions: 0,
         }
     }
 
-    fn allocate_delivery_generation(&mut self) -> DeliveryGeneration {
-        let generation = self.next_delivery_generation;
-        self.next_delivery_generation = self.next_delivery_generation.saturating_next();
-        generation
+    /// Check before receiver-side rewind or broker operations, which must not
+    /// start a new replay when its feedback identity cannot be made fresh.
+    pub(crate) fn ensure_generation_available(&self) -> Result<(), DeliveryGenerationExhausted> {
+        self.next_delivery_generation
+            .map(|_| ())
+            .ok_or(DeliveryGenerationExhausted)
+    }
+
+    fn allocate_delivery_generation(
+        &mut self,
+    ) -> Result<DeliveryGeneration, DeliveryGenerationExhausted> {
+        let generation = self
+            .next_delivery_generation
+            .ok_or(DeliveryGenerationExhausted)?;
+        self.next_delivery_generation = generation.checked_next();
+        Ok(generation)
+    }
+
+    /// Seed the lifetime boundary before a receiver test allocates any identities.
+    #[cfg(test)]
+    pub(crate) fn set_next_delivery_generation_for_test(&mut self, generation: u64) {
+        self.next_delivery_generation = Some(DeliveryGeneration::from_raw(generation));
     }
 
     fn state(&self, topic: &str, partition: i32) -> Option<&PartitionState> {
@@ -208,23 +234,24 @@ impl RetryManager {
     /// A newly observed ownership period gets a fresh delivery generation. A
     /// transient NACK also advances this generation, independently of Kafka
     /// assignment generations, so feedback from the pre-replay delivery is stale.
+    /// Exhaustion rejects a new identity before changing existing partition state.
     pub(crate) fn delivery_generation(
         &mut self,
         topic: &str,
         partition: i32,
         ownership_generation: OwnershipGeneration,
-    ) -> DeliveryGeneration {
+    ) -> Result<DeliveryGeneration, DeliveryGenerationExhausted> {
         if let Some(state) = self.state(topic, partition)
             && state.ownership_generation == ownership_generation
         {
-            return state.delivery_generation;
+            return Ok(state.delivery_generation);
         }
 
+        let delivery_generation = self.allocate_delivery_generation()?;
         if let Some(previous) = self.take_state(topic, partition) {
             self.remember_feedback_tombstone(topic, partition, &previous);
         }
 
-        let delivery_generation = self.allocate_delivery_generation();
         self.put_state(
             topic,
             partition,
@@ -234,7 +261,7 @@ impl RetryManager {
                 retry: None,
             },
         );
-        delivery_generation
+        Ok(delivery_generation)
     }
 
     /// Returns the ownership generation for current feedback.
@@ -264,16 +291,17 @@ impl RetryManager {
     }
 
     /// Starts or restarts replay backoff and advances the delivery generation.
+    /// Exhaustion leaves the previous replay state and derived indexes intact.
     pub(crate) fn begin_retry(
         &mut self,
         request: BeginRetry<'_>,
         config: &ReplayBackoffConfig,
-    ) -> DeliveryGeneration {
+    ) -> Result<DeliveryGeneration, DeliveryGenerationExhausted> {
         let attempts = self
             .state(request.topic, request.partition)
             .and_then(|state| state.retry.as_ref())
             .map_or(0, |retry| retry.attempts);
-        let delivery_generation = self.allocate_delivery_generation();
+        let delivery_generation = self.allocate_delivery_generation()?;
         let deadline = retry_deadline(request.now, config, attempts);
         let _ = self.take_state(request.topic, request.partition);
         let state = PartitionState {
@@ -290,7 +318,7 @@ impl RetryManager {
             }),
         };
         self.put_state(request.topic, request.partition, state);
-        delivery_generation
+        Ok(delivery_generation)
     }
 
     /// Returns the earliest scheduled replay deadline.
@@ -543,19 +571,23 @@ mod tests {
     #[test]
     fn retry_advances_delivery_generation_without_changing_ownership() {
         let mut manager = RetryManager::new();
-        let original = manager.delivery_generation("traces", 0, ownership(7));
-        let replay = manager.begin_retry(
-            BeginRetry {
-                topic: "traces",
-                partition: 0,
-                ownership_generation: ownership(7),
-                failed_offset: 12,
-                rewind_offset: 10,
-                paused: true,
-                now: Instant::now(),
-            },
-            &replay_config(),
-        );
+        let original = manager
+            .delivery_generation("traces", 0, ownership(7))
+            .expect("delivery generation available");
+        let replay = manager
+            .begin_retry(
+                BeginRetry {
+                    topic: "traces",
+                    partition: 0,
+                    ownership_generation: ownership(7),
+                    failed_offset: 12,
+                    rewind_offset: 10,
+                    paused: true,
+                    now: Instant::now(),
+                },
+                &replay_config(),
+            )
+            .expect("delivery generation available");
 
         assert_ne!(original, replay);
         assert_eq!(
@@ -576,19 +608,23 @@ mod tests {
         let config = replay_config();
         let start = Instant::now();
         let mut manager = RetryManager::new();
-        let _ = manager.delivery_generation("traces", 0, ownership(1));
-        let delivery = manager.begin_retry(
-            BeginRetry {
-                topic: "traces",
-                partition: 0,
-                ownership_generation: ownership(1),
-                failed_offset: 5,
-                rewind_offset: 5,
-                paused: true,
-                now: start,
-            },
-            &config,
-        );
+        let _ = manager
+            .delivery_generation("traces", 0, ownership(1))
+            .expect("delivery generation available");
+        let delivery = manager
+            .begin_retry(
+                BeginRetry {
+                    topic: "traces",
+                    partition: 0,
+                    ownership_generation: ownership(1),
+                    failed_offset: 5,
+                    rewind_offset: 5,
+                    paused: true,
+                    now: start,
+                },
+                &config,
+            )
+            .expect("delivery generation available");
 
         let mut expected_delay = 10_u128;
         for _ in 0..4 {
@@ -609,19 +645,23 @@ mod tests {
     #[test]
     fn revocation_drops_retry_but_retains_feedback_tombstone() {
         let mut manager = RetryManager::new();
-        let _ = manager.delivery_generation("traces", 0, ownership(3));
-        let replay = manager.begin_retry(
-            BeginRetry {
-                topic: "traces",
-                partition: 0,
-                ownership_generation: ownership(3),
-                failed_offset: 8,
-                rewind_offset: 8,
-                paused: true,
-                now: Instant::now(),
-            },
-            &replay_config(),
-        );
+        let _ = manager
+            .delivery_generation("traces", 0, ownership(3))
+            .expect("delivery generation available");
+        let replay = manager
+            .begin_retry(
+                BeginRetry {
+                    topic: "traces",
+                    partition: 0,
+                    ownership_generation: ownership(3),
+                    failed_offset: 8,
+                    rewind_offset: 8,
+                    paused: true,
+                    now: Instant::now(),
+                },
+                &replay_config(),
+            )
+            .expect("delivery generation available");
 
         manager.revoke_if_older("traces", 0, ownership(3));
 
@@ -639,19 +679,23 @@ mod tests {
     #[test]
     fn only_current_rewind_feedback_completes_replay() {
         let mut manager = RetryManager::new();
-        let original = manager.delivery_generation("traces", 0, ownership(1));
-        let replay = manager.begin_retry(
-            BeginRetry {
-                topic: "traces",
-                partition: 0,
-                ownership_generation: ownership(1),
-                failed_offset: 11,
-                rewind_offset: 10,
-                paused: true,
-                now: Instant::now(),
-            },
-            &replay_config(),
-        );
+        let original = manager
+            .delivery_generation("traces", 0, ownership(1))
+            .expect("delivery generation available");
+        let replay = manager
+            .begin_retry(
+                BeginRetry {
+                    topic: "traces",
+                    partition: 0,
+                    ownership_generation: ownership(1),
+                    failed_offset: 11,
+                    rewind_offset: 10,
+                    paused: true,
+                    now: Instant::now(),
+                },
+                &replay_config(),
+            )
+            .expect("delivery generation available");
         let due = manager
             .due_replays(Instant::now() + Duration::from_secs(1), 1)
             .pop()
@@ -672,20 +716,26 @@ mod tests {
     #[test]
     fn replay_state_is_partition_local() {
         let mut manager = RetryManager::new();
-        let _ = manager.delivery_generation("traces", 0, ownership(1));
-        let healthy_generation = manager.delivery_generation("traces", 1, ownership(1));
-        let _ = manager.begin_retry(
-            BeginRetry {
-                topic: "traces",
-                partition: 0,
-                ownership_generation: ownership(1),
-                failed_offset: 4,
-                rewind_offset: 4,
-                paused: true,
-                now: Instant::now(),
-            },
-            &replay_config(),
-        );
+        let _ = manager
+            .delivery_generation("traces", 0, ownership(1))
+            .expect("delivery generation available");
+        let healthy_generation = manager
+            .delivery_generation("traces", 1, ownership(1))
+            .expect("delivery generation available");
+        let _ = manager
+            .begin_retry(
+                BeginRetry {
+                    topic: "traces",
+                    partition: 0,
+                    ownership_generation: ownership(1),
+                    failed_offset: 4,
+                    rewind_offset: 4,
+                    paused: true,
+                    now: Instant::now(),
+                },
+                &replay_config(),
+            )
+            .expect("delivery generation available");
 
         assert!(manager.blocks_delivery("traces", 0));
         assert!(!manager.blocks_delivery("traces", 1));
@@ -704,19 +754,23 @@ mod tests {
         let config = replay_config();
         let start = Instant::now();
         let mut manager = RetryManager::new();
-        let _ = manager.delivery_generation("traces", 0, ownership(1));
-        let _ = manager.begin_retry(
-            BeginRetry {
-                topic: "traces",
-                partition: 0,
-                ownership_generation: ownership(1),
-                failed_offset: 5,
-                rewind_offset: 5,
-                paused: true,
-                now: start,
-            },
-            &config,
-        );
+        let _ = manager
+            .delivery_generation("traces", 0, ownership(1))
+            .expect("delivery generation available");
+        let _ = manager
+            .begin_retry(
+                BeginRetry {
+                    topic: "traces",
+                    partition: 0,
+                    ownership_generation: ownership(1),
+                    failed_offset: 5,
+                    rewind_offset: 5,
+                    paused: true,
+                    now: start,
+                },
+                &config,
+            )
+            .expect("delivery generation available");
         let due_at = manager.next_deadline().expect("deadline scheduled");
         let replay = manager.due_replays(due_at, 1).pop().expect("replay is due");
 
@@ -739,20 +793,24 @@ mod tests {
         });
         let start = Instant::now();
         let mut manager = RetryManager::new();
-        let _ = manager.delivery_generation("traces", 0, ownership(1));
+        let _ = manager
+            .delivery_generation("traces", 0, ownership(1))
+            .expect("delivery generation available");
 
-        let _ = manager.begin_retry(
-            BeginRetry {
-                topic: "traces",
-                partition: 0,
-                ownership_generation: ownership(1),
-                failed_offset: 5,
-                rewind_offset: 5,
-                paused: true,
-                now: start,
-            },
-            &config,
-        );
+        let _ = manager
+            .begin_retry(
+                BeginRetry {
+                    topic: "traces",
+                    partition: 0,
+                    ownership_generation: ownership(1),
+                    failed_offset: 5,
+                    rewind_offset: 5,
+                    paused: true,
+                    now: start,
+                },
+                &config,
+            )
+            .expect("delivery generation available");
 
         assert!(
             manager
@@ -770,19 +828,23 @@ mod tests {
         let start = Instant::now();
         let mut manager = RetryManager::new();
         for partition in 0..5 {
-            let _ = manager.delivery_generation("traces", partition, ownership(1));
-            let _ = manager.begin_retry(
-                BeginRetry {
-                    topic: "traces",
-                    partition,
-                    ownership_generation: ownership(1),
-                    failed_offset: 5,
-                    rewind_offset: 5,
-                    paused: true,
-                    now: start,
-                },
-                &config,
-            );
+            let _ = manager
+                .delivery_generation("traces", partition, ownership(1))
+                .expect("delivery generation available");
+            let _ = manager
+                .begin_retry(
+                    BeginRetry {
+                        topic: "traces",
+                        partition,
+                        ownership_generation: ownership(1),
+                        failed_offset: 5,
+                        rewind_offset: 5,
+                        paused: true,
+                        now: start,
+                    },
+                    &config,
+                )
+                .expect("delivery generation available");
         }
         let due_at = manager.next_deadline().expect("deadline scheduled");
 
@@ -803,7 +865,9 @@ mod tests {
         let mut oldest_delivery = DeliveryGeneration::default();
         let mut newest_delivery = DeliveryGeneration::default();
         for partition in 0..=(MAX_FEEDBACK_TOMBSTONES as i32) {
-            let delivery = manager.delivery_generation("traces", partition, ownership(1));
+            let delivery = manager
+                .delivery_generation("traces", partition, ownership(1))
+                .expect("delivery generation available");
             if partition == 0 {
                 oldest_delivery = delivery;
             }
@@ -825,6 +889,82 @@ mod tests {
                 newest_delivery,
             ),
             Some(ownership(1)),
+        );
+        manager.assert_indexes_consistent();
+    }
+
+    /// Scenario: The last available identity is allocated before a new partition or ownership period needs another.
+    /// Guarantees: The final token is issued once, exhaustion is permanent, and rejected allocations leave current ownership and indexes intact.
+    #[test]
+    fn exhausted_generation_rejects_new_delivery_without_mutating_state() {
+        let mut manager = RetryManager::new();
+        manager.set_next_delivery_generation_for_test(u64::MAX);
+        let final_token = manager
+            .delivery_generation("test", 0, ownership(1))
+            .unwrap();
+        assert_eq!(final_token.raw(), u64::MAX);
+        assert_eq!(
+            manager.ensure_generation_available(),
+            Err(DeliveryGenerationExhausted)
+        );
+        for _ in 0..2 {
+            assert_eq!(
+                manager.delivery_generation("test", 0, ownership(2)),
+                Err(DeliveryGenerationExhausted)
+            );
+            assert_eq!(
+                manager.delivery_generation("test", 1, ownership(1)),
+                Err(DeliveryGenerationExhausted)
+            );
+        }
+        assert_eq!(
+            manager.delivery_generation("test", 0, ownership(1)),
+            Ok(final_token)
+        );
+        assert_eq!(
+            manager.feedback_ownership_generation("test", 0, final_token),
+            Some(ownership(1))
+        );
+        assert_eq!(manager.partitions["test"].len(), 1);
+        assert!(manager.feedback_tombstones.is_empty());
+        manager.assert_indexes_consistent();
+    }
+
+    /// Scenario: Replay consumes the last fresh token and a subsequent replay requests one more.
+    /// Guarantees: Old feedback stays fenced, the next replay fails, and the existing retry deadline, pause accounting, and identity remain unchanged.
+    #[test]
+    fn exhausted_generation_cannot_reuse_replay_identity() {
+        let mut manager = RetryManager::new();
+        manager.set_next_delivery_generation_for_test(u64::MAX - 1);
+        let old = manager
+            .delivery_generation("test", 0, ownership(1))
+            .unwrap();
+        let request = || BeginRetry {
+            topic: "test",
+            partition: 0,
+            ownership_generation: ownership(1),
+            failed_offset: 5,
+            rewind_offset: 5,
+            paused: true,
+            now: Instant::now(),
+        };
+        let final_token = manager.begin_retry(request(), &replay_config()).unwrap();
+        assert_eq!(final_token.raw(), u64::MAX);
+        let deadline = manager.next_deadline();
+        assert_eq!(manager.feedback_ownership_generation("test", 0, old), None);
+        for _ in 0..2 {
+            assert_eq!(
+                manager.begin_retry(request(), &replay_config()),
+                Err(DeliveryGenerationExhausted)
+            );
+        }
+        assert_eq!(manager.next_deadline(), deadline);
+        assert_eq!(manager.paused_count(), 1);
+        assert!(manager.blocks_delivery("test", 0));
+        assert_eq!(manager.feedback_ownership_generation("test", 0, old), None);
+        assert_eq!(
+            manager.feedback_ownership_generation("test", 0, final_token),
+            Some(ownership(1))
         );
         manager.assert_indexes_consistent();
     }

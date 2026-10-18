@@ -1170,3 +1170,102 @@ fn total_pending_cache_matches_scan_across_mutations() {
     assert!(tracker.acknowledge("traces", 1, 210));
     assert_in_flight_agrees(&tracker, 0);
 }
+
+/// Scenario: The largest offset is acknowledged after the native list has already published it.
+/// Guarantees: Snapshot and native commits omit the exhausted partition, retain sibling progress, and never wrap or reuse its cached offset.
+#[test]
+fn exhausted_offset_is_omitted_from_snapshot_and_native_commit_list() {
+    let mut tracker = OffsetTracker::new();
+    tracker.track("exhausted", 0, i64::MAX - 1, 1);
+    assert!(tracker.acknowledge("exhausted", 0, i64::MAX - 1));
+    assert_eq!(
+        tracker.committable_snapshot()[&("exhausted".into(), 0)],
+        i64::MAX
+    );
+    tracker.track("exhausted", 0, i64::MAX, 1);
+    tracker.track("healthy", 1, 7, 1);
+    assert_eq!(
+        tracker
+            .committable_tpl()
+            .find_partition("exhausted", 0)
+            .unwrap()
+            .offset(),
+        Offset::Offset(i64::MAX)
+    );
+
+    assert!(tracker.acknowledge("exhausted", 0, i64::MAX));
+    let snapshot = tracker.committable_snapshot();
+    assert!(!snapshot.contains_key(&("exhausted".into(), 0)));
+    assert_eq!(snapshot[&("healthy".into(), 1)], 7);
+    let tpl = tracker.committable_tpl();
+    assert_eq!(tpl.count(), 1);
+    assert!(tpl.find_partition("exhausted", 0).is_none());
+    assert_eq!(
+        tpl.find_partition("healthy", 1).unwrap().offset(),
+        Offset::Offset(7)
+    );
+    assert_eq!(tracker.total_pending(), 1);
+    assert_eq!(tracker.partition_generation("exhausted", 0), Some(1));
+    assert!(tracker.is_known_offset_for_generation("exhausted", 0, i64::MAX, 1));
+}
+
+/// Scenario: A later maximum offset is acknowledged while an earlier offset still blocks commit.
+/// Guarantees: The lower pending barrier remains committable until its acknowledgement exhausts the successor.
+#[test]
+fn maximum_ack_preserves_lower_pending_commit_barrier() {
+    let mut tracker = OffsetTracker::new();
+    tracker.track("test", 0, i64::MAX - 1, 1);
+    tracker.track("test", 0, i64::MAX, 1);
+    assert!(!tracker.acknowledge("test", 0, i64::MAX));
+    assert_eq!(
+        tracker.committable_snapshot()[&("test".into(), 0)],
+        i64::MAX - 1
+    );
+    assert_eq!(
+        tracker
+            .committable_tpl()
+            .find_partition("test", 0)
+            .unwrap()
+            .offset(),
+        Offset::Offset(i64::MAX - 1)
+    );
+    assert!(tracker.acknowledge("test", 0, i64::MAX - 1));
+    assert!(tracker.committable_snapshot().is_empty());
+    assert_eq!(tracker.committable_tpl().count(), 0);
+    assert_eq!(tracker.total_pending(), 0);
+}
+
+/// Scenario: An exhausted partition survives a sibling revocation, then receives stale and fresh ownership deliveries.
+/// Guarantees: Rebuilding cannot resurrect an exhausted commit entry; a fresh ownership period restores normal snapshot and native commits.
+#[test]
+fn exhausted_partition_retracking_restores_commit_list() {
+    let mut tracker = OffsetTracker::new();
+    tracker.track("test", 0, i64::MAX, 1);
+    assert!(tracker.acknowledge("test", 0, i64::MAX));
+    tracker.track("test", 1, 7, 1);
+    tracker.revoke("test", 1);
+    assert_eq!(tracker.committable_tpl().count(), 0);
+    tracker.track("test", 0, 0, 0);
+    assert_eq!(tracker.committable_tpl().count(), 0);
+    assert_eq!(tracker.total_pending(), 0);
+    tracker.track("test", 0, 0, 2);
+    assert_eq!(
+        tracker
+            .committable_tpl()
+            .find_partition("test", 0)
+            .unwrap()
+            .offset(),
+        Offset::Offset(0)
+    );
+    assert!(tracker.acknowledge("test", 0, 0));
+    assert_eq!(tracker.committable_snapshot()[&("test".into(), 0)], 1);
+    assert_eq!(
+        tracker
+            .committable_tpl()
+            .find_partition("test", 0)
+            .unwrap()
+            .offset(),
+        Offset::Offset(1)
+    );
+    assert_eq!(tracker.total_pending(), 0);
+}

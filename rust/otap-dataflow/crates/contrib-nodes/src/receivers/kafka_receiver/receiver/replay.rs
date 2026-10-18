@@ -4,7 +4,7 @@
 //! Kafka client operations and receiver orchestration for transient-NACK replay.
 
 use super::KafkaReceiver;
-use crate::receivers::kafka_receiver::retry::{BeginRetry, DueReplay};
+use crate::receivers::kafka_receiver::retry::{BeginRetry, DeliveryGenerationExhausted, DueReplay};
 use otel_arrow_dfe_engine::control::CallData;
 use rdkafka::consumer::{Consumer, ConsumerContext, StreamConsumer};
 use rdkafka::error::KafkaError;
@@ -116,20 +116,21 @@ impl KafkaReceiver {
         &mut self,
         calldata: &CallData,
         consumer: &O,
-    ) {
+    ) -> Result<(), DeliveryGenerationExhausted> {
         let Some(retry_config) = self.config.replay_backoff().cloned() else {
-            return;
+            return Ok(());
         };
         let Some(feedback) = self.resolve_offset_feedback(calldata) else {
-            return;
+            return Ok(());
         };
+        self.retry_manager.ensure_generation_available()?;
         let Some(rewind_offset) = self.offset_tracker.prepare_replay(
             &feedback.topic,
             feedback.partition,
             feedback.offset,
             feedback.ownership_generation.raw(),
         ) else {
-            return;
+            return Ok(());
         };
 
         let paused = match consumer.pause_partition(&feedback.topic, feedback.partition) {
@@ -157,7 +158,7 @@ impl KafkaReceiver {
                 now: Instant::now(),
             },
             &retry_config,
-        );
+        )?;
         self.refresh_committable_snapshot();
         otel_warn!(
             "kafka.retry.schedule",
@@ -167,6 +168,7 @@ impl KafkaReceiver {
             rewind_offset = rewind_offset,
             delivery_generation = delivery_generation.raw(),
         );
+        Ok(())
     }
 
     /// Run every pause/seek/resume replay attempt whose backoff has elapsed.

@@ -156,10 +156,11 @@ impl PartitionTracker {
     /// The offset that should be committed for this partition.
     ///
     /// Returns the lowest pending offset if any are in-flight, otherwise
-    /// `high_water_mark + 1` if all offsets have been acknowledged.
+    /// `high_water_mark + 1` if representable and all offsets have been acknowledged.
+    /// Returns `None` after acknowledging `i64::MAX` with no pending barrier.
     fn committable_offset(&self) -> Option<i64> {
         self.lowest_pending()
-            .or_else(|| self.high_water_mark().map(|h| h + 1))
+            .or_else(|| self.high_water_mark().and_then(|h| h.checked_add(1)))
     }
 
     /// Number of pending (un-acked) offsets.
@@ -196,9 +197,10 @@ impl PartitionTracker {
 ///
 /// Keyed by topic name, then by partition. Maintains a persistent
 /// [`TopicPartitionList`] (`tpl`) whose **partition membership mirrors the
-/// tracked partition set**: [`track`](Self::track) registers a partition the
-/// first time it is seen and [`revoke`](Self::revoke) rebuilds the list without
-/// it. [`committable_tpl`](Self::committable_tpl) then only has to update
+/// tracked partition set, excluding exhausted commit offsets**:
+/// [`track`](Self::track) registers a partition the first time it is seen and
+/// [`revoke`](Self::revoke) rebuilds the list without it. Acknowledging an exhausted offset also rebuilds the list to omit it.
+/// [`committable_tpl`](Self::committable_tpl) then only has to update
 /// offsets in place each commit, avoiding per-commit reallocation and FFI
 /// reconstruction.
 ///
@@ -209,9 +211,9 @@ impl PartitionTracker {
 pub struct OffsetTracker {
     partitions: HashMap<String, HashMap<i32, PartitionTracker>>,
     /// Persistent TPL reused across commits. Its partition membership is kept
-    /// in sync with `partitions` by [`track`](Self::track) (adds) and
+    /// in sync with committable `partitions` by [`track`](Self::track) (adds) and
     /// [`revoke`](Self::revoke) (rebuilds); [`committable_tpl`](Self::committable_tpl)
-    /// updates offsets in place.
+    /// updates offsets in place. Exhausted entries are omitted on acknowledgement.
     tpl: TopicPartitionList,
     /// O(1) aggregate of pending offsets across every tracked partition.
     ///
@@ -256,14 +258,16 @@ impl OffsetTracker {
     pub fn track(&mut self, topic: &str, partition: i32, offset: i64, generation: u64) {
         let delta = if let Some(partitions) = self.partitions.get_mut(topic) {
             // Known topic -- zero allocation.
-            let entry = partitions.entry(partition);
-            if matches!(&entry, std::collections::hash_map::Entry::Vacant(_)) {
-                // First sight of this partition -- register it in the TPL.
+            let tracker = partitions
+                .entry(partition)
+                .or_insert_with(|| PartitionTracker::new(generation));
+            let had_no_commit_offset = tracker.committable_offset().is_none();
+            let delta = tracker.track(offset, generation);
+            if had_no_commit_offset && tracker.committable_offset().is_some() {
+                // New partition, or retracking after commit-offset exhaustion.
                 let _ = self.tpl.add_partition(topic, partition);
             }
-            entry
-                .or_insert_with(|| PartitionTracker::new(generation))
-                .track(offset, generation)
+            delta
         } else {
             // New topic -- allocate once and register the partition in the TPL.
             let _ = self.tpl.add_partition(topic, partition);
@@ -344,7 +348,7 @@ impl OffsetTracker {
     }
 
     /// Rebuild the persistent [`TopicPartitionList`] so its partition
-    /// membership matches the currently tracked partitions.
+    /// membership matches tracked partitions with representable commit offsets.
     ///
     /// Offsets are materialized later by [`committable_tpl`](Self::committable_tpl);
     /// here we only need the partition entries to exist.
@@ -352,8 +356,10 @@ impl OffsetTracker {
         let mut tpl =
             TopicPartitionList::with_capacity(self.partitions.values().map(HashMap::len).sum());
         for (topic, partitions) in &self.partitions {
-            for &partition in partitions.keys() {
-                let _ = tpl.add_partition(topic, partition);
+            for (&partition, tracker) in partitions {
+                if tracker.committable_offset().is_some() {
+                    let _ = tpl.add_partition(topic, partition);
+                }
             }
         }
         self.tpl = tpl;
@@ -364,12 +370,24 @@ impl OffsetTracker {
     /// Returns `true` if the lowest pending offset for this partition changed,
     /// indicating the committable watermark advanced.
     pub fn acknowledge(&mut self, topic: &str, partition: i32, offset: i64) -> bool {
-        let (removed, advanced) = self
+        let (removed, advanced, exhausted) = self
             .partitions
             .get_mut(topic)
             .and_then(|parts| parts.get_mut(&partition))
-            .map(|tracker| tracker.acknowledge(offset))
-            .unwrap_or((false, false));
+            .map(|tracker| {
+                let (removed, advanced) = tracker.acknowledge(offset);
+                (
+                    removed,
+                    advanced,
+                    removed && tracker.committable_offset().is_none(),
+                )
+            })
+            .unwrap_or((false, false, false));
+        if exhausted {
+            // A previously materialized offset must not remain in the native
+            // commit list after its successor becomes unrepresentable.
+            self.rebuild_tpl();
+        }
         if removed {
             // A successful ack retires exactly one pending offset.
             self.apply_pending_delta(-1);
@@ -442,13 +460,13 @@ impl OffsetTracker {
     /// `consumer.commit()`.
     ///
     /// Offsets are updated **in place**: the TPL's partition membership already
-    /// mirrors the tracked set (maintained by [`track`](Self::track) and
-    /// [`revoke`](Self::revoke)), so revoked partitions are never present and
-    /// no per-commit reallocation is needed. `set_partition_offset` targets the
+    /// mirrors the committable tracked set (maintained by [`track`](Self::track),
+    /// [`acknowledge`](Self::acknowledge), and [`revoke`](Self::revoke)), so revoked
+    /// partitions are never present and no per-commit reallocation is needed. `set_partition_offset` targets the
     /// existing entry for each tracked partition.
     ///
     /// If no partitions are tracked the returned TPL is empty, which is safe to
-    /// commit.
+    /// commit. Exhausted partitions have no representable successor and are omitted.
     pub fn committable_tpl(&mut self) -> &TopicPartitionList {
         for (topic, partitions) in &self.partitions {
             for (&partition, tracker) in partitions {
