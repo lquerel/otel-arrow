@@ -42,6 +42,15 @@ in both `rust/otap-dataflow/rust-toolchain.toml` and
 compile fixes the new version requires. `rustup` installs the pinned toolchain
 automatically on the next `cargo` invocation.
 
+## Formal verification
+
+Selected arithmetic kernels have standalone Creusot proof targets. Ordinary
+engine builds do not require Creusot or its nightly toolchain. When changing a
+covered kernel or its assumptions, run the target's pinned verification command
+alongside the normal Rust checks. See the
+[verification policy](docs/creusot-verification.md) for coverage, CI behavior,
+trusted boundaries, and tool-upgrade requirements.
+
 ## Test documentation
 
 Document every test immediately above its declaration with Rust doc comments:

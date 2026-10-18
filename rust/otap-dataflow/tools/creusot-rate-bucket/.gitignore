@@ -1,0 +1,6 @@
+/target/
+/.why3find/
+/verif/
+/_creusot_erasure/
+__pycache__/
+!/Cargo.lock

@@ -20,6 +20,10 @@
 //! allocation per decision, which is what lets the same type serve a shared
 //! multi-threaded receiver and a single-threaded local one.
 
+// The standalone proof target supplies `cfg(creusot)` for this shared module.
+#[allow(unexpected_cfgs)]
+mod math;
+
 use super::clock::AdmissionClock;
 use otel_arrow_dfe_config::policy::RateLimiterPolicy;
 use std::sync::atomic::{AtomicU64, Ordering};
@@ -63,7 +67,7 @@ impl RateBucket {
         let burst_window_nanos = if burst == 0 || allow == 0 || interval_nanos == 0 {
             0
         } else {
-            Self::nanos_for_rate(allow, interval_nanos, burst)
+            math::nanos_for_rate(allow, interval_nanos, burst)
         };
         let start = clock.now_nanos();
 
@@ -78,35 +82,7 @@ impl RateBucket {
     }
 
     fn nanos_for_units(&self, units: u64) -> u64 {
-        Self::nanos_for_rate(self.allow, self.interval_nanos, units)
-    }
-
-    fn nanos_for_rate(allow: u64, interval_nanos: u64, units: u64) -> u64 {
-        if units == 0 {
-            return 0;
-        }
-        if allow == 0 || interval_nanos == 0 {
-            return u64::MAX;
-        }
-
-        let nanos = (u128::from(units) * u128::from(interval_nanos)).div_ceil(u128::from(allow));
-        u64::try_from(nanos).unwrap_or(u64::MAX)
-    }
-
-    /// Computes the TAT to publish, clamped so the bucket can never move backwards.
-    ///
-    /// `debt_limit` caps how far past `now` an over-limit charge may push the
-    /// bucket, so a sustained flood cannot build unbounded debt that would
-    /// starve traffic long after the flood stops. The trailing `.max(current)`
-    /// is the safety net: another thread may already have published a TAT beyond
-    /// a `debt_limit` this caller computed from an older `now`, and regressing
-    /// it would hand out capacity that was already spent.
-    fn next_theoretical_arrival(current: u64, now: u64, cost: u64, debt_limit: u64) -> u64 {
-        current
-            .max(now)
-            .saturating_add(cost)
-            .min(debt_limit)
-            .max(current)
+        math::nanos_for_rate(self.allow, self.interval_nanos, units)
     }
 
     /// Charges `units`, publishing state only when the charge conforms.
@@ -159,7 +135,7 @@ impl RateBucket {
                 };
             }
 
-            let next = Self::next_theoretical_arrival(current, now, cost, debt_limit);
+            let next = math::next_theoretical_arrival(current, now, cost, debt_limit);
             if self
                 .theoretical_arrival_nanos
                 .compare_exchange_weak(current, next, Ordering::AcqRel, Ordering::Acquire)
@@ -405,7 +381,7 @@ mod tests {
         let stale_debt_limit = 900;
 
         assert_eq!(
-            RateBucket::next_theoretical_arrival(current, 100, 10, stale_debt_limit),
+            math::next_theoretical_arrival(current, 100, 10, stale_debt_limit),
             current
         );
     }

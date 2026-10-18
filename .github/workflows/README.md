@@ -3,6 +3,7 @@
 This directory contains the repository's main CI workflows:
 
 - [`rust-ci.yml`](rust-ci.yml): Rust validation.
+- [`creusot.yml`](creusot.yml): Advisory verification of selected Rust kernels.
 - [`contrib-integration.yml`](contrib-integration.yml): Path-aware contrib
   integration tests called by Rust CI.
 - [`go-ci.yml`](go-ci.yml): Go validation and CodeQL.
@@ -71,3 +72,17 @@ but are omitted from merge-queue runs.
 - Caches provide reusable inputs across runs.
 - Workflow artifacts distribute nextest archives to test partitions within one
   run.
+
+## Creusot pilot
+
+`creusot.yml` runs on relevant pull requests and main pushes, manual dispatch,
+and weekly upstream main checks. It builds a pinned verifier container locally
+on the runner and checks the shared rate-bucket arithmetic with fresh proofs
+and negative controls. It does not publish an image. Failures are visible, but
+this pilot is outside the required Rust aggregate during rollout.
+
+PRs restore the dedicated Docker cache; only main runs write it. Max mode keeps
+the intermediate compiler/OCaml layers. Monitor its size within the repository's
+shared cache quota. Source
+hashes, verifier image ID, versions, and proof logs are uploaded as workflow
+artifacts. See the [verification policy](../../rust/otap-dataflow/docs/creusot-verification.md).
