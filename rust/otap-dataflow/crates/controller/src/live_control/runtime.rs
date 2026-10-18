@@ -806,38 +806,13 @@ impl<
                     // Readiness is observed outside the controller mutex and can
                     // race an exit or cancellation. Promotion therefore rechecks
                     // worker ownership and runtime liveness atomically.
-                    let promoted = {
-                        let mut state = self
-                            .state
-                            .lock()
-                            .unwrap_or_else(|poisoned| poisoned.into_inner());
-                        let target_active =
-                            state
-                                .runtime_instances
-                                .get(&target_key)
-                                .is_some_and(|instance| {
-                                    matches!(instance.lifecycle, RuntimeInstanceLifecycle::Active)
-                                });
-                        let preempted = state.recovery_preempted(&pipeline_key);
-                        let Some(recovery) = state
-                            .runtime_recoveries
-                            .get_mut(&(pipeline_key.clone(), core_id))
-                        else {
-                            return;
-                        };
-                        if recovery.worker_id != Some(worker_id)
-                            || recovery.cancel_requested
-                            || preempted
-                            || !target_active
-                        {
-                            false
-                        } else {
-                            recovery.serving_generation = target_key.deployment_generation;
-                            recovery.ready_since = Some(Instant::now());
-                            recovery.worker_id = None;
-                            recovery.candidate_generation = None;
-                            true
-                        }
+                    let Some(promoted) = self.accept_runtime_recovery_promotion(
+                        &pipeline_key,
+                        core_id,
+                        worker_id,
+                        &target_key,
+                    ) else {
+                        return;
                     };
                     self.state_changed.notify_all();
                     if !promoted {
@@ -886,8 +861,8 @@ impl<
                     // Publish the serving overlay only after controller state has
                     // accepted the candidate. Until then, status continues to
                     // select the failed generation rather than an unready runtime.
-                    self.observed_state_store.set_pipeline_serving_generation(
-                        pipeline_key.clone(),
+                    self.publish_runtime_recovery_promotion(
+                        &pipeline_key,
                         core_id,
                         target_key.deployment_generation,
                     );
@@ -931,6 +906,55 @@ impl<
         }
     }
 
+    /// Accept a ready recovery candidate under the controller lock.
+    /// Publication to observed state remains a separate phase, as in the original worker.
+    pub(super) fn accept_runtime_recovery_promotion(
+        &self,
+        pipeline_key: &PipelineKey,
+        core_id: usize,
+        worker_id: u64,
+        target_key: &DeployedPipelineKey,
+    ) -> Option<bool> {
+        let mut state = self
+            .state
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner());
+        let target_active = state
+            .runtime_instances
+            .get(target_key)
+            .is_some_and(|instance| matches!(instance.lifecycle, RuntimeInstanceLifecycle::Active));
+        let preempted = state.recovery_preempted(pipeline_key);
+        let recovery = state
+            .runtime_recoveries
+            .get_mut(&(pipeline_key.clone(), core_id))?;
+        let mut cursor = recovery.cursor();
+        let promoted = cursor.promote(
+            worker_id,
+            target_key.deployment_generation,
+            preempted,
+            target_active,
+        );
+        if promoted {
+            recovery.apply_cursor(cursor);
+            recovery.ready_since = Some(Instant::now());
+        }
+        Some(promoted)
+    }
+
+    /// Publish the recovery overlay after the locked promotion has completed.
+    pub(super) fn publish_runtime_recovery_promotion(
+        &self,
+        pipeline_key: &PipelineKey,
+        core_id: usize,
+        generation: u64,
+    ) {
+        self.observed_state_store.set_pipeline_serving_generation(
+            pipeline_key.clone(),
+            core_id,
+            generation,
+        );
+    }
+
     /// Reserves the next generation and tentative restart ordinal.
     fn prepare_runtime_recovery_attempt(
         &self,
@@ -950,9 +974,9 @@ impl<
         // Explicit operations always outrank automatic recovery. The worker
         // releases its token in run_runtime_recovery so it can preserve the
         // failed serving generation for post-operation handoff first.
-        if recovery.worker_id != Some(worker_id)
-            || recovery.cancel_requested
-            || state.recovery_preempted(pipeline_key)
+        if !recovery
+            .cursor()
+            .may_prepare(worker_id, state.recovery_preempted(pipeline_key))
         {
             return RuntimeRecoveryAttemptDecision::Cancelled;
         }
@@ -997,7 +1021,7 @@ impl<
     }
 
     /// Charges one restart immediately before its replacement launch.
-    fn commit_runtime_recovery_launch(
+    pub(super) fn commit_runtime_recovery_launch(
         &self,
         pipeline_key: &PipelineKey,
         core_id: usize,
@@ -1009,24 +1033,19 @@ impl<
             .state
             .lock()
             .unwrap_or_else(|poisoned| poisoned.into_inner());
-        if state.recovery_preempted(pipeline_key) {
-            return false;
-        }
+        let preempted = state.recovery_preempted(pipeline_key);
         let Some(recovery) = state
             .runtime_recoveries
             .get_mut(&(pipeline_key.clone(), core_id))
         else {
             return false;
         };
-        if recovery.worker_id != Some(worker_id)
-            || recovery.cancel_requested
-            || recovery.candidate_generation != Some(target_generation)
-            || recovery.restart_count.checked_add(1) != Some(attempt)
-        {
-            return false;
+        let mut cursor = recovery.cursor();
+        let accepted = cursor.commit_launch(worker_id, target_generation, attempt, preempted);
+        if accepted {
+            recovery.apply_cursor(cursor);
         }
-        recovery.restart_count = attempt;
-        true
+        accepted
     }
 
     /// Waits for a recovery backoff while remaining cancellable.
@@ -1210,9 +1229,11 @@ impl<
         if let Some(recovery) = state
             .runtime_recoveries
             .get_mut(&(pipeline_key.clone(), core_id))
-            && recovery.worker_id == Some(worker_id)
         {
-            recovery.candidate_generation = None;
+            let mut cursor = recovery.cursor();
+            if cursor.clear_candidate(worker_id) {
+                recovery.apply_cursor(cursor);
+            }
         }
         self.state_changed.notify_all();
     }
@@ -1239,8 +1260,7 @@ impl<
             return;
         }
 
-        let should_defer = state.recovery_preempted(pipeline_key)
-            && !state.recovery_in_shutdown_context(pipeline_key);
+        let should_defer = state.ownership(pipeline_key).defer_cancelled_failure();
         if should_defer {
             let context_bindings = state
                 .runtime_recoveries
@@ -1260,11 +1280,11 @@ impl<
             );
         }
 
-        if let Some(recovery) = state.runtime_recoveries.get_mut(&recovery_key)
-            && recovery.worker_id == Some(worker_id)
-        {
-            recovery.worker_id = None;
-            recovery.candidate_generation = None;
+        if let Some(recovery) = state.runtime_recoveries.get_mut(&recovery_key) {
+            let mut cursor = recovery.cursor();
+            if cursor.release_worker(worker_id) {
+                recovery.apply_cursor(cursor);
+            }
         }
         self.state_changed.notify_all();
     }
@@ -1283,10 +1303,11 @@ impl<
         if let Some(recovery) = state
             .runtime_recoveries
             .get_mut(&(pipeline_key.clone(), core_id))
-            && recovery.worker_id == Some(worker_id)
         {
-            recovery.worker_id = None;
-            recovery.candidate_generation = None;
+            let mut cursor = recovery.cursor();
+            if cursor.release_worker(worker_id) {
+                recovery.apply_cursor(cursor);
+            }
         }
         self.state_changed.notify_all();
     }

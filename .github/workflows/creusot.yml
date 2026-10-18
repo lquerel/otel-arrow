@@ -9,6 +9,9 @@ on:
     paths:
       - '.github/workflows/creusot.yml'
       - 'rust/otap-dataflow/tools/creusot-rate-bucket/**'
+      - 'rust/otap-dataflow/tools/creusot-controller/**'
+      - 'rust/otap-dataflow/crates/controller/**'
+      - 'rust/otap-dataflow/crates/state/**'
       - 'rust/otap-dataflow/crates/engine/src/admission/**'
       - 'rust/otap-dataflow/crates/engine/Cargo.toml'
       - 'rust/otap-dataflow/Cargo.toml'
@@ -21,6 +24,9 @@ on:
     paths:
       - '.github/workflows/creusot.yml'
       - 'rust/otap-dataflow/tools/creusot-rate-bucket/**'
+      - 'rust/otap-dataflow/tools/creusot-controller/**'
+      - 'rust/otap-dataflow/crates/controller/**'
+      - 'rust/otap-dataflow/crates/state/**'
       - 'rust/otap-dataflow/crates/engine/src/admission/**'
   workflow_dispatch:
   schedule:
@@ -31,7 +37,7 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
-  rate-bucket:
+  kernels:
     if: github.event_name != 'schedule' || github.repository == 'open-telemetry/otel-arrow'
     runs-on: ubuntu-24.04
     timeout-minutes: 90
@@ -40,7 +46,9 @@ jobs:
         with:
           persist-credentials: false
       - name: Check verification evidence handling
-        run: python3 -m unittest discover -s rust/otap-dataflow/tools/creusot-rate-bucket -p 'test_*.py'
+        run: |
+          python3 -m unittest discover -s rust/otap-dataflow/tools/creusot-rate-bucket -p 'test_*.py'
+          python3 -m unittest discover -s rust/otap-dataflow/tools/creusot-controller -p 'test_*.py'
       - name: Prepare checksum-verified toolchain sources
         run: rust/otap-dataflow/tools/creusot-rate-bucket/build.sh --prepare-only
       - name: Set up Docker Buildx
@@ -65,11 +73,63 @@ jobs:
           cache-to: ${{ github.ref == 'refs/heads/main' && github.event_name != 'pull_request' && 'type=gha,scope=creusot-rate-bucket-v1,mode=max' || '' }}
       - name: Prove shared arithmetic and reject negative controls
         run: python3 rust/otap-dataflow/tools/creusot-rate-bucket/verify.py --skip-build
+      - name: Prove controller lifecycle guards and reproduce requirement failures
+        run: python3 rust/otap-dataflow/tools/creusot-controller/verify.py --skip-build
+      - name: Require controller bug and policy requirement to be resolved
+        run: |
+          python3 - <<'PYTHON'
+          import json
+          from pathlib import Path
+          report = json.loads(Path("rust/otap-dataflow/tools/creusot-controller/target/reports/result.json").read_text())
+          if report["status"] != "proved" or report.get("confirmed_bugs") or report.get("open_policy_requirements"):
+              raise SystemExit("Controller lifecycle requirements remain unresolved: " + "; ".join(report.get("confirmed_bugs", []) + report.get("open_policy_requirements", [])))
+          PYTHON
+      - name: Upload controller verification evidence
+        if: always()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: creusot-controller-${{ github.sha }}
+          path: rust/otap-dataflow/tools/creusot-controller/target/reports
+          if-no-files-found: warn
+          retention-days: 14
       - name: Upload verification evidence
         if: always()
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
           name: creusot-rate-bucket-${{ github.sha }}
           path: rust/otap-dataflow/tools/creusot-rate-bucket/target/reports
+          if-no-files-found: warn
+          retention-days: 14
+
+  controller-runtime:
+    if: github.event_name != 'schedule' || github.repository == 'open-telemetry/otel-arrow'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 45
+    env:
+      CARGO_PROFILE_DEV_DEBUG: '0'
+      CARGO_PROFILE_TEST_DEBUG: '0'
+      CARGO_BUILD_JOBS: '2'
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+          submodules: true
+      - uses: dtolnay/rust-toolchain@3c5f7ea28cd621ae0bf5283f0e981fb97b8a7af9
+        with:
+          toolchain: 1.98.1
+      - name: Free runner disk space for the native runtime tests
+        run: sudo rm -rf /usr/local/lib/android /usr/share/dotnet /usr/local/share/powershell
+      - name: Test controller runtime and ownership conformance
+        working-directory: rust/otap-dataflow
+        run: >-
+          cargo +1.98.1 test --locked -p otel-arrow-dfe-controller --lib
+      - name: Reproduce the publication bug and shutdown-policy gap
+        run: python3 rust/otap-dataflow/tools/creusot-controller/runtime_probes.py
+      - name: Upload runtime finding evidence
+        if: always()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: creusot-controller-runtime-findings-${{ github.sha }}
+          path: rust/otap-dataflow/tools/creusot-controller/target/runtime-probes
           if-no-files-found: warn
           retention-days: 14

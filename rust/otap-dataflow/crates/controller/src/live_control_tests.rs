@@ -9460,3 +9460,126 @@ fn state_dir_untrusted_ancestor_rejected_at_startup() {
     assert!(matches!(error, Error::StateDirectory(_)));
     assert!(!path.exists());
 }
+
+/// Scenario: Recovery accepts a ready candidate, then a rollout commits a newer generation before the recovery status publication runs.
+/// Guarantees: The explicit CTRL-001 requirement probe exposes a late publication replacing the newer serving selection until the handoff is fenced.
+#[test]
+#[ignore = "Known lifecycle finding CTRL-001; run the controller proof runtime probes"]
+fn lifecycle_probe_stale_recovery_publication_cannot_overwrite_rollout() {
+    let config = engine_config_with_pipeline(&rollback_test_pipeline_yaml(1, false));
+    let runtime = test_runtime(&config);
+    let _runner = ObservedStateRunner::start(&runtime);
+    register_existing_pipeline(&runtime, &config);
+    let pipeline_key = PipelineKey::new("g1".into(), "p1".into());
+    let candidate_key = deployed_key("g1", "p1", 0, 1);
+    let _candidate_rx =
+        register_runtime_instance(&runtime, "g1", "p1", 0, 1, RuntimeInstanceLifecycle::Active);
+    report_ready(&runtime, candidate_key.clone());
+    let _ = wait_for_observed_status(&runtime, &pipeline_key, |status| {
+        status
+            .instance_status(0, 1)
+            .is_some_and(|instance| matches!(instance.phase(), PipelinePhase::Running))
+    });
+    {
+        let mut state = runtime.state.lock().unwrap_or_else(|p| p.into_inner());
+        let context_bindings = Arc::clone(&state.latest_context_bindings);
+        let _ = state.generation_counters.insert(pipeline_key.clone(), 2);
+        let _ = state.runtime_recoveries.insert(
+            (pipeline_key.clone(), 0),
+            RuntimeRecoveryState {
+                serving_generation: 0,
+                context_bindings,
+                restart_count: 1,
+                ready_since: None,
+                worker_id: Some(7),
+                candidate_generation: Some(1),
+                cancel_requested: false,
+            },
+        );
+    }
+    // Pause the worker exactly between its real locked and publication phases.
+    assert_eq!(
+        runtime.accept_runtime_recovery_promotion(&pipeline_key, 0, 7, &candidate_key),
+        Some(true)
+    );
+    let reservation = runtime
+        .begin_pipeline_operation_reservation(pipeline_key.clone(), PipelineOperationKind::Rollout)
+        .unwrap();
+    runtime.cancel_runtime_recoveries_for_pipeline(&pipeline_key);
+    let plan = runtime
+        .prepare_rollout_plan(
+            "g1",
+            "p1",
+            &ReconfigureRequest {
+                pipeline: rollback_test_pipeline_config(1, true),
+                step_timeout_secs: 2,
+                drain_timeout_secs: 2,
+            },
+        )
+        .unwrap();
+    assert_eq!(plan.target_deployment.baseline_generation, 2);
+    runtime
+        .insert_rollout(&pipeline_key, plan.rollout.clone())
+        .unwrap();
+    drop(reservation);
+    let _new_rx =
+        register_runtime_instance(&runtime, "g1", "p1", 0, 2, RuntimeInstanceLifecycle::Active);
+    report_ready(&runtime, deployed_key("g1", "p1", 0, 2));
+    let _ = wait_for_observed_status(&runtime, &pipeline_key, |status| {
+        status
+            .instance_status(0, 2)
+            .is_some_and(|instance| matches!(instance.phase(), PipelinePhase::Running))
+    });
+    runtime.note_instance_exit(candidate_key, RuntimeInstanceExit::Success);
+    runtime.commit_pipeline_deployment(&plan);
+    runtime.clear_pipeline_serving_generations(&pipeline_key, [0]);
+    runtime.update_rollout(&pipeline_key, &plan.rollout.rollout_id, |rollout| {
+        rollout.state = RolloutLifecycleState::Succeeded
+    });
+    runtime.finish_rollout(&pipeline_key, &plan.rollout.rollout_id);
+    assert_eq!(
+        runtime
+            .state
+            .lock()
+            .unwrap_or_else(|p| p.into_inner())
+            .logical_pipelines[&pipeline_key]
+            .baseline_generation,
+        2
+    );
+    // Resume the exact original publication call, after the new operation has finished.
+    runtime.publish_runtime_recovery_promotion(&pipeline_key, 0, 1);
+    let status = runtime
+        .observed_state_handle
+        .pipeline_status(&pipeline_key)
+        .unwrap();
+    assert_ne!(
+        status.serving_generations().get(&0),
+        Some(&1),
+        "stale recovery publication overwrote committed serving generation"
+    );
+}
+
+/// Scenario: Full reconciliation receives a configuration change after global shutdown has been accepted.
+/// Guarantees: The explicit CTRL-002 proposed-policy probe fails while shutdown still permits new configuration mutation authority.
+#[test]
+#[ignore = "Lifecycle policy finding CTRL-002; run the controller proof runtime probes"]
+fn lifecycle_probe_shutdown_closes_reconcile_mutation() {
+    let runtime = test_runtime(&empty_engine_config());
+    runtime.request_shutdown_all(1).unwrap();
+    assert!(
+        runtime
+            .state
+            .lock()
+            .unwrap_or_else(|p| p.into_inner())
+            .global_shutdown_requested
+    );
+    let result =
+        runtime.reconcile_engine_config(reconcile_request(empty_pipeline_group_config(), true));
+    assert!(
+        result.is_err(),
+        "reconcile accepted configuration mutation after global shutdown"
+    );
+}
+
+#[path = "live_control/lifecycle_conformance.rs"]
+mod lifecycle_conformance;

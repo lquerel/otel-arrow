@@ -1,0 +1,22 @@
+{
+  "fast": 0.1,
+  "time": 1.0,
+  "depth": 2,
+  "packages": [
+    "creusot"
+  ],
+  "provers": [
+    "alt-ergo",
+    "cvc5",
+    "z3"
+  ],
+  "tactics": [
+    "compute_specified",
+    "split_vc"
+  ],
+  "drivers": [],
+  "warnoff": [
+    "unused_variable",
+    "axiom_abstract"
+  ]
+}

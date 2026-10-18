@@ -37,6 +37,8 @@ use std::sync::{Condvar, Mutex};
 use std::time::{Duration, Instant};
 
 mod execution;
+#[allow(unexpected_cfgs)]
+mod lifecycle_kernels;
 mod planning;
 mod runtime;
 mod state;

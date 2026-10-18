@@ -10,6 +10,7 @@ its nightly compiler. Proof targets are standalone Cargo workspaces under
 | Target | Production source | Established properties | Important exclusions |
 | --- | --- | --- | --- |
 | [Rate bucket](../tools/creusot-rate-bucket/README.md) | `crates/engine/src/admission/bucket/math.rs` | Exact saturated rate cost; monotonic, bounded arrival-time transition; arithmetic panic safety | Atomic protocol, clocks, scheduling, end-to-end admission, and performance |
+| [Controller lifecycle](../tools/creusot-controller/README.md) | `crates/controller/src/live_control/lifecycle_kernels.rs` | Worker and operation fencing; launch/promotion/cleanup frame guarantees; completion accounting; separate publication model | Collections and concurrency refinement, readiness/caller binding, token issuance, shutdown liveness; CTRL-001 bug and CTRL-002 policy gap remain unresolved |
 
 The production crate and proof target compile the same function bodies. Proof
 annotations and logical definitions are conditional on `cfg(creusot)`. Keep
@@ -20,7 +21,8 @@ A separate model proves properties of its own transitions. It requires an
 explicit connection to production through shared implementation or conformance
 checks. A passing model proof is not a claim that surrounding async code is
 verified. Partition, transform, bitmaps, and ID masks are not covered by this
-initial infrastructure change.
+branch. The controller investigation includes a model counterexample and real
+runtime reproductions; see its target README for the precise boundary.
 
 ## Local and CI workflow
 
@@ -28,11 +30,15 @@ From the repository root:
 
 ```sh
 python3 rust/otap-dataflow/tools/creusot-rate-bucket/verify.py
+python3 rust/otap-dataflow/tools/creusot-controller/verify.py
 ```
 
 The runner builds pinned tooling, tests the shared functions, proves them with
 fresh verification output, rejects deliberate bugs, and rechecks the original
-source. The [target README](../tools/creusot-rate-bucket/README.md) documents
+source. The controller target additionally requires the known publication bug
+and proposed shutdown-policy failure to remain explicit; its separate CI safety
+gate stays red until they are resolved. Native runtime probes reproduce the
+recorded behavior. The [target README](../tools/creusot-rate-bucket/README.md) documents
 prerequisites, exact pins, trusted specifications, and evidence locations.
 
 [Creusot CI](../../../.github/workflows/creusot.yml) runs on relevant pull

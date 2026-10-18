@@ -447,14 +447,7 @@ pub(crate) enum RuntimeInstanceExit {
     Error(RuntimeInstanceError),
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-/// Explicit per-pipeline operation reserving lifecycle ownership.
-pub(super) enum PipelineOperationKind {
-    /// A create, resize, replace, or no-op rollout.
-    Rollout,
-    /// A graceful pipeline shutdown.
-    Shutdown,
-}
+pub(super) use lifecycle_kernels::OperationKind as PipelineOperationKind;
 
 #[derive(Debug, Clone, Copy)]
 /// Planning-stage reservation that closes the cancel-to-insert ownership gap.
@@ -482,6 +475,26 @@ pub(super) struct RuntimeRecoveryState {
     pub(super) candidate_generation: Option<u64>,
     /// Whether an explicit controller operation has cancelled this worker.
     pub(super) cancel_requested: bool,
+}
+
+impl RuntimeRecoveryState {
+    pub(super) fn cursor(&self) -> lifecycle_kernels::RecoveryCursor {
+        lifecycle_kernels::RecoveryCursor {
+            serving: self.serving_generation,
+            worker: self.worker_id,
+            candidate: self.candidate_generation,
+            cancelled: self.cancel_requested,
+            restarts: self.restart_count,
+        }
+    }
+
+    pub(super) fn apply_cursor(&mut self, cursor: lifecycle_kernels::RecoveryCursor) {
+        self.serving_generation = cursor.serving;
+        self.worker_id = cursor.worker;
+        self.candidate_generation = cursor.candidate;
+        self.cancel_requested = cursor.cancelled;
+        self.restart_count = cursor.restarts;
+    }
 }
 
 #[derive(Debug, Clone)]
@@ -614,39 +627,45 @@ pub(super) struct ControllerRuntimeState {
 }
 
 impl ControllerRuntimeState {
+    pub(super) fn ownership(&self, pipeline_key: &PipelineKey) -> lifecycle_kernels::Ownership {
+        lifecycle_kernels::Ownership {
+            global_shutdown: self.global_shutdown_requested,
+            engine_operation: self.active_engine_operation.is_some(),
+            rollout: self.active_rollouts.contains_key(pipeline_key),
+            shutdown: self.active_shutdowns.contains_key(pipeline_key),
+            reservation: self
+                .pipeline_operation_reservations
+                .get(pipeline_key)
+                .map(|r| r.kind),
+        }
+    }
+
     /// Returns whether an explicit operation currently owns this pipeline.
     pub(super) fn recovery_preempted(&self, pipeline_key: &PipelineKey) -> bool {
-        self.global_shutdown_requested
-            || self.active_rollouts.contains_key(pipeline_key)
-            || self.active_shutdowns.contains_key(pipeline_key)
-            || self
-                .pipeline_operation_reservations
-                .contains_key(pipeline_key)
-            || self.active_engine_operation.is_some()
+        self.ownership(pipeline_key).preempts_recovery()
     }
 
     /// Returns whether shutdown owns failures instead of deferring recovery.
     pub(super) fn recovery_in_shutdown_context(&self, pipeline_key: &PipelineKey) -> bool {
-        self.global_shutdown_requested
-            || self.active_shutdowns.contains_key(pipeline_key)
-            || self
-                .pipeline_operation_reservations
-                .get(pipeline_key)
-                .is_some_and(|reservation| reservation.kind == PipelineOperationKind::Shutdown)
+        self.ownership(pipeline_key).shutdown_owns_failures()
     }
 
-    /// Returns true if there is pending lifecycle work that prevents immediate shutdown completion.
+    /// Returns true if lifecycle work prevents immediate shutdown completion.
     pub(super) fn has_pending_lifecycle_work(&self) -> bool {
-        self.active_instances > 0
-            || self
-                .runtime_instances
-                .values()
-                .any(|instance| matches!(instance.lifecycle, RuntimeInstanceLifecycle::Active))
-            || !self.active_rollouts.is_empty()
-            || !self.active_shutdowns.is_empty()
-            || self.active_engine_operation.is_some()
-            || !self.pipeline_operation_reservations.is_empty()
-            || self.global_shutdown_coordinators > 0
+        lifecycle_kernels::lifecycle_work_pending(
+            self.active_instances,
+            // Preserve the original cheap positive-cache fast path before scanning records.
+            self.active_instances == 0
+                && self
+                    .runtime_instances
+                    .values()
+                    .any(|instance| matches!(instance.lifecycle, RuntimeInstanceLifecycle::Active)),
+            !self.active_rollouts.is_empty(),
+            !self.active_shutdowns.is_empty(),
+            self.active_engine_operation.is_some(),
+            !self.pipeline_operation_reservations.is_empty(),
+            self.global_shutdown_coordinators,
+        )
     }
 }
 

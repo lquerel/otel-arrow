@@ -1,0 +1,178 @@
+{
+  "otel_arrow_dfe_controller_proof_rlib/lifecycle_kernels/engine_operation_authorized": [
+    "vc_engine_operation_authorized"
+  ],
+  "otel_arrow_dfe_controller_proof_rlib/lifecycle_kernels/impl_Clone_for_OperationKind/clone": [
+    "vc_clone_OperationKind"
+  ],
+  "otel_arrow_dfe_controller_proof_rlib/lifecycle_kernels/impl_Clone_for_Ownership/clone": [
+    "vc_clone_OperationKind",
+    "vc_clone_Option_OperationKind",
+    "vc_clone_Ownership",
+    "vc_clone_bool"
+  ],
+  "otel_arrow_dfe_controller_proof_rlib/lifecycle_kernels/impl_Clone_for_RecoveryCursor/clone": [
+    "vc_clone_Option_u64",
+    "vc_clone_RecoveryCursor",
+    "vc_clone_bool",
+    "vc_clone_u64",
+    "vc_clone_usize"
+  ],
+  "otel_arrow_dfe_controller_proof_rlib/lifecycle_kernels/impl_Eq_for_OperationKind/assert_fields_are_eq": [
+    "vc_assert_fields_are_eq_OperationKind"
+  ],
+  "otel_arrow_dfe_controller_proof_rlib/lifecycle_kernels/impl_Eq_for_Ownership/assert_fields_are_eq": [
+    "vc_assert_fields_are_eq_Ownership"
+  ],
+  "otel_arrow_dfe_controller_proof_rlib/lifecycle_kernels/impl_Eq_for_RecoveryCursor/assert_fields_are_eq": [
+    "vc_assert_fields_are_eq_RecoveryCursor"
+  ],
+  "otel_arrow_dfe_controller_proof_rlib/lifecycle_kernels/impl_Ownership/defer_cancelled_failure": [
+    "vc_defer_cancelled_failure",
+    "vc_preempts_recovery",
+    "vc_shutdown_owns_failures"
+  ],
+  "otel_arrow_dfe_controller_proof_rlib/lifecycle_kernels/impl_Ownership/permits_pipeline_reservation": [
+    "vc_is_none_OperationKind",
+    "vc_permits_pipeline_reservation"
+  ],
+  "otel_arrow_dfe_controller_proof_rlib/lifecycle_kernels/impl_Ownership/preempts_recovery": [
+    "vc_is_some_OperationKind",
+    "vc_preempts_recovery"
+  ],
+  "otel_arrow_dfe_controller_proof_rlib/lifecycle_kernels/impl_Ownership/shutdown_owns_failures": [
+    "vc_eq_Option_OperationKind",
+    "vc_shutdown_owns_failures"
+  ],
+  "otel_arrow_dfe_controller_proof_rlib/lifecycle_kernels/impl_PartialEq_for_OperationKind/eq": [
+    "vc_eq_OperationKind"
+  ],
+  "otel_arrow_dfe_controller_proof_rlib/lifecycle_kernels/impl_PartialEq_for_OperationKind/eq__refines": [
+    "refines"
+  ],
+  "otel_arrow_dfe_controller_proof_rlib/lifecycle_kernels/impl_PartialEq_for_Ownership/eq": [
+    "vc_eq_Option_OperationKind",
+    "vc_eq_Ownership"
+  ],
+  "otel_arrow_dfe_controller_proof_rlib/lifecycle_kernels/impl_PartialEq_for_Ownership/eq__refines": [
+    "refines"
+  ],
+  "otel_arrow_dfe_controller_proof_rlib/lifecycle_kernels/impl_PartialEq_for_RecoveryCursor/eq": [
+    "vc_eq_Option_u64",
+    "vc_eq_RecoveryCursor"
+  ],
+  "otel_arrow_dfe_controller_proof_rlib/lifecycle_kernels/impl_PartialEq_for_RecoveryCursor/eq__refines": [
+    "refines"
+  ],
+  "otel_arrow_dfe_controller_proof_rlib/lifecycle_kernels/impl_RecoveryCursor/clear_candidate": [
+    "vc_clear_candidate",
+    "vc_owns_token"
+  ],
+  "otel_arrow_dfe_controller_proof_rlib/lifecycle_kernels/impl_RecoveryCursor/commit_launch": [
+    "vc_checked_add",
+    "vc_commit_launch",
+    "vc_may_prepare",
+    "vc_ne_Option_u64",
+    "vc_ne_Option_usize"
+  ],
+  "otel_arrow_dfe_controller_proof_rlib/lifecycle_kernels/impl_RecoveryCursor/may_prepare": [
+    "vc_may_prepare",
+    "vc_owns_token"
+  ],
+  "otel_arrow_dfe_controller_proof_rlib/lifecycle_kernels/impl_RecoveryCursor/promote": [
+    "vc_may_prepare",
+    "vc_promote"
+  ],
+  "otel_arrow_dfe_controller_proof_rlib/lifecycle_kernels/impl_RecoveryCursor/release_worker": [
+    "vc_owns_token",
+    "vc_release_worker"
+  ],
+  "otel_arrow_dfe_controller_proof_rlib/lifecycle_kernels/lifecycle_work_pending": [
+    "vc_lifecycle_work_pending"
+  ],
+  "otel_arrow_dfe_controller_proof_rlib/lifecycle_kernels/owns_token": [
+    "vc_eq_Option_u64",
+    "vc_owns_token"
+  ],
+  "otel_arrow_dfe_controller_proof_rlib/lifecycle_kernels/permits_engine_operation": [
+    "vc_permits_engine_operation"
+  ],
+  "otel_arrow_dfe_controller_proof_rlib/protocol/impl_Clone_for_Publication/clone": [
+    "vc_clone_Option_u64",
+    "vc_clone_Publication",
+    "vc_clone_u64"
+  ],
+  "otel_arrow_dfe_controller_proof_rlib/protocol/impl_Eq_for_Publication/assert_fields_are_eq": [
+    "vc_assert_fields_are_eq_Publication"
+  ],
+  "otel_arrow_dfe_controller_proof_rlib/protocol/impl_PartialEq_for_Publication/eq": [
+    "vc_eq_Option_u64",
+    "vc_eq_Publication"
+  ],
+  "otel_arrow_dfe_controller_proof_rlib/protocol/impl_PartialEq_for_Publication/eq__refines": [
+    "refines"
+  ],
+  "otel_arrow_dfe_controller_proof_rlib/protocol/impl_Publication/accepted_recovery": [
+    "vc_accepted_recovery"
+  ],
+  "otel_arrow_dfe_controller_proof_rlib/protocol/impl_Publication/commit_new_owner": [
+    "vc_commit_new_owner"
+  ],
+  "otel_arrow_dfe_controller_proof_rlib/protocol/impl_Publication/publish_pending": [
+    "vc_elim_Some",
+    "vc_publish_pending"
+  ],
+  "otel_arrow_dfe_controller_proof_rlib/protocol/uninterrupted_publication_is_consistent": [
+    "vc_accepted_recovery",
+    "vc_promote",
+    "vc_publish_pending",
+    "vc_uninterrupted_publication_is_consistent"
+  ],
+  "otel_arrow_dfe_controller_proof_rlib/requirements/active_instance_prevents_completion": [
+    "vc_active_instance_prevents_completion",
+    "vc_lifecycle_work_pending"
+  ],
+  "otel_arrow_dfe_controller_proof_rlib/requirements/cancelled_worker_cannot_spend_restart": [
+    "vc_cancelled_worker_cannot_spend_restart",
+    "vc_commit_launch"
+  ],
+  "otel_arrow_dfe_controller_proof_rlib/requirements/conflicting_pipeline_reservation_is_denied": [
+    "vc_conflicting_pipeline_reservation_is_denied",
+    "vc_permits_pipeline_reservation"
+  ],
+  "otel_arrow_dfe_controller_proof_rlib/requirements/exited_candidate_cannot_be_promoted": [
+    "vc_exited_candidate_cannot_be_promoted",
+    "vc_promote"
+  ],
+  "otel_arrow_dfe_controller_proof_rlib/requirements/explicit_operation_fences_recovery": [
+    "vc_explicit_operation_fences_recovery",
+    "vc_preempts_recovery",
+    "vc_promote"
+  ],
+  "otel_arrow_dfe_controller_proof_rlib/requirements/foreign_engine_operation_is_denied": [
+    "vc_engine_operation_authorized",
+    "vc_foreign_engine_operation_is_denied"
+  ],
+  "otel_arrow_dfe_controller_proof_rlib/requirements/launch_requires_matching_candidate": [
+    "vc_commit_launch",
+    "vc_launch_requires_matching_candidate"
+  ],
+  "otel_arrow_dfe_controller_proof_rlib/requirements/shutdown_does_not_defer_recovery": [
+    "vc_defer_cancelled_failure",
+    "vc_shutdown_does_not_defer_recovery"
+  ],
+  "otel_arrow_dfe_controller_proof_rlib/requirements/shutdown_fences_recovery": [
+    "vc_preempts_recovery",
+    "vc_promote",
+    "vc_shutdown_fences_recovery"
+  ],
+  "otel_arrow_dfe_controller_proof_rlib/requirements/stale_cleanup_preserves_new_owner": [
+    "vc_clear_candidate",
+    "vc_release_worker",
+    "vc_stale_cleanup_preserves_new_owner"
+  ],
+  "otel_arrow_dfe_controller_proof_rlib/requirements/stale_worker_promotion_is_noop": [
+    "vc_promote",
+    "vc_stale_worker_promotion_is_noop"
+  ]
+}

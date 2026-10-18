@@ -1,0 +1,17 @@
+[package]
+name = "otel-arrow-dfe-controller-proof"
+version = "0.1.0"
+edition = "2024"
+publish = false
+
+# This proof target has its own pinned toolchain and dependency graph.
+[workspace]
+
+[features]
+known-findings = []
+
+[dependencies]
+creusot-std = "=0.14.0"
+
+[lints.rust]
+unexpected_cfgs = { level = "warn", check-cfg = ['cfg(creusot)'] }

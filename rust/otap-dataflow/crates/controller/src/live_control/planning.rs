@@ -77,7 +77,12 @@ impl<
             if state
                 .pipeline_operation_reservations
                 .get(&self.pipeline_key)
-                .is_some_and(|reservation| reservation.reservation_id == self.reservation_id)
+                .is_some_and(|reservation| {
+                    lifecycle_kernels::owns_token(
+                        Some(reservation.reservation_id),
+                        self.reservation_id,
+                    )
+                })
             {
                 let _ = state
                     .pipeline_operation_reservations
@@ -102,11 +107,11 @@ impl<
 > ControllerRuntime<PData>
 {
     fn engine_operation_allows(state: &ControllerRuntimeState, operation_id: Option<&str>) -> bool {
-        match (state.active_engine_operation.as_deref(), operation_id) {
-            (None, None) => true,
-            (Some(active), Some(operation_id)) if active == operation_id => true,
-            _ => false,
-        }
+        lifecycle_kernels::engine_operation_authorized(
+            state.active_engine_operation.is_some(),
+            operation_id.is_some(),
+            state.active_engine_operation.as_deref() == operation_id,
+        )
     }
 
     pub(super) fn begin_named_engine_operation(
@@ -118,9 +123,10 @@ impl<
                 .state
                 .lock()
                 .unwrap_or_else(|poisoned| poisoned.into_inner());
-            if state.active_engine_operation.is_some()
-                || !state.pipeline_operation_reservations.is_empty()
-            {
+            if !lifecycle_kernels::permits_engine_operation(
+                state.active_engine_operation.is_some(),
+                !state.pipeline_operation_reservations.is_empty(),
+            ) {
                 return Err(ControlPlaneError::RolloutConflict);
             }
             state.active_engine_operation = Some(operation_id.clone());
@@ -139,9 +145,10 @@ impl<
                 .state
                 .lock()
                 .unwrap_or_else(|poisoned| poisoned.into_inner());
-            if state.active_engine_operation.is_some()
-                || !state.pipeline_operation_reservations.is_empty()
-            {
+            if !lifecycle_kernels::permits_engine_operation(
+                state.active_engine_operation.is_some(),
+                !state.pipeline_operation_reservations.is_empty(),
+            ) {
                 return Err(ControlPlaneError::RolloutConflict);
             }
             let reconcile_id = format!("reconcile-{}", state.next_reconcile_id);
@@ -169,12 +176,9 @@ impl<
                 .state
                 .lock()
                 .unwrap_or_else(|poisoned| poisoned.into_inner());
-            if state.active_engine_operation.is_some()
-                || state.active_rollouts.contains_key(&pipeline_key)
-                || state.active_shutdowns.contains_key(&pipeline_key)
-                || state
-                    .pipeline_operation_reservations
-                    .contains_key(&pipeline_key)
+            if !state
+                .ownership(&pipeline_key)
+                .permits_pipeline_reservation()
             {
                 return Err(ControlPlaneError::RolloutConflict);
             }
