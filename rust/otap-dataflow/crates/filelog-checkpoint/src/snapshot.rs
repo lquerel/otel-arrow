@@ -3,6 +3,8 @@
 
 //! Version 1 snapshot section codec.
 
+pub use crate::replay_values::{QuarantineEvidence, SnapshotRecord};
+
 use std::collections::{HashMap, HashSet};
 
 use crate::primitives::{
@@ -28,52 +30,6 @@ const SNAPSHOT_MIN_RECORD_FRAME_BYTES: usize =
 /// Maximum complete version 1 snapshot record frame.
 pub const SNAPSHOT_MAX_RECORD_FRAME_BYTES: u64 =
     SNAPSHOT_RECORD_LENGTH_BYTES + SNAPSHOT_MAX_RECORD_PAYLOAD_BYTES + SNAPSHOT_RECORD_CRC_BYTES;
-
-/// Immutable evidence attached to a quarantined record.
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct QuarantineEvidence {
-    /// Opaque diagnostic reason code.
-    pub reason_code: u16,
-    /// Observed file size at quarantine time.
-    pub observed_size: u64,
-    /// File epoch at quarantine time.
-    pub quarantine_epoch: u32,
-    /// Quarantine time as Unix nanoseconds.
-    pub quarantine_time_unix_nano: u64,
-}
-
-/// One durable version 1 checkpoint record.
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct SnapshotRecord {
-    /// Opaque durable record key.
-    pub file_id: FileId,
-    /// Current file epoch.
-    pub file_epoch: u32,
-    /// Acked source-byte frontier.
-    pub committed_offset: u64,
-    /// Evidence for bytes immediately before the frontier.
-    pub committed_frontier_guard: CommittedFrontierGuard,
-    /// Current bounded fingerprint evidence.
-    pub fingerprint: Vec<u8>,
-    /// Bytes excluded before fingerprinting.
-    pub ignored_header_bytes: u32,
-    /// Current or quarantined immutable locator.
-    pub locator: Locator,
-    /// Framing-profile structural version.
-    pub framing_profile_version: u16,
-    /// Framing-profile canonical digest.
-    pub framing_profile_digest: [u8; 32],
-    /// Durable record-framing resume state.
-    pub framing_resume: FramingResume,
-    /// Durable lifecycle state.
-    pub lifecycle_state: LifecycleState,
-    /// Evidence present exactly for quarantined records.
-    pub quarantine_evidence: Option<QuarantineEvidence>,
-    /// Last-observed time as Unix nanoseconds.
-    pub last_seen_time_unix_nano: u64,
-    /// Bounded advisory path evidence.
-    pub advisory_path: AdvisoryPath,
-}
 
 impl SnapshotRecord {
     pub(crate) fn validate(&self) -> Result<(), &'static str> {

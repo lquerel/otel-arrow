@@ -13,6 +13,8 @@ mod error;
 mod framing_profile;
 mod primitives;
 mod replay;
+#[allow(unexpected_cfgs)]
+mod replay_values;
 mod snapshot;
 mod wal;
 

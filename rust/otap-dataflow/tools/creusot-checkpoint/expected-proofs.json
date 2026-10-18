@@ -1,0 +1,181 @@
+{
+  "otel_arrow_dfe_checkpoint_proof_rlib/replay_values/EMPTY_FRONTIER_GUARD_DIGEST": [
+    "vc_const_EMPTY_FRONTIER_GUARD_DIGEST_def"
+  ],
+  "otel_arrow_dfe_checkpoint_proof_rlib/replay_values/impl_Clone_for_CommittedFrontierGuard/clone": [
+    "vc_clone_CommittedFrontierGuard",
+    "vc_clone_array_u8_32",
+    "vc_clone_u16",
+    "vc_clone_u8"
+  ],
+  "otel_arrow_dfe_checkpoint_proof_rlib/replay_values/impl_Clone_for_CommittedFrontierGuard/clone__refines": [
+    "refines",
+    "vc_clone_array_u8_32",
+    "vc_clone_u16",
+    "vc_clone_u8"
+  ],
+  "otel_arrow_dfe_checkpoint_proof_rlib/replay_values/impl_Clone_for_FramingResume/clone": [
+    "vc_clone_FramingResume",
+    "vc_clone_u32",
+    "vc_clone_u64",
+    "vc_elim_Continuation"
+  ],
+  "otel_arrow_dfe_checkpoint_proof_rlib/replay_values/impl_Clone_for_LifecycleState/clone": [
+    "vc_clone_LifecycleState"
+  ],
+  "otel_arrow_dfe_checkpoint_proof_rlib/replay_values/impl_Clone_for_ResetQuarantineAction/clone": [
+    "vc_clone_ResetQuarantineAction"
+  ],
+  "otel_arrow_dfe_checkpoint_proof_rlib/replay_values/impl_CommittedFrontierGuard/valid_for_offset": [
+    "vc_eq_array_u8_32",
+    "vc_from_u64",
+    "vc_min_u64",
+    "vc_set_EMPTY_FRONTIER_GUARD_DIGEST",
+    "vc_valid_for_offset"
+  ],
+  "otel_arrow_dfe_checkpoint_proof_rlib/replay_values/impl_CommittedFrontierGuard_0/empty": [
+    "vc_empty",
+    "vc_set_EMPTY_FRONTIER_GUARD_DIGEST"
+  ],
+  "otel_arrow_dfe_checkpoint_proof_rlib/replay_values/impl_Eq_for_CommittedFrontierGuard/assert_fields_are_eq": [
+    "vc_assert_fields_are_eq_CommittedFrontierGuard"
+  ],
+  "otel_arrow_dfe_checkpoint_proof_rlib/replay_values/impl_Eq_for_FramingResume/assert_fields_are_eq": [
+    "vc_assert_fields_are_eq_FramingResume"
+  ],
+  "otel_arrow_dfe_checkpoint_proof_rlib/replay_values/impl_Eq_for_LifecycleState/assert_fields_are_eq": [
+    "vc_assert_fields_are_eq_LifecycleState"
+  ],
+  "otel_arrow_dfe_checkpoint_proof_rlib/replay_values/impl_Eq_for_ResetQuarantineAction/assert_fields_are_eq": [
+    "vc_assert_fields_are_eq_ResetQuarantineAction"
+  ],
+  "otel_arrow_dfe_checkpoint_proof_rlib/replay_values/impl_FramingResume/valid_for_offset": [
+    "vc_elim_Continuation",
+    "vc_valid_for_offset"
+  ],
+  "otel_arrow_dfe_checkpoint_proof_rlib/replay_values/impl_PartialEq_for_CommittedFrontierGuard/eq": [
+    "vc_eq_CommittedFrontierGuard",
+    "vc_eq_array_u8_32"
+  ],
+  "otel_arrow_dfe_checkpoint_proof_rlib/replay_values/impl_PartialEq_for_CommittedFrontierGuard/eq__refines": [
+    "refines"
+  ],
+  "otel_arrow_dfe_checkpoint_proof_rlib/replay_values/impl_PartialEq_for_FramingResume/eq": [
+    "vc_elim_Continuation",
+    "vc_eq_FramingResume"
+  ],
+  "otel_arrow_dfe_checkpoint_proof_rlib/replay_values/impl_PartialEq_for_FramingResume/eq__refines": [
+    "refines"
+  ],
+  "otel_arrow_dfe_checkpoint_proof_rlib/replay_values/impl_PartialEq_for_LifecycleState/eq": [
+    "vc_eq_LifecycleState"
+  ],
+  "otel_arrow_dfe_checkpoint_proof_rlib/replay_values/impl_PartialEq_for_LifecycleState/eq__refines": [
+    "refines"
+  ],
+  "otel_arrow_dfe_checkpoint_proof_rlib/replay_values/impl_PartialEq_for_ResetQuarantineAction/eq": [
+    "vc_eq_ResetQuarantineAction"
+  ],
+  "otel_arrow_dfe_checkpoint_proof_rlib/replay_values/impl_PartialEq_for_ResetQuarantineAction/eq__refines": [
+    "refines"
+  ],
+  "otel_arrow_dfe_checkpoint_proof_rlib/requirements/accepted_cursor_has_valid_shape": [
+    "vc_accepted_cursor_has_valid_shape",
+    "vc_accepted_progress_applies_atomically",
+    "vc_set_EMPTY_FRONTIER_GUARD_DIGEST"
+  ],
+  "otel_arrow_dfe_checkpoint_proof_rlib/requirements/accepted_progress_applies_atomically": [
+    "vc_accepted_progress_applies_atomically",
+    "vc_apply_progress_fields",
+    "vc_check_progress",
+    "vc_is_ok_unit",
+    "vc_set_EMPTY_FRONTIER_GUARD_DIGEST"
+  ],
+  "otel_arrow_dfe_checkpoint_proof_rlib/requirements/finalized_progress_is_terminal": [
+    "vc_apply_progress_fields",
+    "vc_check_progress",
+    "vc_finalized_progress_is_terminal",
+    "vc_is_err_unit",
+    "vc_is_ok_unit",
+    "vc_set_EMPTY_FRONTIER_GUARD_DIGEST"
+  ],
+  "otel_arrow_dfe_checkpoint_proof_rlib/requirements/keep_failed_is_noop": [
+    "vc_keep_failed_is_noop",
+    "vc_reset_quarantined"
+  ],
+  "otel_arrow_dfe_checkpoint_proof_rlib/requirements/refuses_early_close": [
+    "vc_check_progress",
+    "vc_is_err_unit",
+    "vc_refuses_early_close",
+    "vc_set_EMPTY_FRONTIER_GUARD_DIGEST"
+  ],
+  "otel_arrow_dfe_checkpoint_proof_rlib/requirements/rejected_reset_preserves_record": [
+    "vc_is_err_unit",
+    "vc_rejected_reset_preserves_record",
+    "vc_reset_after_truncate",
+    "vc_set_EMPTY_FRONTIER_GUARD_DIGEST"
+  ],
+  "otel_arrow_dfe_checkpoint_proof_rlib/requirements/reset_rejects_late_progress": [
+    "vc_check_progress",
+    "vc_is_err_unit",
+    "vc_reset_after_truncate",
+    "vc_reset_rejects_late_progress",
+    "vc_set_EMPTY_FRONTIER_GUARD_DIGEST"
+  ],
+  "otel_arrow_dfe_checkpoint_proof_rlib/transitions/apply_progress_fields": [
+    "vc_apply_progress_fields"
+  ],
+  "otel_arrow_dfe_checkpoint_proof_rlib/transitions/check_progress": [
+    "vc_branch_Result_unit_TransitionError",
+    "vc_call_closure0",
+    "vc_check_progress",
+    "vc_closure0",
+    "vc_closure1",
+    "vc_closure2",
+    "vc_closure3",
+    "vc_elim_Break",
+    "vc_elim_Continuation",
+    "vc_from_TransitionError",
+    "vc_from_residual_Result_unit_TransitionError",
+    "vc_is_some_and_u64",
+    "vc_is_some_and_u64'0",
+    "vc_is_some_and_u64'1",
+    "vc_ne_CommittedFrontierGuard",
+    "vc_ne_FramingResume",
+    "vc_require",
+    "vc_set_EMPTY_FRONTIER_GUARD_DIGEST",
+    "vc_valid_for_offset",
+    "vc_valid_for_offset'0"
+  ],
+  "otel_arrow_dfe_checkpoint_proof_rlib/transitions/require": [
+    "vc_ne_LifecycleState",
+    "vc_require"
+  ],
+  "otel_arrow_dfe_checkpoint_proof_rlib/transitions/reset_after_truncate": [
+    "vc_branch_Result_unit_TransitionError",
+    "vc_checked_add",
+    "vc_elim_Break",
+    "vc_empty",
+    "vc_from_TransitionError",
+    "vc_from_residual_Result_unit_TransitionError",
+    "vc_ne_FramingResume",
+    "vc_ne_Option_u32",
+    "vc_require",
+    "vc_reset_after_truncate",
+    "vc_set_EMPTY_FRONTIER_GUARD_DIGEST"
+  ],
+  "otel_arrow_dfe_checkpoint_proof_rlib/transitions/reset_quarantined": [
+    "vc_branch_Result_unit_TransitionError",
+    "vc_checked_add",
+    "vc_elim_Break",
+    "vc_eq_ResetQuarantineAction",
+    "vc_from_TransitionError",
+    "vc_from_residual_Result_unit_TransitionError",
+    "vc_ne_CommittedFrontierGuard",
+    "vc_ne_FramingResume",
+    "vc_ne_Option_u32",
+    "vc_ne_Vec_u8_Global",
+    "vc_require",
+    "vc_reset_quarantined"
+  ]
+}

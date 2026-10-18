@@ -3,6 +3,11 @@
 
 //! Shared durable values and bounded byte helpers.
 
+pub use crate::replay_values::{
+    AdvisoryPath, AdvisoryPathKind, CommittedFrontierGuard, FileId, FramingResume, LifecycleState,
+    Locator,
+};
+
 use crc::{CRC_32_ISCSI, Crc};
 use sha2::{Digest, Sha256};
 
@@ -19,10 +24,7 @@ pub(crate) const TX_MAGIC: &[u8; 8] = b"FLOGTXN\0";
 
 const NAMESPACE_DOMAIN: &[u8] = b"otel-arrow-filelog-checkpoint-namespace-v1\0";
 const FRONTIER_DOMAIN: &[u8] = b"otel-arrow-filelog-frontier-guard-v1\0";
-const EMPTY_FRONTIER_GUARD_DIGEST: [u8; 32] = [
-    0xbe, 0x47, 0xd0, 0x23, 0xa0, 0x6e, 0x82, 0xfd, 0x6d, 0xa2, 0xda, 0xa0, 0x63, 0x15, 0x47, 0xd6,
-    0xec, 0xa2, 0x97, 0xb7, 0xac, 0x53, 0x2c, 0xba, 0x64, 0x71, 0xab, 0x90, 0x82, 0x9e, 0xc5, 0xb9,
-];
+
 const ADVISORY_PATH_DOMAIN: &[u8] = b"otel-arrow-filelog-advisory-path-v1\0";
 
 /// Absolute version 1 fingerprint field maximum.
@@ -35,15 +37,10 @@ pub const AUDIT_REASON_MAX_BYTES: usize = 1024;
 /// Maximum administrative namespace-ID length.
 pub const NAMESPACE_ID_MAX_BYTES: usize = 255;
 pub(crate) const FRAMING_PATTERN_MAX_BYTES: usize = 4096;
-/// Raw-byte window covered by committed-frontier evidence.
-pub const COMMITTED_FRONTIER_GUARD_WINDOW_BYTES: u16 = 64;
+pub use crate::replay_values::COMMITTED_FRONTIER_GUARD_WINDOW_BYTES;
 pub(crate) const SNAPSHOT_MAX_RECORD_PAYLOAD_BYTES: u64 = 69_854;
 pub(crate) const REASON_CODE_RESERVED: u16 = 0;
 pub(crate) const QUARANTINE_REASON_RESERVED_V1: u16 = 4;
-
-/// Opaque durable 128-bit file identity.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord)]
-pub struct FileId(pub(crate) [u8; 16]);
 
 impl FileId {
     /// Constructs an ID from its exact opaque bytes.
@@ -57,17 +54,6 @@ impl FileId {
     pub const fn as_bytes(&self) -> &[u8; 16] {
         &self.0
     }
-}
-
-/// Durable lifecycle state.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum LifecycleState {
-    /// File is actively tracked.
-    Active,
-    /// Rotation finalization completed.
-    RotatedFinalized,
-    /// Reading is blocked pending administration.
-    Quarantined,
 }
 
 impl LifecycleState {
@@ -90,28 +76,6 @@ impl LifecycleState {
             }),
         }
     }
-}
-
-/// Normalized platform-neutral file locator.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
-pub enum Locator {
-    /// No locator is available. Version 1 snapshot and registration state
-    /// rejects this value, but the discriminant remains part of the codec.
-    Unspecified,
-    /// POSIX device and inode values widened to `u64`.
-    PosixDevIno {
-        /// Device identifier.
-        dev: u64,
-        /// Inode number.
-        ino: u64,
-    },
-    /// Windows volume serial and opaque 128-bit file ID.
-    WindowsVolumeFileId {
-        /// Full volume serial value.
-        volume_serial: u64,
-        /// Opaque `FILE_ID_INFO.FileId` bytes.
-        file_id: [u8; 16],
-    },
 }
 
 impl Locator {
@@ -153,22 +117,6 @@ impl Locator {
     }
 }
 
-/// Durable framing resume state.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum FramingResume {
-    /// The next unit starts a new record.
-    Clean,
-    /// A split record remains in progress.
-    Continuation {
-        /// Original record start offset.
-        record_start_offset: u64,
-        /// Known record end, or zero for scan-to-LF mode.
-        record_end_offset: u64,
-        /// Index of the next fragment.
-        next_fragment_index: u32,
-    },
-}
-
 impl FramingResume {
     pub(crate) fn write(&self, out: &mut Writer) {
         match *self {
@@ -200,32 +148,6 @@ impl FramingResume {
             }),
         }
     }
-
-    pub(crate) const fn valid_for_offset(self, offset: u64) -> bool {
-        match self {
-            Self::Clean => true,
-            Self::Continuation {
-                record_start_offset,
-                record_end_offset,
-                next_fragment_index,
-            } => {
-                next_fragment_index >= 1
-                    && record_start_offset < offset
-                    && (record_end_offset == 0 || offset < record_end_offset)
-            }
-        }
-    }
-}
-
-/// Advisory path encoding kind.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum AdvisoryPathKind {
-    /// No path is available.
-    Unavailable,
-    /// Native Unix bytes.
-    UnixBytes,
-    /// Native UTF-16 code units serialized little-endian.
-    WindowsUtf16Le,
 }
 
 impl AdvisoryPathKind {
@@ -250,16 +172,6 @@ impl AdvisoryPathKind {
             }),
         }
     }
-}
-
-/// Bounded filelog advisory-path evidence.
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct AdvisoryPath {
-    kind: AdvisoryPathKind,
-    truncated: bool,
-    full_path_len: u64,
-    stored_path_bytes: Vec<u8>,
-    full_path_digest: [u8; 32],
 }
 
 impl AdvisoryPath {
@@ -467,15 +379,6 @@ fn advisory_path_digest(kind: AdvisoryPathKind, len: u64, bytes: &[u8]) -> [u8; 
     hasher.finalize().into()
 }
 
-/// Fixed-width digest evidence immediately preceding committed progress.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub struct CommittedFrontierGuard {
-    /// Required raw window length.
-    pub window_len: u16,
-    /// Domain-separated SHA-256 digest.
-    pub digest: [u8; 32],
-}
-
 impl CommittedFrontierGuard {
     /// Computes a guard from the exact required raw window.
     pub fn compute(offset: u64, window: &[u8]) -> Result<Self, EncodeError> {
@@ -497,15 +400,6 @@ impl CommittedFrontierGuard {
         })
     }
 
-    /// Computes the canonical empty guard at offset zero.
-    #[must_use]
-    pub const fn empty() -> Self {
-        Self {
-            window_len: 0,
-            digest: EMPTY_FRONTIER_GUARD_DIGEST,
-        }
-    }
-
     pub(crate) fn write(&self, out: &mut Writer) {
         out.u16(self.window_len);
         out.bytes(&self.digest);
@@ -516,12 +410,6 @@ impl CommittedFrontierGuard {
             window_len: input.u16()?,
             digest: input.array()?,
         })
-    }
-
-    pub(crate) fn valid_for_offset(&self, offset: u64) -> bool {
-        let expected_len = offset.min(u64::from(COMMITTED_FRONTIER_GUARD_WINDOW_BYTES));
-        self.window_len as u64 == expected_len
-            && (offset != 0 || self.digest == EMPTY_FRONTIER_GUARD_DIGEST)
     }
 }
 

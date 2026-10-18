@@ -5,12 +5,16 @@
 
 use std::collections::{HashMap, HashSet};
 
+#[allow(unexpected_cfgs)]
+mod transitions;
+use transitions::apply_progress_fields;
+
 use crate::primitives::quarantine_reason_reserved;
 use crate::{
-    CommittedFrontierGuard, DecodeError, EncodeError, FRAMING_PROFILE_VERSION, FileId,
-    FramingProfileParams, FramingResume, LifecycleState, Locator, Operation, QuarantineEvidence,
-    RegisterFile, ResetQuarantineAction, SnapshotRecord, Transaction, TransactionScan,
-    UpdateProgress, decode_checkpoint_snapshot, namespace_digest, scan_next_transaction,
+    DecodeError, EncodeError, FRAMING_PROFILE_VERSION, FileId, FramingProfileParams, FramingResume,
+    LifecycleState, Locator, Operation, QuarantineEvidence, RegisterFile, SnapshotRecord,
+    Transaction, TransactionScan, UpdateProgress, decode_checkpoint_snapshot, namespace_digest,
+    scan_next_transaction,
 };
 
 /// Admission bounds and the selected identity/framing profile.
@@ -518,20 +522,8 @@ fn transition(slot: &mut Option<SnapshotRecord>, operation: Operation) -> Result
             apply_progress_fields(record, &op);
         }
         Operation::ResetAfterTruncate(op) => {
-            require(record, LifecycleState::Active, op.expected_active_epoch)?;
-            if record.file_epoch.checked_add(1) != Some(op.resulting_epoch)
-                || op.new_committed_offset != 0
-                || op.new_framing_resume != FramingResume::Clean
-                || op.reason_code != 1
-            {
-                return Err(invalid(id, "invalid truncate reset"));
-            }
-            record.file_epoch = op.resulting_epoch;
-            record.committed_offset = 0;
-            record.committed_frontier_guard = CommittedFrontierGuard::empty();
-            record.framing_resume = FramingResume::Clean;
-            record.fingerprint = op.new_fingerprint;
-            record.last_seen_time_unix_nano = op.reset_time_unix_nano;
+            transitions::reset_after_truncate(record, op)
+                .map_err(|error| transition_error(id, error))?;
         }
         Operation::UpdateFingerprint(op) => {
             require(record, LifecycleState::Active, op.expected_file_epoch)?;
@@ -581,37 +573,8 @@ fn transition(slot: &mut Option<SnapshotRecord>, operation: Operation) -> Result
             }
         }
         Operation::ResetQuarantinedFile(op) => {
-            require(
-                record,
-                LifecycleState::Quarantined,
-                op.expected_quarantine_epoch,
-            )?;
-            if op.action == ResetQuarantineAction::KeepFailed {
-                if op.resulting_epoch != record.file_epoch
-                    || op.resulting_offset != record.committed_offset
-                    || op.new_committed_frontier_guard != record.committed_frontier_guard
-                    || op.new_framing_resume != record.framing_resume
-                    || op.new_fingerprint != record.fingerprint
-                {
-                    return Err(ReplayError::KeepFailedStateChange { file_id: id });
-                }
-                return Ok(());
-            }
-            if record.file_epoch.checked_add(1) != Some(op.resulting_epoch)
-                || op.new_framing_resume != FramingResume::Clean
-                || (op.action == ResetQuarantineAction::ResetToBeginning
-                    && op.resulting_offset != 0)
-            {
-                return Err(invalid(id, "invalid quarantine reset"));
-            }
-            record.lifecycle_state = LifecycleState::Active;
-            record.quarantine_evidence = None;
-            record.file_epoch = op.resulting_epoch;
-            record.committed_offset = op.resulting_offset;
-            record.committed_frontier_guard = op.new_committed_frontier_guard;
-            record.framing_resume = op.new_framing_resume;
-            record.fingerprint = op.new_fingerprint;
-            record.last_seen_time_unix_nano = op.action_time_unix_nano;
+            transitions::reset_quarantined(record, op)
+                .map_err(|error| transition_error(id, error))?;
         }
         Operation::RemoveFile(op) => {
             require(record, op.expected_prior_state, op.expected_file_epoch)?;
@@ -639,84 +602,22 @@ fn require(record: &SnapshotRecord, state: LifecycleState, epoch: u32) -> Result
     Ok(())
 }
 
-fn validate_progress(record: &SnapshotRecord, op: &UpdateProgress) -> Result<(), ReplayError> {
-    require(record, LifecycleState::Active, op.expected_file_epoch)?;
-    let reject = || {
-        invalid(
-            record.file_id,
-            "progress does not preserve the stored frontier and continuation contract",
-        )
+fn transition_error(file_id: FileId, error: transitions::TransitionError) -> ReplayError {
+    use transitions::TransitionError;
+    let reason = match error {
+        TransitionError::StoredState => "stored lifecycle or epoch does not match",
+        TransitionError::Progress => {
+            "progress does not preserve the stored frontier and continuation contract"
+        }
+        TransitionError::Truncate => "invalid truncate reset",
+        TransitionError::QuarantineReset => "invalid quarantine reset",
+        TransitionError::KeepFailed => return ReplayError::KeepFailedStateChange { file_id },
     };
-    if !op
-        .new_committed_frontier_guard
-        .valid_for_offset(op.new_committed_offset)
-        || !op
-            .new_framing_resume
-            .valid_for_offset(op.new_committed_offset)
-        || (op.finalize && op.new_framing_resume != FramingResume::Clean)
-    {
-        return Err(reject());
-    }
-    if record.committed_offset != op.expected_committed_offset
-        || op.new_committed_offset < record.committed_offset
-    {
-        return Err(reject());
-    }
-    if op.new_committed_offset == record.committed_offset {
-        if op.new_committed_frontier_guard != record.committed_frontier_guard
-            || op.new_framing_resume != record.framing_resume
-        {
-            return Err(reject());
-        }
-        return Ok(());
-    }
-    let next_start = match op.new_framing_resume {
-        FramingResume::Clean => None,
-        FramingResume::Continuation {
-            record_start_offset,
-            ..
-        } => Some(record_start_offset),
-    };
-    match record.framing_resume {
-        FramingResume::Clean => {
-            if next_start.is_some_and(|start| start < record.committed_offset) {
-                return Err(reject());
-            }
-        }
-        FramingResume::Continuation {
-            record_start_offset: start,
-            record_end_offset: end,
-            next_fragment_index: index,
-        } => {
-            let same = matches!(op.new_framing_resume,
-                FramingResume::Continuation { record_start_offset, record_end_offset, next_fragment_index }
-                if record_start_offset == start && record_end_offset == end && next_fragment_index > index);
-            if end != 0 && op.new_committed_offset < end {
-                if !same {
-                    return Err(reject());
-                }
-            } else if end != 0 {
-                if next_start.is_some_and(|start| start < end) {
-                    return Err(reject());
-                }
-            } else if !same && next_start.is_some_and(|start| start < record.committed_offset) {
-                return Err(reject());
-            }
-            // For scan-to-LF state, only the caller can prove the LF boundary.
-            // A clean or later continuation is legal after that source proof.
-        }
-    }
-    Ok(())
+    invalid(file_id, reason)
 }
 
-fn apply_progress_fields(record: &mut SnapshotRecord, op: &UpdateProgress) {
-    record.committed_offset = op.new_committed_offset;
-    record.committed_frontier_guard = op.new_committed_frontier_guard;
-    record.framing_resume = op.new_framing_resume;
-    record.last_seen_time_unix_nano = op.new_last_seen_time_unix_nano;
-    if op.finalize {
-        record.lifecycle_state = LifecycleState::RotatedFinalized;
-    }
+fn validate_progress(record: &SnapshotRecord, op: &UpdateProgress) -> Result<(), ReplayError> {
+    transitions::check_progress(record, op).map_err(|error| transition_error(record.file_id, error))
 }
 
 #[cfg(test)]

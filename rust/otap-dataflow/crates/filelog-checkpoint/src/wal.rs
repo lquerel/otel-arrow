@@ -3,6 +3,10 @@
 
 //! Version 1 WAL operation, transaction, and scanner codec.
 
+pub use crate::replay_values::{
+    ResetAfterTruncate, ResetQuarantineAction, ResetQuarantinedFile, UpdateProgress,
+};
+
 use std::collections::HashSet;
 
 use crate::primitives::{
@@ -80,50 +84,6 @@ pub struct RegisterFile {
     pub advisory_path: AdvisoryPath,
 }
 
-/// Advances one file's committed progress.
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct UpdateProgress {
-    /// Target file key.
-    pub file_id: FileId,
-    /// Expected stored offset.
-    pub expected_committed_offset: u64,
-    /// Expected stored epoch.
-    pub expected_file_epoch: u32,
-    /// New committed offset.
-    pub new_committed_offset: u64,
-    /// New frontier evidence.
-    pub new_committed_frontier_guard: CommittedFrontierGuard,
-    /// New framing resume.
-    pub new_framing_resume: FramingResume,
-    /// New last-observed time as Unix nanoseconds.
-    pub new_last_seen_time_unix_nano: u64,
-    /// Whether to finalize the rotated file atomically.
-    pub finalize: bool,
-}
-
-/// Resets a file after truncation.
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct ResetAfterTruncate {
-    /// Target file key.
-    pub file_id: FileId,
-    /// Expected active epoch.
-    pub expected_active_epoch: u32,
-    /// Observed truncated size.
-    pub observed_truncated_size: u64,
-    /// Resulting epoch.
-    pub resulting_epoch: u32,
-    /// Resulting committed offset.
-    pub new_committed_offset: u64,
-    /// Resulting framing resume.
-    pub new_framing_resume: FramingResume,
-    /// Replacement fingerprint.
-    pub new_fingerprint: Vec<u8>,
-    /// Reset time as Unix nanoseconds.
-    pub reset_time_unix_nano: u64,
-    /// Opaque reset reason.
-    pub reason_code: u16,
-}
-
 /// Strictly extends fingerprint evidence.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct UpdateFingerprint {
@@ -171,17 +131,6 @@ pub struct QuarantineFile {
     pub quarantine_time_unix_nano: u64,
 }
 
-/// Administrative reset decision for a quarantined file.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum ResetQuarantineAction {
-    /// Resume at offset zero with a new epoch.
-    ResetToBeginning,
-    /// Resume at an externally selected end offset with a new epoch.
-    ResetToEnd,
-    /// Keep the immutable quarantined record unchanged.
-    KeepFailed,
-}
-
 impl ResetQuarantineAction {
     const fn to_wire(self) -> u8 {
         match self {
@@ -202,33 +151,6 @@ impl ResetQuarantineAction {
             }),
         }
     }
-}
-
-/// Audited operation over one quarantined file.
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct ResetQuarantinedFile {
-    /// Target file key.
-    pub file_id: FileId,
-    /// Expected quarantine epoch.
-    pub expected_quarantine_epoch: u32,
-    /// Requested action.
-    pub action: ResetQuarantineAction,
-    /// Resulting epoch supplied by the caller.
-    pub resulting_epoch: u32,
-    /// Resulting offset supplied by the caller.
-    pub resulting_offset: u64,
-    /// Resulting frontier evidence supplied by the caller.
-    pub new_committed_frontier_guard: CommittedFrontierGuard,
-    /// Resulting framing resume supplied by the caller.
-    pub new_framing_resume: FramingResume,
-    /// Resulting fingerprint supplied by the caller.
-    pub new_fingerprint: Vec<u8>,
-    /// Action time as Unix nanoseconds.
-    pub action_time_unix_nano: u64,
-    /// Exact checkpoint namespace ID.
-    pub namespace_id: String,
-    /// Mandatory operator audit reason.
-    pub audit_reason: String,
 }
 
 /// Removes one file record.
