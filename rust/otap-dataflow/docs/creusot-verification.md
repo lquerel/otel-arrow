@@ -10,6 +10,7 @@ its nightly compiler. Proof targets are standalone Cargo workspaces under
 | Target | Production source | Established properties | Important exclusions |
 | --- | --- | --- | --- |
 | [Rate bucket](../tools/creusot-rate-bucket/README.md) | `crates/engine/src/admission/bucket/math.rs` | Exact saturated rate cost; monotonic, bounded arrival-time transition; arithmetic panic safety | Atomic protocol, clocks, scheduling, end-to-end admission, and performance |
+| [Kafka state](../tools/creusot-kafka/README.md) | Shared scalar cursor, feedback, and replay phase kernels; finite pending-set model | Generation fencing, cursor minima, replay barriers, phase transitions; model count and commit safety | Two unresolved exhaustion findings; concrete collection refinement, cached-counter machine arithmetic, broker and FFI behavior remain outside the proof |
 
 The production crate and proof target compile the same function bodies. Proof
 annotations and logical definitions are conditional on `cfg(creusot)`. Keep
@@ -22,12 +23,20 @@ checks. A passing model proof is not a claim that surrounding async code is
 verified. Partition, transform, bitmaps, and ID masks are not covered by this
 initial infrastructure change.
 
+The Kafka target reports `verified_with_known_findings`, not `proved`: its
+positive inventory passes, but commit-offset overflow and saturated delivery-token
+reuse are explicitly reproduced. A separate advisory CI safety gate remains
+failed until those findings are resolved and the report becomes `proved`.
+Counterexample reproduction is not counted as a successful safety proof. Read
+the [finding dispositions](../tools/creusot-kafka/README.md#unresolved-findings).
+
 ## Local and CI workflow
 
 From the repository root:
 
 ```sh
 python3 rust/otap-dataflow/tools/creusot-rate-bucket/verify.py
+python3 rust/otap-dataflow/tools/creusot-kafka/verify.py --skip-build
 ```
 
 The runner builds pinned tooling, tests the shared functions, proves them with
@@ -59,6 +68,11 @@ fails. Tool setup errors, timeouts, missing obligations, and an empty proof
 selection cannot be treated as successful verification. Read `result.json`
 status together with the job conclusion; the presence of an artifact alone is
 not evidence of success.
+
+The Kafka workflow also runs the feature-enabled receiver tests and explicit
+runtime finding probes with the pinned production compiler. The proof runner
+hashes its concrete adapters but does not compile librdkafka inside the verifier
+container; runtime evidence comes from that separate job.
 
 ## Maintaining the guarantee
 

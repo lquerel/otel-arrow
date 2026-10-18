@@ -1,0 +1,169 @@
+{
+  "otel_arrow_dfe_kafka_proof_rlib/model/acknowledged_cursor_matches_set": [
+    "vc_acknowledged",
+    "vc_acknowledged_cursor_matches_set"
+  ],
+  "otel_arrow_dfe_kafka_proof_rlib/model/commit_boundary": [
+    "vc_commit_boundary"
+  ],
+  "otel_arrow_dfe_kafka_proof_rlib/model/minimum": [
+    "vc_minimum"
+  ],
+  "otel_arrow_dfe_kafka_proof_rlib/model/model_acknowledge": [
+    "vc_model_acknowledge"
+  ],
+  "otel_arrow_dfe_kafka_proof_rlib/model/model_rewind": [
+    "vc_model_rewind"
+  ],
+  "otel_arrow_dfe_kafka_proof_rlib/model/model_track": [
+    "vc_model_track"
+  ],
+  "otel_arrow_dfe_kafka_proof_rlib/model/tracked_cursor_matches_set": [
+    "vc_tracked",
+    "vc_tracked_cursor_matches_set"
+  ],
+  "otel_arrow_dfe_kafka_proof_rlib/requirements/fresh_before_exhaustion": [
+    "vc_fresh_before_exhaustion",
+    "vc_next_delivery_generation"
+  ],
+  "otel_arrow_dfe_kafka_proof_rlib/requirements/reassignment_discards_old_evidence": [
+    "vc_prepare_track",
+    "vc_reassignment_discards_old_evidence"
+  ],
+  "otel_arrow_dfe_kafka_proof_rlib/requirements/reassignment_fences_old_feedback": [
+    "vc_classify_offset_feedback",
+    "vc_reassignment_fences_old_feedback"
+  ],
+  "otel_arrow_dfe_kafka_proof_rlib/requirements/rewind_preserves_commit_barrier": [
+    "vc_rewind_preserves_commit_barrier",
+    "vc_rewound"
+  ],
+  "otel_arrow_dfe_kafka_proof_rlib/requirements/stale_feedback_cannot_complete": [
+    "vc_completes_u64",
+    "vc_stale_feedback_cannot_complete"
+  ],
+  "otel_arrow_dfe_kafka_proof_rlib/requirements/stale_replay_cannot_start": [
+    "vc_mark_replaying_u64",
+    "vc_stale_replay_cannot_start"
+  ],
+  "otel_arrow_dfe_kafka_proof_rlib/requirements/stale_track_preserves_cursor": [
+    "vc_prepare_track",
+    "vc_stale_track_preserves_cursor"
+  ],
+  "otel_arrow_dfe_kafka_proof_rlib/state_kernels/classify_offset_feedback": [
+    "vc_classify_offset_feedback",
+    "vc_closure0",
+    "vc_is_some_and_u64",
+    "vc_max_u64",
+    "vc_unwrap_or_u64"
+  ],
+  "otel_arrow_dfe_kafka_proof_rlib/state_kernels/impl_Clone_for_GenerationChange/clone": [
+    "vc_clone_GenerationChange"
+  ],
+  "otel_arrow_dfe_kafka_proof_rlib/state_kernels/impl_Clone_for_PartitionCursor/clone": [
+    "vc_clone_Option_i64",
+    "vc_clone_PartitionCursor",
+    "vc_clone_i64",
+    "vc_clone_u64"
+  ],
+  "otel_arrow_dfe_kafka_proof_rlib/state_kernels/impl_Clone_for_RetryPhase_D/clone": [
+    "vc_clone_D",
+    "vc_clone_RetryPhase_D",
+    "vc_clone_bool",
+    "vc_elim_Backoff",
+    "vc_elim_Due"
+  ],
+  "otel_arrow_dfe_kafka_proof_rlib/state_kernels/impl_Clone_for_RetryPhase_D/clone__refines": [
+    "refines",
+    "vc_clone_D",
+    "vc_clone_bool"
+  ],
+  "otel_arrow_dfe_kafka_proof_rlib/state_kernels/impl_Eq_for_GenerationChange/assert_fields_are_eq": [
+    "vc_assert_fields_are_eq_GenerationChange"
+  ],
+  "otel_arrow_dfe_kafka_proof_rlib/state_kernels/impl_Eq_for_OffsetFeedbackAction/assert_fields_are_eq": [
+    "vc_assert_fields_are_eq_OffsetFeedbackAction"
+  ],
+  "otel_arrow_dfe_kafka_proof_rlib/state_kernels/impl_Eq_for_PartitionCursor/assert_fields_are_eq": [
+    "vc_assert_fields_are_eq_PartitionCursor"
+  ],
+  "otel_arrow_dfe_kafka_proof_rlib/state_kernels/impl_PartialEq_for_GenerationChange/eq": [
+    "vc_eq_GenerationChange"
+  ],
+  "otel_arrow_dfe_kafka_proof_rlib/state_kernels/impl_PartialEq_for_GenerationChange/eq__refines": [
+    "refines"
+  ],
+  "otel_arrow_dfe_kafka_proof_rlib/state_kernels/impl_PartialEq_for_OffsetFeedbackAction/eq": [
+    "vc_elim_DropLateAck",
+    "vc_eq_OffsetFeedbackAction"
+  ],
+  "otel_arrow_dfe_kafka_proof_rlib/state_kernels/impl_PartialEq_for_OffsetFeedbackAction/eq__refines": [
+    "refines"
+  ],
+  "otel_arrow_dfe_kafka_proof_rlib/state_kernels/impl_PartialEq_for_PartitionCursor/eq": [
+    "vc_eq_Option_i64",
+    "vc_eq_PartitionCursor"
+  ],
+  "otel_arrow_dfe_kafka_proof_rlib/state_kernels/impl_PartialEq_for_PartitionCursor/eq__refines": [
+    "refines"
+  ],
+  "otel_arrow_dfe_kafka_proof_rlib/state_kernels/impl_PartitionCursor/acknowledged": [
+    "vc_acknowledged",
+    "vc_elim_Some",
+    "vc_ne_Option_i64"
+  ],
+  "otel_arrow_dfe_kafka_proof_rlib/state_kernels/impl_PartitionCursor/is_known": [
+    "vc_closure0",
+    "vc_is_known",
+    "vc_is_some_and_i64"
+  ],
+  "otel_arrow_dfe_kafka_proof_rlib/state_kernels/impl_PartitionCursor/new": [
+    "vc_new"
+  ],
+  "otel_arrow_dfe_kafka_proof_rlib/state_kernels/impl_PartitionCursor/prepare_track": [
+    "vc_prepare_track"
+  ],
+  "otel_arrow_dfe_kafka_proof_rlib/state_kernels/impl_PartitionCursor/rewound": [
+    "vc_checked_sub",
+    "vc_closure0",
+    "vc_map_tup2_i64_i64",
+    "vc_min_i64",
+    "vc_rewound",
+    "vc_zip_i64"
+  ],
+  "otel_arrow_dfe_kafka_proof_rlib/state_kernels/impl_PartitionCursor/tracked": [
+    "vc_elim_Some",
+    "vc_tracked"
+  ],
+  "otel_arrow_dfe_kafka_proof_rlib/state_kernels/impl_RetryPhase_D/completes": [
+    "vc_completes_D"
+  ],
+  "otel_arrow_dfe_kafka_proof_rlib/state_kernels/impl_RetryPhase_D/deadline": [
+    "vc_deadline_D",
+    "vc_elim_Backoff"
+  ],
+  "otel_arrow_dfe_kafka_proof_rlib/state_kernels/impl_RetryPhase_D/mark_replaying": [
+    "vc_mark_replaying_D"
+  ],
+  "otel_arrow_dfe_kafka_proof_rlib/state_kernels/impl_RetryPhase_D/paused": [
+    "vc_elim_Backoff",
+    "vc_elim_Due",
+    "vc_paused_D"
+  ],
+  "otel_arrow_dfe_kafka_proof_rlib/state_kernels/impl_RetryPhase_D_0/mark_due": [
+    "vc_elim_Backoff",
+    "vc_mark_due_D",
+    "vc_ne_D"
+  ],
+  "otel_arrow_dfe_kafka_proof_rlib/state_kernels/next_attempt": [
+    "vc_next_attempt",
+    "vc_saturating_add"
+  ],
+  "otel_arrow_dfe_kafka_proof_rlib/state_kernels/next_delivery_generation": [
+    "vc_next_delivery_generation",
+    "vc_saturating_add"
+  ],
+  "otel_arrow_dfe_kafka_proof_rlib/state_kernels/revoke_allowed": [
+    "vc_revoke_allowed"
+  ]
+}

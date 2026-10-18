@@ -1,0 +1,10 @@
+{
+  "otel_arrow_dfe_kafka_proof_rlib/offset_successor/committable_offset": [
+    "vc_and_then_i64",
+    "vc_checked_add",
+    "vc_closure0",
+    "vc_closure0'0",
+    "vc_committable_offset",
+    "vc_or_else_i64"
+  ]
+}

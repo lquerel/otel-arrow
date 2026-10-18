@@ -5,6 +5,8 @@
 
 use super::config::ReplayBackoffConfig;
 use super::identity::{DeliveryGeneration, OwnershipGeneration};
+use super::state_kernels::{RetryPhase as Phase, next_attempt, revoke_allowed};
+type RetryPhase = Phase<Instant>;
 use super::scheduling::{DeadlineIndex, capped_exponential_backoff, checked_deadline};
 use std::collections::{HashMap, VecDeque};
 use std::time::{Duration, Instant};
@@ -30,33 +32,6 @@ struct RetryState {
     failed_offset: i64,
     attempts: u32,
     phase: RetryPhase,
-}
-
-/// Mutually exclusive stages of one partition replay.
-#[derive(Debug, Copy, Clone, PartialEq, Eq)]
-enum RetryPhase {
-    /// Waiting for a scheduled deadline before touching the consumer.
-    Backoff { deadline: Instant, paused: bool },
-    /// Removed from the schedule and synchronously awaiting broker operations.
-    Due { paused: bool },
-    /// Seek and resume succeeded; deliveries now belong to the replay generation.
-    Replaying,
-}
-
-impl RetryPhase {
-    const fn paused(self) -> bool {
-        match self {
-            Self::Backoff { paused, .. } | Self::Due { paused } => paused,
-            Self::Replaying => false,
-        }
-    }
-
-    const fn deadline(self) -> Option<Instant> {
-        match self {
-            Self::Backoff { deadline, .. } => Some(deadline),
-            Self::Due { .. } | Self::Replaying => None,
-        }
-    }
 }
 
 #[derive(Debug)]
@@ -314,23 +289,18 @@ impl RetryManager {
             let Some(mut state) = self.take_state(&topic, partition) else {
                 continue;
             };
-            if state.delivery_generation != entry.token {
-                self.put_state(&topic, partition, state);
-                continue;
-            }
             let Some(retry) = state.retry.as_mut() else {
                 self.put_state(&topic, partition, state);
                 continue;
             };
-            let RetryPhase::Backoff { deadline, paused } = retry.phase else {
+            let Some(paused) = retry.phase.mark_due(
+                state.delivery_generation.raw(),
+                entry.token.raw(),
+                entry.deadline,
+            ) else {
                 self.put_state(&topic, partition, state);
                 continue;
             };
-            if deadline != entry.deadline {
-                self.put_state(&topic, partition, state);
-                continue;
-            }
-            retry.phase = RetryPhase::Due { paused };
             let replay = DueReplay {
                 topic,
                 partition,
@@ -369,7 +339,7 @@ impl RetryManager {
             self.put_state(&replay.topic, replay.partition, state);
             return;
         }
-        retry.attempts = retry.attempts.saturating_add(1);
+        retry.attempts = next_attempt(retry.attempts);
         retry.phase = RetryPhase::Backoff {
             deadline: retry_deadline(now, config, retry.attempts),
             paused,
@@ -382,20 +352,14 @@ impl RetryManager {
         let Some(mut state) = self.take_state(&replay.topic, replay.partition) else {
             return;
         };
-        if state.delivery_generation != replay.delivery_generation {
-            self.put_state(&replay.topic, replay.partition, state);
-            return;
+        if let Some(retry) = state.retry.as_mut()
+            && retry.phase.mark_replaying(
+                state.delivery_generation.raw(),
+                replay.delivery_generation.raw(),
+            )
+        {
+            retry.attempts = next_attempt(retry.attempts);
         }
-        let Some(retry) = state.retry.as_mut() else {
-            self.put_state(&replay.topic, replay.partition, state);
-            return;
-        };
-        if !matches!(retry.phase, RetryPhase::Due { .. }) {
-            self.put_state(&replay.topic, replay.partition, state);
-            return;
-        }
-        retry.attempts = retry.attempts.saturating_add(1);
-        retry.phase = RetryPhase::Replaying;
         self.put_state(&replay.topic, replay.partition, state);
     }
 
@@ -437,12 +401,13 @@ impl RetryManager {
         let Some(mut state) = self.take_state(topic, partition) else {
             return;
         };
-        if state.delivery_generation != delivery_generation {
-            self.put_state(topic, partition, state);
-            return;
-        }
         if state.retry.as_ref().is_some_and(|retry| {
-            retry.rewind_offset == offset && matches!(retry.phase, RetryPhase::Replaying)
+            retry.phase.completes(
+                state.delivery_generation.raw(),
+                delivery_generation.raw(),
+                retry.rewind_offset,
+                offset,
+            )
         }) {
             state.retry = None;
         }
@@ -460,7 +425,7 @@ impl RetryManager {
         let Some(state) = self.state(topic, partition) else {
             return;
         };
-        if state.ownership_generation > ownership_generation {
+        if !revoke_allowed(state.ownership_generation.raw(), ownership_generation.raw()) {
             return;
         }
         let Some(state) = self.take_state(topic, partition) else {
@@ -827,5 +792,32 @@ mod tests {
             Some(ownership(1)),
         );
         manager.assert_indexes_consistent();
+    }
+    /// Scenario: Retry allocation reaches u64::MAX and a new replay receives the saturated token again.
+    /// Guarantees: The explicit known-finding probe exposes old feedback remaining acceptable until generation exhaustion is handled.
+    #[test]
+    #[ignore = "Known Creusot finding KAFKA-002; run tools/creusot-kafka/runtime_probes.py"]
+    fn exhausted_generation_requires_stale_feedback_rejection() {
+        let mut manager = RetryManager::new();
+        manager.next_delivery_generation = DeliveryGeneration::from_raw(u64::MAX);
+        let old = manager.delivery_generation("exhausted", 0, ownership(1));
+        let _ = manager.begin_retry(
+            BeginRetry {
+                topic: "exhausted",
+                partition: 0,
+                ownership_generation: ownership(1),
+                failed_offset: 5,
+                rewind_offset: 5,
+                paused: true,
+                now: Instant::now(),
+            },
+            &replay_config(),
+        );
+        assert!(
+            manager
+                .feedback_ownership_generation("exhausted", 0, old)
+                .is_none(),
+            "obsolete delivery token remains accepted after exhaustion"
+        );
     }
 }

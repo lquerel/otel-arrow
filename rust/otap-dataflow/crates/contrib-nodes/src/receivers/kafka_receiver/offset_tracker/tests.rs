@@ -167,7 +167,7 @@ fn partition_track_resets_state_on_newer_generation() {
     // All pending were already acked (pending_count 0), so the reset delta
     // is 1 - 0 = 1.
     assert_eq!(pt.track(50, 2), 1);
-    assert_eq!(pt.generation, 2);
+    assert_eq!(pt.cursor.generation, 2);
     assert_eq!(pt.pending_count(), 1);
     assert_eq!(pt.high_water_mark(), None);
     assert_eq!(pt.committable_offset(), Some(50));
@@ -183,7 +183,7 @@ fn partition_track_ignores_stale_generation() {
 
     // Establish current ownership period (generation 2) with one offset.
     let _ = pt.track(200, 2);
-    assert_eq!(pt.generation, 2);
+    assert_eq!(pt.cursor.generation, 2);
     assert_eq!(pt.pending_count(), 1);
     assert_eq!(pt.lowest_pending(), Some(200));
 
@@ -191,7 +191,7 @@ fn partition_track_ignores_stale_generation() {
     // and reports a zero delta.
     assert_eq!(pt.track(100, 1), 0);
     assert_eq!(
-        pt.generation, 2,
+        pt.cursor.generation, 2,
         "stale track must not lower the generation"
     );
     assert_eq!(pt.pending_count(), 1, "stale offset must not be inserted");
@@ -1169,4 +1169,18 @@ fn total_pending_cache_matches_scan_across_mutations() {
     assert!(tracker.acknowledge("metrics", 0, 400));
     assert!(tracker.acknowledge("traces", 1, 210));
     assert_in_flight_agrees(&tracker, 0);
+}
+
+/// Scenario: The public tracker acknowledges the largest signed offset and materializes its next commit offset.
+/// Guarantees: The explicit known-finding probe fails until commit-offset exhaustion is handled without panic or wraparound.
+#[test]
+#[ignore = "Known Creusot finding KAFKA-001; run tools/creusot-kafka/runtime_probes.py"]
+fn exhausted_offset_requires_safe_commit_boundary() {
+    let mut tracker = OffsetTracker::new();
+    tracker.track("exhausted", 0, i64::MAX, 1);
+    assert!(tracker.acknowledge("exhausted", 0, i64::MAX));
+    assert!(
+        tracker.committable_snapshot().is_empty(),
+        "exhaustion must not wrap the commit offset"
+    );
 }

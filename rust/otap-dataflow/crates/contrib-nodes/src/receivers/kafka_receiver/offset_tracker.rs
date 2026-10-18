@@ -14,6 +14,7 @@
 //! Designed for single-threaded use on a `LocalSet` runtime -- no internal
 //! synchronization.
 
+use super::state_kernels::{GenerationChange, PartitionCursor, revoke_allowed};
 use rdkafka::Offset;
 use rdkafka::topic_partition_list::TopicPartitionList;
 use std::collections::{BTreeSet, HashMap};
@@ -23,27 +24,15 @@ struct PartitionTracker {
     /// Pending (un-acked) offsets. `BTreeSet` keeps them sorted so
     /// `first()` gives the lowest pending offset in O(log n).
     pending: BTreeSet<i64>,
-    /// The highest acknowledged offset for this partition.
-    /// Used as a commit fallback when all pending offsets have been cleared.
-    high_water_mark: Option<i64>,
-    /// Cached lowest pending offset from the last mutation.
-    /// Used to detect when the committable watermark advances.
-    last_lowest: Option<i64>,
-    /// Assignment generation this partition's current state belongs to.
-    ///
-    /// Set from the generation current when the partition was (re)tracked.
-    /// Used to distinguish ownership periods so a stale revocation cannot
-    /// purge state created after the partition was reassigned to this consumer.
-    generation: u64,
+    /// Scalar progress is shared with the standalone verifier.
+    cursor: PartitionCursor,
 }
 
 impl PartitionTracker {
     fn new(generation: u64) -> Self {
         Self {
             pending: BTreeSet::new(),
-            high_water_mark: None,
-            last_lowest: None,
-            generation,
+            cursor: PartitionCursor::new(generation),
         }
     }
 
@@ -58,28 +47,19 @@ impl PartitionTracker {
     /// for a fresh insert, and `1 - old_len` for a newer-generation reset (the
     /// prior `old_len` pending offsets are cleared and one new offset inserted).
     fn track(&mut self, offset: i64, generation: u64) -> isize {
-        if generation < self.generation {
-            // Stale ownership period -- do not touch current-period state.
-            return 0;
-        }
         let mut delta: isize = 0;
-        if generation > self.generation {
-            self.generation = generation;
-            // The reset drops every currently-pending offset.
-            delta -= self.pending.len() as isize;
-            self.pending.clear();
-            self.high_water_mark = None;
-            self.last_lowest = None;
+        match self.cursor.prepare_track(generation) {
+            GenerationChange::Stale => return 0,
+            GenerationChange::Same => {}
+            GenerationChange::New => {
+                delta -= self.pending.len() as isize;
+                self.pending.clear();
+            }
         }
         if self.pending.insert(offset) {
             delta += 1;
         }
-        // Update cached lowest if this is lower or first entry.
-        match self.last_lowest {
-            None => self.last_lowest = Some(offset),
-            Some(prev) if offset < prev => self.last_lowest = Some(offset),
-            _ => {}
-        }
+        self.cursor.tracked(offset);
         delta
     }
 
@@ -101,28 +81,19 @@ impl PartitionTracker {
             return (false, false);
         }
 
-        // Update high-water mark.
-        match self.high_water_mark {
-            None => self.high_water_mark = Some(offset),
-            Some(h) if offset > h => self.high_water_mark = Some(offset),
-            _ => {}
-        }
-
-        // Check whether the lowest pending offset changed.
         let new_lowest = self.pending.first().copied();
-        let advanced = new_lowest != self.last_lowest;
-        self.last_lowest = new_lowest;
+        let advanced = self.cursor.acknowledged(offset, new_lowest);
         (true, advanced)
     }
 
     /// The lowest un-acknowledged offset, if any.
     fn lowest_pending(&self) -> Option<i64> {
-        self.last_lowest
+        self.cursor.last_lowest
     }
 
     /// The highest acknowledged offset.
     fn high_water_mark(&self) -> Option<i64> {
-        self.high_water_mark
+        self.cursor.high_water_mark
     }
 
     /// Check whether an offset is currently pending or has already been processed.
@@ -130,7 +101,7 @@ impl PartitionTracker {
     /// Returns `true` if the offset is in the pending set (in-flight) or has
     /// already been acknowledged (`offset <= high_water_mark`).
     fn is_known(&self, offset: i64) -> bool {
-        self.pending.contains(&offset) || self.high_water_mark.is_some_and(|hwm| offset <= hwm)
+        self.cursor.is_known(self.pending.contains(&offset), offset)
     }
 
     /// Generation-aware form of [`is_known`](Self::is_known).
@@ -147,7 +118,7 @@ impl PartitionTracker {
     /// For a same-or-older generation the ordinary [`is_known`](Self::is_known)
     /// dedupe applies.
     fn is_known_for_generation(&self, offset: i64, generation: u64) -> bool {
-        if generation > self.generation {
+        if generation > self.cursor.generation {
             return false;
         }
         self.is_known(offset)
@@ -158,8 +129,7 @@ impl PartitionTracker {
     /// Returns the lowest pending offset if any are in-flight, otherwise
     /// `high_water_mark + 1` if all offsets have been acknowledged.
     fn committable_offset(&self) -> Option<i64> {
-        self.lowest_pending()
-            .or_else(|| self.high_water_mark().map(|h| h + 1))
+        super::offset_successor::committable_offset(self.lowest_pending(), self.high_water_mark())
     }
 
     /// Number of pending (un-acked) offsets.
@@ -183,11 +153,7 @@ impl PartitionTracker {
         let old_pending = self.pending.len();
         self.pending.clear();
         let _ = self.pending.insert(rewind_offset);
-        self.last_lowest = Some(rewind_offset);
-        self.high_water_mark = self
-            .high_water_mark
-            .zip(rewind_offset.checked_sub(1))
-            .map(|(high_water_mark, cap)| high_water_mark.min(cap));
+        self.cursor.rewound(rewind_offset);
         Some((rewind_offset, 1 - old_pending as isize))
     }
 }
@@ -284,7 +250,7 @@ impl OffsetTracker {
         self.partitions
             .get(topic)
             .and_then(|parts| parts.get(&partition))
-            .map(|t| t.generation)
+            .map(|t| t.cursor.generation)
     }
 
     /// Revoke a partition only if its tracked state is *not newer* than
@@ -302,7 +268,7 @@ impl OffsetTracker {
             .and_then(|parts| parts.get(&partition))
         {
             // Tracked state belongs to a newer ownership period; keep it.
-            Some(t) if t.generation > revoke_generation => false,
+            Some(t) if !revoke_allowed(t.cursor.generation, revoke_generation) => false,
             Some(_) => {
                 self.revoke(topic, partition);
                 true
@@ -393,7 +359,7 @@ impl OffsetTracker {
             .partitions
             .get_mut(topic)
             .and_then(|parts| parts.get_mut(&partition))
-            .filter(|tracker| tracker.generation == ownership_generation)
+            .filter(|tracker| tracker.cursor.generation == ownership_generation)
             .and_then(|tracker| tracker.prepare_replay(failed_offset))?;
         self.apply_pending_delta(delta);
         Some(rewind_offset)
@@ -518,3 +484,6 @@ impl Default for OffsetTracker {
 
 #[cfg(test)]
 mod tests;
+
+#[cfg(test)]
+mod conformance;

@@ -28,56 +28,7 @@ pub(super) struct ResolvedOffsetFeedback {
     pub(super) delivery_generation: DeliveryGeneration,
 }
 
-/// Decision for incoming feedback carrying Kafka offset identity, derived
-/// purely from generation/ownership state.
-///
-/// Extracted from [`KafkaReceiver::resolve_offset_feedback`] so the stale/late-ack
-/// policy is self-contained and exhaustively unit-testable without a live
-/// consumer.
-#[derive(Debug, PartialEq, Eq)]
-pub(super) enum OffsetFeedbackAction {
-    /// Advance the offset tracker and commit: the ack belongs to the current
-    /// ownership period of a currently-owned partition.
-    Commit,
-    /// Drop as stale: the ack is from an ownership period strictly older than
-    /// the partition's current tracked *or* currently-assigned generation. The
-    /// partition was revoked and reassigned since the record was delivered.
-    DropStale,
-    /// Drop as a late ack: the partition is no longer assigned to this consumer.
-    /// `purge` indicates whether lingering tracker state should also be removed
-    /// (only when that state is not newer than the ack's ownership period).
-    DropLateAck { purge: bool },
-}
-
-/// Classify feedback given its ownership `generation` and the
-/// partition's current tracker/assignment state.
-///
-/// The stale-generation check compares the ack against the **maximum** of the
-/// tracker generation and the currently-assigned generation. Consulting the
-/// assigned generation (not just the tracker's) closes the window where a
-/// partition was revoked and reassigned to this consumer under a newer
-/// generation but no record of the new period has been tracked yet: in that
-/// window the tracker still reports the old generation, so an ack that equals
-/// the tracker generation would otherwise pass the guard, find the partition
-/// assigned, and mutate/commit stale state. Because real generations start at
-/// `1`, a `0` assigned/tracked generation means "not owned / untracked" and is
-/// treated as no lower bound.
-pub(super) fn classify_offset_feedback(
-    feedback_generation: u64,
-    tracked_generation: Option<u64>,
-    assigned_generation: u64,
-    is_assigned: bool,
-) -> OffsetFeedbackAction {
-    let current = tracked_generation.unwrap_or(0).max(assigned_generation);
-    if current > 0 && feedback_generation < current {
-        return OffsetFeedbackAction::DropStale;
-    }
-    if !is_assigned {
-        let purge = tracked_generation.is_some_and(|tracked| tracked <= feedback_generation);
-        return OffsetFeedbackAction::DropLateAck { purge };
-    }
-    OffsetFeedbackAction::Commit
-}
+pub(super) use super::super::state_kernels::{OffsetFeedbackAction, classify_offset_feedback};
 
 impl KafkaReceiver {
     /// Commit the current committable offsets to Kafka.

@@ -15,6 +15,8 @@ pub mod headers;
 mod identity;
 /// Implementation of the metrics to collect from the kafka receiver
 pub mod metrics;
+#[allow(unexpected_cfgs)]
+mod offset_successor;
 /// Per-offset tracking for Kafka consumer offset management.
 pub mod offset_tracker;
 /// Consumer-group rebalance handling (partition assign/revoke callbacks).
@@ -24,3 +26,5 @@ pub mod receiver;
 mod retry;
 /// Shared retry-scheduling primitives (ordered deadline index + backoff).
 mod scheduling;
+#[allow(unexpected_cfgs)]
+mod state_kernels;

@@ -44,6 +44,6 @@ impl DeliveryGeneration {
     /// Advance to the next representable generation without wrapping.
     #[must_use]
     pub(crate) const fn saturating_next(self) -> Self {
-        Self(self.0.saturating_add(1))
+        Self(super::state_kernels::next_delivery_generation(self.0))
     }
 }
