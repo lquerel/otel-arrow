@@ -753,6 +753,8 @@ static SYSLOG_BATCHING_SUPPORT: BatchingSupport = BatchingSupport {
 register_pdata_codec!(
     SYSLOG_CEF_CODEC,
     CodecRegistration::new(&SYSLOG_CEF_METADATA)
+        .with_implementation("otel.syslog_cef")
+        .with_default_for_encoding()
         .with_decoder(|_| Box::<SyslogDecoder>::default())
         .with_batcher(CodecBatcherRegistration::new(
             &SYSLOG_BATCHING_SUPPORT,
@@ -1372,7 +1374,8 @@ mod tests {
         let service = CodecServiceBuilder::from_global_registry()
             .expect("valid codec registry")
             .with_decode_policy(DecodePolicy::new(DecodeValidation::Strict))
-            .build();
+            .build()
+            .unwrap();
         let codec = resolve_syslog().unwrap();
         let valid = codec
             .admit(

@@ -253,7 +253,12 @@ impl PdataFormat {
         service: &CodecService,
         encoding: Option<&EncodingPlan>,
     ) -> Result<(), CodecError> {
-        if payload.format() == self {
+        if payload.format() == self
+            && match encoding {
+                Some(plan) => service.allows_encoded_forwarding(plan, payload.signal_type())?,
+                None => true,
+            }
+        {
             return Ok(());
         }
         match self.codec() {
@@ -564,6 +569,7 @@ mod tests {
             .unwrap()
             .with_decode_policy(DecodePolicy::new(DecodeValidation::Strict))
             .build()
+            .unwrap()
     }
 
     /// Scenario: Repeated OTLP byte batching processes multiple logs, metrics, and traces requests.
@@ -679,7 +685,8 @@ mod tests {
         let service = CodecServiceBuilder::from_registry(Arc::new(
             CodecRegistry::validate(&REGISTRATIONS).unwrap(),
         ))
-        .build();
+        .build()
+        .unwrap();
         let codec = service.registry().resolve(METADATA.encoding()).unwrap();
         let plan = BatchPlan::new(
             PdataFormat::encoded(codec),
