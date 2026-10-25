@@ -38,6 +38,20 @@ Main public model types:
 The model is strict (`serde(deny_unknown_fields)` on key types) and validated on
 load.
 
+## Resolution Building Blocks
+
+`secret::RedactedString` provides explicit secret access, real-value equality,
+and redacted serialization/debugging. Snapshot display markers are not valid
+submitted secret values.
+
+The engine crate provides standalone resolved configuration envelopes, typed
+accessors and comparison, explicit snapshot policies, and `SafeConfigSnapshot`.
+These building blocks are not yet wired into factory creation or controller
+admission. Existing factory validation and runtime paths remain in use.
+
+Omitting a node or extension `config` supplies `{}`; explicit values, including
+`null`, retain their meaning. Required component settings are still required.
+
 ## Runtime Config Format
 
 The runtime root config is:

@@ -59,6 +59,7 @@ pub mod admission;
 pub mod capability;
 #[doc(hidden)]
 pub mod clock;
+pub mod component_config;
 pub mod context_declaration;
 pub mod error;
 pub mod exporter;

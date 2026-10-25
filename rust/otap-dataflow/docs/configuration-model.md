@@ -313,7 +313,7 @@ At pipeline level:
 At node level:
 
 - `type`: `NodeUrn` (`urn:<namespace>:<kind>:<id>` or `<kind>:<id>` for `otel`)
-- `config`: node-specific payload
+- `config`: node-specific payload; omission supplies an empty object `{}`
 - `outputs` (optional): named output ports for multi-output nodes
 - `default_output` (optional): explicit default output port for implicit sends
 - `capabilities` (optional): capability bindings to pipeline extensions
@@ -648,11 +648,15 @@ core_allocation:
       end: 5
 ```
 
+<!-- markdownlint-disable MD013 -->
+
 | Type | Required fields | Placement and reservation semantics |
 | --- | --- | --- |
 | `all_cores` | Neither `count` nor `set` | Uses every process-visible core and does not reserve cores from other pipelines. |
 | `core_count` | `count` in YAML | Selects the requested number of unreserved process-visible cores and reserves them against other `core_count` allocations. Explicit `core_set` cores are also excluded. |
 | `core_set` | Non-empty `set` | Uses the exact inclusive ranges. Explicit sets may overlap one another and reserve their cores against `core_count` allocations. |
+
+<!-- markdownlint-enable MD013 -->
 
 `core_count` uses strict exhaustion behavior. A positive count fails if there
 are too few unreserved visible cores, and a count greater than the number of

@@ -576,6 +576,45 @@ impl FromIterator<(NodeId, Arc<NodeUserConfig>)> for PipelineNodes {
 }
 
 impl PipelineConfig {
+    /// Replaces every component-specific config with its precomputed safe config snapshot.
+    ///
+    /// Callers must supply exactly one snapshot for every node and extension. This
+    /// prevents an unresolved submitted value from leaking into a safe config snapshot.
+    pub fn replace_component_config_snapshots(
+        &mut self,
+        node_snapshots: &HashMap<NodeId, Value>,
+        extension_snapshots: &HashMap<ExtensionId, Value>,
+    ) -> Result<(), Error> {
+        if node_snapshots.len() != self.nodes.0.len()
+            || extension_snapshots.len() != self.extensions.0.len()
+        {
+            return Err(Error::InvalidUserConfig {
+                error: "safe config snapshots must cover every pipeline component".to_owned(),
+            });
+        }
+
+        for (node_id, node) in &mut self.nodes.0 {
+            let snapshot = node_snapshots
+                .get(node_id)
+                .ok_or_else(|| Error::InvalidUserConfig {
+                    error: format!("missing safe config snapshot for node `{node_id}`"),
+                })?;
+            Arc::make_mut(node).config = snapshot.clone();
+        }
+        for (extension_id, extension) in &mut self.extensions.0 {
+            let snapshot =
+                extension_snapshots
+                    .get(extension_id)
+                    .ok_or_else(|| Error::InvalidUserConfig {
+                        error: format!(
+                            "missing safe config snapshot for extension `{extension_id}`"
+                        ),
+                    })?;
+            Arc::make_mut(extension).config = snapshot.clone();
+        }
+        Ok(())
+    }
+
     /// Compares two pipeline configs while intentionally ignoring the optional
     /// pipeline-level policies block.
     ///
