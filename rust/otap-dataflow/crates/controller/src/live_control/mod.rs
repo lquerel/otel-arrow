@@ -36,6 +36,7 @@ use std::panic::{AssertUnwindSafe, catch_unwind};
 use std::sync::{Condvar, Mutex};
 use std::time::{Duration, Instant};
 
+mod config_edit;
 mod execution;
 mod planning;
 mod runtime;
@@ -582,6 +583,16 @@ impl<
     ) -> Result<RolloutStatus, ControlPlaneError> {
         self.runtime
             .request_reconfigure_pipeline(pipeline_group_id, pipeline_id, &request)
+    }
+
+    fn update_pipeline(
+        &self,
+        pipeline_group_id: &str,
+        pipeline_id: &str,
+        request: otel_arrow_dfe_admin::PipelineUpdateRequest,
+    ) -> Result<RolloutStatus, ControlPlaneError> {
+        self.runtime
+            .request_update_pipeline(pipeline_group_id, pipeline_id, &request)
     }
 
     fn pipeline_details(

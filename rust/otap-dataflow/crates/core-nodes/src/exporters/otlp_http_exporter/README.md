@@ -405,7 +405,7 @@ failure metrics for rates; existing error-event filters do not need renaming.
 
 ## Related Docs
 
-- [Configuration model](../../../../../docs/configuration-model.md)
+- [Configuration guide and reference](../../../../../docs/configuration.md)
 - [Proxy support](../../../../../docs/proxy-support.md)
 - [Core node catalog](../../../README.md)
 

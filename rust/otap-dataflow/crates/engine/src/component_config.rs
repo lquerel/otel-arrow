@@ -211,6 +211,28 @@ pub enum ConfigSnapshotPolicy {
 /// Factory callback that parses, validates, defaults, and snapshots a component config.
 pub type ResolveConfigFn = fn(&Value) -> Result<ResolvedComponentConfig, ConfigError>;
 
+/// Canonicalizes a private component edit basis without disclosing or resolving it.
+/// Implementations must be idempotent, preserve secrets and runtime meaning, and
+/// reject conflicting aliases. This callback is never used for reporting.
+pub type NormalizeConfigForEditFn = fn(&mut Value) -> Result<(), ConfigError>;
+
+/// Moves a legacy object key to its canonical name without losing its value.
+pub fn normalize_alias(value: &mut Value, alias: &str, canonical: &str) -> Result<(), ConfigError> {
+    if let Some(object) = value.as_object_mut()
+        && object.contains_key(alias)
+    {
+        if object.contains_key(canonical) {
+            return Err(ConfigError::InvalidUserConfig {
+                error: "conflicting configuration aliases in partial update".to_owned(),
+            });
+        }
+        if let Some(value) = object.remove(alias) {
+            _ = object.insert(canonical.to_owned(), value);
+        }
+    }
+    Ok(())
+}
+
 /// A resolved component-specific configuration hidden behind a type-erased boundary.
 ///
 /// The typed value is immutable and shared by all runtime instances. The safe

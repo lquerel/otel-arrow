@@ -246,6 +246,6 @@ Attribute values are bounded: `signal` is `traces`, `metrics`, or `logs`;
 ## Related Docs
 
 - [OTLP receiver design](../../../../../docs/otlp-receiver.md)
-- [Configuration model](../../../../../docs/configuration-model.md)
+- [Configuration guide and reference](../../../../../docs/configuration.md)
 - [Transport headers](../../../../../docs/transport-headers.md)
 - [Core node catalog](../../../README.md)

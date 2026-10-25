@@ -13,7 +13,7 @@ capabilities (such as authentication) that data-path nodes bind to via their
 For help writing runtime YAML, start at
 [`docs/configuration.md`](../../docs/configuration.md). For exact runtime
 configuration semantics, see
-[`docs/configuration-model.md`](../../docs/configuration-model.md).
+[`docs/configuration.md`](../../docs/configuration.md).
 
 ## Extensions
 

@@ -355,7 +355,7 @@ Authentication `source` is the name of the HTTP client auth implementation (ex:
 
 ## Related Docs
 
-- [Configuration model](../../../../../docs/configuration-model.md)
+- [Configuration guide and reference](../../../../../docs/configuration.md)
 - [OAuth2 client auth extension](../../../../contrib-extensions/src/oauth2_client_auth/README.md)
 - [Proxy support](../../../../../docs/proxy-support.md)
 - [Transport headers](../../../../../docs/transport-headers.md)

@@ -4167,6 +4167,7 @@ connections:
             wiring_contract: WiringContract::UNRESTRICTED,
             resolve_config: resolve_any_test_config,
             snapshot_policy: ConfigSnapshotPolicy::Omit,
+            normalize_config_for_edit: None,
         },
         ReceiverFactory {
             name: "urn:test:receiver:example",
@@ -4175,6 +4176,7 @@ connections:
             wiring_contract: WiringContract::UNRESTRICTED,
             resolve_config: resolve_any_test_config,
             snapshot_policy: ConfigSnapshotPolicy::Omit,
+            normalize_config_for_edit: None,
         },
     ];
 
@@ -4186,6 +4188,7 @@ connections:
             wiring_contract: WiringContract::UNRESTRICTED,
             resolve_config: resolve_any_test_config,
             snapshot_policy: ConfigSnapshotPolicy::Omit,
+            normalize_config_for_edit: None,
         }];
 
     pub(super) static TEST_OBSERVABILITY_EXPORTERS: &[ExporterFactory<()>] = &[
@@ -4196,6 +4199,7 @@ connections:
             wiring_contract: WiringContract::UNRESTRICTED,
             resolve_config: resolve_any_test_config,
             snapshot_policy: ConfigSnapshotPolicy::Omit,
+            normalize_config_for_edit: None,
         },
         ExporterFactory {
             name: "urn:otel:exporter:noop",
@@ -4204,6 +4208,7 @@ connections:
             wiring_contract: WiringContract::UNRESTRICTED,
             resolve_config: resolve_any_test_config,
             snapshot_policy: ConfigSnapshotPolicy::Omit,
+            normalize_config_for_edit: None,
         },
         ExporterFactory {
             name: "urn:test:exporter:example",
@@ -4212,6 +4217,7 @@ connections:
             wiring_contract: WiringContract::UNRESTRICTED,
             resolve_config: resolve_any_test_config,
             snapshot_policy: ConfigSnapshotPolicy::Omit,
+            normalize_config_for_edit: None,
         },
     ];
 
@@ -4283,6 +4289,7 @@ connections:
                     wiring_contract: WiringContract::UNRESTRICTED,
                     resolve_config: resolve_state_directory_config,
                     snapshot_policy: ConfigSnapshotPolicy::Omit,
+                    normalize_config_for_edit: None,
                 },
                 ReceiverFactory {
                     name: "urn:otel:receiver:internal_telemetry",
@@ -4291,6 +4298,7 @@ connections:
                     wiring_contract: WiringContract::UNRESTRICTED,
                     resolve_config: resolve_any_test_config,
                     snapshot_policy: ConfigSnapshotPolicy::Omit,
+                    normalize_config_for_edit: None,
                 },
             ],
             TEST_OBSERVABILITY_PROCESSORS,

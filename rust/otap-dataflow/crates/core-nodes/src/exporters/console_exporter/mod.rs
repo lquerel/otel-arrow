@@ -326,6 +326,7 @@ pub static CONSOLE_EXPORTER: ExporterFactory<OtapPdata> = ExporterFactory {
         ConsoleExporterConfig,
     >,
     snapshot_policy: otel_arrow_dfe_engine::component_config::ConfigSnapshotPolicy::TypedSafe,
+    normalize_config_for_edit: None,
 };
 
 /// Claims stdout for records when a resolved pipeline deploys a `record_json` console exporter.

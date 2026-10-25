@@ -154,6 +154,7 @@ pub static HOST_METRICS_RECEIVER: ReceiverFactory<OtapPdata> = ReceiverFactory {
     wiring_contract: otel_arrow_dfe_engine::wiring_contract::WiringContract::UNRESTRICTED,
     resolve_config: resolve_host_metrics_config,
     snapshot_policy: otel_arrow_dfe_engine::component_config::ConfigSnapshotPolicy::CustomSafe,
+    normalize_config_for_edit: Some(config::normalize_config_for_edit),
 };
 
 #[cfg(target_os = "linux")]

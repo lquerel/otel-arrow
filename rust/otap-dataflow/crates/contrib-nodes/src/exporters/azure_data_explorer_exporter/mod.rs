@@ -83,6 +83,7 @@ pub static AZURE_DATA_EXPLORER_EXPORTER: ExporterFactory<OtapPdata> = ExporterFa
         ResolvedComponentConfig::typed_safe(config)
     },
     snapshot_policy: ConfigSnapshotPolicy::TypedSafe,
+    normalize_config_for_edit: None,
     context_declarations: None,
 };
 

@@ -9,7 +9,7 @@ use crate::receivers::kafka_receiver::retry::BeginRetry;
 use async_trait::async_trait;
 use linkme::distributed_slice;
 use otel_arrow_dfe_config::observed_state::{ObservedStateSettings, SendPolicy};
-use otel_arrow_dfe_config::pipeline::{PipelineConfigBuilder, PipelineType};
+use otel_arrow_dfe_config::pipeline::PipelineConfigBuilder;
 use otel_arrow_dfe_config::policy::{ChannelCapacityPolicy, TelemetryPolicy};
 use otel_arrow_dfe_config::{DeployedPipelineKey, PipelineGroupId, PipelineId};
 use otel_arrow_dfe_core_nodes::processors::retry_processor::RETRY_PROCESSOR_URN;
@@ -69,6 +69,7 @@ static REPLAY_TOPOLOGY_EXPORTER: ExporterFactory<OtapPdata> = ExporterFactory {
     wiring_contract: otel_arrow_dfe_engine::wiring_contract::WiringContract::UNRESTRICTED,
     resolve_config: resolve_no_config,
     snapshot_policy: ConfigSnapshotPolicy::TypedSafe,
+    normalize_config_for_edit: None,
 };
 
 #[async_trait(?Send)]
@@ -598,11 +599,7 @@ fn run_retry_topology_pipeline(bootstrap_servers: String) {
         .add_exporter("topology_exporter", REPLAY_TOPOLOGY_EXPORTER_URN, None)
         .one_of("kafka_receiver", ["retry"])
         .one_of("retry", ["topology_exporter"])
-        .build(
-            PipelineType::Otap,
-            pipeline_group_id.clone(),
-            pipeline_id.clone(),
-        )
+        .build(pipeline_group_id.clone(), pipeline_id.clone())
         .expect("build Kafka replay topology");
 
     let telemetry_system = InternalTelemetrySystem::default();

@@ -155,4 +155,5 @@ pub static FLAT_FILE_API_KEY_AUTH_EXTENSION: ExtensionFactory = ExtensionFactory
     create,
     resolve_config,
     snapshot_policy: ConfigSnapshotPolicy::Omit,
+    normalize_config_for_edit: None,
 };

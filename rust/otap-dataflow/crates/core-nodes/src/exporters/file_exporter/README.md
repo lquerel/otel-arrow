@@ -141,7 +141,7 @@ if its write succeeded but its ACK was not observed before a crash.
 
 - [Architecture and design decisions](ARCHITECTURE.md)
 - [Example configuration](../../../../../configs/trafficgen-file.yaml)
-- [Configuration model](../../../../../docs/configuration-model.md)
+- [Configuration guide and reference](../../../../../docs/configuration.md)
 - [Core node catalog](../../../README.md)
 
 <!-- markdownlint-enable MD013 -->

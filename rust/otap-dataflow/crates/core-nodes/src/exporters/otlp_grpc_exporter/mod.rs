@@ -144,6 +144,9 @@ pub static OTLP_EXPORTER: ExporterFactory<OtapPdata> = ExporterFactory {
     wiring_contract: otel_arrow_dfe_engine::wiring_contract::WiringContract::UNRESTRICTED,
     resolve_config,
     snapshot_policy: otel_arrow_dfe_engine::component_config::ConfigSnapshotPolicy::TypedSafe,
+    normalize_config_for_edit: Some(
+        otel_arrow_dfe_otap::otap_grpc::client_settings::normalize_grpc_config_for_edit,
+    ),
 };
 
 /// Validates the OTLP gRPC exporter configuration at config load time.

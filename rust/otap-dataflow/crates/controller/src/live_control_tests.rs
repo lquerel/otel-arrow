@@ -287,6 +287,7 @@ static TEST_RECEIVER_FACTORIES: &[ReceiverFactory<()>] = &[
         wiring_contract: WiringContract::UNRESTRICTED,
         resolve_config: test_resolve_config,
         snapshot_policy: ConfigSnapshotPolicy::Omit,
+        normalize_config_for_edit: None,
     },
     ReceiverFactory {
         name: "urn:otel:receiver:topic",
@@ -295,6 +296,7 @@ static TEST_RECEIVER_FACTORIES: &[ReceiverFactory<()>] = &[
         wiring_contract: WiringContract::UNRESTRICTED,
         resolve_config: test_resolve_config,
         snapshot_policy: ConfigSnapshotPolicy::Omit,
+        normalize_config_for_edit: None,
     },
     ReceiverFactory {
         name: "urn:otel:receiver:otlp",
@@ -303,6 +305,7 @@ static TEST_RECEIVER_FACTORIES: &[ReceiverFactory<()>] = &[
         wiring_contract: WiringContract::UNRESTRICTED,
         resolve_config: test_resolve_config,
         snapshot_policy: ConfigSnapshotPolicy::Omit,
+        normalize_config_for_edit: None,
     },
     ReceiverFactory {
         name: "urn:otel:receiver:internal_telemetry",
@@ -311,6 +314,7 @@ static TEST_RECEIVER_FACTORIES: &[ReceiverFactory<()>] = &[
         wiring_contract: WiringContract::UNRESTRICTED,
         resolve_config: test_resolve_config,
         snapshot_policy: ConfigSnapshotPolicy::Omit,
+        normalize_config_for_edit: None,
     },
 ];
 
@@ -321,6 +325,7 @@ static TEST_PROCESSOR_FACTORIES: &[ProcessorFactory<()>] = &[ProcessorFactory {
     wiring_contract: WiringContract::UNRESTRICTED,
     resolve_config: test_resolve_config,
     snapshot_policy: ConfigSnapshotPolicy::Omit,
+    normalize_config_for_edit: None,
 }];
 
 static TEST_EXPORTER_FACTORIES: &[ExporterFactory<()>] = &[
@@ -331,6 +336,7 @@ static TEST_EXPORTER_FACTORIES: &[ExporterFactory<()>] = &[
         wiring_contract: WiringContract::UNRESTRICTED,
         resolve_config: test_resolve_config,
         snapshot_policy: ConfigSnapshotPolicy::Omit,
+        normalize_config_for_edit: None,
     },
     ExporterFactory {
         name: "urn:otel:exporter:topic",
@@ -339,6 +345,7 @@ static TEST_EXPORTER_FACTORIES: &[ExporterFactory<()>] = &[
         wiring_contract: WiringContract::UNRESTRICTED,
         resolve_config: test_resolve_config,
         snapshot_policy: ConfigSnapshotPolicy::Omit,
+        normalize_config_for_edit: None,
     },
     ExporterFactory {
         name: "urn:otel:exporter:console",
@@ -347,6 +354,7 @@ static TEST_EXPORTER_FACTORIES: &[ExporterFactory<()>] = &[
         wiring_contract: WiringContract::UNRESTRICTED,
         resolve_config: test_resolve_config,
         snapshot_policy: ConfigSnapshotPolicy::Omit,
+        normalize_config_for_edit: None,
     },
     ExporterFactory {
         name: "urn:otel:exporter:noop",
@@ -355,6 +363,7 @@ static TEST_EXPORTER_FACTORIES: &[ExporterFactory<()>] = &[
         wiring_contract: WiringContract::UNRESTRICTED,
         resolve_config: test_resolve_config,
         snapshot_policy: ConfigSnapshotPolicy::Omit,
+        normalize_config_for_edit: None,
     },
 ];
 
@@ -375,6 +384,7 @@ static CONTEXT_BINDINGS_TEST_RECEIVER_FACTORIES: &[ReceiverFactory<()>] = &[
         wiring_contract: WiringContract::UNRESTRICTED,
         resolve_config: resolve_context_bindings_test_config,
         snapshot_policy: ConfigSnapshotPolicy::Omit,
+        normalize_config_for_edit: None,
     },
     ReceiverFactory {
         name: "urn:otel:receiver:internal_telemetry",
@@ -383,6 +393,7 @@ static CONTEXT_BINDINGS_TEST_RECEIVER_FACTORIES: &[ReceiverFactory<()>] = &[
         wiring_contract: WiringContract::UNRESTRICTED,
         resolve_config: test_resolve_config,
         snapshot_policy: ConfigSnapshotPolicy::Omit,
+        normalize_config_for_edit: None,
     },
 ];
 
@@ -394,6 +405,7 @@ static CONTEXT_BINDINGS_TEST_EXPORTER_FACTORIES: &[ExporterFactory<()>] = &[
         wiring_contract: WiringContract::UNRESTRICTED,
         resolve_config: test_resolve_config,
         snapshot_policy: ConfigSnapshotPolicy::Omit,
+        normalize_config_for_edit: None,
     },
     ExporterFactory {
         name: "urn:otel:exporter:console",
@@ -402,6 +414,7 @@ static CONTEXT_BINDINGS_TEST_EXPORTER_FACTORIES: &[ExporterFactory<()>] = &[
         wiring_contract: WiringContract::UNRESTRICTED,
         resolve_config: test_resolve_config,
         snapshot_policy: ConfigSnapshotPolicy::Omit,
+        normalize_config_for_edit: None,
     },
     ExporterFactory {
         name: "urn:otel:exporter:noop",
@@ -410,6 +423,7 @@ static CONTEXT_BINDINGS_TEST_EXPORTER_FACTORIES: &[ExporterFactory<()>] = &[
         wiring_contract: WiringContract::UNRESTRICTED,
         resolve_config: test_resolve_config,
         snapshot_policy: ConfigSnapshotPolicy::Omit,
+        normalize_config_for_edit: None,
     },
 ];
 
@@ -428,6 +442,7 @@ static RECOVERY_TEST_RECEIVER_FACTORIES: &[ReceiverFactory<()>] = &[
         wiring_contract: WiringContract::UNRESTRICTED,
         resolve_config: test_resolve_config,
         snapshot_policy: ConfigSnapshotPolicy::Omit,
+        normalize_config_for_edit: None,
     },
     ReceiverFactory {
         name: "urn:otel:receiver:internal_telemetry",
@@ -436,6 +451,7 @@ static RECOVERY_TEST_RECEIVER_FACTORIES: &[ReceiverFactory<()>] = &[
         wiring_contract: WiringContract::UNRESTRICTED,
         resolve_config: test_resolve_config,
         snapshot_policy: ConfigSnapshotPolicy::Omit,
+        normalize_config_for_edit: None,
     },
 ];
 
@@ -447,6 +463,7 @@ static RECOVERY_TEST_EXPORTER_FACTORIES: &[ExporterFactory<()>] = &[
         wiring_contract: WiringContract::UNRESTRICTED,
         resolve_config: test_resolve_config,
         snapshot_policy: ConfigSnapshotPolicy::Omit,
+        normalize_config_for_edit: None,
     },
     ExporterFactory {
         name: "urn:otel:exporter:console",
@@ -455,6 +472,7 @@ static RECOVERY_TEST_EXPORTER_FACTORIES: &[ExporterFactory<()>] = &[
         wiring_contract: WiringContract::UNRESTRICTED,
         resolve_config: test_resolve_config,
         snapshot_policy: ConfigSnapshotPolicy::Omit,
+        normalize_config_for_edit: None,
     },
     ExporterFactory {
         name: "urn:otel:exporter:noop",
@@ -463,6 +481,7 @@ static RECOVERY_TEST_EXPORTER_FACTORIES: &[ExporterFactory<()>] = &[
         wiring_contract: WiringContract::UNRESTRICTED,
         resolve_config: test_resolve_config,
         snapshot_policy: ConfigSnapshotPolicy::Omit,
+        normalize_config_for_edit: None,
     },
 ];
 
@@ -7317,6 +7336,7 @@ async fn has_active_instances_checks_multiple_state_fields() {
             wiring_contract: WiringContract::UNRESTRICTED,
             resolve_config: test_resolve_config,
             snapshot_policy: ConfigSnapshotPolicy::Omit,
+            normalize_config_for_edit: None,
             context_declarations: None,
         },
         ReceiverFactory {
@@ -7325,6 +7345,7 @@ async fn has_active_instances_checks_multiple_state_fields() {
             wiring_contract: WiringContract::UNRESTRICTED,
             resolve_config: test_resolve_config,
             snapshot_policy: ConfigSnapshotPolicy::Omit,
+            normalize_config_for_edit: None,
             context_declarations: None,
         },
     ]));

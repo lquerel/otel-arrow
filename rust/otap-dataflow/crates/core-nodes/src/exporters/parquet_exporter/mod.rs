@@ -118,6 +118,21 @@ pub static PARQUET_EXPORTER: ExporterFactory<OtapPdata> = ExporterFactory {
     wiring_contract: otel_arrow_dfe_engine::wiring_contract::WiringContract::UNRESTRICTED,
     resolve_config: otel_arrow_dfe_engine::component_config::resolve_typed_config::<config::Config>,
     snapshot_policy: otel_arrow_dfe_engine::component_config::ConfigSnapshotPolicy::TypedSafe,
+    normalize_config_for_edit: Some(|value| {
+        if let Some(strategies) = value
+            .get_mut("partitioning_strategies")
+            .and_then(serde_json::Value::as_array_mut)
+        {
+            for strategy in strategies {
+                otel_arrow_dfe_engine::component_config::normalize_alias(
+                    strategy,
+                    "schema_metadata",
+                    "SchemaMetadata",
+                )?;
+            }
+        }
+        Ok(())
+    }),
 };
 
 impl ParquetExporter {

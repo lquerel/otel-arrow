@@ -82,14 +82,14 @@ fn looks_like_json(content: &str) -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use otel_arrow_dfe_admin_api::config::pipeline::{PipelineConfigBuilder, PipelineType};
+    use otel_arrow_dfe_admin_api::config::pipeline::PipelineConfigBuilder;
 
     fn pipeline_config() -> PipelineConfig {
         PipelineConfigBuilder::new()
             .add_receiver("ingress", "receiver:otlp", None)
             .add_exporter("egress", "exporter:debug", None)
             .to("ingress", "egress")
-            .build(PipelineType::Otap, "tenant-a", "ingest")
+            .build("tenant-a", "ingest")
             .expect("pipeline config")
     }
 

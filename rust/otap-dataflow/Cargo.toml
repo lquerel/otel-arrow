@@ -52,6 +52,10 @@ mimalloc = { workspace = true, optional = true }
 dhat = { workspace = true, optional = true }
 cfg-if.workspace = true
 
+[dev-dependencies]
+serde_json.workspace = true
+tempfile.workspace = true
+
 [target.'cfg(not(windows))'.dependencies]
 tikv-jemallocator = { workspace = true, optional = true }
 

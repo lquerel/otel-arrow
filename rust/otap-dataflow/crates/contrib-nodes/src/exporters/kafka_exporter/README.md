@@ -745,6 +745,6 @@ metric attributes, which keeps cardinality bounded for dynamic tenant routing.
 
 ## Related Docs
 
-- [Configuration model](../../../../../docs/configuration-model.md)
+- [Configuration guide and reference](../../../../../docs/configuration.md)
 - [Transport headers](../../../../../docs/transport-headers.md)
 - [Contrib node catalog](../../../README.md)

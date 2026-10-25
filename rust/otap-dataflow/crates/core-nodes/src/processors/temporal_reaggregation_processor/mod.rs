@@ -156,6 +156,7 @@ pub static TEMPORAL_REAGGREGATION_PROCESSOR_FACTORY: otel_arrow_dfe_engine::Proc
         ResolvedComponentConfig::typed_safe(config)
     },
     snapshot_policy: ConfigSnapshotPolicy::TypedSafe,
+    normalize_config_for_edit: None,
 };
 
 /// Factory function to create a [`TemporalReaggregationProcessor`].

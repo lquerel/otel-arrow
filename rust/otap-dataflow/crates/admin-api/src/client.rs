@@ -497,7 +497,7 @@ impl PipelinesClient<'_> {
     ///
     /// ```rust
     /// # use otel_arrow_dfe_admin_api::{
-    /// #     config::pipeline::{PipelineConfigBuilder, PipelineType},
+    /// #     config::pipeline::PipelineConfigBuilder,
     /// #     operations, pipelines, AdminClient, AdminEndpoint, HttpAdminClientSettings,
     /// # };
     /// # async fn example() -> Result<(), Box<dyn std::error::Error>> {
@@ -512,7 +512,7 @@ impl PipelinesClient<'_> {
     /// #         .add_receiver("ingress", "receiver:otlp", None)
     /// #         .add_exporter("egress", "exporter:debug", None)
     /// #         .to("ingress", "egress")
-    /// #         .build(PipelineType::Otap, "tenant-a", "ingest")?,
+    /// #         .build("tenant-a", "ingest")?,
     /// #     step_timeout_secs: 60,
     /// #     drain_timeout_secs: 60,
     /// # };
@@ -553,6 +553,20 @@ impl PipelinesClient<'_> {
     ) -> Result<pipelines::ReconfigureOutcome, Error> {
         self.backend
             .pipeline_reconfigure(pipeline_group_id, pipeline_id, request, options)
+            .await
+    }
+
+    /// Applies revision-guarded partial edits to controller-owned source.
+    /// Unlike full replacement, unchanged secret and omitted fields are not sent.
+    pub async fn update(
+        &self,
+        pipeline_group_id: &str,
+        pipeline_id: &str,
+        request: &pipelines::PipelineUpdateRequest,
+        options: &operations::OperationOptions,
+    ) -> Result<pipelines::ReconfigureOutcome, Error> {
+        self.backend
+            .pipeline_update(pipeline_group_id, pipeline_id, request, options)
             .await
     }
 
@@ -984,6 +998,13 @@ pub(crate) trait AdminBackend: Send + Sync {
         pipeline_group_id: &str,
         pipeline_id: &str,
         request: &pipelines::ReconfigureRequest,
+        options: &operations::OperationOptions,
+    ) -> Result<pipelines::ReconfigureOutcome, Error>;
+    async fn pipeline_update(
+        &self,
+        pipeline_group_id: &str,
+        pipeline_id: &str,
+        request: &pipelines::PipelineUpdateRequest,
         options: &operations::OperationOptions,
     ) -> Result<pipelines::ReconfigureOutcome, Error>;
     async fn pipeline_rollout_status(

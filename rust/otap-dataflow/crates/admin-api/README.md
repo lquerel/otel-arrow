@@ -3,9 +3,9 @@
 This crate is currently pre-1.0. Its public API may evolve between minor
 releases.
 
-`otel-arrow-dfe-admin-api` is the public Rust integration crate for the OTAP Dataflow
-Engine admin surface. External applications should depend on this crate rather
-than the server implementation crate.
+`otel-arrow-dfe-admin-api` is the public Rust integration crate for the OTel Arrow
+Dataflow Engine admin surface. External applications should depend on this crate
+rather than the server implementation crate.
 
 It provides:
 
@@ -21,6 +21,11 @@ The current admin surface is HTTP-based, but this crate is designed to keep
 client code stable as the engine grows additional authentication modes or other
 admin transports in the future. In v1, `AdminAuth::None` is the only supported
 authentication mode.
+
+Configuration reads return committed source, including credentials, inline TLS
+keys, and free-form component data. Treat responses and editor drafts as
+sensitive management data. The engine retains a separate `SafeConfigSnapshot`
+for future configuration events; Admin HTTP and OpAMP do not use that safe view.
 
 ## Deployment model
 

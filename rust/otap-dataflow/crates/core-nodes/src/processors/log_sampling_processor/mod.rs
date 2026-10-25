@@ -80,6 +80,7 @@ static LOG_SAMPLING_PROCESSOR_FACTORY: otel_arrow_dfe_engine::ProcessorFactory<O
             ResolvedComponentConfig::typed_safe(config)
         },
         snapshot_policy: ConfigSnapshotPolicy::TypedSafe,
+        normalize_config_for_edit: None,
         context_declarations: None,
         wiring_contract: otel_arrow_dfe_engine::wiring_contract::WiringContract::UNRESTRICTED,
     };

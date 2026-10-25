@@ -17,9 +17,7 @@ use crate::style::HumanStyle;
 use crate::troubleshoot::{LogFilters, MetricsFilters};
 use crate::{Cli, run, run_with_terminal, run_with_terminal_and_diagnostics};
 use clap::Parser;
-use otel_arrow_dfe_admin_api::config::pipeline::{
-    PipelineConfig, PipelineConfigBuilder, PipelineType,
-};
+use otel_arrow_dfe_admin_api::config::pipeline::{PipelineConfig, PipelineConfigBuilder};
 use otel_arrow_dfe_admin_api::telemetry::MetricsOptions;
 use otel_arrow_dfe_admin_api::{AdminClient, AdminEndpoint, HttpAdminClientSettings};
 use serde_json::json;
@@ -34,7 +32,7 @@ fn pipeline_config() -> PipelineConfig {
         .add_receiver("ingress", "receiver:otlp", None)
         .add_exporter("egress", "exporter:debug", None)
         .to("ingress", "egress")
-        .build(PipelineType::Otap, "tenant-a", "ingest")
+        .build("tenant-a", "ingest")
         .expect("pipeline config")
 }
 

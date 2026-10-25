@@ -54,7 +54,10 @@ pub(crate) fn routes() -> Router<AppState> {
     Router::new()
         .route(
             "/groups/{pipeline_group_id}/pipelines/{pipeline_id}",
-            get(show_pipeline).put(put_pipeline).delete(delete_pipeline),
+            get(show_pipeline)
+                .put(put_pipeline)
+                .patch(patch_pipeline)
+                .delete(delete_pipeline),
         )
         // Returns the status of a specific pipeline.
         .route(
@@ -154,6 +157,19 @@ pub async fn put_pipeline(
     let result = state
         .controller
         .reconfigure_pipeline(&pipeline_group_id, &pipeline_id, request);
+    rollout_response(state, pipeline_group_id, pipeline_id, params, result).await
+}
+
+/// Applies explicit edits to private source; safe reporting values are not replayed.
+pub async fn patch_pipeline(
+    Path((pipeline_group_id, pipeline_id)): Path<(String, String)>,
+    Query(params): Query<WaitParams>,
+    State(state): State<AppState>,
+    crate::PrivateConfigJson(request): crate::PrivateConfigJson<crate::PipelineUpdateRequest>,
+) -> Response {
+    let result = state
+        .controller
+        .update_pipeline(&pipeline_group_id, &pipeline_id, request);
     rollout_response(state, pipeline_group_id, pipeline_id, params, result).await
 }
 
@@ -742,7 +758,7 @@ mod tests {
         assert!(!text.contains("[OMITTED]"));
     }
 
-    /// Scenario: Full replacement HTTP input contains an invalid scalar that is itself private.
+    /// Scenario: Full or partial pipeline HTTP input contains an invalid scalar that is itself private.
     /// Guarantees: JSON admission errors preserve status without echoing submitted values in response bodies.
     #[tokio::test]
     async fn configuration_json_rejections_do_not_echo_private_values() {
@@ -754,7 +770,13 @@ mod tests {
             shutdown_status_result: Ok(None),
             delete_result: Ok(delete_status("succeeded")),
         }));
-        for (method, body) in [("PUT", json!({"pipeline": "private-invalid-scalar"}))] {
+        for (method, body) in [
+            ("PUT", json!({"pipeline": "private-invalid-scalar"})),
+            (
+                "PATCH",
+                json!({"expectedRevision": "private-invalid-scalar", "changes": []}),
+            ),
+        ] {
             let response = routes()
                 .with_state(state.clone())
                 .oneshot(

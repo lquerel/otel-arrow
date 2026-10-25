@@ -49,6 +49,27 @@ fn default_priorities() -> Vec<u8> {
     (0..=7).collect()
 }
 
+pub(super) fn normalize_config_for_edit(
+    value: &mut serde_json::Value,
+) -> Result<(), otel_arrow_dfe_config::error::Error> {
+    if let Some(maximum) = value.get("max_priority").filter(|v| !v.is_null()) {
+        let maximum = serde_json::from_value(maximum.clone())
+            .map_err(|_| invalid("invalid journald maximum priority"))?;
+        let priorities = value
+            .get("priorities")
+            .map(|v| serde_json::from_value(v.clone()))
+            .transpose()
+            .map_err(|_| invalid("invalid journald priorities"))?
+            .flatten();
+        let priorities = resolve_priorities(priorities, Some(maximum))?;
+        if let Some(object) = value.as_object_mut() {
+            _ = object.remove("max_priority");
+            _ = object.insert("priorities".to_owned(), serde_json::json!(priorities));
+        }
+    }
+    Ok(())
+}
+
 /// Where the receiver should start when no checkpoint exists.
 #[derive(Clone, Copy, Debug, Default, Deserialize, Eq, PartialEq, Serialize)]
 #[serde(rename_all = "snake_case")]

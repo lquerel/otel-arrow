@@ -17,7 +17,7 @@ mod common;
 use common::counting_exporter::{self, COUNTING_EXPORTER_URN};
 use common::flaky_exporter::{self, FLAKY_EXPORTER_URN};
 use otel_arrow_dfe_config::observed_state::{ObservedStateSettings, SendPolicy};
-use otel_arrow_dfe_config::pipeline::{PipelineConfig, PipelineConfigBuilder, PipelineType};
+use otel_arrow_dfe_config::pipeline::{PipelineConfig, PipelineConfigBuilder};
 use otel_arrow_dfe_config::policy::{ChannelCapacityPolicy, TelemetryPolicy};
 use otel_arrow_dfe_config::{DeployedPipelineKey, PipelineGroupId, PipelineId};
 use otel_arrow_dfe_core_nodes::exporters::noop_exporter::NOOP_EXPORTER_URN;
@@ -275,11 +275,7 @@ impl TestConfigBuilder {
             .add_exporter(exporter_name, exporter_urn, exporter_config)
             .one_of("fake_receiver", ["durable_buffer"])
             .one_of("durable_buffer", [exporter_name])
-            .build(
-                PipelineType::Otap,
-                pipeline_group_id.clone(),
-                pipeline_id.clone(),
-            )
+            .build(pipeline_group_id.clone(), pipeline_id.clone())
             .expect("failed to build pipeline config")
     }
 }

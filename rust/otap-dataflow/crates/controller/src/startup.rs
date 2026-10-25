@@ -451,6 +451,7 @@ mod tests {
                 resolve_config: otel_arrow_dfe_engine::component_config::resolve_no_config,
                 snapshot_policy:
                     otel_arrow_dfe_engine::component_config::ConfigSnapshotPolicy::TypedSafe,
+                normalize_config_for_edit: None,
             },
             ReceiverFactory {
                 name: "urn:otel:receiver:internal_telemetry",
@@ -460,6 +461,7 @@ mod tests {
                 resolve_config: otel_arrow_dfe_engine::component_config::resolve_no_config,
                 snapshot_policy:
                     otel_arrow_dfe_engine::component_config::ConfigSnapshotPolicy::TypedSafe,
+                normalize_config_for_edit: None,
             },
         ]));
         let processor_factories = Box::leak(Box::new([ProcessorFactory {
@@ -470,6 +472,7 @@ mod tests {
             resolve_config: otel_arrow_dfe_engine::component_config::resolve_no_config,
             snapshot_policy:
                 otel_arrow_dfe_engine::component_config::ConfigSnapshotPolicy::TypedSafe,
+            normalize_config_for_edit: None,
         }]));
         let exporter_factories = Box::leak(Box::new([
             ExporterFactory {
@@ -480,6 +483,7 @@ mod tests {
                 resolve_config: otel_arrow_dfe_engine::component_config::resolve_no_config,
                 snapshot_policy:
                     otel_arrow_dfe_engine::component_config::ConfigSnapshotPolicy::TypedSafe,
+                normalize_config_for_edit: None,
             },
             ExporterFactory {
                 name: "urn:otel:exporter:console",
@@ -489,6 +493,7 @@ mod tests {
                 resolve_config: otel_arrow_dfe_engine::component_config::resolve_no_config,
                 snapshot_policy:
                     otel_arrow_dfe_engine::component_config::ConfigSnapshotPolicy::TypedSafe,
+                normalize_config_for_edit: None,
             },
             ExporterFactory {
                 name: "urn:otel:exporter:noop",
@@ -498,6 +503,7 @@ mod tests {
                 resolve_config: otel_arrow_dfe_engine::component_config::resolve_no_config,
                 snapshot_policy:
                     otel_arrow_dfe_engine::component_config::ConfigSnapshotPolicy::TypedSafe,
+                normalize_config_for_edit: None,
             },
         ]));
         PipelineFactory::new(

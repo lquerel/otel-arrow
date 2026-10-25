@@ -153,5 +153,5 @@ Network Interface: anpi0
 
 ## Related Docs
 
-- [Configuration model](../../../../../docs/configuration-model.md)
+- [Configuration guide and reference](../../../../../docs/configuration.md)
 - [Core node catalog](../../../README.md)

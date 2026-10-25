@@ -329,6 +329,7 @@ pub static OTAP_EXPORTER: ExporterFactory<OtapPdata> = ExporterFactory {
     resolve_config,
     snapshot_policy: otel_arrow_dfe_engine::component_config::ConfigSnapshotPolicy::TypedSafe,
     // compression_method is an independent Arrow setting, not the flattened gRPC alias.
+    normalize_config_for_edit: None,
 };
 
 /// Validates the OTAP exporter configuration at config load time.

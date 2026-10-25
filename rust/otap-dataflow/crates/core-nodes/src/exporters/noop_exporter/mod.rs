@@ -51,6 +51,7 @@ pub static NOOP_EXPORTER: ExporterFactory<OtapPdata> = ExporterFactory {
     wiring_contract: otel_arrow_dfe_engine::wiring_contract::WiringContract::UNRESTRICTED,
     resolve_config: otel_arrow_dfe_engine::component_config::resolve_no_config,
     snapshot_policy: otel_arrow_dfe_engine::component_config::ConfigSnapshotPolicy::TypedSafe,
+    normalize_config_for_edit: None,
 };
 
 #[async_trait(?Send)]

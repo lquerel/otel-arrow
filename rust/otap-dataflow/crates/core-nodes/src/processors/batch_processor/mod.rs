@@ -1795,6 +1795,7 @@ pub static OTAP_BATCH_PROCESSOR_FACTORY: otel_arrow_dfe_engine::ProcessorFactory
             ResolvedComponentConfig::typed_safe(config)
         },
         snapshot_policy: ConfigSnapshotPolicy::TypedSafe,
+        normalize_config_for_edit: None,
     };
 
 #[cfg(test)]

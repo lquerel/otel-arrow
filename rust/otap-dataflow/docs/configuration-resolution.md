@@ -50,7 +50,7 @@ Collector YAML shape. The intentional choices are:
 - Explicit policies make channel capacity, telemetry, resource allocation,
   and other bounded runtime behavior visible. Hierarchy resolution is
   deterministic; exact precedence belongs to the
-  [operator reference](configuration-model.md#policy-hierarchy).
+  [operator reference](configuration.md#policy-hierarchy).
 - Named topics connect pipelines without direct cross-pipeline graph edges.
   Topic hops must remain acyclic.
 - The mandatory observability pipeline uses the node/connection model, with
@@ -110,9 +110,8 @@ rollout, and committed reporting state. Component creation consumes checked
 typed values; it does not repeat parsing.
 
 The embedding host selects `PipelineFactory<PData>`; `df_engine` uses
-`OTAP_PIPELINE_FACTORY`. The legacy pipeline `type` discriminator remains
-accepted by the ingestion model. Node and extension `type` fields select
-component implementations.
+`OTAP_PIPELINE_FACTORY`. Pipeline configuration has no `type` discriminator.
+Only node and extension envelopes use `type` to select implementations.
 
 ## Configuration Representations
 
@@ -349,13 +348,42 @@ management responses into events or logs. Future events that include
 configuration must explicitly use `SafeConfigSnapshot`, which remains redacted
 or omitted according to the mandatory factory policies.
 
-### Replacement Without Snapshot Replay
+### Editing Without Snapshot Replay
 
 Full replacement accepts complete source, including source returned by Admin.
-An exported safe snapshot is not replacement input. Management reads and PUT
-updates preserve source aliases and sensitive values; markers never mean
-"keep the old value". The candidate is resolved before rollout, and failure
-preserves the previous committed representations.
+An exported safe snapshot is still not replacement input. The pipeline `PATCH` API
+accepts explicit `set` and `remove` operations with object-key paths and an
+`expectedRevision` from pipeline details. The controller applies those edits
+to its committed source under the normal pipeline operation reservation, then
+resolves and admits the resulting candidate through the normal rollout path.
+
+The TUI sends only a resource-policy edit for scaling. Its external editor
+computes sparse edits relative to the original management view and retains that
+view's revision when a draft is reopened. Unchanged fields are absent from the
+request. Management views include secrets, so editor drafts require sensitive
+data handling. Markers never mean "keep the old value". Any newly
+supplied marker, including one nested in a map or array, is rejected. Arrays
+are replaced as a whole, so editing an array containing markers or replacing
+an omitted config requires supplying the complete real source value.
+
+The revision is engine-wide: even a successful no-op update increments it.
+Stale edits return a conflict before rollout; refresh and explicitly reapply
+the edit. This guard can conservatively conflict after another pipeline
+commits. Component subfield edits accept existing authored source paths as well
+as canonical snapshot field names. Factories
+may declare an idempotent private-source edit normalizer to translate legacy
+keys or layouts before those edits. Normalization preserves runtime meaning and
+private values; it never reconstructs source from a safe snapshot. If normalization
+would move the addressed source field, the authored layout is retained for that
+edit. Only touched
+component edit bases are normalized, and they commit only after successful
+rollout. Whole-component replacements still accept the component's source syntax.
+Other normalized defaults are not materialized into private source automatically.
+
+PATCH candidates are limited to 128 levels from the pipeline root (depth zero).
+Each object field or array element adds one level. Paths and replacement values
+are checked together before editing, including every change in a batch. Excessive
+depth returns a value-free validation error without starting a rollout.
 
 ### Diagnostics and References
 
@@ -401,6 +429,9 @@ When adding or changing a component factory:
    uncertain schemas.
 1. Implement `PartialEq` for runtime semantics, or provide a component-owned
    semantic comparator.
+1. If snapshot field layouts differ from accepted source layouts, declare a
+   private-source edit normalizer. Preserve secrets and runtime meaning, reject
+   conflicting aliases, and test idempotence and canonical `set`/`remove` edits.
 1. In creation callbacks, retrieve `Arc<T>` through the checked typed accessor;
    do not deserialize the submitted JSON.
 1. Test normalized/default-equivalent inputs, runtime-significant changes,

@@ -57,5 +57,5 @@ This node does not emit node-specific telemetry.
 
 ## Related Docs
 
-- [Configuration model](../../../../../docs/configuration-model.md)
+- [Configuration guide and reference](../../../../../docs/configuration.md)
 - [Core node catalog](../../../README.md)

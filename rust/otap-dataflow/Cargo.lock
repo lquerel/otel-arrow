@@ -7315,6 +7315,8 @@ dependencies = [
  "otel-arrow-dfe-otap",
  "otel-arrow-dfe-telemetry",
  "otel-arrow-dfe-wasm-host",
+ "serde_json",
+ "tempfile",
  "tikv-jemallocator",
 ]
 

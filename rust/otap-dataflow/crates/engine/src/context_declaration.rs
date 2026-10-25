@@ -1179,6 +1179,7 @@ mod tests {
             wiring_contract: crate::wiring_contract::WiringContract::UNRESTRICTED,
             resolve_config: crate::component_config::resolve_no_config,
             snapshot_policy: crate::component_config::ConfigSnapshotPolicy::TypedSafe,
+            normalize_config_for_edit: None,
         },
         crate::ReceiverFactory {
             name: "urn:otel:receiver:internal_telemetry",
@@ -1187,6 +1188,7 @@ mod tests {
             wiring_contract: crate::wiring_contract::WiringContract::UNRESTRICTED,
             resolve_config: resolve_test_config,
             snapshot_policy: crate::component_config::ConfigSnapshotPolicy::Omit,
+            normalize_config_for_edit: None,
         },
     ];
 
@@ -1199,6 +1201,7 @@ mod tests {
             wiring_contract: crate::wiring_contract::WiringContract::UNRESTRICTED,
             resolve_config: crate::component_config::resolve_no_config,
             snapshot_policy: crate::component_config::ConfigSnapshotPolicy::TypedSafe,
+            normalize_config_for_edit: None,
         },
         crate::ExporterFactory {
             name: "urn:otel:exporter:noop",
@@ -1207,6 +1210,7 @@ mod tests {
             wiring_contract: crate::wiring_contract::WiringContract::UNRESTRICTED,
             resolve_config: crate::component_config::resolve_no_config,
             snapshot_policy: crate::component_config::ConfigSnapshotPolicy::TypedSafe,
+            normalize_config_for_edit: None,
         },
         crate::ExporterFactory {
             name: "urn:otel:exporter:console",
@@ -1215,6 +1219,7 @@ mod tests {
             wiring_contract: crate::wiring_contract::WiringContract::UNRESTRICTED,
             resolve_config: crate::component_config::resolve_no_config,
             snapshot_policy: crate::component_config::ConfigSnapshotPolicy::TypedSafe,
+            normalize_config_for_edit: None,
         },
         crate::ExporterFactory {
             name: "urn:test:exporter:context",
@@ -1225,6 +1230,7 @@ mod tests {
             wiring_contract: crate::wiring_contract::WiringContract::UNRESTRICTED,
             resolve_config: resolve_test_declaration_config,
             snapshot_policy: crate::component_config::ConfigSnapshotPolicy::Omit,
+            normalize_config_for_edit: None,
         },
     ];
 
@@ -1236,6 +1242,7 @@ mod tests {
         wiring_contract: crate::wiring_contract::WiringContract::UNRESTRICTED,
         resolve_config: resolve_test_config,
         snapshot_policy: crate::component_config::ConfigSnapshotPolicy::Omit,
+        normalize_config_for_edit: None,
     }];
 
     /// Builds a pipeline factory from the test node registrations.

@@ -624,6 +624,7 @@ pub static ATTRIBUTES_PROCESSOR_FACTORY: otel_arrow_dfe_engine::ProcessorFactory
         },
         // Literal attribute values and hash salts can contain private operational data.
         snapshot_policy: ConfigSnapshotPolicy::Omit,
+        normalize_config_for_edit: None,
     };
 
 // Per-domain payload slices used by apply_transform_with_stats.
