@@ -8,9 +8,9 @@ use otel_arrow_dfe_pdata::otap::filter::{
     logs::LogFilter, metrics::MetricFilter, traces::TraceFilter,
 };
 
-use serde::Deserialize;
+use serde::{Deserialize, Serialize};
 
-#[derive(Debug, Clone, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct Config {
     #[serde(default = "default_metric_filter")]
     metrics: MetricFilter,

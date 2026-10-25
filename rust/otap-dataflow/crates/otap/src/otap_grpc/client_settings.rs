@@ -9,9 +9,9 @@ use crate::tls_utils;
 use http::header::HeaderValue;
 use hyper_util::rt::TokioIo;
 use otel_arrow_dfe_config::byte_units;
+use otel_arrow_dfe_config::secret::RedactedString;
 use otel_arrow_dfe_config::tls::TlsClientConfig;
-use secrecy::{ExposeSecret, SecretString};
-use serde::Deserialize;
+use serde::{Deserialize, Serialize};
 use std::collections::{HashMap, HashSet};
 use std::io;
 use std::sync::Arc;
@@ -30,7 +30,7 @@ use tower::service_fn;
 ///
 /// The default is [`StartupCheck::None`], which preserves the existing lazy-connection
 /// behaviour.
-#[derive(Debug, Clone, Copy, Default, Deserialize, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, Default, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "snake_case")]
 pub enum StartupCheck {
     /// No startup check; connections are fully lazy (existing behavior).
@@ -50,14 +50,16 @@ pub enum StartupCheck {
 }
 
 /// Common configuration shared across gRPC clients.
-#[derive(Debug, Deserialize, Clone)]
+#[derive(Debug, Serialize, Deserialize, Clone, PartialEq)]
 #[serde(deny_unknown_fields)]
 pub struct GrpcClientSettings {
     /// The gRPC endpoint to connect to (e.g. `"http://localhost:4317"`).
     ///
     /// If no scheme is provided, `http://` is assumed.
+    /// The complete URI is private because credentials may occur in its
+    /// authority, path, or query. Reporting and Debug never expose it.
     #[serde(deserialize_with = "deserialize_grpc_endpoint")]
-    pub grpc_endpoint: String,
+    pub grpc_endpoint: RedactedString,
 
     /// Compression method to use for outbound requests. Defaults to no compression.
     #[serde(default, alias = "compression_method")]
@@ -164,9 +166,9 @@ pub struct GrpcClientSettings {
     /// [`GrpcClientSettings::validate`]. These coexist with any header
     /// propagation policy configured on the exporter.
     ///
-    /// Values are wrapped in [`SecretString`] so a metadata credential is not
+    /// Values are wrapped in [`RedactedString`] so a metadata credential is not
     /// accidentally leaked through `Debug`/telemetry; the cleartext is reached
-    /// only through an explicit [`ExposeSecret::expose_secret`] call -- during
+    /// only through an explicit [`RedactedString::expose`] call -- during
     /// [`GrpcClientSettings::validate`] and at the metadata-construction site.
     ///
     /// `GrpcClientSettings` is shared by the OTLP/gRPC exporter and the OTAP
@@ -174,7 +176,7 @@ pub struct GrpcClientSettings {
     /// metadata; the OTAP exporter applies them once as the initial metadata of
     /// each Arrow stream (see [`build_static_metadata`]).
     #[serde(default)]
-    pub headers: HashMap<String, SecretString>,
+    pub headers: HashMap<String, RedactedString>,
 }
 
 /// Error returned when building a gRPC [`Endpoint`] (including TLS/mTLS setup).
@@ -246,7 +248,7 @@ fn validate_grpc_endpoint(endpoint: &str) -> Result<(), String> {
 
     let uri: http::Uri = trimmed
         .parse()
-        .map_err(|e: http::uri::InvalidUri| format!("invalid grpc_endpoint \"{trimmed}\": {e}"))?;
+        .map_err(|_: http::uri::InvalidUri| "invalid grpc_endpoint URI".to_owned())?;
 
     // If no scheme is present, prepend http:// for validation.
     let effective = if uri.scheme().is_none() {
@@ -256,17 +258,14 @@ fn validate_grpc_endpoint(endpoint: &str) -> Result<(), String> {
     };
 
     let _ = Endpoint::from_shared(effective.clone())
-        .map_err(|e| format!("invalid grpc_endpoint \"{trimmed}\": {e}"))?;
+        .map_err(|_| "invalid grpc_endpoint URI".to_owned())?;
 
     // Reject unsupported schemes.
     if let Some(scheme) = uri.scheme_str()
         && scheme != "http"
         && scheme != "https"
     {
-        return Err(format!(
-            "unsupported scheme \"{scheme}\" in grpc_endpoint \"{trimmed}\"; \
-                 expected \"http\" or \"https\""
-        ));
+        return Err("unsupported scheme in grpc_endpoint; expected http or https".to_owned());
     }
 
     Ok(())
@@ -306,7 +305,7 @@ impl GrpcClientSettings {
                 );
                 continue;
             };
-            let Ok(mut val) = MetadataValue::try_from(value.expose_secret()) else {
+            let Ok(mut val) = MetadataValue::try_from(value.expose()) else {
                 otel_arrow_dfe_telemetry::otel_debug!(
                     "grpc.client.static_header_skip",
                     reason = "invalid ascii metadata value",
@@ -364,7 +363,7 @@ impl GrpcClientSettings {
         let mut seen_names = HashSet::new();
         for (name, value) in &self.headers {
             let key = validate_grpc_metadata_key(name).map_err(GrpcEndpointError::InvalidConfig)?;
-            if MetadataValue::try_from(value.expose_secret()).is_err() {
+            if MetadataValue::try_from(value.expose()).is_err() {
                 return Err(GrpcEndpointError::InvalidConfig(format!(
                     "header \"{name}\" has a value that cannot be represented as ASCII gRPC \
                      metadata (must be visible ASCII)"
@@ -404,17 +403,17 @@ impl GrpcClientSettings {
     /// Skipped when a proxy is configured and would handle the target, since the proxy is expected
     /// to perform name resolution.
     async fn run_dns_check(&self) -> Result<(), GrpcEndpointError> {
-        let endpoint = self.grpc_endpoint.trim();
+        let endpoint = self.grpc_endpoint.expose().trim();
 
         // Extract host and port from the endpoint URI.
-        let uri: http::Uri = endpoint.parse().map_err(|e: http::uri::InvalidUri| {
-            GrpcEndpointError::InvalidEndpoint(format!("invalid URI \"{endpoint}\": {e}"))
+        let uri: http::Uri = endpoint.parse().map_err(|_: http::uri::InvalidUri| {
+            GrpcEndpointError::InvalidEndpoint("invalid endpoint URI".to_owned())
         })?;
 
         let host = uri
             .host()
             .ok_or_else(|| {
-                GrpcEndpointError::InvalidEndpoint(format!("no host in \"{endpoint}\""))
+                GrpcEndpointError::InvalidEndpoint("endpoint URI has no host".to_owned())
             })?
             .trim_matches('[')
             .trim_matches(']')
@@ -522,7 +521,7 @@ impl GrpcClientSettings {
 
     /// Builds the configured [`Endpoint`].
     pub fn build_endpoint(&self) -> Result<Endpoint, tonic::transport::Error> {
-        self.build_endpoint_from_uri(&self.grpc_endpoint)
+        self.build_endpoint_from_uri(self.grpc_endpoint.expose())
     }
 
     /// Builds the configured [`Endpoint`], applying TLS/mTLS settings when needed.
@@ -530,7 +529,8 @@ impl GrpcClientSettings {
         let endpoint = self.build_endpoint()?;
 
         // Decision to enable TLS is handled by load_client_tls_config (secure by default).
-        let tls = tls_utils::load_client_tls_config(self.tls.as_ref(), &self.grpc_endpoint).await?;
+        let tls = tls_utils::load_client_tls_config(self.tls.as_ref(), self.grpc_endpoint.expose())
+            .await?;
 
         if let Some(tls_config) = tls {
             Ok(endpoint.tls_config(tls_config)?)
@@ -563,11 +563,17 @@ impl GrpcClientSettings {
     /// which is a common source of connection failures with some proxy servers.
     pub fn log_proxy_info(&self) {
         let proxy = self.effective_proxy_config();
-        if proxy.has_proxy() && !self.grpc_endpoint.trim_start().starts_with("https://") {
+        if proxy.has_proxy()
+            && !self
+                .grpc_endpoint
+                .expose()
+                .trim_start()
+                .starts_with("https://")
+        {
             let proxy_str = proxy.to_string();
             otel_arrow_dfe_telemetry::otel_info!(
                 "otap_grpc_exporter.proxy.configured",
-                endpoint = self.grpc_endpoint.as_str(),
+                endpoint = otel_arrow_dfe_config::secret::REDACTED_VALUE,
                 proxy = proxy_str.as_str(),
                 message = "Proxy configured for http:// endpoint; using HTTP CONNECT tunneling. If your proxy does not support CONNECT for HTTP targets, consider using a transparent proxy or SOCKS proxy instead."
             );
@@ -660,7 +666,7 @@ impl GrpcClientSettings {
 impl Default for GrpcClientSettings {
     fn default() -> Self {
         Self {
-            grpc_endpoint: String::new(),
+            grpc_endpoint: "".into(),
             compression: None,
             concurrency_limit: default_concurrency_limit(),
             connect_timeout: default_connect_timeout(),
@@ -727,13 +733,13 @@ const fn default_keep_alive_while_idle() -> bool {
 
 /// Deserializes `grpc_endpoint` while validating that the value is a well-formed URI with an
 /// `http` or `https` scheme.
-fn deserialize_grpc_endpoint<'de, D>(deserializer: D) -> Result<String, D::Error>
+fn deserialize_grpc_endpoint<'de, D>(deserializer: D) -> Result<RedactedString, D::Error>
 where
     D: serde::Deserializer<'de>,
 {
-    let endpoint = String::deserialize(deserializer)?;
-    validate_grpc_endpoint(&endpoint).map_err(serde::de::Error::custom)?;
-    Ok(endpoint.trim().to_string())
+    let endpoint = RedactedString::deserialize(deserializer)?;
+    validate_grpc_endpoint(endpoint.expose()).map_err(serde::de::Error::custom)?;
+    Ok(endpoint.expose().trim().into())
 }
 
 #[cfg(test)]
@@ -743,6 +749,33 @@ mod tests {
     use otel_arrow_dfe_config::tls::{TlsClientConfig, TlsConfig};
     use otel_arrow_dfe_test_tls_certs as tls_certs;
     use tempfile::NamedTempFile;
+
+    /// Scenario: Shared gRPC endpoints contain private authority, path, or query data.
+    /// Guarantees: Runtime exposure preserves the URI while serialization, Debug, and invalid-input diagnostics disclose none of it.
+    #[test]
+    fn endpoints_have_secret_safe_serialization_and_diagnostics() {
+        let endpoint = "http://user:private-password@127.0.0.1:9/private-path?token=private-query";
+        let settings: GrpcClientSettings =
+            serde_json::from_value(serde_json::json!({"grpc_endpoint": endpoint})).unwrap();
+        assert_eq!(settings.grpc_endpoint.expose(), endpoint);
+        assert_eq!(
+            serde_json::to_value(&settings).unwrap()["grpc_endpoint"],
+            "[REDACTED]"
+        );
+        assert!(!format!("{settings:?}").contains("private-"));
+        for input in [
+            "[OMITTED]",
+            "[REDACTED]",
+            "private-invalid URI",
+            "ftp://user:private-password@127.0.0.1:9",
+        ] {
+            let error = serde_json::from_value::<GrpcClientSettings>(
+                serde_json::json!({"grpc_endpoint": input}),
+            )
+            .unwrap_err();
+            assert!(!format!("{error:?}").contains("private-"));
+        }
+    }
 
     #[test]
     fn defaults_match_previous_client_tuning() {
@@ -930,7 +963,7 @@ mod tests {
             settings
                 .headers
                 .get("authorization")
-                .map(|v| v.expose_secret()),
+                .map(RedactedString::expose),
             Some("Basic super-secret-token"),
             "the cleartext must remain reachable via the explicit accessor"
         );
@@ -1013,14 +1046,14 @@ mod tests {
             settings
                 .headers
                 .get("authorization")
-                .map(|v| v.expose_secret()),
+                .map(RedactedString::expose),
             Some("Basic abc123")
         );
         assert_eq!(
             settings
                 .headers
                 .get("x-scope-orgid")
-                .map(|v| v.expose_secret()),
+                .map(RedactedString::expose),
             Some("tenant-1")
         );
 
@@ -1083,7 +1116,7 @@ mod tests {
     async fn build_endpoint_with_tls_insecure_does_not_rewrite_scheme() {
         crate::crypto::ensure_crypto_provider();
         let settings = GrpcClientSettings {
-            grpc_endpoint: "https://localhost:4317".to_string(),
+            grpc_endpoint: "https://localhost:4317".into(),
             tls: Some(TlsClientConfig {
                 insecure: Some(true),
                 ..TlsClientConfig::default()
@@ -1156,7 +1189,7 @@ mod tests {
         crate::crypto::ensure_crypto_provider();
         let ca = tls_certs::generate_self_signed_cert("ca", Some("ca"), true);
         let settings = GrpcClientSettings {
-            grpc_endpoint: "http://localhost:4317".to_string(),
+            grpc_endpoint: "http://localhost:4317".into(),
             tls: Some(TlsClientConfig {
                 config: TlsConfig::default(),
                 ca_file: None,
@@ -1177,7 +1210,7 @@ mod tests {
     async fn build_endpoint_with_tls_rejects_partial_mtls_cert_without_key() {
         crate::crypto::ensure_crypto_provider();
         let settings = GrpcClientSettings {
-            grpc_endpoint: "https://localhost:4317".to_string(),
+            grpc_endpoint: "https://localhost:4317".into(),
             tls: Some(TlsClientConfig {
                 config: TlsConfig {
                     cert_pem: Some(
@@ -1199,12 +1232,11 @@ mod tests {
     async fn build_endpoint_with_tls_rejects_partial_mtls_key_without_cert() {
         crate::crypto::ensure_crypto_provider();
         let settings = GrpcClientSettings {
-            grpc_endpoint: "https://localhost:4317".to_string(),
+            grpc_endpoint: "https://localhost:4317".into(),
             tls: Some(TlsClientConfig {
                 config: TlsConfig {
                     key_pem: Some(
-                        "-----BEGIN PRIVATE KEY-----\nMIIB\n-----END PRIVATE KEY-----\n"
-                            .to_string(),
+                        "-----BEGIN PRIVATE KEY-----\nMIIB\n-----END PRIVATE KEY-----\n".into(),
                     ),
                     ..TlsConfig::default()
                 },
@@ -1221,7 +1253,7 @@ mod tests {
     async fn build_endpoint_with_tls_errors_when_ca_file_missing() {
         crate::crypto::ensure_crypto_provider();
         let settings = GrpcClientSettings {
-            grpc_endpoint: "https://localhost:4317".to_string(),
+            grpc_endpoint: "https://localhost:4317".into(),
             tls: Some(TlsClientConfig {
                 ca_file: Some("/this/path/should/not/exist/ca.pem".into()),
                 include_system_ca_certs_pool: Some(false),
@@ -1250,7 +1282,7 @@ mod tests {
         tmp.write_all(&oversized).unwrap();
 
         let settings = GrpcClientSettings {
-            grpc_endpoint: "https://localhost:4317".to_string(),
+            grpc_endpoint: "https://localhost:4317".into(),
             tls: Some(TlsClientConfig {
                 ca_file: Some(tmp.path().to_path_buf()),
                 include_system_ca_certs_pool: Some(false),
@@ -1270,7 +1302,7 @@ mod tests {
     async fn build_endpoint_with_tls_errors_when_no_trust_anchors() {
         crate::crypto::ensure_crypto_provider();
         let settings = GrpcClientSettings {
-            grpc_endpoint: "https://localhost:4317".to_string(),
+            grpc_endpoint: "https://localhost:4317".into(),
             tls: Some(TlsClientConfig {
                 include_system_ca_certs_pool: Some(false),
                 // No ca_file or ca_pem provided
@@ -1299,7 +1331,7 @@ mod tests {
         key_tmp.write_all(b"dummy key").unwrap();
 
         let settings = GrpcClientSettings {
-            grpc_endpoint: "https://localhost:4317".to_string(),
+            grpc_endpoint: "https://localhost:4317".into(),
             tls: Some(TlsClientConfig {
                 config: TlsConfig {
                     cert_file: Some(cert_tmp.path().to_path_buf()),
@@ -1325,7 +1357,7 @@ mod tests {
         crate::crypto::ensure_crypto_provider();
         // Test 1: Empty ca_pem with system CAs disabled -> "no trust anchors" error
         let settings1 = GrpcClientSettings {
-            grpc_endpoint: "https://localhost:4317".to_string(),
+            grpc_endpoint: "https://localhost:4317".into(),
             tls: Some(TlsClientConfig {
                 ca_pem: Some("".to_string()),
                 include_system_ca_certs_pool: Some(false),
@@ -1343,7 +1375,7 @@ mod tests {
 
         // Test 2: Whitespace-only ca_pem with system CAs enabled -> "ca_pem is empty" error
         let settings2 = GrpcClientSettings {
-            grpc_endpoint: "https://localhost:4317".to_string(),
+            grpc_endpoint: "https://localhost:4317".into(),
             tls: Some(TlsClientConfig {
                 ca_pem: Some("   ".to_string()),
                 ..TlsClientConfig::default()
@@ -1365,7 +1397,7 @@ mod tests {
         // server_name_override should be accepted and not cause an error
         // (actual SNI behavior would require integration test with a real server)
         let settings = GrpcClientSettings {
-            grpc_endpoint: "https://127.0.0.1:4317".to_string(),
+            grpc_endpoint: "https://127.0.0.1:4317".into(),
             tls: Some(TlsClientConfig {
                 server_name: Some("custom.hostname.example.com".to_string()),
                 // Use system CAs (default) so we have trust anchors
@@ -1385,7 +1417,7 @@ mod tests {
         // Secure by default: http:// endpoint with empty TLS block should enable TLS (system roots)
         // because keys/certs are optional and insecure is false by default.
         let settings = GrpcClientSettings {
-            grpc_endpoint: "http://localhost:4317".to_string(),
+            grpc_endpoint: "http://localhost:4317".into(),
             tls: Some(TlsClientConfig::default()), // Empty TLS config, insecure=false implicitly
             ..GrpcClientSettings::default()
         };
@@ -1399,7 +1431,7 @@ mod tests {
     async fn build_endpoint_with_tls_disables_tls_when_insecure_true() {
         crate::crypto::ensure_crypto_provider();
         let settings = GrpcClientSettings {
-            grpc_endpoint: "http://localhost:4317".to_string(),
+            grpc_endpoint: "http://localhost:4317".into(),
             tls: Some(TlsClientConfig {
                 insecure: Some(true),
                 ..TlsClientConfig::default()
@@ -1435,7 +1467,7 @@ mod tests {
     #[test]
     fn test_effective_proxy_config_preserves_explicit() {
         let settings = GrpcClientSettings {
-            grpc_endpoint: "http://localhost:4317".to_string(),
+            grpc_endpoint: "http://localhost:4317".into(),
             proxy: Some(ProxyConfig {
                 http_proxy: Some("http://explicit-proxy:3128".into()),
                 ..Default::default()
@@ -1585,7 +1617,7 @@ mod tests {
     #[tokio::test]
     async fn startup_check_none_always_succeeds() {
         let settings = GrpcClientSettings {
-            grpc_endpoint: "http://this.host.does.not.exist.invalid:4317".to_string(),
+            grpc_endpoint: "http://this.host.does.not.exist.invalid:4317".into(),
             startup_check: StartupCheck::None,
             ..GrpcClientSettings::default()
         };
@@ -1596,7 +1628,7 @@ mod tests {
     #[tokio::test]
     async fn startup_check_dns_resolves_localhost() {
         let settings = GrpcClientSettings {
-            grpc_endpoint: "http://localhost:4317".to_string(),
+            grpc_endpoint: "http://localhost:4317".into(),
             startup_check: StartupCheck::Dns,
             ..GrpcClientSettings::default()
         };
@@ -1606,7 +1638,7 @@ mod tests {
     #[tokio::test]
     async fn startup_check_dns_fails_unresolvable() {
         let settings = GrpcClientSettings {
-            grpc_endpoint: "http://this.host.definitely.does.not.exist.invalid:4317".to_string(),
+            grpc_endpoint: "http://this.host.definitely.does.not.exist.invalid:4317".into(),
             startup_check: StartupCheck::Dns,
             ..GrpcClientSettings::default()
         };
@@ -1622,7 +1654,7 @@ mod tests {
         // When a proxy is configured and the endpoint is NOT in no_proxy,
         // the DNS check should be skipped (proxy resolves the target).
         let settings = GrpcClientSettings {
-            grpc_endpoint: "http://this.host.definitely.does.not.exist.invalid:4317".to_string(),
+            grpc_endpoint: "http://this.host.definitely.does.not.exist.invalid:4317".into(),
             startup_check: StartupCheck::Dns,
             proxy: Some(ProxyConfig {
                 http_proxy: Some("http://my-proxy:3128".into()),
@@ -1637,7 +1669,7 @@ mod tests {
     #[tokio::test]
     async fn startup_check_dns_not_skipped_when_proxy_does_not_apply_to_endpoint_scheme() {
         let settings = GrpcClientSettings {
-            grpc_endpoint: "http://this.host.definitely.does.not.exist.invalid:4317".to_string(),
+            grpc_endpoint: "http://this.host.definitely.does.not.exist.invalid:4317".into(),
             startup_check: StartupCheck::Dns,
             proxy: Some(ProxyConfig {
                 https_proxy: Some("http://my-proxy:3128".into()),
@@ -1657,7 +1689,7 @@ mod tests {
     async fn startup_check_dns_not_skipped_when_endpoint_bypasses_proxy() {
         // When the endpoint IS in no_proxy, DNS check should still run.
         let settings = GrpcClientSettings {
-            grpc_endpoint: "http://this.host.definitely.does.not.exist.invalid:4317".to_string(),
+            grpc_endpoint: "http://this.host.definitely.does.not.exist.invalid:4317".into(),
             startup_check: StartupCheck::Dns,
             proxy: Some(ProxyConfig {
                 http_proxy: Some("http://my-proxy:3128".into()),
@@ -1683,7 +1715,7 @@ mod tests {
             .await
             .unwrap();
         let settings = GrpcClientSettings {
-            grpc_endpoint: format!("http://127.0.0.1:{port}"),
+            grpc_endpoint: format!("http://127.0.0.1:{port}").into(),
             startup_check: StartupCheck::Connect,
             connect_timeout: Duration::from_secs(2),
             ..GrpcClientSettings::default()
@@ -1696,7 +1728,7 @@ mod tests {
         crate::crypto::ensure_crypto_provider();
         let port = otel_arrow_dfe_test_net::pick_unused_loopback_tcp_port();
         let settings = GrpcClientSettings {
-            grpc_endpoint: format!("http://127.0.0.1:{port}"),
+            grpc_endpoint: format!("http://127.0.0.1:{port}").into(),
             startup_check: StartupCheck::Connect,
             connect_timeout: Duration::from_secs(2),
             ..GrpcClientSettings::default()
@@ -1712,7 +1744,7 @@ mod tests {
     async fn startup_check_dns_uses_default_port_for_https() {
         // Endpoint without explicit port and https scheme should default to 443.
         let settings = GrpcClientSettings {
-            grpc_endpoint: "https://localhost".to_string(),
+            grpc_endpoint: "https://localhost".into(),
             startup_check: StartupCheck::Dns,
             ..GrpcClientSettings::default()
         };
@@ -1785,7 +1817,7 @@ mod tests {
         });
 
         let settings = GrpcClientSettings {
-            grpc_endpoint: format!("http://127.0.0.1:{}", addr.port()),
+            grpc_endpoint: format!("http://127.0.0.1:{}", addr.port()).into(),
             user_agent: Some("my-app/1.0".to_string()),
             ..GrpcClientSettings::default()
         };

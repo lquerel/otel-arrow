@@ -60,6 +60,7 @@ use crate::{
 use otel_arrow_dfe_config::PipelineKey;
 use otel_arrow_dfe_config::engine::OtelDataflowSpec;
 use otel_arrow_dfe_config::error::Error as ConfigError;
+use otel_arrow_dfe_engine::component_config::{ConfigSnapshotPolicy, ResolvedComponentConfig};
 use otel_arrow_dfe_state::phase::PipelinePhase;
 use otel_arrow_dfe_state::pipeline_status::PipelineStatus;
 
@@ -94,11 +95,14 @@ pub static OPAMP_CONTROLLER_EXTENSION: ControllerExtensionFactory = ControllerEx
     name: CONTROL_EXTENSION_URN,
     description: "OpAMP controller extension",
     documentation_url: "",
-    validate_config,
+    resolve_config: resolve_opamp_config,
+    snapshot_policy: ConfigSnapshotPolicy::Omit,
     start,
 };
 
-fn validate_config(config: &serde_json::Value) -> Result<(), ConfigError> {
+fn resolve_opamp_config(
+    config: &serde_json::Value,
+) -> Result<ResolvedComponentConfig, ConfigError> {
     let config: Config =
         serde_json::from_value(config.clone()).map_err(|e| ConfigError::InvalidUserConfig {
             error: e.to_string(),
@@ -110,7 +114,6 @@ fn validate_config(config: &serde_json::Value) -> Result<(), ConfigError> {
         .map_err(|e| ConfigError::InvalidUserConfig {
             error: e.to_string(),
         })?;
-
     // Then validate TLS config by attempting to build the client config (may read files)
     if let Some(tls_client_config) = &config.tls {
         // This function is async because internally it uses tokio fs utils to read certs
@@ -139,16 +142,17 @@ fn validate_config(config: &serde_json::Value) -> Result<(), ConfigError> {
         _ = connector_init_result?;
     }
 
-    Ok(())
+    Ok(ResolvedComponentConfig::omitted(config))
 }
 
 fn start(
     context: ControllerExtensionContext,
 ) -> Result<ControllerExtensionTaskFactory, ControllerExtensionError> {
-    // safety: we can 'expect' the deserialization to have succeeded because it's also deserialized
-    // in the `validate_config` call
-    let config: Config =
-        serde_json::from_value(context.extension.config.clone()).expect("config validated");
+    let config = (*context
+        .extension
+        .component_config::<Config>()
+        .map_err(|source| Box::new(source) as ControllerExtensionError)?)
+    .clone();
 
     Ok(Box::new(move |cancellation_token| {
         Box::pin(async move {
@@ -217,7 +221,7 @@ impl SessionState {
     fn try_new(config: &Config) -> Result<Self, Error> {
         let instance_uid = match &config.instance_uid {
             Some(instance_uid) => {
-                // safety: this was validated in validate_config
+                // safety: this was validated during factory resolution
                 Uuid::parse_str(instance_uid).expect("valid UUID")
             }
             None => Uuid::now_v7(),
@@ -1191,7 +1195,7 @@ fn initial_message(
         agent_description: agent_description(config),
         capabilities: capabilities(),
         health: Some(component_health(session_state, &status_snapshot)),
-        effective_config: Some(effective_config(context)),
+        effective_config: Some(opamp_effective_config(context)),
         flags: AgentToServerFlags::Unspecified as u64,
         custom_capabilities: Some(custom_capabilities()),
         remote_config_status: Some(RemoteConfigStatus {
@@ -1246,7 +1250,7 @@ fn applying_message(
     };
 
     if reply_to_server.report_full_state {
-        message.effective_config = Some(effective_config(context));
+        message.effective_config = Some(opamp_effective_config(context));
         message.agent_description = agent_description(config);
         message.custom_capabilities = Some(custom_capabilities());
 
@@ -1284,7 +1288,7 @@ fn applied_result_message(
         flags: AgentToServerFlags::Unspecified as u64,
         capabilities: capabilities(),
         health: Some(component_health(session_state, &status_snapshot)),
-        effective_config: Some(effective_config(context)),
+        effective_config: Some(opamp_effective_config(context)),
         remote_config_status: Some(remote_config_status),
         custom_message: pipeline_status_custom_message(&status_snapshot),
         ..Default::default()
@@ -1347,7 +1351,7 @@ fn full_state_reply_message(
         sequence_num: session_state.sequence_num,
         capabilities: capabilities(),
         health: Some(component_health(session_state, &status_snapshot)),
-        effective_config: Some(effective_config(context)),
+        effective_config: Some(opamp_effective_config(context)),
         agent_description: agent_description(config),
         custom_capabilities: Some(custom_capabilities()),
         remote_config_status: Some(remote_config_status),
@@ -1606,8 +1610,8 @@ fn set_health_and_status_from_components(group_health: &mut ComponentHealth) {
     group_health.status = status;
 }
 
-/// Serialize the current applied config as the effective config for the AgentToServer message
-fn effective_config(context: &ControllerExtensionContext) -> EffectiveConfig {
+/// Serializes committed source, including secrets, into OpAMP's `effective_config` field.
+pub(crate) fn opamp_effective_config(context: &ControllerExtensionContext) -> EffectiveConfig {
     let config_result = context
         .control_plane
         .engine_config_snapshot()
@@ -1634,7 +1638,7 @@ fn effective_config(context: &ControllerExtensionContext) -> EffectiveConfig {
         Err(e) => {
             otel_error!(
                 "opamp.controller_extension.effective_config.error",
-                message = "Could not build effective config",
+                message = "Could not serialize committed config for OpAMP",
                 error = e.as_str(),
             );
             EffectiveConfig { config_map: None }
@@ -1688,6 +1692,7 @@ mod test {
         observed_state::ObservedStateSettings,
         tls::{TlsClientConfig, TlsConfig, TlsServerConfig},
     };
+    use otel_arrow_dfe_engine::component_config::ResolvedExtensionConfig;
     use otel_arrow_dfe_state::store::ObservedStateStore;
     use otel_arrow_dfe_telemetry::registry::TelemetryRegistryHandle;
     use otel_arrow_dfe_test_tls_certs::{ExtendedKeyUsage, generate_ca};
@@ -1703,6 +1708,17 @@ mod test {
     use super::*;
 
     mod util;
+
+    fn resolved_test_extension(config: &Config) -> ResolvedExtensionConfig {
+        let extension_urn = ExtensionUrn::parse(CONTROL_EXTENSION_URN).expect("OpAMP URN");
+        let extension_source = ExtensionUserConfig::new(extension_urn, serde_json::Value::Null);
+        ResolvedExtensionConfig::new(
+            &extension_source,
+            ResolvedComponentConfig::omitted(config.clone()),
+            ConfigSnapshotPolicy::Omit,
+        )
+        .expect("OpAMP extension envelope resolves")
+    }
 
     /// Start a mock server, and the agent controller with the passed config. Messages will then
     /// be exchanged until the number of expected exchanges have occurred. Afterward, the requests
@@ -1754,13 +1770,10 @@ mod test {
             telemetry_registry_handle.clone(),
         );
 
-        let extension_urn = ExtensionUrn::parse(CONTROL_EXTENSION_URN).unwrap();
+        let extension = resolved_test_extension(&config);
         let context = ControllerExtensionContext {
             extension_id: Cow::Borrowed("opamp"),
-            extension: Arc::new(ExtensionUserConfig::new(
-                extension_urn,
-                serde_json::to_value(&config).unwrap(),
-            )),
+            extension: Arc::new(extension),
             control_plane,
             observed_state: observed_state_store.handle(),
             telemetry_registry: telemetry_registry_handle,
@@ -1821,13 +1834,10 @@ mod test {
             &ObservedStateSettings::default(),
             telemetry_registry_handle.clone(),
         );
-        let extension_urn = ExtensionUrn::parse(CONTROL_EXTENSION_URN).unwrap();
+        let extension = resolved_test_extension(&config);
         let context = ControllerExtensionContext {
             extension_id: Cow::Borrowed("opamp"),
-            extension: Arc::new(ExtensionUserConfig::new(
-                extension_urn,
-                serde_json::to_value(&config).unwrap(),
-            )),
+            extension: Arc::new(extension),
             control_plane,
             observed_state: observed_state_store.handle(),
             telemetry_registry: telemetry_registry_handle,
@@ -1856,12 +1866,66 @@ mod test {
         client_handle.await.unwrap().unwrap();
     }
 
+    /// Scenario: Committed source with sensitive metadata is serialized into an OpAMP report.
+    /// Guarantees: effective_config retains secrets, JSON envelope, content type, and wire tag 6.
+    #[test]
+    fn source_config_uses_unchanged_opamp_effective_config_field() {
+        #[derive(Clone, PartialEq, prost::Message)]
+        struct ExistingWireReport {
+            #[prost(message, optional, tag = "6")]
+            effective_config: Option<EffectiveConfig>,
+        }
+
+        let mut reporting_config = empty_engine_config();
+        _ = reporting_config
+            .engine
+            .custom
+            .insert("private".into(), "opamp-source-secret".into());
+        let control_plane = Arc::new(MockControlPlane::new(reporting_config.clone()));
+        let registry = TelemetryRegistryHandle::default();
+        let observed = ObservedStateStore::new(&ObservedStateSettings::default(), registry.clone());
+        let config: Config = serde_json::from_value(serde_json::json!({
+            "instance_uid": EXPECTED_INSTANCE_UID_STR,
+            "endpoint": "ws://127.0.0.1:1/v1/opamp"
+        }))
+        .unwrap();
+        let context = ControllerExtensionContext {
+            extension_id: "opamp".into(),
+            extension: Arc::new(resolved_test_extension(&config)),
+            control_plane,
+            observed_state: observed.handle(),
+            telemetry_registry: registry,
+            engine_config: empty_engine_config(),
+        };
+        let report = opamp_effective_config(&context);
+        let message = AgentToServer {
+            effective_config: Some(report.clone()),
+            ..Default::default()
+        };
+        let bytes = prost::Message::encode_to_vec(&message);
+        let wire_report = <ExistingWireReport as prost::Message>::decode(bytes.as_slice()).unwrap();
+        assert_eq!(wire_report.effective_config, Some(report.clone()));
+        let file = &report.config_map.as_ref().unwrap().config_map["state"];
+        assert_eq!(file.content_type, "application/json");
+        assert_eq!(
+            serde_json::from_slice::<serde_json::Value>(&file.body).unwrap(),
+            serde_json::to_value(reporting_config).unwrap()
+        );
+    }
+
+    /// Scenario: A remote configuration with sensitive metadata is applied over the OpAMP WebSocket.
+    /// Guarantees: The applied effective_config report includes committed source secrets, not omitted markers.
     #[tokio::test]
     async fn test_config_update() {
         let control_plane = Arc::new(MockControlPlane::new(empty_engine_config()));
+        let mut desired = test_config();
+        _ = desired
+            .engine
+            .custom
+            .insert("credential".into(), "websocket-source-secret".into());
 
         let responses = vec![
-            Some(server_to_agent_with_config(&test_config(), vec![5, 1, 4])),
+            Some(server_to_agent_with_config(&desired, vec![5, 1, 4])),
             None,
             None,
         ];
@@ -1916,6 +1980,18 @@ mod test {
         assert_eq!(applied_status.status, RemoteConfigStatuses::Applied as i32);
         assert_eq!(applied_status.last_remote_config_hash, vec![5, 1, 4]);
         assert!(applied.effective_config.is_some());
+        let file = &applied
+            .effective_config
+            .as_ref()
+            .unwrap()
+            .config_map
+            .as_ref()
+            .unwrap()
+            .config_map["state"];
+        assert_eq!(
+            serde_json::from_slice::<serde_json::Value>(&file.body).unwrap(),
+            serde_json::to_value(desired).unwrap()
+        );
     }
 
     #[tokio::test]
@@ -2068,7 +2144,14 @@ mod test {
                 status.error_message.contains("engine.state_dir"),
                 "{status:?}"
             );
-            assert_eq!(control_plane.engine_config_snapshot().unwrap(), initial);
+            assert_eq!(
+                control_plane
+                    .safe_config_snapshot()
+                    .unwrap()
+                    .engine
+                    .state_dir,
+                initial.engine.state_dir
+            );
         }
     }
 
@@ -2242,9 +2325,13 @@ mod test {
         );
         assert_eq!(
             control_plane
-                .engine_config_snapshot()
-                .expect("effective config should be available"),
-            desired
+                .safe_config_snapshot()
+                .expect("safe config snapshot should be available")
+                .as_config(),
+            otel_arrow_dfe_engine::component_config::SafeConfigSnapshot::from_source_omitted(
+                desired
+            )
+            .as_config()
         );
     }
 
@@ -2571,7 +2658,7 @@ mod test {
                 ca_pem: Some(server_ca.cert_pem),
                 config: TlsConfig {
                     cert_pem: Some(wrong_client_cert.cert_pem),
-                    key_pem: Some(wrong_client_cert.key_pem),
+                    key_pem: Some(wrong_client_cert.key_pem.into()),
                     ..Default::default()
                 },
                 ..Default::default()
@@ -3175,46 +3262,54 @@ mod test {
         assert_eq!(parent.status, health_status::STOPPED);
     }
 
+    /// Scenario: The OpAMP factory resolves a valid WebSocket endpoint.
+    /// Guarantees: A valid controller-extension configuration is accepted before startup.
     #[test]
-    fn test_validate_config_accepts_valid() {
+    fn test_resolve_config_accepts_valid() {
         let config_value = serde_json::json!({
             "endpoint": "ws://127.0.0.1:4320/v1/opamp"
         });
-        assert!(validate_config(&config_value).is_ok());
+        assert!(resolve_opamp_config(&config_value).is_ok());
     }
 
+    /// Scenario: Submitted OpAMP configuration omits its required endpoint.
+    /// Guarantees: Resolution rejects the missing required setting before extension startup.
     #[test]
-    fn test_validate_config_rejects_invalid_json_structure() {
+    fn test_resolve_config_rejects_invalid_json_structure() {
         // Missing required "endpoint" field
         let config_value = serde_json::json!({
             "not_a_real_field": "hello"
         });
-        let err = validate_config(&config_value).unwrap_err();
+        let err = resolve_opamp_config(&config_value).unwrap_err();
         assert!(
             err.to_string().contains("endpoint"),
             "expected error about missing endpoint, got: {err}"
         );
     }
 
+    /// Scenario: Submitted OpAMP configuration uses an unsupported endpoint scheme.
+    /// Guarantees: Resolution preserves endpoint semantic validation before extension startup.
     #[test]
-    fn test_validate_config_rejects_invalid_endpoint() {
+    fn test_resolve_config_rejects_invalid_endpoint() {
         let config_value = serde_json::json!({
             "endpoint": "ftp://nope.invalid:1234"
         });
-        let err = validate_config(&config_value).unwrap_err();
+        let err = resolve_opamp_config(&config_value).unwrap_err();
         assert!(
             err.to_string().contains("ftp"),
             "expected error mentioning invalid scheme, got: {err}"
         );
     }
 
+    /// Scenario: Submitted OpAMP configuration contains a malformed instance UUID.
+    /// Guarantees: Resolution rejects invalid instance identity before extension startup.
     #[test]
-    fn test_validate_config_rejects_invalid_instance_uid() {
+    fn test_resolve_config_rejects_invalid_instance_uid() {
         let config_value = serde_json::json!({
             "endpoint": "ws://127.0.0.1:4320",
             "instance_uid": "not-a-uuid"
         });
-        let err = validate_config(&config_value).unwrap_err();
+        let err = resolve_opamp_config(&config_value).unwrap_err();
         assert!(
             err.to_string().contains("invalid"),
             "expected error about invalid UUID, got: {err}"
@@ -3234,7 +3329,7 @@ mod test {
             "endpoint": "wss://localhost:4320/v1/opamp",
             "tls": { "ca_file": temp_dir.path().join("ca.crt") }
         });
-        validate_config(&config_value).unwrap();
+        _ = resolve_opamp_config(&config_value).unwrap();
     }
 
     /// Scenario: validate_config with TLS (ca_file on disk) called from a multi-threaded
@@ -3252,7 +3347,7 @@ mod test {
             "endpoint": "wss://localhost:4320/v1/opamp",
             "tls": { "ca_file": temp_dir.path().join("ca.crt") }
         });
-        validate_config(&config_value).unwrap();
+        _ = resolve_opamp_config(&config_value).unwrap();
     }
 
     /// Scenario: validate_config with TLS (ca_file on disk) called from a single-threaded
@@ -3269,7 +3364,7 @@ mod test {
             "endpoint": "wss://localhost:4320/v1/opamp",
             "tls": { "ca_file": temp_dir.path().join("ca.crt") }
         });
-        validate_config(&config_value).unwrap();
+        _ = resolve_opamp_config(&config_value).unwrap();
     }
 
     #[tokio::test]

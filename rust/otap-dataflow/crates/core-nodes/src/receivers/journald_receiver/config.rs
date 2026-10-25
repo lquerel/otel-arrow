@@ -118,7 +118,7 @@ impl MaxPriority {
 }
 
 /// Batch shaping for the worker -> async handoff.
-#[derive(Clone, Debug, Deserialize, Serialize)]
+#[derive(Clone, Debug, Deserialize, Serialize, PartialEq)]
 #[serde(deny_unknown_fields)]
 pub struct BatchConfig {
     /// Maximum records per emitted batch.
@@ -151,7 +151,7 @@ impl Default for BatchConfig {
 }
 
 /// Checkpoint configuration.
-#[derive(Clone, Debug, Deserialize, Serialize)]
+#[derive(Clone, Debug, Deserialize, Serialize, PartialEq)]
 #[serde(deny_unknown_fields)]
 pub struct CheckpointConfig {
     /// Root directory for checkpoint files. The receiver appends
@@ -193,7 +193,7 @@ impl Default for CheckpointConfig {
 }
 
 /// Concrete systemd journal source selection.
-#[derive(Clone, Debug, Deserialize, Serialize)]
+#[derive(Clone, Debug, Deserialize, Serialize, PartialEq)]
 #[serde(deny_unknown_fields)]
 pub struct JournalConfig {
     /// Optional systemd journal namespace. `None` selects the default namespace
@@ -222,7 +222,7 @@ impl Default for JournalConfig {
 }
 
 /// Field extraction safety limits.
-#[derive(Clone, Debug, Deserialize, Serialize)]
+#[derive(Clone, Debug, Deserialize, Serialize, PartialEq)]
 #[serde(deny_unknown_fields)]
 pub struct ExtractionConfig {
     /// Maximum copied bytes per journal entry.
@@ -269,7 +269,7 @@ impl Default for ExtractionConfig {
 }
 
 /// User-facing journald receiver configuration.
-#[derive(Clone, Debug, Deserialize, Serialize)]
+#[derive(Clone, Debug, Deserialize, Serialize, PartialEq)]
 #[serde(deny_unknown_fields)]
 pub struct Config {
     /// Stable OTAP source identifier. Used for checkpoint paths and telemetry
@@ -356,7 +356,7 @@ impl Default for Config {
 ///
 /// Parsing produces this from `Config` once and the receiver hot path consumes
 /// it without re-validating.
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, PartialEq)]
 #[allow(dead_code)]
 pub(crate) struct RuntimeConfig {
     /// Stable OTAP source identifier.

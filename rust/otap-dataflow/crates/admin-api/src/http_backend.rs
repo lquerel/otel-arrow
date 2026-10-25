@@ -32,6 +32,42 @@ pub(crate) struct HttpBackend {
 }
 
 impl HttpBackend {
+    async fn submit_pipeline_rollout(
+        &self,
+        group_id: &str,
+        pipeline_id: &str,
+        method: Method,
+        body: Vec<u8>,
+        options: &operations::OperationOptions,
+    ) -> Result<pipelines::ReconfigureOutcome, Error> {
+        let (status, body) = self
+            .request_raw(
+                method,
+                &["api", "v1", "groups", group_id, "pipelines", pipeline_id],
+                &options.to_query_pairs(),
+                Some(body),
+                &[200, 202, 404, 409, 422, 500, 504],
+            )
+            .await?;
+        match status {
+            200 => self
+                .decode_json(&body)
+                .map(pipelines::ReconfigureOutcome::Completed),
+            202 => self
+                .decode_json(&body)
+                .map(pipelines::ReconfigureOutcome::Accepted),
+            409 => match self.decode_json::<pipelines::RolloutStatus>(&body) {
+                Ok(status) => Ok(pipelines::ReconfigureOutcome::Failed(status)),
+                Err(_) => Err(self.decode_operation_error(status, &body)?),
+            },
+            504 => self
+                .decode_json(&body)
+                .map(pipelines::ReconfigureOutcome::TimedOut),
+            404 | 422 | 500 => Err(self.decode_operation_error(status, &body)?),
+            _ => unreachable!("request_raw filters unexpected statuses"),
+        }
+    }
+
     pub(crate) fn from_settings(settings: HttpAdminClientSettings) -> Result<Self, Error> {
         settings.endpoint.validate()?;
         let client = build_http_client(&settings)?;
@@ -308,45 +344,16 @@ impl AdminBackend for HttpBackend {
         request: &pipelines::ReconfigureRequest,
         options: &operations::OperationOptions,
     ) -> Result<pipelines::ReconfigureOutcome, Error> {
-        let query = options.to_query_pairs();
-        let (status, body) = self
-            .request_raw(
-                Method::PUT,
-                &[
-                    "api",
-                    "v1",
-                    "groups",
-                    pipeline_group_id,
-                    "pipelines",
-                    pipeline_id,
-                ],
-                &query,
-                Some(
-                    serde_json::to_vec(request).map_err(|err| Error::ClientConfig {
-                        details: format!("failed to encode reconfigure request: {err}"),
-                    })?,
-                ),
-                &[200, 202, 404, 409, 422, 500, 504],
-            )
-            .await?;
-
-        match status {
-            200 => self
-                .decode_json(&body)
-                .map(pipelines::ReconfigureOutcome::Completed),
-            202 => self
-                .decode_json(&body)
-                .map(pipelines::ReconfigureOutcome::Accepted),
-            409 => match self.decode_json::<pipelines::RolloutStatus>(&body) {
-                Ok(status) => Ok(pipelines::ReconfigureOutcome::Failed(status)),
-                Err(_) => Err(self.decode_operation_error(status, &body)?),
-            },
-            504 => self
-                .decode_json(&body)
-                .map(pipelines::ReconfigureOutcome::TimedOut),
-            404 | 422 | 500 => Err(self.decode_operation_error(status, &body)?),
-            _ => unreachable!("request_raw should have filtered unexpected statuses"),
-        }
+        self.submit_pipeline_rollout(
+            pipeline_group_id,
+            pipeline_id,
+            Method::PUT,
+            serde_json::to_vec(request).map_err(|_| Error::ClientConfig {
+                details: "failed to encode reconfigure request".to_owned(),
+            })?,
+            options,
+        )
+        .await
     }
 
     async fn pipeline_rollout_status(
@@ -684,7 +691,7 @@ fn build_http_client(settings: &HttpAdminClientSettings) -> Result<reqwest::Clie
                 .config
                 .key_pem
                 .as_ref()
-                .is_some_and(|pem| !pem.trim().is_empty());
+                .is_some_and(|pem| !pem.expose().trim().is_empty());
 
         if client_cert_configured || client_key_configured {
             if !(client_cert_configured && client_key_configured) {
@@ -705,7 +712,7 @@ fn build_http_client(settings: &HttpAdminClientSettings) -> Result<reqwest::Clie
             let key_pem = if let Some(key_file) = &tls.config.key_file {
                 fs::read(key_file).map_err(client_config_io_error)?
             } else if let Some(key_pem) = &tls.config.key_pem {
-                key_pem.as_bytes().to_vec()
+                key_pem.expose().as_bytes().to_vec()
             } else {
                 unreachable!();
             };
@@ -755,7 +762,7 @@ fn validate_tls_settings(settings: &HttpAdminClientSettings) -> Result<(), Error
                 .config
                 .key_pem
                 .as_ref()
-                .is_some_and(|pem| !pem.trim().is_empty())
+                .is_some_and(|pem| !pem.expose().trim().is_empty())
             || tls.server_name.is_some()
             || tls.insecure == Some(true)
             || tls.insecure_skip_verify == Some(true);
@@ -1356,6 +1363,78 @@ mod tests {
             .expect("pipeline details should decode");
 
         assert!(response.is_some());
+    }
+
+    /// Scenario: An SDK client edits a GET response and submits a full pipeline replacement.
+    /// Guarantees: Passwords, headers, TLS keys, and arbitrary config survive both HTTP serialization directions.
+    #[tokio::test]
+    async fn pipeline_details_can_be_edited_and_put_without_losing_sensitive_values() {
+        let server = MockServer::start().await;
+        let mut source = minimal_pipeline_json();
+        source["nodes"]["recv"]["type"] = "urn:otel:receiver:traffic_generator".into();
+        source["nodes"]["exporter"] = json!({"type": "urn:otel:exporter:otlp_grpc", "config": {
+            "password": "sdk-password",
+            "headers": {"authorization": "sdk-token"},
+            "tls": {"key_pem": "sdk-private-key"},
+            "arbitrary": {"credential": "sdk-opaque"}
+        }});
+        Mock::given(method("GET"))
+            .and(path("/api/v1/groups/default/pipelines/main"))
+            .respond_with(ResponseTemplate::new(200).set_body_json(json!({
+                "pipelineGroupId": "default", "pipelineId": "main", "pipeline": source
+            })))
+            .expect(1)
+            .mount(&server)
+            .await;
+        let client = client(&server);
+        let details = client
+            .pipelines()
+            .details("default", "main")
+            .await
+            .unwrap()
+            .unwrap();
+        let mut edited = serde_json::to_value(details.pipeline).unwrap();
+        assert_eq!(edited, source);
+        edited["policies"] =
+            json!({"resources": {"core_allocation": {"type": "core_count", "count": 2}}});
+        let request = pipelines::ReconfigureRequest {
+            pipeline: serde_json::from_value(edited).unwrap(),
+            step_timeout_secs: 45,
+            drain_timeout_secs: 30,
+        };
+        let expected_request = serde_json::to_value(&request).unwrap();
+        assert_eq!(expected_request["pipeline"]["nodes"], source["nodes"]);
+        assert_eq!(
+            expected_request["pipeline"]["policies"]["resources"]["core_allocation"]["count"],
+            2
+        );
+        Mock::given(method("PUT"))
+            .and(path("/api/v1/groups/default/pipelines/main"))
+            .and(body_json(expected_request))
+            .respond_with(ResponseTemplate::new(202).set_body_json(json!({
+                "rolloutId": "source-round-trip", "pipelineGroupId": "default", "pipelineId": "main",
+                "action": "resize", "state": "running", "targetGeneration": 0,
+                "startedAt": "2026-01-01T00:00:00Z", "updatedAt": "2026-01-01T00:00:01Z", "cores": []
+            })))
+            .expect(1)
+            .mount(&server)
+            .await;
+        assert!(matches!(
+            client
+                .pipelines()
+                .reconfigure(
+                    "default",
+                    "main",
+                    &request,
+                    &operations::OperationOptions {
+                        wait: false,
+                        timeout_secs: 120
+                    }
+                )
+                .await
+                .unwrap(),
+            pipelines::ReconfigureOutcome::Accepted(_)
+        ));
     }
 
     /// Scenario: a caller submits an asynchronous reconfigure request through
@@ -2024,7 +2103,7 @@ mod tests {
                         ca_pem: Some(ca.cert_pem.clone()),
                         config: TlsConfig {
                             cert_pem: Some(client_cert.cert_pem),
-                            key_pem: Some(client_cert.key_pem),
+                            key_pem: Some(client_cert.key_pem.into()),
                             ..TlsConfig::default()
                         },
                         ..TlsClientConfig::default()

@@ -46,8 +46,10 @@ submitted secret values.
 
 The engine crate provides standalone resolved configuration envelopes, typed
 accessors and comparison, explicit snapshot policies, and `SafeConfigSnapshot`.
-These building blocks are not yet wired into factory creation or controller
-admission. Existing factory validation and runtime paths remain in use.
+Every factory resolves its concrete immutable type before controller
+admission. Creation uses checked typed access and does not deserialize JSON.
+See [Configuration Framework Design](../../docs/configuration-resolution.md)
+for the mandatory resolver, snapshot policy, and reconciliation contracts.
 
 Omitting a node or extension `config` supplies `{}`; explicit values, including
 `null`, retain their meaning. Required component settings are still required.
@@ -426,38 +428,16 @@ Terminology:
 
 ## Guidance for Node Implementers
 
-When implementing a receiver/processor/exporter:
+Every factory must declare a concrete typed resolver and an explicit
+`TypedSafe`, `CustomSafe`, or `Omit` snapshot policy. Parsing, semantic
+validation, defaulting, and normalization occur in that resolver. Creation
+retrieves the immutable `Arc<T>` through a checked accessor. It must not
+deserialize `NodeUserConfig.config` or defer validation to a constructor.
 
-1. Define a strongly-typed config struct in your node crate.
-2. Deserialize `NodeUserConfig.config` into that struct.
-3. Validate semantic constraints in your factory/constructor.
-4. Return clear `InvalidUserConfig` errors with actionable messages.
-
-Example pattern:
-
-```rust
-use serde::Deserialize;
-
-#[derive(Debug, Deserialize)]
-#[serde(deny_unknown_fields)]
-struct MyProcessorConfig {
-    threshold: usize,
-    mode: String,
-}
-
-fn parse_node_config(
-    raw: &serde_json::Value,
-) -> Result<MyProcessorConfig, String> {
-    serde_json::from_value(raw.clone())
-        .map_err(|e| format!("invalid my_processor config: {e}"))
-}
-```
-
-Recommendations:
-
-- Use `#[serde(deny_unknown_fields)]` on node-specific config types.
-- Keep defaults explicit and documented.
-- Validate cross-field constraints early (factory time), not deep in hot path.
+Keep closed schemas strict, compare runtime semantics rather than snapshots,
+and choose omission for unaudited or open schemas. The
+[contributor checklist](../../docs/configuration-resolution.md#contributor-checklist)
+defines the complete contract and required tests.
 
 ## Connections-Oriented Graph Model
 

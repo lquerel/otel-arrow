@@ -122,7 +122,7 @@ fn test_strict_processor_configuration() {
         let mut config = config.clone();
         config["skip_sanitize_result"] = skip.into();
         assert_eq!(parse_config(&config).unwrap().1, !skip);
-        assert!(validate_log_parser_config(&config).is_ok());
+        assert!((LOG_PARSER_PROCESSOR_FACTORY.resolve_config)(&config).is_ok());
         assert!(try_create_with_config(config, &runtime).is_ok());
     }
     for key in [
@@ -135,7 +135,10 @@ fn test_strict_processor_configuration() {
     ] {
         let mut invalid = config.clone();
         invalid[key] = json!(1);
-        assert!(validate_log_parser_config(&invalid).is_err(), "{key}");
+        assert!(
+            (LOG_PARSER_PROCESSOR_FACTORY.resolve_config)(&invalid).is_err(),
+            "{key}"
+        );
         assert!(try_create_with_config(invalid, &runtime).is_err(), "{key}");
     }
     for invalid in [Value::Null, json!([]), json!({"parse_logs": config}), {
@@ -143,7 +146,7 @@ fn test_strict_processor_configuration() {
         config["skip_sanitize_result"] = json!("false");
         config
     }] {
-        assert!(validate_log_parser_config(&invalid).is_err());
+        assert!((LOG_PARSER_PROCESSOR_FACTORY.resolve_config)(&invalid).is_err());
         assert!(try_create_with_config(invalid, &runtime).is_err());
     }
 }
@@ -233,7 +236,7 @@ fn test_parser_to_opl_pipeline() {
     let processor = (TRANSFORM_PROCESSOR_FACTORY.create)(
         pipeline,
         test_node("transform"),
-        Arc::new(node),
+        resolve_processor_node(&node, &TRANSFORM_PROCESSOR_FACTORY).unwrap(),
         runtime.config(),
         &otel_arrow_dfe_engine::capability::registry::Capabilities::empty(),
     )
@@ -374,13 +377,26 @@ fn try_create_with_config(
     let pipeline_context =
         controller_context.pipeline_context_with("group_id".into(), "pipeline_id".into(), 0, 1, 0);
     let node_id = test_node("log-parser-processor");
+    let resolved = resolve_processor_node(&node_config, &LOG_PARSER_PROCESSOR_FACTORY)?;
     create_log_parser_processor(
         pipeline_context,
         node_id,
-        Arc::new(node_config),
+        resolved,
         runtime.config(),
         &otel_arrow_dfe_engine::capability::registry::Capabilities::empty(),
     )
+}
+
+fn resolve_processor_node(
+    node: &NodeUserConfig,
+    factory: &ProcessorFactory<OtapPdata>,
+) -> Result<Arc<ResolvedNodeConfig>, ConfigError> {
+    let component = (factory.resolve_config)(&node.config)?;
+    Ok(Arc::new(ResolvedNodeConfig::new(
+        node,
+        component,
+        factory.snapshot_policy,
+    )?))
 }
 
 fn parsing_config(format: &str) -> Value {
@@ -673,7 +689,7 @@ fn test_parse_logs_configuration_gate() {
     assert!(try_create_with_config(config, &runtime).is_err());
     let mut config = parsing_config("regex");
     config["limits"]["max_pattern_bytes"] = 1.into();
-    assert!((LOG_PARSER_PROCESSOR_FACTORY.validate_config)(&config).is_err());
+    assert!((LOG_PARSER_PROCESSOR_FACTORY.resolve_config)(&config).is_err());
     assert!(try_create_with_config(config, &runtime).is_err());
 }
 
@@ -689,17 +705,18 @@ fn test_documented_parsing_yaml() {
         let yaml = block.split("```").next().unwrap();
         let node: Value = serde_yaml::from_str(yaml).unwrap();
         if let Some(nodes) = node.get("nodes") {
-            (LOG_PARSER_PROCESSOR_FACTORY.validate_config)(&nodes["parse"]["config"]).unwrap();
+            _ = (LOG_PARSER_PROCESSOR_FACTORY.resolve_config)(&nodes["parse"]["config"]).unwrap();
             #[cfg(feature = "transform")]
             {
                 use crate::processors::transform_processor::TRANSFORM_PROCESSOR_FACTORY;
-                (TRANSFORM_PROCESSOR_FACTORY.validate_config)(&nodes["filter"]["config"]).unwrap();
+                _ = (TRANSFORM_PROCESSOR_FACTORY.resolve_config)(&nodes["filter"]["config"])
+                    .unwrap();
             }
             assert!(try_create_with_config(nodes["parse"]["config"].clone(), &runtime).is_ok());
             composition_examples += 1;
         }
         if node["config"].get("format").is_some() {
-            (LOG_PARSER_PROCESSOR_FACTORY.validate_config)(&node["config"]).unwrap();
+            _ = (LOG_PARSER_PROCESSOR_FACTORY.resolve_config)(&node["config"]).unwrap();
             assert!(try_create_with_config(node["config"].clone(), &runtime).is_ok());
             examples += 1;
         }
@@ -1309,7 +1326,7 @@ fn test_parse_logs_factory_rejects_invalid_settings() {
         let mut config = parsing_config(format);
         *config.pointer_mut(pointer).unwrap() = value;
         assert!(
-            (LOG_PARSER_PROCESSOR_FACTORY.validate_config)(&config).is_err(),
+            (LOG_PARSER_PROCESSOR_FACTORY.resolve_config)(&config).is_err(),
             "{pointer}"
         );
     }
@@ -1328,7 +1345,7 @@ fn test_parse_logs_failed_send() {
     let mut processor = create_log_parser_processor(
         pipeline,
         test_node("log-parser-processor"),
-        Arc::new(node),
+        resolve_processor_node(&node, &LOG_PARSER_PROCESSOR_FACTORY).unwrap(),
         runtime.config(),
         &otel_arrow_dfe_engine::capability::registry::Capabilities::empty(),
     )

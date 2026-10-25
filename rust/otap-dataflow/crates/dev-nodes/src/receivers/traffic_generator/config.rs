@@ -10,6 +10,7 @@ use std::collections::HashMap;
 use std::num::NonZeroU32;
 
 use otel_arrow_dfe_config::ContextEntryName;
+use otel_arrow_dfe_config::secret::RedactedString;
 use weaver_common::result::WResult;
 use weaver_common::vdir::VirtualDirectoryPath;
 use weaver_forge::registry::ResolvedRegistry;
@@ -78,7 +79,7 @@ pub enum ProductionMode {
 ///   - attrs: {"tenant.id": "ppe"}
 ///     weight: 1
 /// ```
-#[derive(Clone, Deserialize, Serialize)]
+#[derive(Clone, Deserialize, Serialize, PartialEq)]
 #[serde(deny_unknown_fields)]
 pub struct ResourceAttributeSet {
     /// Key-value pairs merged into the resource of every generated signal.
@@ -154,11 +155,64 @@ pub struct Config {
     ///   x-request-id:
     /// ```
     #[serde(default)]
-    transport_headers: HashMap<ContextEntryName, Option<String>>,
+    transport_headers: HashMap<ContextEntryName, Option<RedactedString>>,
+}
+
+impl PartialEq for Config {
+    fn eq(&self, other: &Self) -> bool {
+        self.traffic_config == other.traffic_config
+            && self.data_source == other.data_source
+            && registry_paths_equal(&self.registry_path, &other.registry_path)
+            && self.generation_strategy == other.generation_strategy
+            && self.enable_ack_nack == other.enable_ack_nack
+            && self.resource_attributes == other.resource_attributes
+            && self.transport_headers == other.transport_headers
+    }
+}
+
+fn registry_paths_equal(left: &VirtualDirectoryPath, right: &VirtualDirectoryPath) -> bool {
+    use VirtualDirectoryPath::{GitRepo, LocalArchive, LocalFolder, RemoteArchive, RemoteFile};
+    match (left, right) {
+        (LocalFolder { path: left }, LocalFolder { path: right })
+        | (RemoteFile { url: left }, RemoteFile { url: right }) => left == right,
+        (
+            LocalArchive {
+                path: left,
+                sub_folder: left_folder,
+            },
+            LocalArchive {
+                path: right,
+                sub_folder: right_folder,
+            },
+        )
+        | (
+            RemoteArchive {
+                url: left,
+                sub_folder: left_folder,
+            },
+            RemoteArchive {
+                url: right,
+                sub_folder: right_folder,
+            },
+        ) => left == right && left_folder == right_folder,
+        (
+            GitRepo {
+                url: left,
+                refspec: left_ref,
+                sub_folder: left_folder,
+            },
+            GitRepo {
+                url: right,
+                refspec: right_ref,
+                sub_folder: right_folder,
+            },
+        ) => left == right && left_ref == right_ref && left_folder == right_folder,
+        _ => false,
+    }
 }
 
 /// Configuration to describe the traffic being sent
-#[derive(Clone, Deserialize, Serialize)]
+#[derive(Clone, PartialEq, Deserialize, Serialize)]
 #[serde(deny_unknown_fields)]
 pub struct TrafficConfig {
     /// How signal batches are paced within each production run.
@@ -262,7 +316,10 @@ impl Config {
         mut self,
         transport_headers: HashMap<ContextEntryName, Option<String>>,
     ) -> Self {
-        self.transport_headers = transport_headers;
+        self.transport_headers = transport_headers
+            .into_iter()
+            .map(|(name, value)| (name, value.map(RedactedString::from)))
+            .collect();
         self
     }
 
@@ -337,7 +394,7 @@ impl Config {
     /// Keys are header names. Entries with a value produce fixed headers;
     /// entries left empty produce a random value generated once at startup.
     #[must_use]
-    pub fn transport_headers(&self) -> &HashMap<ContextEntryName, Option<String>> {
+    pub fn transport_headers(&self) -> &HashMap<ContextEntryName, Option<RedactedString>> {
         &self.transport_headers
     }
 }
@@ -792,7 +849,7 @@ mod tests {
         assert!(headers.keys().any(|name| name.as_str() == "X-Request-Id"));
         assert_eq!(
             headers.get(&context_name("X-Tenant-Id")),
-            Some(&Some("acme".to_string())),
+            Some(&Some("acme".into())),
             "fixed value should be preserved"
         );
         assert_eq!(
@@ -819,11 +876,11 @@ mod tests {
         assert_eq!(config.transport_headers().len(), 2);
         assert_eq!(
             config.transport_headers().get(&context_name("X-Tenant-Id")),
-            Some(&Some("acme".to_string()))
+            Some(&Some("acme".into()))
         );
         assert_eq!(
             config.transport_headers().get(&context_name("x-tenant-id")),
-            Some(&Some("contoso".to_string()))
+            Some(&Some("contoso".into()))
         );
     }
 

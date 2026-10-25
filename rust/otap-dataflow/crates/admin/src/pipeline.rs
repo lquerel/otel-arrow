@@ -126,12 +126,7 @@ fn shutdown_is_success(state: &str) -> bool {
     state == "succeeded"
 }
 
-/// Returns committed configuration details for one logical pipeline.
-///
-/// Credential header values are redacted from the response (see
-/// [`otel_arrow_dfe_config::pipeline::PipelineConfig::redacted_for_snapshot`]) so
-/// secrets configured in node and extension `headers` are not exposed in
-/// cleartext.
+/// Returns committed pipeline source configuration, including sensitive values.
 pub async fn show_pipeline(
     Path((pipeline_group_id, pipeline_id)): Path<(String, String)>,
     State(state): State<AppState>,
@@ -140,10 +135,7 @@ pub async fn show_pipeline(
         .controller
         .pipeline_details(&pipeline_group_id, &pipeline_id)
     {
-        Ok(Some(mut details)) => {
-            details.pipeline = details.pipeline.redacted_for_snapshot();
-            Ok(Json(details))
-        }
+        Ok(Some(details)) => Ok(Json(details)),
         Ok(None) => Err(StatusCode::NOT_FOUND),
         Err(
             crate::ControlPlaneError::PipelineNotFound | crate::ControlPlaneError::GroupNotFound,
@@ -157,36 +149,45 @@ pub async fn put_pipeline(
     Path((pipeline_group_id, pipeline_id)): Path<(String, String)>,
     Query(params): Query<WaitParams>,
     State(state): State<AppState>,
-    Json(request): Json<crate::ReconfigureRequest>,
+    crate::PrivateConfigJson(request): crate::PrivateConfigJson<crate::ReconfigureRequest>,
 ) -> impl IntoResponse {
-    let rollout =
-        match state
-            .controller
-            .reconfigure_pipeline(&pipeline_group_id, &pipeline_id, request)
-        {
-            Ok(rollout) => rollout,
-            Err(crate::ControlPlaneError::GroupNotFound) => {
-                return operation_error_response(
-                    StatusCode::NOT_FOUND,
-                    crate::ControlPlaneError::GroupNotFound,
-                );
-            }
-            Err(crate::ControlPlaneError::RolloutConflict) => {
-                return operation_error_response(
-                    StatusCode::CONFLICT,
-                    crate::ControlPlaneError::RolloutConflict,
-                );
-            }
-            Err(crate::ControlPlaneError::InvalidRequest { message }) => {
-                return operation_error_response(
-                    StatusCode::UNPROCESSABLE_ENTITY,
-                    crate::ControlPlaneError::InvalidRequest { message },
-                );
-            }
-            Err(other) => {
-                return operation_error_response(StatusCode::INTERNAL_SERVER_ERROR, other);
-            }
-        };
+    let result = state
+        .controller
+        .reconfigure_pipeline(&pipeline_group_id, &pipeline_id, request);
+    rollout_response(state, pipeline_group_id, pipeline_id, params, result).await
+}
+
+async fn rollout_response(
+    state: AppState,
+    pipeline_group_id: String,
+    pipeline_id: String,
+    params: WaitParams,
+    result: Result<crate::RolloutStatus, crate::ControlPlaneError>,
+) -> Response {
+    let rollout = match result {
+        Ok(rollout) => rollout,
+        Err(
+            error @ (crate::ControlPlaneError::GroupNotFound
+            | crate::ControlPlaneError::PipelineNotFound),
+        ) => {
+            return operation_error_response(StatusCode::NOT_FOUND, error);
+        }
+        Err(crate::ControlPlaneError::RolloutConflict) => {
+            return operation_error_response(
+                StatusCode::CONFLICT,
+                crate::ControlPlaneError::RolloutConflict,
+            );
+        }
+        Err(crate::ControlPlaneError::InvalidRequest { message }) => {
+            return operation_error_response(
+                StatusCode::UNPROCESSABLE_ENTITY,
+                crate::ControlPlaneError::InvalidRequest { message },
+            );
+        }
+        Err(other) => {
+            return operation_error_response(StatusCode::INTERNAL_SERVER_ERROR, other);
+        }
+    };
 
     if !params.wait {
         let status = if rollout_is_terminal(rollout.state) {
@@ -594,7 +595,6 @@ mod tests {
     fn request() -> crate::ReconfigureRequest {
         crate::ReconfigureRequest {
             pipeline: serde_json::from_value(json!({
-                "type": "otap",
                 "nodes": {
                     "recv": {
                         "type": "receiver:traffic_generator",
@@ -650,7 +650,7 @@ mod tests {
     }
 
     /// Minimal control plane that serves a configured `pipeline_details`, used
-    /// to exercise the `show_pipeline` redaction path end-to-end.
+    /// to exercise the `show_pipeline` source serialization path end-to-end.
     struct PipelineDetailsStub {
         details: Result<Option<PipelineDetails>, ControlPlaneError>,
     }
@@ -705,11 +705,10 @@ mod tests {
         }
     }
 
-    /// Scenario: a pipeline's node config contains credential header values.
-    /// Guarantees: `show_pipeline` redacts them so the raw credential never
-    /// appears in the response body.
+    /// Scenario: Pipeline details contain sensitive component source configuration.
+    /// Guarantees: Admin preserves credentials instead of applying redaction or omission.
     #[tokio::test]
-    async fn show_pipeline_redacts_credential_header_values() {
+    async fn show_pipeline_preserves_sensitive_source_values() {
         let details: PipelineDetails = serde_json::from_value(json!({
             "pipelineGroupId": "default",
             "pipelineId": "main",
@@ -717,9 +716,7 @@ mod tests {
                 "nodes": {
                     "exporter": {
                         "type": "urn:test:exporter:example",
-                        "config": {
-                            "headers": { "authorization": "Bearer super-secret-token" }
-                        }
+                        "config": {"headers": {"authorization": "pipeline-secret"}}
                     }
                 }
             }
@@ -740,14 +737,42 @@ mod tests {
             .await
             .expect("body should collect");
         let text = String::from_utf8(body.to_vec()).expect("pipeline body is utf-8");
-        assert!(
-            !text.contains("Bearer super-secret-token"),
-            "raw credential must not appear in the pipeline response: {text}"
-        );
-        assert!(
-            text.contains("[REDACTED]"),
-            "redacted placeholder should appear in the pipeline response: {text}"
-        );
+        assert!(text.contains("pipeline-secret"));
+        assert!(!text.contains("[REDACTED]"));
+        assert!(!text.contains("[OMITTED]"));
+    }
+
+    /// Scenario: Full replacement HTTP input contains an invalid scalar that is itself private.
+    /// Guarantees: JSON admission errors preserve status without echoing submitted values in response bodies.
+    #[tokio::test]
+    async fn configuration_json_rejections_do_not_echo_private_values() {
+        use tower::ServiceExt;
+        let state = test_app_state(Arc::new(StubControlPlane {
+            replace_result: Ok(rollout_status(PipelineRolloutState::Succeeded)),
+            rollout_status_result: Ok(None),
+            shutdown_result: Ok(shutdown_status("succeeded")),
+            shutdown_status_result: Ok(None),
+            delete_result: Ok(delete_status("succeeded")),
+        }));
+        for (method, body) in [("PUT", json!({"pipeline": "private-invalid-scalar"}))] {
+            let response = routes()
+                .with_state(state.clone())
+                .oneshot(
+                    axum::http::Request::builder()
+                        .method(method)
+                        .uri("/groups/default/pipelines/main")
+                        .header("content-type", "application/json")
+                        .body(axum::body::Body::from(body.to_string()))
+                        .unwrap(),
+                )
+                .await
+                .unwrap();
+            assert_eq!(response.status(), StatusCode::UNPROCESSABLE_ENTITY);
+            let body = to_bytes(response.into_body(), usize::MAX).await.unwrap();
+            assert!(!String::from_utf8_lossy(&body).contains("private-invalid-scalar"));
+            let error: OperationError = serde_json::from_slice(&body).unwrap();
+            assert_eq!(error.kind, OperationErrorKind::InvalidRequest);
+        }
     }
 
     /// Scenario: the control plane rejects a pipeline reconfigure request
@@ -771,7 +796,7 @@ mod tests {
                 shutdown_status_result: Ok(None),
                 delete_result: Ok(delete_status("succeeded")),
             }))),
-            Json(request()),
+            crate::PrivateConfigJson(request()),
         )
         .await
         .into_response();
@@ -805,7 +830,7 @@ mod tests {
                 shutdown_status_result: Ok(None),
                 delete_result: Ok(delete_status("succeeded")),
             }))),
-            Json(request()),
+            crate::PrivateConfigJson(request()),
         )
         .await
         .into_response();

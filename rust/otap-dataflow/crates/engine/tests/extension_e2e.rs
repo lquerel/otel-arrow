@@ -39,6 +39,7 @@ use otel_arrow_dfe_engine::ExporterFactory;
 use otel_arrow_dfe_engine::ExtensionFactory;
 use otel_arrow_dfe_engine::ReceiverFactory;
 use otel_arrow_dfe_engine::capability::registry::Capabilities;
+use otel_arrow_dfe_engine::component_config::{ResolvedExtensionConfig, ResolvedNodeConfig};
 use otel_arrow_dfe_engine::config::{ExporterConfig, ExtensionConfig, ReceiverConfig};
 use otel_arrow_dfe_engine::context::{ControllerContext, ExtensionContext, PipelineContext};
 use otel_arrow_dfe_engine::control::{
@@ -68,6 +69,15 @@ use std::rc::Rc;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, AtomicU64, AtomicUsize, Ordering};
 use std::time::{Duration, Instant};
+
+fn resolve_test_value_config(
+    raw: &serde_json::Value,
+) -> Result<
+    otel_arrow_dfe_engine::component_config::ResolvedComponentConfig,
+    otel_arrow_dfe_config::error::Error,
+> {
+    Ok(otel_arrow_dfe_engine::component_config::ResolvedComponentConfig::omitted(raw.clone()))
+}
 
 // ---------------------------------------------------------------------
 // Shared helpers -- global probe registries thread per-test state into
@@ -288,12 +298,13 @@ impl local_recv::Receiver<()> for ProbeReceiver {
 fn probe_receiver_create(
     _pipeline_ctx: PipelineContext,
     node: otel_arrow_dfe_engine::node::NodeId,
-    node_config: Arc<otel_arrow_dfe_config::node::NodeUserConfig>,
+    node_config: Arc<ResolvedNodeConfig>,
     receiver_config: &ReceiverConfig,
     capabilities: &Capabilities,
 ) -> Result<ReceiverWrapper<()>, otel_arrow_dfe_config::error::Error> {
-    let key = node_config
-        .config
+    let safe_config_snapshot = node_config.safe_config_snapshot();
+    let component = node_config.component_config::<serde_json::Value>()?;
+    let key = component
         .get("probe_key")
         .and_then(|v| v.as_str())
         .expect("probe_key present in receiver node config");
@@ -428,8 +439,7 @@ fn probe_receiver_create(
 
     Ok(ReceiverWrapper::local(
         ProbeReceiver {
-            lifecycle: node_config
-                .config
+            lifecycle: component
                 .get("lifecycle_key")
                 .and_then(|v| v.as_str())
                 .map(lookup_node_lifecycle_probe),
@@ -438,7 +448,7 @@ fn probe_receiver_create(
             probe_key: Some(key.to_owned()),
         },
         node,
-        node_config,
+        safe_config_snapshot,
         receiver_config,
     ))
 }
@@ -448,7 +458,10 @@ const PROBE_RECEIVER_FACTORY: ReceiverFactory<()> = ReceiverFactory {
     create: probe_receiver_create,
     context_declarations: None,
     wiring_contract: otel_arrow_dfe_engine::wiring_contract::WiringContract::UNRESTRICTED,
-    validate_config: otel_arrow_dfe_config::validation::no_config,
+    resolve_config: otel_arrow_dfe_engine::component_config::resolve_omitted_config::<
+        serde_json::Value,
+    >,
+    snapshot_policy: otel_arrow_dfe_engine::component_config::ConfigSnapshotPolicy::Omit,
 };
 
 // ---------------------------------------------------------------------
@@ -479,14 +492,14 @@ impl local_exp::Exporter<()> for NoopExporter {
 fn noop_exporter_create(
     _pipeline_ctx: PipelineContext,
     node: otel_arrow_dfe_engine::node::NodeId,
-    node_config: Arc<otel_arrow_dfe_config::node::NodeUserConfig>,
+    node_config: Arc<ResolvedNodeConfig>,
     exporter_config: &ExporterConfig,
     _capabilities: &Capabilities,
 ) -> Result<ExporterWrapper<()>, otel_arrow_dfe_config::error::Error> {
     Ok(ExporterWrapper::local(
         NoopExporter,
         node,
-        node_config,
+        node_config.safe_config_snapshot(),
         exporter_config,
     ))
 }
@@ -496,7 +509,8 @@ const NOOP_EXPORTER_FACTORY: ExporterFactory<()> = ExporterFactory {
     create: noop_exporter_create,
     context_declarations: None,
     wiring_contract: otel_arrow_dfe_engine::wiring_contract::WiringContract::UNRESTRICTED,
-    validate_config: otel_arrow_dfe_config::validation::no_config,
+    resolve_config: otel_arrow_dfe_engine::component_config::resolve_no_config,
+    snapshot_policy: otel_arrow_dfe_engine::component_config::ConfigSnapshotPolicy::TypedSafe,
 };
 
 // ---------------------------------------------------------------------
@@ -571,17 +585,18 @@ impl LocalNoOpStateless for NoOpStatelessImplLocal {
 fn passive_extension_create(
     _ctx: &ExtensionContext,
     name: otel_arrow_dfe_config::ExtensionId,
-    user_config: Arc<otel_arrow_dfe_config::extension::ExtensionUserConfig>,
+    user_config: Arc<ResolvedExtensionConfig>,
     extension_config: &ExtensionConfig,
 ) -> Result<ExtensionBundle, otel_arrow_dfe_config::error::Error> {
-    let bundle = ExtensionWrapper::builder(name, user_config, extension_config)
-        .passive()
-        .cloned()
-        .shared::<NoOpStatelessImpl>(NoOpStatelessImpl {
-            name: "passive-noop",
-        })
-        .build()
-        .expect("passive extension bundle builds");
+    let bundle =
+        ExtensionWrapper::builder(name, user_config.safe_config_snapshot(), extension_config)
+            .passive()
+            .cloned()
+            .shared::<NoOpStatelessImpl>(NoOpStatelessImpl {
+                name: "passive-noop",
+            })
+            .build()
+            .expect("passive extension bundle builds");
     Ok(bundle)
 }
 
@@ -593,7 +608,8 @@ const PASSIVE_EXTENSION_FACTORY: ExtensionFactory = ExtensionFactory {
         shared: NoOpStatelessImpl => [NoOpStateless]
     )),
     create: passive_extension_create,
-    validate_config: otel_arrow_dfe_config::validation::no_config,
+    resolve_config: otel_arrow_dfe_engine::component_config::resolve_no_config,
+    snapshot_policy: otel_arrow_dfe_engine::component_config::ConfigSnapshotPolicy::TypedSafe,
 };
 
 // ---------------------------------------------------------------------
@@ -604,16 +620,17 @@ const PASSIVE_EXTENSION_FACTORY: ExtensionFactory = ExtensionFactory {
 fn dual_extension_create(
     _ctx: &ExtensionContext,
     name: otel_arrow_dfe_config::ExtensionId,
-    user_config: Arc<otel_arrow_dfe_config::extension::ExtensionUserConfig>,
+    user_config: Arc<ResolvedExtensionConfig>,
     extension_config: &ExtensionConfig,
 ) -> Result<ExtensionBundle, otel_arrow_dfe_config::error::Error> {
-    let bundle = ExtensionWrapper::builder(name, user_config, extension_config)
-        .passive()
-        .cloned()
-        .shared::<NoOpStatelessImpl>(NoOpStatelessImpl { name: "dual-noop" })
-        .local::<NoOpStatelessImplLocal>(NoOpStatelessImplLocal { name: "dual-noop" })
-        .build()
-        .expect("dual extension bundle builds");
+    let bundle =
+        ExtensionWrapper::builder(name, user_config.safe_config_snapshot(), extension_config)
+            .passive()
+            .cloned()
+            .shared::<NoOpStatelessImpl>(NoOpStatelessImpl { name: "dual-noop" })
+            .local::<NoOpStatelessImplLocal>(NoOpStatelessImplLocal { name: "dual-noop" })
+            .build()
+            .expect("dual extension bundle builds");
     Ok(bundle)
 }
 
@@ -625,7 +642,8 @@ const DUAL_EXTENSION_FACTORY: ExtensionFactory = ExtensionFactory {
         (shared: NoOpStatelessImpl, local: NoOpStatelessImplLocal) => [NoOpStateless]
     )),
     create: dual_extension_create,
-    validate_config: otel_arrow_dfe_config::validation::no_config,
+    resolve_config: otel_arrow_dfe_engine::component_config::resolve_no_config,
+    snapshot_policy: otel_arrow_dfe_engine::component_config::ConfigSnapshotPolicy::TypedSafe,
 };
 
 // ---------------------------------------------------------------------
@@ -712,11 +730,11 @@ fn lookup_active_ext_probe(key: &str) -> ActiveExtProbe {
 fn active_extension_create(
     _ctx: &ExtensionContext,
     name: otel_arrow_dfe_config::ExtensionId,
-    user_config: Arc<otel_arrow_dfe_config::extension::ExtensionUserConfig>,
+    user_config: Arc<ResolvedExtensionConfig>,
     extension_config: &ExtensionConfig,
 ) -> Result<ExtensionBundle, otel_arrow_dfe_config::error::Error> {
-    let key = user_config
-        .config
+    let component = user_config.component_config::<serde_json::Value>()?;
+    let key = component
         .get("probe_key")
         .and_then(|v| v.as_str())
         .expect("probe_key present in active extension config");
@@ -726,11 +744,12 @@ fn active_extension_create(
         start_at: Arc::clone(&probe.start_at),
         shutdown_at: Arc::clone(&probe.shutdown_at),
     };
-    let bundle = ExtensionWrapper::builder(name, user_config, extension_config)
-        .active()
-        .shared::<ActiveExtImpl>(impl_)
-        .build()
-        .expect("active extension bundle builds");
+    let bundle =
+        ExtensionWrapper::builder(name, user_config.safe_config_snapshot(), extension_config)
+            .active()
+            .shared::<ActiveExtImpl>(impl_)
+            .build()
+            .expect("active extension bundle builds");
     Ok(bundle)
 }
 
@@ -742,7 +761,8 @@ const ACTIVE_EXTENSION_FACTORY: ExtensionFactory = ExtensionFactory {
         shared: ActiveExtImpl => [NoOpStateless]
     )),
     create: active_extension_create,
-    validate_config: otel_arrow_dfe_config::validation::no_config,
+    resolve_config: resolve_test_value_config,
+    snapshot_policy: otel_arrow_dfe_engine::component_config::ConfigSnapshotPolicy::Omit,
 };
 
 // ---------------------------------------------------------------------
@@ -808,29 +828,26 @@ const ACTIVE_SHARED_COUNTER_EXTENSION_URN: &str =
 fn active_shared_counter_extension_create(
     _ctx: &ExtensionContext,
     name: otel_arrow_dfe_config::ExtensionId,
-    user_config: Arc<otel_arrow_dfe_config::extension::ExtensionUserConfig>,
+    user_config: Arc<ResolvedExtensionConfig>,
     extension_config: &ExtensionConfig,
 ) -> Result<ExtensionBundle, otel_arrow_dfe_config::error::Error> {
-    let key = user_config
-        .config
+    let component = user_config.component_config::<serde_json::Value>()?;
+    let key = component
         .get("probe_key")
         .and_then(|v| v.as_str())
         .expect("probe_key present in active_shared_counter extension config");
-    let bumps = user_config
-        .config
-        .get("bumps")
-        .and_then(|v| v.as_u64())
-        .unwrap_or(3);
+    let bumps = component.get("bumps").and_then(|v| v.as_u64()).unwrap_or(3);
     let probe = lookup_shared_counter_probe(key);
     let impl_ = ActiveSharedCounterImpl {
         counter: Arc::clone(&probe.counter),
         bumps,
     };
-    let bundle = ExtensionWrapper::builder(name, user_config, extension_config)
-        .active()
-        .shared::<ActiveSharedCounterImpl>(impl_)
-        .build()
-        .expect("active shared counter extension bundle builds");
+    let bundle =
+        ExtensionWrapper::builder(name, user_config.safe_config_snapshot(), extension_config)
+            .active()
+            .shared::<ActiveSharedCounterImpl>(impl_)
+            .build()
+            .expect("active shared counter extension bundle builds");
     Ok(bundle)
 }
 
@@ -842,7 +859,8 @@ const ACTIVE_SHARED_COUNTER_EXTENSION_FACTORY: ExtensionFactory = ExtensionFacto
         shared: ActiveSharedCounterImpl => [NoOpStateful]
     )),
     create: active_shared_counter_extension_create,
-    validate_config: otel_arrow_dfe_config::validation::no_config,
+    resolve_config: resolve_test_value_config,
+    snapshot_policy: otel_arrow_dfe_engine::component_config::ConfigSnapshotPolicy::Omit,
 };
 
 // ---------------------------------------------------------------------
@@ -884,14 +902,15 @@ impl otel_arrow_dfe_engine::shared::extension::Extension for FailingExtImpl {
 fn failing_extension_create(
     _ctx: &ExtensionContext,
     name: otel_arrow_dfe_config::ExtensionId,
-    user_config: Arc<otel_arrow_dfe_config::extension::ExtensionUserConfig>,
+    user_config: Arc<ResolvedExtensionConfig>,
     extension_config: &ExtensionConfig,
 ) -> Result<ExtensionBundle, otel_arrow_dfe_config::error::Error> {
-    let bundle = ExtensionWrapper::builder(name, user_config, extension_config)
-        .active()
-        .shared::<FailingExtImpl>(FailingExtImpl)
-        .build()
-        .expect("failing extension bundle builds");
+    let bundle =
+        ExtensionWrapper::builder(name, user_config.safe_config_snapshot(), extension_config)
+            .active()
+            .shared::<FailingExtImpl>(FailingExtImpl)
+            .build()
+            .expect("failing extension bundle builds");
     Ok(bundle)
 }
 
@@ -903,7 +922,8 @@ const FAILING_EXTENSION_FACTORY: ExtensionFactory = ExtensionFactory {
         shared: FailingExtImpl => [NoOpStateless]
     )),
     create: failing_extension_create,
-    validate_config: otel_arrow_dfe_config::validation::no_config,
+    resolve_config: otel_arrow_dfe_engine::component_config::resolve_no_config,
+    snapshot_policy: otel_arrow_dfe_engine::component_config::ConfigSnapshotPolicy::TypedSafe,
 };
 
 // ---------------------------------------------------------------------
@@ -945,14 +965,15 @@ impl otel_arrow_dfe_engine::shared::extension::Extension for ImmediateOkExtImpl 
 fn immediate_ok_extension_create(
     _ctx: &ExtensionContext,
     name: otel_arrow_dfe_config::ExtensionId,
-    user_config: Arc<otel_arrow_dfe_config::extension::ExtensionUserConfig>,
+    user_config: Arc<ResolvedExtensionConfig>,
     extension_config: &ExtensionConfig,
 ) -> Result<ExtensionBundle, otel_arrow_dfe_config::error::Error> {
-    let bundle = ExtensionWrapper::builder(name, user_config, extension_config)
-        .active()
-        .shared::<ImmediateOkExtImpl>(ImmediateOkExtImpl)
-        .build()
-        .expect("immediate-ok extension bundle builds");
+    let bundle =
+        ExtensionWrapper::builder(name, user_config.safe_config_snapshot(), extension_config)
+            .active()
+            .shared::<ImmediateOkExtImpl>(ImmediateOkExtImpl)
+            .build()
+            .expect("immediate-ok extension bundle builds");
     Ok(bundle)
 }
 
@@ -964,7 +985,8 @@ const IMMEDIATE_OK_EXTENSION_FACTORY: ExtensionFactory = ExtensionFactory {
         shared: ImmediateOkExtImpl => [NoOpStateless]
     )),
     create: immediate_ok_extension_create,
-    validate_config: otel_arrow_dfe_config::validation::no_config,
+    resolve_config: otel_arrow_dfe_engine::component_config::resolve_no_config,
+    snapshot_policy: otel_arrow_dfe_engine::component_config::ConfigSnapshotPolicy::TypedSafe,
 };
 
 // ---------------------------------------------------------------------
@@ -1047,11 +1069,11 @@ fn lookup_shutdown_recording_probe(key: &str) -> ShutdownRecordingProbe {
 fn shutdown_recording_extension_create(
     _ctx: &ExtensionContext,
     name: otel_arrow_dfe_config::ExtensionId,
-    user_config: Arc<otel_arrow_dfe_config::extension::ExtensionUserConfig>,
+    user_config: Arc<ResolvedExtensionConfig>,
     extension_config: &ExtensionConfig,
 ) -> Result<ExtensionBundle, otel_arrow_dfe_config::error::Error> {
-    let key = user_config
-        .config
+    let component = user_config.component_config::<serde_json::Value>()?;
+    let key = component
         .get("probe_key")
         .and_then(|v| v.as_str())
         .expect("probe_key present in shutdown_recording extension config");
@@ -1059,11 +1081,12 @@ fn shutdown_recording_extension_create(
     let impl_ = ShutdownRecordingExtImpl {
         shutdown_at: Arc::clone(&probe.shutdown_at),
     };
-    let bundle = ExtensionWrapper::builder(name, user_config, extension_config)
-        .active()
-        .shared::<ShutdownRecordingExtImpl>(impl_)
-        .build()
-        .expect("shutdown_recording extension bundle builds");
+    let bundle =
+        ExtensionWrapper::builder(name, user_config.safe_config_snapshot(), extension_config)
+            .active()
+            .shared::<ShutdownRecordingExtImpl>(impl_)
+            .build()
+            .expect("shutdown_recording extension bundle builds");
     Ok(bundle)
 }
 
@@ -1075,7 +1098,8 @@ const SHUTDOWN_RECORDING_EXTENSION_FACTORY: ExtensionFactory = ExtensionFactory 
         shared: ShutdownRecordingExtImpl => [NoOpStateless]
     )),
     create: shutdown_recording_extension_create,
-    validate_config: otel_arrow_dfe_config::validation::no_config,
+    resolve_config: resolve_test_value_config,
+    snapshot_policy: otel_arrow_dfe_engine::component_config::ConfigSnapshotPolicy::Omit,
 };
 
 // ---------------------------------------------------------------------
@@ -1139,16 +1163,15 @@ const DUAL_ACTIVE_EXTENSION_URN: &str = "urn:test:extension:dual_active_extensio
 fn dual_active_extension_create(
     _ctx: &ExtensionContext,
     name: otel_arrow_dfe_config::ExtensionId,
-    user_config: Arc<otel_arrow_dfe_config::extension::ExtensionUserConfig>,
+    user_config: Arc<ResolvedExtensionConfig>,
     extension_config: &ExtensionConfig,
 ) -> Result<ExtensionBundle, otel_arrow_dfe_config::error::Error> {
-    let local_key = user_config
-        .config
+    let component = user_config.component_config::<serde_json::Value>()?;
+    let local_key = component
         .get("local_probe_key")
         .and_then(|v| v.as_str())
         .expect("local_probe_key present in dual_active extension config");
-    let shared_key = user_config
-        .config
+    let shared_key = component
         .get("shared_probe_key")
         .and_then(|v| v.as_str())
         .expect("shared_probe_key present in dual_active extension config");
@@ -1166,12 +1189,13 @@ fn dual_active_extension_create(
         shutdown_at: Arc::clone(&shared_probe.shutdown_at),
     };
 
-    let bundle = ExtensionWrapper::builder(name, user_config, extension_config)
-        .active()
-        .shared::<ActiveExtImpl>(shared_impl)
-        .local::<ActiveLocalExtImpl>(Rc::new(local_impl))
-        .build()
-        .expect("dual-active extension bundle builds");
+    let bundle =
+        ExtensionWrapper::builder(name, user_config.safe_config_snapshot(), extension_config)
+            .active()
+            .shared::<ActiveExtImpl>(shared_impl)
+            .local::<ActiveLocalExtImpl>(Rc::new(local_impl))
+            .build()
+            .expect("dual-active extension bundle builds");
     Ok(bundle)
 }
 
@@ -1183,7 +1207,8 @@ const DUAL_ACTIVE_EXTENSION_FACTORY: ExtensionFactory = ExtensionFactory {
         (shared: ActiveExtImpl, local: ActiveLocalExtImpl) => [NoOpStateless]
     )),
     create: dual_active_extension_create,
-    validate_config: otel_arrow_dfe_config::validation::no_config,
+    resolve_config: resolve_test_value_config,
+    snapshot_policy: otel_arrow_dfe_engine::component_config::ConfigSnapshotPolicy::Omit,
 };
 
 // ---------------------------------------------------------------------
@@ -1253,11 +1278,11 @@ fn lookup_background_probe(key: &str) -> BackgroundProbe {
 fn background_extension_create(
     _ctx: &ExtensionContext,
     name: otel_arrow_dfe_config::ExtensionId,
-    user_config: Arc<otel_arrow_dfe_config::extension::ExtensionUserConfig>,
+    user_config: Arc<ResolvedExtensionConfig>,
     extension_config: &ExtensionConfig,
 ) -> Result<ExtensionBundle, otel_arrow_dfe_config::error::Error> {
-    let key = user_config
-        .config
+    let component = user_config.component_config::<serde_json::Value>()?;
+    let key = component
         .get("probe_key")
         .and_then(|v| v.as_str())
         .expect("probe_key present in background extension config");
@@ -1266,11 +1291,12 @@ fn background_extension_create(
         started: Arc::clone(&probe.started),
         shutdown_at: Arc::clone(&probe.shutdown_at),
     };
-    let bundle = ExtensionWrapper::builder(name, user_config, extension_config)
-        .background()
-        .shared::<BackgroundExtImpl>(impl_)
-        .build()
-        .expect("background extension bundle builds");
+    let bundle =
+        ExtensionWrapper::builder(name, user_config.safe_config_snapshot(), extension_config)
+            .background()
+            .shared::<BackgroundExtImpl>(impl_)
+            .build()
+            .expect("background extension bundle builds");
     Ok(bundle)
 }
 
@@ -1283,7 +1309,8 @@ const BACKGROUND_EXTENSION_FACTORY: ExtensionFactory = ExtensionFactory {
     // pruning treats this bundle as "always kept".
     capabilities: None,
     create: background_extension_create,
-    validate_config: otel_arrow_dfe_config::validation::no_config,
+    resolve_config: resolve_test_value_config,
+    snapshot_policy: otel_arrow_dfe_engine::component_config::ConfigSnapshotPolicy::Omit,
 };
 
 // ---------------------------------------------------------------------
@@ -1373,11 +1400,11 @@ fn lookup_shared_counter_probe(key: &str) -> SharedCounterProbe {
 fn shared_counter_extension_create(
     _ctx: &ExtensionContext,
     name: otel_arrow_dfe_config::ExtensionId,
-    user_config: Arc<otel_arrow_dfe_config::extension::ExtensionUserConfig>,
+    user_config: Arc<ResolvedExtensionConfig>,
     extension_config: &ExtensionConfig,
 ) -> Result<ExtensionBundle, otel_arrow_dfe_config::error::Error> {
-    let key = user_config
-        .config
+    let component = user_config.component_config::<serde_json::Value>()?;
+    let key = component
         .get("probe_key")
         .and_then(|v| v.as_str())
         .expect("probe_key present in shared_counter extension config");
@@ -1389,12 +1416,13 @@ fn shared_counter_extension_create(
     // prototype. The `Arc<AtomicU64>` field means clones all point at
     // the same underlying counter, which is the explicit
     // share-state-via-`Arc` pattern documented in the architecture.
-    let bundle = ExtensionWrapper::builder(name, user_config, extension_config)
-        .passive()
-        .cloned()
-        .local::<SharedCounterImpl>(impl_)
-        .build()
-        .expect("shared counter extension bundle builds");
+    let bundle =
+        ExtensionWrapper::builder(name, user_config.safe_config_snapshot(), extension_config)
+            .passive()
+            .cloned()
+            .local::<SharedCounterImpl>(impl_)
+            .build()
+            .expect("shared counter extension bundle builds");
     Ok(bundle)
 }
 
@@ -1406,7 +1434,8 @@ const SHARED_COUNTER_EXTENSION_FACTORY: ExtensionFactory = ExtensionFactory {
         local: SharedCounterImpl => [NoOpStateful]
     )),
     create: shared_counter_extension_create,
-    validate_config: otel_arrow_dfe_config::validation::no_config,
+    resolve_config: resolve_test_value_config,
+    snapshot_policy: otel_arrow_dfe_engine::component_config::ConfigSnapshotPolicy::Omit,
 };
 
 // ---------------------------------------------------------------------
@@ -1422,11 +1451,11 @@ const SHARED_COUNTER_SHARED_EXTENSION_URN: &str =
 fn shared_counter_shared_extension_create(
     _ctx: &ExtensionContext,
     name: otel_arrow_dfe_config::ExtensionId,
-    user_config: Arc<otel_arrow_dfe_config::extension::ExtensionUserConfig>,
+    user_config: Arc<ResolvedExtensionConfig>,
     extension_config: &ExtensionConfig,
 ) -> Result<ExtensionBundle, otel_arrow_dfe_config::error::Error> {
-    let key = user_config
-        .config
+    let component = user_config.component_config::<serde_json::Value>()?;
+    let key = component
         .get("probe_key")
         .and_then(|v| v.as_str())
         .expect("probe_key present in shared_counter_shared extension config");
@@ -1434,12 +1463,13 @@ fn shared_counter_shared_extension_create(
     let impl_ = SharedCounterImpl {
         counter: Arc::clone(&probe.counter),
     };
-    let bundle = ExtensionWrapper::builder(name, user_config, extension_config)
-        .passive()
-        .cloned()
-        .shared::<SharedCounterImpl>(impl_)
-        .build()
-        .expect("shared counter (shared variant) extension bundle builds");
+    let bundle =
+        ExtensionWrapper::builder(name, user_config.safe_config_snapshot(), extension_config)
+            .passive()
+            .cloned()
+            .shared::<SharedCounterImpl>(impl_)
+            .build()
+            .expect("shared counter (shared variant) extension bundle builds");
     Ok(bundle)
 }
 
@@ -1451,7 +1481,8 @@ const SHARED_COUNTER_SHARED_EXTENSION_FACTORY: ExtensionFactory = ExtensionFacto
         shared: SharedCounterImpl => [NoOpStateful]
     )),
     create: shared_counter_shared_extension_create,
-    validate_config: otel_arrow_dfe_config::validation::no_config,
+    resolve_config: resolve_test_value_config,
+    snapshot_policy: otel_arrow_dfe_engine::component_config::ConfigSnapshotPolicy::Omit,
 };
 
 // ---------------------------------------------------------------------
@@ -1516,11 +1547,11 @@ fn lookup_constructed_probe(key: &str) -> ConstructedProbe {
 fn constructed_extension_create(
     _ctx: &ExtensionContext,
     name: otel_arrow_dfe_config::ExtensionId,
-    user_config: Arc<otel_arrow_dfe_config::extension::ExtensionUserConfig>,
+    user_config: Arc<ResolvedExtensionConfig>,
     extension_config: &ExtensionConfig,
 ) -> Result<ExtensionBundle, otel_arrow_dfe_config::error::Error> {
-    let key = user_config
-        .config
+    let component = user_config.component_config::<serde_json::Value>()?;
+    let key = component
         .get("probe_key")
         .and_then(|v| v.as_str())
         .expect("probe_key present in constructed extension config");
@@ -1530,15 +1561,16 @@ fn constructed_extension_create(
     // gets a fresh `ConstructedNoOpImpl` value, demonstrating
     // per-consumer instantiation.
     let counter = Arc::clone(&probe.closure_invocations);
-    let bundle = ExtensionWrapper::builder(name, user_config, extension_config)
-        .passive()
-        .constructed()
-        .local::<ConstructedNoOpImpl, _>(move || {
-            let _ = counter.fetch_add(1, Ordering::SeqCst);
-            ConstructedNoOpImpl
-        })
-        .build()
-        .expect("constructed extension bundle builds");
+    let bundle =
+        ExtensionWrapper::builder(name, user_config.safe_config_snapshot(), extension_config)
+            .passive()
+            .constructed()
+            .local::<ConstructedNoOpImpl, _>(move || {
+                let _ = counter.fetch_add(1, Ordering::SeqCst);
+                ConstructedNoOpImpl
+            })
+            .build()
+            .expect("constructed extension bundle builds");
     Ok(bundle)
 }
 
@@ -1550,7 +1582,8 @@ const CONSTRUCTED_EXTENSION_FACTORY: ExtensionFactory = ExtensionFactory {
         local: ConstructedNoOpImpl => [NoOpStateless]
     )),
     create: constructed_extension_create,
-    validate_config: otel_arrow_dfe_config::validation::no_config,
+    resolve_config: resolve_test_value_config,
+    snapshot_policy: otel_arrow_dfe_engine::component_config::ConfigSnapshotPolicy::Omit,
 };
 
 // ---------------------------------------------------------------------
@@ -1593,7 +1626,7 @@ const RC_COUNTER_EXTENSION_URN: &str = "urn:test:extension:rc_counter_extension"
 fn rc_counter_extension_create(
     _ctx: &ExtensionContext,
     name: otel_arrow_dfe_config::ExtensionId,
-    user_config: Arc<otel_arrow_dfe_config::extension::ExtensionUserConfig>,
+    user_config: Arc<ResolvedExtensionConfig>,
     extension_config: &ExtensionConfig,
 ) -> Result<ExtensionBundle, otel_arrow_dfe_config::error::Error> {
     // The prototype owns one `Rc<RefCell<u64>>`; `.passive().cloned()`
@@ -1602,12 +1635,13 @@ fn rc_counter_extension_create(
     let impl_ = RcCounterImpl {
         counter: Rc::new(std::cell::RefCell::new(0)),
     };
-    let bundle = ExtensionWrapper::builder(name, user_config, extension_config)
-        .passive()
-        .cloned()
-        .local::<RcCounterImpl>(impl_)
-        .build()
-        .expect("rc counter extension bundle builds");
+    let bundle =
+        ExtensionWrapper::builder(name, user_config.safe_config_snapshot(), extension_config)
+            .passive()
+            .cloned()
+            .local::<RcCounterImpl>(impl_)
+            .build()
+            .expect("rc counter extension bundle builds");
     Ok(bundle)
 }
 
@@ -1619,7 +1653,8 @@ const RC_COUNTER_EXTENSION_FACTORY: ExtensionFactory = ExtensionFactory {
         local: RcCounterImpl => [NoOpStateful]
     )),
     create: rc_counter_extension_create,
-    validate_config: otel_arrow_dfe_config::validation::no_config,
+    resolve_config: otel_arrow_dfe_engine::component_config::resolve_no_config,
+    snapshot_policy: otel_arrow_dfe_engine::component_config::ConfigSnapshotPolicy::TypedSafe,
 };
 
 // ---------------------------------------------------------------------
@@ -1700,17 +1735,15 @@ impl local_proc::Processor<()> for ProbeProcessor {
 fn probe_processor_create(
     _pipeline_ctx: PipelineContext,
     node: otel_arrow_dfe_engine::node::NodeId,
-    node_config: Arc<otel_arrow_dfe_config::node::NodeUserConfig>,
+    node_config: Arc<ResolvedNodeConfig>,
     processor_config: &otel_arrow_dfe_engine::config::ProcessorConfig,
     capabilities: &Capabilities,
 ) -> Result<ProcessorWrapper<()>, otel_arrow_dfe_config::error::Error> {
-    let probe_key = node_config.config.get("probe_key").and_then(|v| v.as_str());
-    let lifecycle_key = node_config
-        .config
-        .get("lifecycle_key")
-        .and_then(|v| v.as_str());
-    let optional_only = node_config
-        .config
+    let safe_config_snapshot = node_config.safe_config_snapshot();
+    let component = node_config.component_config::<serde_json::Value>()?;
+    let probe_key = component.get("probe_key").and_then(|v| v.as_str());
+    let lifecycle_key = component.get("lifecycle_key").and_then(|v| v.as_str());
+    let optional_only = component
         .get("optional_only")
         .and_then(|v| v.as_bool())
         .unwrap_or(false);
@@ -1735,7 +1768,7 @@ fn probe_processor_create(
     Ok(ProcessorWrapper::local(
         ProbeProcessor { lifecycle },
         node,
-        node_config,
+        safe_config_snapshot,
         processor_config,
     ))
 }
@@ -1746,7 +1779,10 @@ const PROBE_PROCESSOR_FACTORY: otel_arrow_dfe_engine::ProcessorFactory<()> =
         create: probe_processor_create,
         context_declarations: None,
         wiring_contract: otel_arrow_dfe_engine::wiring_contract::WiringContract::UNRESTRICTED,
-        validate_config: otel_arrow_dfe_config::validation::no_config,
+        resolve_config: otel_arrow_dfe_engine::component_config::resolve_omitted_config::<
+            serde_json::Value,
+        >,
+        snapshot_policy: otel_arrow_dfe_engine::component_config::ConfigSnapshotPolicy::Omit,
     };
 
 // ---------------------------------------------------------------------
@@ -1786,17 +1822,15 @@ impl local_exp::Exporter<()> for ProbeExporter {
 fn probe_exporter_create(
     _pipeline_ctx: PipelineContext,
     node: otel_arrow_dfe_engine::node::NodeId,
-    node_config: Arc<otel_arrow_dfe_config::node::NodeUserConfig>,
+    node_config: Arc<ResolvedNodeConfig>,
     exporter_config: &ExporterConfig,
     capabilities: &Capabilities,
 ) -> Result<ExporterWrapper<()>, otel_arrow_dfe_config::error::Error> {
-    let probe_key = node_config.config.get("probe_key").and_then(|v| v.as_str());
-    let lifecycle_key = node_config
-        .config
-        .get("lifecycle_key")
-        .and_then(|v| v.as_str());
-    let optional_only = node_config
-        .config
+    let safe_config_snapshot = node_config.safe_config_snapshot();
+    let component = node_config.component_config::<serde_json::Value>()?;
+    let probe_key = component.get("probe_key").and_then(|v| v.as_str());
+    let lifecycle_key = component.get("lifecycle_key").and_then(|v| v.as_str());
+    let optional_only = component
         .get("optional_only")
         .and_then(|v| v.as_bool())
         .unwrap_or(false);
@@ -1819,7 +1853,7 @@ fn probe_exporter_create(
     Ok(ExporterWrapper::local(
         ProbeExporter { lifecycle },
         node,
-        node_config,
+        safe_config_snapshot,
         exporter_config,
     ))
 }
@@ -1829,7 +1863,10 @@ const PROBE_EXPORTER_FACTORY: ExporterFactory<()> = ExporterFactory {
     create: probe_exporter_create,
     context_declarations: None,
     wiring_contract: otel_arrow_dfe_engine::wiring_contract::WiringContract::UNRESTRICTED,
-    validate_config: otel_arrow_dfe_config::validation::no_config,
+    resolve_config: otel_arrow_dfe_engine::component_config::resolve_omitted_config::<
+        serde_json::Value,
+    >,
+    snapshot_policy: otel_arrow_dfe_engine::component_config::ConfigSnapshotPolicy::Omit,
 };
 
 // ---------------------------------------------------------------------
@@ -1951,6 +1988,9 @@ fn build_test_runtime_pipeline(
 ) {
     let config = PipelineConfig::from_yaml("test-group".into(), "test-pipeline".into(), yaml)
         .expect("yaml config parses + validates");
+    let config = TEST_PIPELINE_FACTORY
+        .resolve_pipeline_config(&config)
+        .expect("component configs resolve");
     let (pipeline_ctx, telemetry_system, entity_key) = fresh_pipeline_env();
     let runtime_pipeline = TEST_PIPELINE_FACTORY
         .build(
@@ -1971,6 +2011,9 @@ fn build_test_pipeline_with_unconsumed_explicit_binding(
 ) -> Result<otel_arrow_dfe_engine::runtime_pipeline::RuntimePipeline<()>, EngineError> {
     let config = PipelineConfig::from_yaml("test-group".into(), "test-pipeline".into(), yaml)
         .expect("yaml config parses + validates");
+    let config = TEST_PIPELINE_FACTORY
+        .resolve_pipeline_config(&config)
+        .expect("component configs resolve");
     let (pipeline_ctx, _telemetry_system, _entity_key) = fresh_pipeline_env();
     let policy = RateLimiterPolicy {
         enforcement: RateLimitEnforcement::Enforce,
@@ -4235,18 +4278,17 @@ fn make_ready_gate_probe(
 fn ready_gate_extension_create(
     _ctx: &ExtensionContext,
     name: otel_arrow_dfe_config::ExtensionId,
-    user_config: Arc<otel_arrow_dfe_config::extension::ExtensionUserConfig>,
+    user_config: Arc<ResolvedExtensionConfig>,
     extension_config: &ExtensionConfig,
 ) -> Result<ExtensionBundle, otel_arrow_dfe_config::error::Error> {
-    let key = user_config
-        .config
+    let component = user_config.component_config::<serde_json::Value>()?;
+    let key = component
         .get("probe_key")
         .and_then(|v| v.as_str())
         .expect("probe_key present in ready_gate extension config");
     let probe = lookup_ready_gate_probe(key);
 
-    let readiness_timeout = user_config
-        .config
+    let readiness_timeout = component
         .get("readiness_timeout_ms")
         .and_then(|v| v.as_u64())
         .map(Duration::from_millis);
@@ -4258,7 +4300,9 @@ fn ready_gate_extension_create(
         start_at: Arc::clone(&probe.start_at),
     };
 
-    let builder = ExtensionWrapper::builder(name, user_config, extension_config).active();
+    let builder =
+        ExtensionWrapper::builder(name, user_config.safe_config_snapshot(), extension_config)
+            .active();
     let builder = match readiness_timeout {
         Some(t) => builder.with_readiness_probe_timeout_override(t),
         None => builder,
@@ -4278,7 +4322,8 @@ const READY_GATE_EXTENSION_FACTORY: ExtensionFactory = ExtensionFactory {
         shared: ReadyGateExtImpl => [NoOpStateless]
     )),
     create: ready_gate_extension_create,
-    validate_config: otel_arrow_dfe_config::validation::no_config,
+    resolve_config: resolve_test_value_config,
+    snapshot_policy: otel_arrow_dfe_engine::component_config::ConfigSnapshotPolicy::Omit,
 };
 
 const READY_GATE_BG_EXTENSION_URN: &str = "urn:test:extension:ready_gate_extension_bg";
@@ -4286,18 +4331,17 @@ const READY_GATE_BG_EXTENSION_URN: &str = "urn:test:extension:ready_gate_extensi
 fn ready_gate_bg_extension_create(
     _ctx: &ExtensionContext,
     name: otel_arrow_dfe_config::ExtensionId,
-    user_config: Arc<otel_arrow_dfe_config::extension::ExtensionUserConfig>,
+    user_config: Arc<ResolvedExtensionConfig>,
     extension_config: &ExtensionConfig,
 ) -> Result<ExtensionBundle, otel_arrow_dfe_config::error::Error> {
-    let key = user_config
-        .config
+    let component = user_config.component_config::<serde_json::Value>()?;
+    let key = component
         .get("probe_key")
         .and_then(|v| v.as_str())
         .expect("probe_key present in ready_gate background extension config");
     let probe = lookup_ready_gate_probe(key);
 
-    let readiness_timeout = user_config
-        .config
+    let readiness_timeout = component
         .get("readiness_timeout_ms")
         .and_then(|v| v.as_u64())
         .map(Duration::from_millis);
@@ -4309,7 +4353,9 @@ fn ready_gate_bg_extension_create(
         start_at: Arc::clone(&probe.start_at),
     };
 
-    let builder = ExtensionWrapper::builder(name, user_config, extension_config).background();
+    let builder =
+        ExtensionWrapper::builder(name, user_config.safe_config_snapshot(), extension_config)
+            .background();
     let builder = match readiness_timeout {
         Some(t) => builder.with_readiness_probe_timeout_override(t),
         None => builder,
@@ -4327,7 +4373,8 @@ const READY_GATE_BG_EXTENSION_FACTORY: ExtensionFactory = ExtensionFactory {
     documentation_url: "",
     capabilities: None,
     create: ready_gate_bg_extension_create,
-    validate_config: otel_arrow_dfe_config::validation::no_config,
+    resolve_config: resolve_test_value_config,
+    snapshot_policy: otel_arrow_dfe_engine::component_config::ConfigSnapshotPolicy::Omit,
 };
 
 fn build_runtime_pipeline_with_ready_gate(
@@ -4364,6 +4411,9 @@ fn build_runtime_pipeline_with_ready_gate(
 
     let config = PipelineConfig::from_yaml("test-group".into(), "test-pipeline".into(), yaml)
         .expect("yaml config parses + validates");
+    let config = PIPELINE_FACTORY
+        .resolve_pipeline_config(&config)
+        .expect("component configs resolve");
     let (pipeline_ctx, telemetry_system, entity_key) = fresh_pipeline_env();
     let runtime_pipeline = PIPELINE_FACTORY
         .build(

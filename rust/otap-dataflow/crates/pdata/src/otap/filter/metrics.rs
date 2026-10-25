@@ -13,10 +13,10 @@ use crate::otap::filter::{
 use crate::schema::consts;
 use arrow::array::{BooleanArray, StringArray};
 use arrow::buffer::BooleanBuffer;
-use serde::Deserialize;
+use serde::{Deserialize, Serialize};
 
 /// Overall requirements to use when filtering metrics.
-#[derive(Debug, Clone, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct MetricFilter {
     /// Include match properties describe metrics that should be included in the pipeline.
     /// If both include and exclude are specified, include filtering occurs first.
@@ -27,7 +27,7 @@ pub struct MetricFilter {
 }
 
 /// Set of metric properties to match against.
-#[derive(Debug, Clone, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct MetricMatchProperties {
     /// MatchType specifies the type of matching desired.
     #[serde(default = "default_match_type")]

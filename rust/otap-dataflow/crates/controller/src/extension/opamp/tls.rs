@@ -84,7 +84,7 @@ pub async fn create_client_config(config: &TlsClientConfig) -> Result<Option<Cli
             .config
             .key_pem
             .as_ref()
-            .is_some_and(|pem| !pem.trim().is_empty());
+            .is_some_and(|pem| !pem.expose().trim().is_empty());
 
     if client_cert_configured || client_key_configured {
         if !(client_cert_configured && client_key_configured) {
@@ -126,7 +126,7 @@ pub async fn create_client_config(config: &TlsClientConfig) -> Result<Option<Cli
                 }
             })?
         } else if let Some(key_pem) = &config.config.key_pem {
-            key_pem.as_bytes().to_vec()
+            key_pem.expose().as_bytes().to_vec()
         } else {
             unreachable!()
         };

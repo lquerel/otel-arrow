@@ -9,7 +9,7 @@ use serde::{self, Deserialize, Serialize};
 /// in the range `[1 - JITTER_FRACTION, 1 + JITTER_FRACTION]`.
 const JITTER_FRACTION: f64 = 0.2;
 
-#[derive(Deserialize, Debug, Clone, Serialize)]
+#[derive(Deserialize, Debug, Clone, PartialEq, Serialize)]
 pub struct ExponentialBackoff {
     #[serde(with = "humantime_serde", rename = "initial")]
     current: Duration,

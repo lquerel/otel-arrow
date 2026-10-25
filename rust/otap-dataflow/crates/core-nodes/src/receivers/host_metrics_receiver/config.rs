@@ -430,7 +430,7 @@ pub struct ProcessFilterConfig {
 }
 
 /// Per-process attribute controls.
-#[derive(Clone, Copy, Debug, Deserialize, Serialize)]
+#[derive(Clone, Copy, Debug, Deserialize, Serialize, PartialEq)]
 #[serde(default, deny_unknown_fields)]
 pub struct ProcessLabelsConfig {
     /// Emit process.pid.
@@ -467,7 +467,7 @@ impl Default for ProcessLabelsConfig {
 }
 
 /// Per-process metric controls.
-#[derive(Clone, Copy, Debug, Deserialize, Serialize)]
+#[derive(Clone, Copy, Debug, Deserialize, Serialize, PartialEq)]
 #[serde(default, deny_unknown_fields)]
 pub struct ProcessMetricsConfig {
     /// Emit process.cpu.time.
@@ -535,7 +535,7 @@ pub enum MatchType {
     Regexp,
 }
 
-#[derive(Clone)]
+#[derive(Clone, PartialEq)]
 pub(super) struct RuntimeConfig {
     pub(super) root_path: PathBuf,
     pub(super) validation: HostViewValidationMode,
@@ -547,7 +547,7 @@ pub(super) struct RuntimeConfig {
     pub(super) families: RuntimeFamilies,
 }
 
-#[derive(Clone)]
+#[derive(Clone, PartialEq)]
 pub(super) struct RuntimeFamilies {
     pub(super) cpu: RuntimeFamily,
     pub(super) memory: RuntimeFamily,
@@ -560,13 +560,13 @@ pub(super) struct RuntimeFamilies {
     pub(super) processes: RuntimeProcessFamily,
 }
 
-#[derive(Clone)]
+#[derive(Clone, PartialEq)]
 pub(super) struct RuntimeFamily {
     pub(super) enabled: bool,
     pub(super) interval: Duration,
 }
 
-#[derive(Clone)]
+#[derive(Clone, PartialEq)]
 pub(super) struct RuntimeDiskFamily {
     pub(super) enabled: bool,
     pub(super) interval: Duration,
@@ -575,7 +575,7 @@ pub(super) struct RuntimeDiskFamily {
     pub(super) exclude: Option<CompiledFilter>,
 }
 
-#[derive(Clone)]
+#[derive(Clone, PartialEq)]
 pub(super) struct RuntimeFilesystemFamily {
     pub(super) enabled: bool,
     pub(super) interval: Duration,
@@ -590,7 +590,7 @@ pub(super) struct RuntimeFilesystemFamily {
     pub(super) exclude_mount_points: Option<CompiledFilter>,
 }
 
-#[derive(Clone)]
+#[derive(Clone, PartialEq)]
 pub(super) struct RuntimeNetworkFamily {
     pub(super) enabled: bool,
     pub(super) interval: Duration,
@@ -598,7 +598,7 @@ pub(super) struct RuntimeNetworkFamily {
     pub(super) exclude: Option<CompiledFilter>,
 }
 
-#[derive(Clone)]
+#[derive(Clone, PartialEq)]
 pub(super) struct RuntimeProcessFamily {
     pub(super) enabled: bool,
     pub(super) interval: Duration,
@@ -617,14 +617,22 @@ pub(crate) struct CompiledFilter {
     regex_set: Option<RegexSet>,
 }
 
+impl PartialEq for CompiledFilter {
+    fn eq(&self, other: &Self) -> bool {
+        self.match_type == other.match_type && self.values == other.values
+    }
+}
+
 impl CompiledFilter {
     pub(super) fn compile(
         match_type: MatchType,
-        values: Vec<String>,
+        mut values: Vec<String>,
     ) -> Result<Option<Self>, otel_arrow_dfe_config::error::Error> {
         if values.is_empty() {
             return Ok(None);
         }
+        values.sort();
+        values.dedup();
         let regex_set = if match_type == MatchType::Regexp {
             Some(RegexSet::new(&values).map_err(|err| {
                 otel_arrow_dfe_config::error::Error::InvalidUserConfig {

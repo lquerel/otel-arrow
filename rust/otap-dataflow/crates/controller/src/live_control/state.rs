@@ -16,16 +16,6 @@ pub(super) const TERMINAL_SHUTDOWN_RETENTION_LIMIT: usize = 32;
 /// Maximum age for terminal rollout/shutdown records kept in memory.
 pub(super) const TERMINAL_OPERATION_RETENTION_TTL: Duration = Duration::from_secs(24 * 60 * 60);
 
-fn panic_payload_message(payload: &(dyn Any + Send)) -> String {
-    if let Some(message) = payload.downcast_ref::<&str>() {
-        (*message).to_owned()
-    } else if let Some(message) = payload.downcast_ref::<String>() {
-        message.clone()
-    } else {
-        "non-string panic payload".to_owned()
-    }
-}
-
 #[derive(Debug, Clone)]
 /// Structured panic capture with public and diagnostic renderings.
 ///
@@ -34,7 +24,6 @@ fn panic_payload_message(payload: &(dyn Any + Send)) -> String {
 /// and a forced backtrace for internal telemetry.
 pub(crate) struct PanicReport {
     pub(super) kind: &'static str,
-    pub(super) payload_message: String,
     pub(super) thread_name: Option<String>,
     pub(super) thread_id: Option<usize>,
     pub(super) core_id: Option<usize>,
@@ -45,14 +34,13 @@ impl PanicReport {
     /// Captures a panic payload plus best-effort worker/thread context.
     pub(crate) fn capture(
         kind: &'static str,
-        panic: Box<dyn Any + Send>,
+        _panic: Box<dyn Any + Send>,
         thread_name: Option<String>,
         thread_id: Option<usize>,
         core_id: Option<usize>,
     ) -> Self {
         Self {
             kind,
-            payload_message: panic_payload_message(&*panic),
             thread_name,
             thread_id,
             core_id,
@@ -62,7 +50,9 @@ impl PanicReport {
 
     /// Returns the short message stored in public rollout/shutdown status.
     pub(super) fn summary_message(&self) -> String {
-        format!("{} panicked: {}", self.kind, self.payload_message)
+        // Panic text is arbitrary component-owned data and can contain secrets.
+        // Do not retain it in public reports, Debug, or observed-state sources.
+        format!("{} panicked", self.kind)
     }
 
     /// Returns the diagnostic message used as internal error source detail.
@@ -483,6 +473,8 @@ pub(super) struct RuntimeRecoveryState {
 /// Runtime-ready deployment description for a logical pipeline.
 pub(crate) struct LogicalPipelineDeployment {
     pub(super) resolved: ResolvedPipelineConfig,
+    /// Factory-resolved immutable component configuration for runtime creation.
+    pub(super) runtime_resolved: otel_arrow_dfe_engine::component_config::ResolvedPipelineConfig,
     /// Compiled context bindings for this deployment generation.
     pub(super) context_bindings: Arc<CompiledContextBindings>,
     /// Generation established when this logical deployment was created or replaced.
@@ -496,6 +488,7 @@ pub(crate) struct LogicalPipelineDeployment {
 impl LogicalPipelineDeployment {
     pub(crate) fn new(
         resolved: ResolvedPipelineConfig,
+        runtime_resolved: otel_arrow_dfe_engine::component_config::ResolvedPipelineConfig,
         context_bindings: Arc<CompiledContextBindings>,
         baseline_generation: u64,
         placement: PipelinePlacement,
@@ -503,6 +496,7 @@ impl LogicalPipelineDeployment {
     ) -> Self {
         Self {
             resolved,
+            runtime_resolved,
             context_bindings,
             baseline_generation,
             placement,
@@ -538,12 +532,17 @@ pub(super) struct TopicRuntimeProfile {
 pub(super) struct ControllerRuntimeState {
     /// Latest accepted full engine config, including committed live changes.
     pub(super) live_config: OtelDataflowSpec,
+    /// SafeConfigSnapshot for the same committed generation.
+    pub(super) safe_config_snapshot: SafeConfigSnapshot,
     /// Monotonic revision for committed logical config changes.
     pub(super) config_revision: u64,
     /// Latest node-binding snapshot compiled for the committed live configuration.
     pub(super) latest_context_bindings: Arc<CompiledContextBindings>,
     /// Committed logical pipelines keyed by group/pipeline id.
     pub(super) logical_pipelines: HashMap<PipelineKey, LogicalPipelineDeployment>,
+    /// Factory-resolved component configs for every committed pipeline, including stopped ones.
+    pub(super) resolved_pipelines:
+        HashMap<PipelineKey, otel_arrow_dfe_engine::component_config::ResolvedPipelineConfig>,
     /// Deployed runtime instances keyed by group/pipeline/core/generation.
     pub(super) runtime_instances: HashMap<DeployedPipelineKey, RuntimeInstanceRecord>,
     /// Per-core restart streak and active recovery-worker state.

@@ -21,10 +21,12 @@ use std::time::Duration;
 
 use linkme::distributed_slice;
 use otel_arrow_dfe_config::error::Error as ConfigError;
-use otel_arrow_dfe_config::extension::ExtensionUserConfig;
 use otel_arrow_dfe_engine::ExtensionFactory;
 use otel_arrow_dfe_engine::capability::auth::api_key_provider::ApiKeyProvider;
 use otel_arrow_dfe_engine::capability::auth::{ApiKey, ApiKeyAttributes};
+use otel_arrow_dfe_engine::component_config::{
+    ConfigSnapshotPolicy, ResolvedComponentConfig, ResolvedExtensionConfig,
+};
 use otel_arrow_dfe_engine::config::ExtensionConfig;
 use otel_arrow_dfe_engine::context::ExtensionContext;
 use otel_arrow_dfe_engine::extension::wrapper::ExtensionVariant;
@@ -72,19 +74,38 @@ fn parse_config(config: &serde_json::Value) -> Result<(Config, ApiKeyAttributes)
     Ok((parsed, attributes))
 }
 
-/// Static config validation hook for the factory.
-fn validate_config(config: &serde_json::Value) -> Result<(), ConfigError> {
-    parse_config(config).map(|_| ())
+fn configs_equal(left: &Config, right: &Config) -> bool {
+    left.key_secret
+        .as_ref()
+        .map(secrecy::ExposeSecret::expose_secret)
+        == right
+            .key_secret
+            .as_ref()
+            .map(secrecy::ExposeSecret::expose_secret)
+        && left.key_secret_file == right.key_secret_file
+        && left.key_secret_file_refresh == right.key_secret_file_refresh
+        && left.attributes == right.attributes
+}
+
+fn resolve_config(config: &serde_json::Value) -> Result<ResolvedComponentConfig, ConfigError> {
+    let (config, _) = parse_config(config)?;
+    Ok(ResolvedComponentConfig::omitted_by(config, configs_equal))
 }
 
 /// Builds a `FlatFileApiKeyAuthExtension` bundle.
 fn create(
     ext_ctx: &ExtensionContext,
     name: otel_arrow_dfe_config::ExtensionId,
-    ext_config: Arc<ExtensionUserConfig>,
+    ext_config: Arc<ResolvedExtensionConfig>,
     extension_config: &ExtensionConfig,
 ) -> Result<ExtensionBundle, ConfigError> {
-    let (config, attributes) = parse_config(&ext_config.config)?;
+    let config = ext_config.component_config::<Config>()?;
+    let attributes = ApiKeyAttributes::from_map(config.attributes.clone()).map_err(|e| {
+        ConfigError::InvalidUserConfig {
+            error: format!("failed to initialize flat file api key auth: {e}"),
+        }
+    })?;
+    let config = (*config).clone();
 
     let entity_key = ext_ctx.register_extension_entity(name.clone(), ExtensionVariant::Shared);
     let metric_set =
@@ -110,7 +131,7 @@ fn create(
         tracker,
     );
 
-    ExtensionWrapper::builder(name, ext_config, extension_config)
+    ExtensionWrapper::builder(name, ext_config.safe_config_snapshot(), extension_config)
         .active()
         .with_readiness_probe()
         .shared::<FlatFileApiKeyAuthExtension>(extension)
@@ -132,5 +153,6 @@ pub static FLAT_FILE_API_KEY_AUTH_EXTENSION: ExtensionFactory = ExtensionFactory
         shared: FlatFileApiKeyAuthExtension => [ApiKeyProvider]
     )),
     create,
-    validate_config,
+    resolve_config,
+    snapshot_policy: ConfigSnapshotPolicy::Omit,
 };

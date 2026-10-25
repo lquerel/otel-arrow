@@ -43,6 +43,17 @@ struct TestSaslCredentialProvider {
     error_source: CapabilityErrorSource<SaslCredentialProviderCapability>,
 }
 
+fn resolved_receiver_node(config: &NodeUserConfig) -> Arc<ResolvedNodeConfig> {
+    Arc::new(
+        ResolvedNodeConfig::new(
+            config,
+            (KAFKA_RECEIVER.resolve_config)(&config.config).unwrap(),
+            KAFKA_RECEIVER.snapshot_policy,
+        )
+        .unwrap(),
+    )
+}
+
 impl TestSaslCredentialProvider {
     fn credential(credential: SaslCredential) -> Self {
         Self {
@@ -359,7 +370,7 @@ fn factory_retains_and_uses_bound_sasl_credential_provider() {
     let receiver = (KAFKA_RECEIVER.create)(
         make_pipeline_ctx(0, 1, 0),
         test_node("kafka-receiver"),
-        Arc::new(node_config),
+        resolved_receiver_node(&node_config),
         runtime.config(),
         &capabilities,
     )
@@ -394,7 +405,7 @@ fn factory_rejects_missing_sasl_credential_provider_binding() {
     let result = (KAFKA_RECEIVER.create)(
         make_pipeline_ctx(0, 1, 0),
         test_node("kafka-receiver"),
-        Arc::new(capability_node_config(None)),
+        resolved_receiver_node(&capability_node_config(None)),
         runtime.config(),
         &Capabilities::empty(),
     );
@@ -417,7 +428,7 @@ fn factory_allows_inline_sasl_credentials_without_provider_binding() {
     let result = (KAFKA_RECEIVER.create)(
         make_pipeline_ctx(0, 1, 0),
         test_node("kafka-receiver"),
-        Arc::new(inline_node_config()),
+        resolved_receiver_node(&inline_node_config()),
         runtime.config(),
         &Capabilities::empty(),
     );

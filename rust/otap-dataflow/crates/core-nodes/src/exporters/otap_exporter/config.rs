@@ -6,11 +6,11 @@
 use otel_arrow_dfe_otap::compression::CompressionMethod;
 use otel_arrow_dfe_otap::otap_grpc::client_settings::GrpcClientSettings;
 use serde::de::Error as SerdeError;
-use serde::{Deserialize, Deserializer};
+use serde::{Deserialize, Deserializer, Serialize};
 use std::time::Duration;
 
 /// Configuration for the OTAP Exporter
-#[derive(Debug, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct Config {
     /// Shared gRPC client settings reused across OTAP exports.
@@ -50,7 +50,7 @@ pub struct Config {
 }
 
 /// Configuration for the arrow payloads produced by the [`OtapExporter`]
-#[derive(Debug, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct ArrowConfig {
     /// Compression to use for IPC serialized payloads within the BatchArrowMessages
@@ -71,7 +71,7 @@ pub struct ArrowConfig {
 }
 
 /// Compression options for arrow payloads
-#[derive(Debug, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum ArrowPayloadCompression {
     /// Zstd compression

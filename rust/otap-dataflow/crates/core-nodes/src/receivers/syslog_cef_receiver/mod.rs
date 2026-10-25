@@ -10,7 +10,6 @@ use self::arrow_records_encoder::ArrowRecordsBuilder;
 use async_trait::async_trait;
 use linkme::distributed_slice;
 use otel_arrow_dfe_config::SignalType;
-use otel_arrow_dfe_config::node::NodeUserConfig;
 use otel_arrow_dfe_engine::admission::{
     AdmissionContext, AdmissionDecision, AdmissionDimension, LocalAdmissionGate,
 };
@@ -36,8 +35,7 @@ use otel_arrow_dfe_telemetry::common_attributes::{
 };
 use otel_arrow_dfe_telemetry::instrument::{Counter, UpDownCounter};
 use otel_arrow_dfe_telemetry_macros::{AttributeEnum, attribute_set, metric_set};
-use serde::Deserialize;
-use serde_json::Value;
+use serde::{Deserialize, Serialize};
 use std::borrow::Cow;
 use std::cell::{Cell, RefCell};
 use std::net::SocketAddr;
@@ -81,7 +79,7 @@ const INITIAL_MSG_BUFFER_CAPACITY: usize = 4096;
 const MAX_TASK_DRAIN_WAIT: Duration = Duration::from_secs(1);
 
 /// TCP message framing mode.
-#[derive(Debug, Clone, Copy, Default, Deserialize, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, Default, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "snake_case")]
 enum TcpFraming {
     /// Messages are terminated by a newline character.
@@ -101,7 +99,7 @@ impl TcpFraming {
 }
 
 /// TCP-specific settings for the syslog CEF receiver.
-#[derive(Debug, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 struct TcpConfig {
     /// The address to listen on for TCP connections.
@@ -116,7 +114,7 @@ struct TcpConfig {
 }
 
 /// UDP-specific settings for the syslog CEF receiver.
-#[derive(Debug, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 struct UdpConfig {
     /// The address to listen on for UDP datagrams.
@@ -126,7 +124,7 @@ struct UdpConfig {
 /// Protocol configuration for the syslog CEF receiver.
 ///
 /// Exactly one protocol variant must be specified.
-#[derive(Debug, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 #[allow(clippy::large_enum_variant)] // This enum is only used for configuration, so the size is not a concern.
 enum Protocol {
@@ -151,7 +149,7 @@ impl Protocol {
 /// before being forwarded downstream. Reducing these values can limit
 /// the scope of data loss for in-memory records that have not yet been
 /// sent to the next node.
-#[derive(Debug, Deserialize, Clone)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 struct BatchConfig {
     /// Maximum time in milliseconds to wait before flushing an Arrow batch.
@@ -165,7 +163,7 @@ struct BatchConfig {
 }
 
 /// Config for a syslog cef receiver
-#[derive(Debug, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 struct Config {
     /// Protocol-specific configuration.
@@ -454,19 +452,6 @@ impl SyslogCefReceiver {
             rate_limiter: None,
         }
     }
-
-    /// Creates a new SyslogCefReceiver from a configuration object
-    fn from_config(
-        pipeline: PipelineContext,
-        config: &Value,
-    ) -> Result<Self, otel_arrow_dfe_config::error::Error> {
-        let cfg: Config = serde_json::from_value(config.clone()).map_err(|e| {
-            otel_arrow_dfe_config::error::Error::InvalidUserConfig {
-                error: e.to_string(),
-            }
-        })?;
-        Ok(SyslogCefReceiver::with_pipeline(pipeline, cfg))
-    }
 }
 
 /// Discards any buffered records without sending downstream.
@@ -566,11 +551,12 @@ pub static SYSLOG_CEF_RECEIVER: ReceiverFactory<OtapPdata> = ReceiverFactory {
     create:
         |pipeline: PipelineContext,
          node: NodeId,
-         node_config: Arc<NodeUserConfig>,
+         node_config: Arc<otel_arrow_dfe_engine::component_config::ResolvedNodeConfig>,
          receiver_config: &ReceiverConfig,
          _capabilities: &otel_arrow_dfe_engine::capability::registry::Capabilities| {
             let admission = pipeline.admission().clone();
-            let mut receiver = SyslogCefReceiver::from_config(pipeline, &node_config.config)?;
+            let config = node_config.component_config::<Config>()?;
+            let mut receiver = SyslogCefReceiver::with_pipeline(pipeline, (*config).clone());
             receiver.rate_limiter = admission
                 .bind_local(
                     AdmissionDimension::Messages,
@@ -584,13 +570,14 @@ pub static SYSLOG_CEF_RECEIVER: ReceiverFactory<OtapPdata> = ReceiverFactory {
             Ok(ReceiverWrapper::local(
                 receiver,
                 node,
-                node_config,
+                node_config.safe_config_snapshot(),
                 receiver_config,
             ))
         },
     context_declarations: None,
     wiring_contract: otel_arrow_dfe_engine::wiring_contract::WiringContract::UNRESTRICTED,
-    validate_config: otel_arrow_dfe_config::validation::validate_typed_config::<Config>,
+    resolve_config: otel_arrow_dfe_engine::component_config::resolve_typed_config::<Config>,
+    snapshot_policy: otel_arrow_dfe_engine::component_config::ConfigSnapshotPolicy::TypedSafe,
 };
 
 #[async_trait(?Send)]

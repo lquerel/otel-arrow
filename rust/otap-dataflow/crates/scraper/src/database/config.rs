@@ -18,7 +18,7 @@ const MAX_CATCH_UP_PAGES: usize = 1024;
 const MAX_CATCH_UP_DURATION: Duration = Duration::from_secs(5 * 60);
 
 /// Budgets for immediately fetching additional acknowledged pages.
-#[derive(Clone, Copy, Debug, Deserialize)]
+#[derive(Clone, Copy, Debug, Deserialize, PartialEq)]
 #[serde(default, deny_unknown_fields)]
 pub struct CatchUpConfig {
     /// Maximum query-page fetches admitted in one cycle, including empty probes.
@@ -38,7 +38,7 @@ impl Default for CatchUpConfig {
 }
 
 /// Bounds and timing shared by every database receiver.
-#[derive(Clone, Debug, Deserialize)]
+#[derive(Clone, Debug, Deserialize, PartialEq)]
 #[serde(deny_unknown_fields)]
 pub struct PollingConfig {
     /// Delay after a poll cycle ends, not between its acknowledged pages.
@@ -61,7 +61,7 @@ pub struct PollingConfig {
 /// Watermark mode selected by the operator.
 ///
 /// Snapshot mode polls complete results without tracking result columns.
-#[derive(Clone, Debug, Deserialize)]
+#[derive(Clone, Debug, Deserialize, PartialEq)]
 #[serde(tag = "mode", rename_all = "snake_case", deny_unknown_fields)]
 pub enum WatermarkConfig {
     /// Full-result polling without cursor columns or bind parameters.
@@ -85,7 +85,7 @@ pub enum WatermarkConfig {
 }
 
 /// Timestamp component of a composite watermark.
-#[derive(Clone, Deserialize)]
+#[derive(Clone, Deserialize, PartialEq)]
 #[serde(deny_unknown_fields)]
 pub struct TimestampCursorConfig {
     /// Result column holding the ordered timestamp.
@@ -111,7 +111,7 @@ impl fmt::Debug for TimestampCursorConfig {
 }
 
 /// Tie-breaker component of a composite watermark.
-#[derive(Clone, Deserialize)]
+#[derive(Clone, Deserialize, PartialEq)]
 #[serde(deny_unknown_fields)]
 pub struct TieBreakerCursorConfig {
     /// Result column holding the non-null `int64` tie-breaker.
@@ -156,7 +156,7 @@ pub enum OnPermanentNack {
 }
 
 /// Durable checkpoint policy.
-#[derive(Clone, Debug, Deserialize)]
+#[derive(Clone, Debug, Deserialize, PartialEq)]
 #[serde(deny_unknown_fields)]
 pub struct CheckpointConfig {
     /// Root directory for revisioned checkpoint files.
@@ -174,7 +174,7 @@ pub struct CheckpointConfig {
 }
 
 /// Required output columns for the initial all-column body mapping.
-#[derive(Clone, Debug, Default)]
+#[derive(Clone, Debug, Default, PartialEq)]
 pub struct OutputConfig {
     /// Optional result column used as the OTLP event timestamp.
     pub timestamp_column: Option<String>,

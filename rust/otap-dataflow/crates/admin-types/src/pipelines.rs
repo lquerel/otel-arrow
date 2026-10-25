@@ -102,7 +102,7 @@ pub struct PipelineDetails {
     /// Last committed active generation, if known.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub active_generation: Option<u64>,
-    /// Current live pipeline configuration.
+    /// Committed source configuration, including sensitive operational values.
     pub pipeline: PipelineConfig,
     /// Optional rollout summary mirrored into `/status`.
     #[serde(default, skip_serializing_if = "Option::is_none")]

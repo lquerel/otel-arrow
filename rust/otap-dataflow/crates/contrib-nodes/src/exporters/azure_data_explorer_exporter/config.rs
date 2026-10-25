@@ -1,7 +1,7 @@
 // Copyright The OpenTelemetry Authors
 // SPDX-License-Identifier: Apache-2.0
 
-use serde::Deserialize;
+use serde::{Deserialize, Serialize};
 use std::net::IpAddr;
 use std::time::Duration;
 
@@ -17,7 +17,7 @@ pub(crate) const MAX_STREAMING_REQUEST_ROWS: usize = 100_000;
 const MAX_IN_FLIGHT_REQUESTS: usize = 1_024;
 
 /// Configuration for the Azure Data Explorer Exporter.
-#[derive(Debug, Deserialize, Clone)]
+#[derive(Debug, Serialize, Deserialize, Clone, PartialEq)]
 #[serde(deny_unknown_fields)]
 pub struct Config {
     /// Kusto cluster URI for streaming ingestion.
@@ -173,7 +173,7 @@ impl Config {
 }
 
 /// Signal-specific ADX table settings.
-#[derive(Debug, Deserialize, Clone, Default)]
+#[derive(Debug, Serialize, Deserialize, Clone, Default, PartialEq)]
 #[serde(default, deny_unknown_fields)]
 pub struct TablesConfig {
     /// Log table and transformation settings.
@@ -187,7 +187,7 @@ pub struct TablesConfig {
 }
 
 /// ADX log table and transformation settings.
-#[derive(Debug, Deserialize, Clone)]
+#[derive(Debug, Serialize, Deserialize, Clone, PartialEq)]
 #[serde(default, deny_unknown_fields)]
 pub struct LogsTableConfig {
     /// Target table name.
@@ -221,7 +221,7 @@ impl Default for LogsTableConfig {
 }
 
 /// ADX metrics table settings.
-#[derive(Debug, Deserialize, Clone)]
+#[derive(Debug, Serialize, Deserialize, Clone, PartialEq)]
 #[serde(default, deny_unknown_fields)]
 pub struct MetricsTableConfig {
     /// Target table name.
@@ -242,7 +242,7 @@ impl Default for MetricsTableConfig {
 }
 
 /// ADX traces table settings.
-#[derive(Debug, Deserialize, Clone)]
+#[derive(Debug, Serialize, Deserialize, Clone, PartialEq)]
 #[serde(default, deny_unknown_fields)]
 pub struct TracesTableConfig {
     /// Target table name.
@@ -267,7 +267,7 @@ impl Default for TracesTableConfig {
 /// Coalescing retains source acknowledgements until ADX accepts the combined
 /// request. `max_pending_messages` bounds those retained source messages per
 /// exporter instance.
-#[derive(Debug, Deserialize, Clone)]
+#[derive(Debug, Serialize, Deserialize, Clone, PartialEq)]
 #[serde(default, deny_unknown_fields)]
 pub struct NetworkRequestsConfig {
     /// Combine multiple inbound PData messages into fewer outbound requests.

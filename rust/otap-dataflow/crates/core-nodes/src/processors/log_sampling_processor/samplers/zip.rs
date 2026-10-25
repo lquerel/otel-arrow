@@ -27,13 +27,13 @@ use otel_arrow_dfe_engine::error::Error as EngineError;
 use otel_arrow_dfe_engine::local::processor as local;
 use otel_arrow_dfe_otap::pdata::OtapPdata;
 use otel_arrow_dfe_pdata::otap::OtapArrowRecords;
-use serde::Deserialize;
+use serde::{Deserialize, Serialize};
 use std::time::Duration;
 
 /// Configuration for zip sampling.
 ///
 /// Emits at most `max_items` log records per `interval` time window.
-#[derive(Debug, Clone, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct ZipConfig {
     /// Length of the sampling window (e.g., "60s", "1m").
     #[serde(with = "humantime_serde")]

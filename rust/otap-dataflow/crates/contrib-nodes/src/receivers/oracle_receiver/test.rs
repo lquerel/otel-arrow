@@ -1232,6 +1232,7 @@ macro_rules! oracle_module_tests {
 }
 
 use super::*;
+use otel_arrow_dfe_config::node::NodeUserConfig;
 use otel_arrow_dfe_engine::capability::CapabilityError;
 use otel_arrow_dfe_engine::capability::auth::BasicAuthCredential;
 use otel_arrow_dfe_engine::capability::auth::basic_auth_provider::BasicAuthCredentialStream;
@@ -1242,6 +1243,7 @@ use otel_arrow_dfe_engine::testing::{receiver::TestRuntime, test_node};
 use otel_arrow_dfe_scraper::SourceLease;
 use otel_arrow_dfe_scraper::database::OnNack;
 use otel_arrow_dfe_telemetry::registry::TelemetryRegistryHandle;
+use serde_json::Value;
 use std::time::{Duration, Instant};
 
 const COMPOSITE_STATEMENT: &str = "SELECT AUDIT_ID, LAST_UPDATED, PAYLOAD FROM AUDIT_LOGS \
@@ -1273,7 +1275,9 @@ pub(super) fn test_provider() -> Box<dyn LocalBasicAuthProvider> {
 }
 
 fn build(pipeline: &PipelineContext, name: &str, config: &Value) -> Result<Receiver, ConfigError> {
-    super::build(pipeline, name, config, test_provider())
+    let config: OracleReceiverConfig =
+        serde_json::from_value(config.clone()).map_err(invalid_config)?;
+    super::build(pipeline, name, &config, test_provider())
 }
 
 pub(super) fn fixture_credential(username: &str, password_file: &str) -> BasicAuthCredential {
@@ -1471,6 +1475,16 @@ fn pipeline_context() -> PipelineContext {
     )
 }
 
+fn resolved_node_config(config: Value) -> Arc<ResolvedNodeConfig> {
+    let mut source = NodeUserConfig::new_receiver_config(ORACLE_RECEIVER_URN);
+    source.config = config;
+    let component = (ORACLE_RECEIVER.resolve_config)(&source.config).expect("resolved config");
+    Arc::new(
+        ResolvedNodeConfig::new(&source, component, ORACLE_RECEIVER.snapshot_policy)
+            .expect("resolved node config"),
+    )
+}
+
 /// Scenario: The engine attempts to create the unpartitioned Oracle receiver on two cores.
 /// Guarantees: Factory validation rejects duplicate per-core pollers before acquiring a lease.
 #[test]
@@ -1486,7 +1500,7 @@ fn factory_rejects_multi_core_placement() {
     let result = (ORACLE_RECEIVER.create)(
         pipeline,
         test_node("oracle-test"),
-        Arc::new(NodeUserConfig::new_receiver_config(ORACLE_RECEIVER_URN)),
+        resolved_node_config(documented_config()),
         runtime.config(),
         &otel_arrow_dfe_engine::capability::registry::Capabilities::empty(),
     );
@@ -1504,7 +1518,7 @@ fn factory_requires_authentication_capability() {
     let result = (ORACLE_RECEIVER.create)(
         pipeline_context(),
         test_node("oracle-test"),
-        Arc::new(NodeUserConfig::new_receiver_config(ORACLE_RECEIVER_URN)),
+        resolved_node_config(documented_config()),
         runtime.config(),
         &otel_arrow_dfe_engine::capability::registry::Capabilities::empty(),
     );
@@ -1854,7 +1868,7 @@ fn configuration_errors_redact_supplied_values() {
     ] {
         let direct_error = parsed(config.clone()).err().expect("invalid schema");
         assert!(!direct_error.to_string().contains(SENTINEL));
-        let error = (ORACLE_RECEIVER.validate_config)(&config).expect_err("invalid schema");
+        let error = (ORACLE_RECEIVER.resolve_config)(&config).expect_err("invalid schema");
         let engine = Error::ConfigError(Box::new(error));
         for rendered in [
             engine.to_string(),
@@ -1888,7 +1902,7 @@ fn semantic_configuration_errors_redact_identifiers() {
     );
     cases.push(order);
     for config in cases {
-        let error = validate(&config).expect_err("invalid SQL contract");
+        let error = (ORACLE_RECEIVER.resolve_config)(&config).expect_err("invalid SQL contract");
         assert!(!error.to_string().contains(SENTINEL));
         assert!(!format!("{error:?}").contains(SENTINEL));
     }
@@ -2095,8 +2109,10 @@ fn equivalent_initial_offsets_share_checkpoint_identity() {
 /// validating a pipeline never blocks the receiver that later runs it.
 #[test]
 fn validation_does_not_acquire_a_source_lease() {
-    validate(&documented_config()).expect("documented configuration should validate");
-    validate(&documented_config()).expect("validation must be repeatable");
+    _ = (ORACLE_RECEIVER.resolve_config)(&documented_config())
+        .expect("documented configuration should resolve");
+    _ = (ORACLE_RECEIVER.resolve_config)(&documented_config())
+        .expect("resolution must be repeatable");
 }
 
 /// Scenario: Two receivers in one process are built against the same checkpoint source.
@@ -2235,15 +2251,16 @@ fn emits_oracle_rows_when_live_test_is_enabled() {
         &std::env::var("ORACLE_USERNAME").expect("inline fixture username"),
         &std::env::var("ORACLE_PASSWORD_FILE").expect("password fixture file"),
     );
+    let typed_config = parsed(config.clone()).expect("Oracle receiver config");
     let receiver = super::build(
         &pipeline_context(),
         "oracle-e2e",
-        &config,
+        &typed_config,
         credential_provider(credential),
     )
     .expect("receiver config should build");
     let test_runtime = TestRuntime::<OtapPdata>::new();
-    let node_config = Arc::new(NodeUserConfig::new_receiver_config(ORACLE_RECEIVER_URN));
+    let node_config = resolved_node_config(config).safe_config_snapshot();
     let receiver_wrapper = ReceiverWrapper::local(
         receiver,
         test_node(test_runtime.config().name.clone()),

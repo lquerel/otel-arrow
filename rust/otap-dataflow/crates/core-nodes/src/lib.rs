@@ -11,3 +11,6 @@ pub mod receivers;
 
 /// Processor implementations for core nodes.
 pub mod processors;
+
+#[cfg(test)]
+mod configuration_edit_tests;

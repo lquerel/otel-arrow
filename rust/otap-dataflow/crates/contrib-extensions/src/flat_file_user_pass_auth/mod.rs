@@ -21,10 +21,12 @@ use std::time::Duration;
 
 use linkme::distributed_slice;
 use otel_arrow_dfe_config::error::Error as ConfigError;
-use otel_arrow_dfe_config::extension::ExtensionUserConfig;
 use otel_arrow_dfe_engine::ExtensionFactory;
 use otel_arrow_dfe_engine::capability::auth::BasicAuthCredential;
 use otel_arrow_dfe_engine::capability::auth::basic_auth_provider::BasicAuthProvider;
+use otel_arrow_dfe_engine::component_config::{
+    ConfigSnapshotPolicy, ResolvedComponentConfig, ResolvedExtensionConfig,
+};
 use otel_arrow_dfe_engine::config::ExtensionConfig;
 use otel_arrow_dfe_engine::context::ExtensionContext;
 use otel_arrow_dfe_engine::extension::wrapper::ExtensionVariant;
@@ -67,20 +69,42 @@ fn parse_config(config: &serde_json::Value) -> Result<Config, ConfigError> {
     Ok(parsed)
 }
 
-/// Static config validation hook for the factory.
-fn validate_config(config: &serde_json::Value) -> Result<(), ConfigError> {
-    parse_config(config).map(|_| ())
+fn configs_equal(left: &Config, right: &Config) -> bool {
+    left.username
+        .as_ref()
+        .map(secrecy::ExposeSecret::expose_secret)
+        == right
+            .username
+            .as_ref()
+            .map(secrecy::ExposeSecret::expose_secret)
+        && left.username_file == right.username_file
+        && left
+            .password_secret
+            .as_ref()
+            .map(secrecy::ExposeSecret::expose_secret)
+            == right
+                .password_secret
+                .as_ref()
+                .map(secrecy::ExposeSecret::expose_secret)
+        && left.password_secret_file == right.password_secret_file
+        && left.password_secret_file_refresh == right.password_secret_file_refresh
+}
+
+fn resolve_config(config: &serde_json::Value) -> Result<ResolvedComponentConfig, ConfigError> {
+    Ok(ResolvedComponentConfig::omitted_by(
+        parse_config(config)?,
+        configs_equal,
+    ))
 }
 
 /// Builds an `FlatFileUserPassAuthExtension` bundle.
 fn create(
     ext_ctx: &ExtensionContext,
     name: otel_arrow_dfe_config::ExtensionId,
-    ext_config: Arc<ExtensionUserConfig>,
+    ext_config: Arc<ResolvedExtensionConfig>,
     extension_config: &ExtensionConfig,
 ) -> Result<ExtensionBundle, ConfigError> {
-    // Validate config now so a bad config fails fast at wiring time.
-    let config = parse_config(&ext_config.config)?;
+    let config = (*ext_config.component_config::<Config>()?).clone();
 
     // Register a dedicated entity + metric set for this extension instance.
     let entity_key = ext_ctx.register_extension_entity(name.clone(), ExtensionVariant::Shared);
@@ -109,7 +133,7 @@ fn create(
         tracker,
     );
 
-    ExtensionWrapper::builder(name, ext_config, extension_config)
+    ExtensionWrapper::builder(name, ext_config.safe_config_snapshot(), extension_config)
         .active()
         .with_readiness_probe()
         .shared::<FlatFileUserPassAuthExtension>(extension)
@@ -131,5 +155,6 @@ pub static FLAT_FILE_USER_PASS_AUTH_EXTENSION: ExtensionFactory = ExtensionFacto
         shared: FlatFileUserPassAuthExtension => [BasicAuthProvider]
     )),
     create,
-    validate_config,
+    resolve_config,
+    snapshot_policy: ConfigSnapshotPolicy::Omit,
 };

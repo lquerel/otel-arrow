@@ -15,7 +15,7 @@ use std::time::Duration;
 const MAX_QUERY_BYTES: usize = 16 * 1024;
 
 /// Cursor binds and columns required by composite watermark mode.
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, PartialEq)]
 pub struct CompositeWatermark {
     /// Result column holding the ordered timestamp.
     pub timestamp_column: String,
@@ -30,7 +30,7 @@ pub struct CompositeWatermark {
 }
 
 /// Validated binds and columns for a single-column keyset query.
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, PartialEq)]
 pub struct ScalarWatermark {
     /// Result column containing the ordered key.
     pub column: String,
@@ -41,7 +41,7 @@ pub struct ScalarWatermark {
 }
 
 /// Mode-specific contract that adapters must validate before execution.
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, PartialEq)]
 pub enum CompiledWatermark {
     /// One complete result per polling interval, with no source position.
     Snapshot,
@@ -84,7 +84,7 @@ impl CompiledWatermark {
 }
 
 /// Immutable query plan passed to a database adapter.
-#[derive(Clone)]
+#[derive(Clone, PartialEq)]
 pub struct CompiledQuery {
     sql: String,
     interval: Duration,

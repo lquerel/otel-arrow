@@ -246,11 +246,11 @@ fn parse_core_id_range(s: &str) -> Result<CoreRange, String> {
 fn validate_engine_config_for_startup(
     engine_cfg: &OtelDataflowSpec,
     run_options: &ControllerRunOptions,
-) -> Result<(), Box<dyn std::error::Error>> {
-    startup::validate_engine_components(engine_cfg, &OTAP_PIPELINE_FACTORY)?;
-    startup::validate_controller_extensions(engine_cfg, &run_options.extensions)?;
-    _ = OTAP_PIPELINE_FACTORY.compile_initial_context(&engine_cfg.resolve())?;
-    Ok(())
+) -> Result<
+    otel_arrow_dfe_controller::PreparedEngineConfig<otel_arrow_dfe_otap::pdata::OtapPdata>,
+    Box<dyn std::error::Error>,
+> {
+    Ok(Controller::new(&OTAP_PIPELINE_FACTORY).prepare(engine_cfg.clone(), run_options.clone())?)
 }
 
 fn main() -> Result<(), Box<dyn std::error::Error>> {
@@ -288,10 +288,21 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     );
 
     let resolved = resolve_config(config.as_deref())?;
-    let mut engine_cfg = match resolved.format {
-        ConfigFormat::Json => OtelDataflowSpec::from_json(&resolved.content)?,
-        ConfigFormat::Yaml => OtelDataflowSpec::from_yaml(&resolved.content)?,
+    drop(config);
+    let source_description =
+        otel_arrow_dfe_config::config_provider::safe_source_description(&resolved.source);
+    let parsed = match resolved.format {
+        ConfigFormat::Json => OtelDataflowSpec::from_json(&resolved.content),
+        ConfigFormat::Yaml => OtelDataflowSpec::from_yaml(&resolved.content),
     };
+    let mut engine_cfg = parsed.map_err(|_| {
+        std::io::Error::other(
+            "Configuration could not be parsed or validated; check its syntax, field names, and policy constraints",
+        )
+    })?;
+    // Keep the parsed source, not the provider's original bytes and URI, for
+    // the engine's lifetime. This is data minimization, not secure erasure.
+    drop(resolved);
     startup::apply_cli_overrides(&mut engine_cfg, num_cores, core_id_range, http_admin_bind);
 
     let run_options = ControllerRunOptions {
@@ -302,19 +313,18 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         handle_os_signals: true,
         ..Default::default()
     };
-    validate_engine_config_for_startup(&engine_cfg, &run_options)?;
+    let prepared = validate_engine_config_for_startup(&engine_cfg, &run_options)?;
 
     if validate_and_exit {
-        println!("Configuration '{}' is valid.", resolved.source);
+        println!("Configuration from {source_description} is valid.");
         std::process::exit(0);
     }
 
     // Applied to the accepted configuration before any pipeline starts, so a
     // `pretty` console exporter never reaches a stdout that carries records.
-    claim_structured_stdout(&engine_cfg);
+    claim_structured_stdout(prepared.resolved_pipelines())?;
 
-    let controller = Controller::new(&OTAP_PIPELINE_FACTORY);
-    let result = controller.run_forever_with_options(engine_cfg, run_options);
+    let result = prepared.run_forever();
     #[cfg(all(not(tarpaulin_include), feature = "dhat-heap"))]
     {
         dhat_finish();
@@ -404,6 +414,8 @@ mod tests {
         assert_eq!(args.config.as_deref(), Some("config.yaml"));
     }
 
+    /// Scenario: Validation-only startup receives a controller extension with an invalid zero interval.
+    /// Guarantees: Mandatory resolution rejects it with extension attribution and value-free diagnostics.
     #[test]
     fn validate_engine_config_for_startup_rejects_invalid_controller_extension_config() {
         let engine_cfg = OtelDataflowSpec::from_yaml(&format!(
@@ -427,7 +439,7 @@ groups: {{}}
             .expect_err("validate-and-exit path should reject invalid controller extension config");
         let message = err.to_string();
         assert!(message.contains("Invalid config for controller extension"));
-        assert!(message.contains("greater than zero"));
+        assert!(message.contains("check its configuration against the component schema"));
     }
 
     /// Scenario: validate-and-exit encounters a qualified selector for an unknown composite.
@@ -515,7 +527,7 @@ connections:
             &OTAP_PIPELINE_FACTORY,
         )
         .expect_err("semantic component validation should fail");
-        assert!(err.to_string().contains("Unknown receiver component"));
+        assert!(err.to_string().contains("Unknown receiver plugin"));
     }
 
     #[test]

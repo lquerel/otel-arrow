@@ -19,14 +19,15 @@ use async_trait::async_trait;
 use linkme::distributed_slice;
 use otel_arrow_dfe_config::SignalType;
 use otel_arrow_dfe_config::error::Error as ConfigError;
-use otel_arrow_dfe_config::node::NodeUserConfig;
 use otel_arrow_dfe_config::transport_headers_policy::CompiledHeaderCapturePolicy;
 #[cfg(test)]
 use otel_arrow_dfe_config::transport_headers_policy::HeaderCapturePolicy;
-use otel_arrow_dfe_config::validation::validate_typed_config;
 use otel_arrow_dfe_engine::capability::auth::SaslCredential;
 use otel_arrow_dfe_engine::capability::auth::sasl_credential_provider::{
     SASL_CREDENTIAL_USABLE_MARGIN, SaslCredentialProvider as SaslCredentialProviderCapability,
+};
+use otel_arrow_dfe_engine::component_config::{
+    ConfigSnapshotPolicy, ResolvedNodeConfig, resolve_omitted_config,
 };
 use otel_arrow_dfe_engine::config::ReceiverConfig;
 use otel_arrow_dfe_engine::context::PipelineContext;
@@ -131,10 +132,16 @@ pub static KAFKA_RECEIVER: ReceiverFactory<OtapPdata> = ReceiverFactory {
     name: KAFKA_RECEIVER_URN,
     create: |pipeline: PipelineContext,
              node: NodeId,
-             node_config: Arc<NodeUserConfig>,
+             node_config: Arc<ResolvedNodeConfig>,
              receiver_config: &ReceiverConfig,
              capabilities: &otel_arrow_dfe_engine::capability::registry::Capabilities| {
-        let receiver = KafkaReceiver::from_config(pipeline, &node_config.config)?;
+        let receiver = KafkaReceiver::new(
+            pipeline,
+            node_config
+                .component_config::<KafkaReceiverConfig>()?
+                .as_ref()
+                .clone(),
+        )?;
         let receiver = if receiver.config.uses_sasl_credential_provider() {
             receiver.with_sasl_credential_provider(
                 capabilities
@@ -149,11 +156,12 @@ pub static KAFKA_RECEIVER: ReceiverFactory<OtapPdata> = ReceiverFactory {
         Ok(ReceiverWrapper::local(
             receiver,
             node,
-            node_config,
+            node_config.safe_config_snapshot(),
             receiver_config,
         ))
     },
-    validate_config: validate_typed_config::<KafkaReceiverConfig>,
+    resolve_config: resolve_omitted_config::<KafkaReceiverConfig>,
+    snapshot_policy: ConfigSnapshotPolicy::Omit,
     context_declarations: None,
     wiring_contract: otel_arrow_dfe_engine::wiring_contract::WiringContract::UNRESTRICTED,
 };

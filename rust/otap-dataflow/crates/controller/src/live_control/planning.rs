@@ -622,6 +622,7 @@ impl<
             None,
             None,
             None,
+            None,
         )?;
         self.spawn_rollout(plan)
     }
@@ -642,16 +643,25 @@ impl<
             None,
             None,
             None,
+            None,
         )
     }
 
     fn compile_context_bindings(
         &self,
         resolved: &ResolvedOtelDataflowSpec,
+        component_configs: &HashMap<
+            PipelineKey,
+            otel_arrow_dfe_engine::component_config::ResolvedPipelineConfig,
+        >,
     ) -> Result<Arc<CompiledContextBindings>, ControlPlaneError> {
         let context = self
             .pipeline_factory
-            .compile_candidate_context(resolved, &self.context_runtime_requirements)
+            .compile_candidate_context_with_components(
+                resolved,
+                component_configs,
+                &self.context_runtime_requirements,
+            )
             .map_err(|error| ControlPlaneError::InvalidRequest {
                 message: error.to_string(),
             })?;
@@ -673,6 +683,40 @@ impl<
             }
         };
         Ok(context.bindings)
+    }
+
+    /// Clones committed component configs without holding state during declaration callbacks.
+    fn component_configs_for_context(
+        &self,
+        replacement: Option<(
+            &PipelineKey,
+            &otel_arrow_dfe_engine::component_config::ResolvedPipelineConfig,
+        )>,
+        excluded: Option<&PipelineKey>,
+    ) -> HashMap<PipelineKey, otel_arrow_dfe_engine::component_config::ResolvedPipelineConfig> {
+        let mut configs: HashMap<_, _> = {
+            let state = self
+                .state
+                .lock()
+                .unwrap_or_else(|poisoned| poisoned.into_inner());
+            state
+                .resolved_pipelines
+                .iter()
+                .filter(|(key, _)| excluded != Some(*key))
+                .map(|(key, resolved)| (key.clone(), resolved.clone()))
+                .collect()
+        };
+        _ = configs.insert(
+            PipelineKey::new(
+                SYSTEM_PIPELINE_GROUP_ID.into(),
+                SYSTEM_OBSERVABILITY_PIPELINE_ID.into(),
+            ),
+            self.observability_component_config.clone(),
+        );
+        if let Some((key, config)) = replacement {
+            _ = configs.insert(key.clone(), config.clone());
+        }
+        configs
     }
 
     fn validate_deployed_pipeline_context_bindings_unchanged(
@@ -745,6 +789,9 @@ impl<
         pipeline_id: &str,
         request: &ReconfigureRequest,
         planning_config: Option<&OtelDataflowSpec>,
+        pre_resolved_runtime: Option<
+            &HashMap<PipelineKey, otel_arrow_dfe_engine::component_config::ResolvedPipelineConfig>,
+        >,
         prepared_context_bindings: Option<Arc<CompiledContextBindings>>,
         engine_operation_id: Option<&str>,
         projected_reserved_core_ids: Option<&BTreeSet<usize>>,
@@ -806,11 +853,6 @@ impl<
             .map_err(|err| ControlPlaneError::InvalidRequest {
                 message: err.to_string(),
             })?;
-        startup::validate_engine_components(&candidate_config, self.pipeline_factory).map_err(
-            |error| ControlPlaneError::InvalidRequest {
-                message: error.to_string(),
-            },
-        )?;
 
         let current_profiles = Self::pipeline_topic_profiles(&live_config)?;
         let candidate_profiles = Self::pipeline_topic_profiles(&candidate_config)?;
@@ -822,25 +864,50 @@ impl<
         Self::validate_live_memory_limiter_unchanged(&live_config, &candidate_config)?;
 
         let resolved_candidate_config = candidate_config.resolve();
-        let context_bindings = match prepared_context_bindings {
-            Some(policy) => policy,
-            None => {
-                let policy = self.compile_context_bindings(&resolved_candidate_config)?;
-                self.validate_deployed_pipeline_context_bindings_unchanged(&policy)?;
-                policy
-            }
-        };
         let resolved_pipeline = resolved_candidate_config
             .pipelines
-            .into_iter()
+            .iter()
             .find(|pipeline| {
                 pipeline.role == ResolvedPipelineRole::Regular
                     && pipeline.pipeline_group_id == pipeline_group_id
                     && pipeline.pipeline_id == pipeline_id
             })
+            .cloned()
             .ok_or_else(|| ControlPlaneError::Internal {
                 message: "candidate pipeline disappeared during resolution".to_owned(),
             })?;
+        startup::validate_rate_limiter_bindings(
+            &pipeline_group_id,
+            &pipeline_id,
+            &resolved_pipeline.pipeline,
+            &resolved_pipeline.policies,
+        )
+        .map_err(|error| ControlPlaneError::InvalidRequest {
+            message: error.to_string(),
+        })?;
+        let runtime_resolved_pipeline =
+            match pre_resolved_runtime.and_then(|pipelines| pipelines.get(&pipeline_key)) {
+                Some(resolved) => resolved.clone(),
+                None => self
+                    .pipeline_factory
+                    .resolve_pipeline_config(&resolved_pipeline.pipeline)
+                    .map_err(|error| ControlPlaneError::InvalidRequest {
+                        message: error.to_string(),
+                    })?,
+            };
+        let context_bindings = match prepared_context_bindings {
+            Some(policy) => policy,
+            None => {
+                let component_configs = self.component_configs_for_context(
+                    Some((&pipeline_key, &runtime_resolved_pipeline)),
+                    None,
+                );
+                let policy =
+                    self.compile_context_bindings(&resolved_candidate_config, &component_configs)?;
+                self.validate_deployed_pipeline_context_bindings_unchanged(&policy)?;
+                policy
+            }
+        };
         let current_pipeline_placement = current_deployment
             .as_ref()
             .map(|record| record.placement.clone());
@@ -910,18 +977,23 @@ impl<
             .filter(|core_id| !target_core_set.contains(core_id))
             .collect();
         let action = if let Some(record) = current_deployment.as_ref() {
+            let same_runtime_shape = record.resolved.role == resolved_pipeline.role
+                && record.resolved.topic_scope == resolved_pipeline.topic_scope
+                && record
+                    .runtime_resolved
+                    .eq_ignoring_policies(&runtime_resolved_pipeline);
             let identical_update = current_core_set == target_core_set
                 && active_core_set == target_core_set
                 && !active_runtime_state.has_foreign_active_generations
-                && record.resolved.runtime_matches(&resolved_pipeline);
+                && record.resolved.policies == resolved_pipeline.policies
+                && same_runtime_shape;
             let resize_only = current_core_set != target_core_set
                 && !active_runtime_state.has_foreign_active_generations
                 // Listener snapshots are immutable per worker. Retained cores cannot
                 // participate in an in-place resize without keeping stale membership.
                 && !target_has_listener_groups
-                && record
-                    .resolved
-                    .runtime_shape_matches_ignoring_resources(&resolved_pipeline);
+                && record.resolved.policies.eq_ignoring_resources(&resolved_pipeline.policies)
+                && same_runtime_shape;
             if identical_update {
                 RolloutAction::NoOp
             } else if resize_only {
@@ -1017,7 +1089,8 @@ impl<
             context_bindings
         };
         let target_deployment = LogicalPipelineDeployment::new(
-            resolved_pipeline,
+            resolved_pipeline.clone(),
+            runtime_resolved_pipeline.clone(),
             target_context_bindings,
             target_generation,
             target_pipeline_placement,
@@ -1284,9 +1357,18 @@ impl<
                     plan.pipeline_id.clone(),
                     plan.target_deployment.resolved.pipeline.clone(),
                 );
+            state.safe_config_snapshot.insert_pipeline(
+                plan.pipeline_group_id.clone(),
+                plan.pipeline_id.clone(),
+                &plan.target_deployment.runtime_resolved,
+            );
             _ = state
                 .logical_pipelines
                 .insert(plan.pipeline_key.clone(), plan.target_deployment.clone());
+            _ = state.resolved_pipelines.insert(
+                plan.pipeline_key.clone(),
+                plan.target_deployment.runtime_resolved.clone(),
+            );
             if !matches!(plan.action, RolloutAction::NoOp) {
                 state.latest_context_bindings =
                     Arc::clone(&plan.target_deployment.context_bindings);
@@ -1611,13 +1693,19 @@ impl<
             .map_err(|err| ControlPlaneError::InvalidRequest {
                 message: err.to_string(),
             })?;
+        state
+            .safe_config_snapshot
+            .insert_empty_group(pipeline_group_id.clone(), group.clone())
+            .map_err(|_| ControlPlaneError::InvalidRequest {
+                message: "safe group insertion requires an empty pipeline set".to_owned(),
+            })?;
         state.live_config = candidate_config;
         state.config_revision += 1;
         Ok(group)
     }
 
     /// Returns a clone of the current controller-owned engine configuration.
-    pub(super) fn engine_config_snapshot(&self) -> OtelDataflowSpec {
+    pub(super) fn source_config_snapshot(&self) -> OtelDataflowSpec {
         let state = self
             .state
             .lock()
@@ -1625,7 +1713,21 @@ impl<
         state.live_config.clone()
     }
 
-    fn apply_reconcile_success(&self, desired_config: &OtelDataflowSpec, delete_missing: bool) {
+    /// Returns the safe snapshot for future privacy-preserving reporting, not management APIs.
+    pub(super) fn safe_config_snapshot(&self) -> SafeConfigSnapshot {
+        let state = self
+            .state
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner());
+        state.safe_config_snapshot.clone()
+    }
+
+    fn apply_reconcile_success(
+        &self,
+        desired_config: &OtelDataflowSpec,
+        desired_safe_config_snapshot: &SafeConfigSnapshot,
+        delete_missing: bool,
+    ) {
         self.log_filter_handle
             .apply(desired_config.engine.telemetry.logs.level.as_ref());
         let mut state = self
@@ -1633,6 +1735,9 @@ impl<
             .lock()
             .unwrap_or_else(|poisoned| poisoned.into_inner());
         Self::merge_reconcile_config(&mut state.live_config, desired_config, delete_missing);
+        state
+            .safe_config_snapshot
+            .merge_committed(desired_safe_config_snapshot, delete_missing);
         state.config_revision += 1;
     }
 
@@ -1754,6 +1859,9 @@ impl<
             {
                 let _ = group.pipelines.remove(pipeline_key.pipeline_id());
             }
+            state
+                .safe_config_snapshot
+                .remove_pipeline(pipeline_key.pipeline_group_id(), pipeline_key.pipeline_id());
             let context_bindings = if state
                 .latest_context_bindings
                 .eq(&candidate_context_bindings)
@@ -1763,6 +1871,7 @@ impl<
                 candidate_context_bindings
             };
             let _ = state.logical_pipelines.remove(pipeline_key);
+            let _ = state.resolved_pipelines.remove(pipeline_key);
             let _ = state.generation_counters.remove(pipeline_key);
             state.latest_context_bindings = context_bindings;
             state.config_revision += 1;
@@ -1900,8 +2009,9 @@ impl<
             }
             (candidate_config, state.config_revision)
         };
+        let component_configs = self.component_configs_for_context(None, Some(&pipeline_key));
         let candidate_context_bindings =
-            self.compile_context_bindings(&candidate_config.resolve())?;
+            self.compile_context_bindings(&candidate_config.resolve(), &component_configs)?;
         let (has_active_runtime, candidate_context_bindings) = {
             let state = self
                 .state
@@ -2095,6 +2205,7 @@ impl<
                 });
             }
             let _ = state.live_config.groups.remove(&pipeline_group_id);
+            state.safe_config_snapshot.remove_group(&pipeline_group_id);
             state.config_revision += 1;
         }
 
@@ -2122,37 +2233,79 @@ impl<
             started_at,
         );
 
-        let live_config = self.engine_config_snapshot();
-        let desired_config = request.config;
+        let live_config = self.source_config_snapshot();
         let mut candidate_config = live_config.clone();
         Self::merge_reconcile_config(
             &mut candidate_config,
-            &desired_config,
+            &request.config,
             request.delete_missing,
         );
         Self::validate_live_state_dir_unchanged(&live_config, &candidate_config)?;
-        candidate_config
-            .validate()
-            .map_err(|err| ControlPlaneError::InvalidRequest {
-                message: err.to_string(),
-            })?;
-        startup::validate_engine_components(&candidate_config, self.pipeline_factory).map_err(
-            |error| ControlPlaneError::InvalidRequest {
+        let desired_candidate = Controller::<PData>::new(self.pipeline_factory)
+            .resolve_engine_candidate(candidate_config, &self.controller_extensions)
+            .map_err(|error| ControlPlaneError::InvalidRequest {
                 message: error.to_string(),
-            },
-        )?;
+            })?;
+        let (_, _, current_observability) = live_config.resolve().into_parts();
+        let current_observability =
+            current_observability.ok_or_else(|| ControlPlaneError::Internal {
+                message: "committed observability pipeline is missing".to_owned(),
+            })?;
+        if desired_candidate.controller_extensions != self.resolved_controller_extensions {
+            return Err(ControlPlaneError::InvalidRequest {
+                message: "controller extensions cannot be added, removed, or changed at runtime; restart the engine".to_owned(),
+            });
+        }
+        if !desired_candidate
+            .observability
+            .runtime
+            .eq_ignoring_policies(&self.observability_component_config)
+            || desired_candidate.observability.policy.policies != current_observability.policies
+        {
+            return Err(ControlPlaneError::InvalidRequest {
+                message:
+                    "the observability pipeline cannot be changed at runtime; restart the engine"
+                        .to_owned(),
+            });
+        }
+        let mut desired_runtime_by_key: HashMap<_, _> = desired_candidate
+            .pipelines
+            .iter()
+            .map(|pipeline| {
+                (
+                    PipelineKey::new(
+                        pipeline.policy.pipeline_group_id.clone(),
+                        pipeline.policy.pipeline_id.clone(),
+                    ),
+                    pipeline.runtime.clone(),
+                )
+            })
+            .collect();
+        _ = desired_runtime_by_key.insert(
+            PipelineKey::new(
+                desired_candidate
+                    .observability
+                    .policy
+                    .pipeline_group_id
+                    .clone(),
+                desired_candidate.observability.policy.pipeline_id.clone(),
+            ),
+            desired_candidate.observability.runtime.clone(),
+        );
+        let desired_safe_config_snapshot = desired_candidate.safe_config_snapshot;
+        let desired_config = desired_candidate.source;
 
         let current_profiles = Self::pipeline_topic_profiles(&live_config)?;
-        let candidate_profiles = Self::pipeline_topic_profiles(&candidate_config)?;
+        let candidate_profiles = Self::pipeline_topic_profiles(&desired_config)?;
         if current_profiles != candidate_profiles {
             return Err(ControlPlaneError::InvalidRequest {
                 message: "desired config would require runtime topic broker mutation".to_owned(),
             });
         }
-        Self::validate_live_memory_limiter_unchanged(&live_config, &candidate_config)?;
+        Self::validate_live_memory_limiter_unchanged(&live_config, &desired_config)?;
 
         let mut desired_keys = Vec::new();
-        for (pipeline_group_id, group) in &desired_config.groups {
+        for (pipeline_group_id, group) in &request.config.groups {
             for (pipeline_id, pipeline) in &group.pipelines {
                 desired_keys.push((
                     PipelineKey::new(pipeline_group_id.clone(), pipeline_id.clone()),
@@ -2160,9 +2313,9 @@ impl<
                 ));
             }
         }
-        let candidate_resolved_config = candidate_config.resolve();
+        let candidate_resolved_config = desired_config.resolve();
         let candidate_context_bindings =
-            self.compile_context_bindings(&candidate_resolved_config)?;
+            self.compile_context_bindings(&candidate_resolved_config, &desired_runtime_by_key)?;
         let retained_pipeline_keys: HashSet<_> = candidate_resolved_config
             .pipelines
             .iter()
@@ -2239,7 +2392,8 @@ impl<
                 pipeline_key.pipeline_group_id(),
                 pipeline_key.pipeline_id(),
                 &reconfigure_request,
-                Some(&candidate_config),
+                Some(&desired_config),
+                Some(&desired_runtime_by_key),
                 Some(Arc::clone(&candidate_context_bindings)),
                 Some(guard.operation_id()),
                 Some(&projected_exclusive_core_ids),
@@ -2370,7 +2524,11 @@ impl<
             }
         }
 
-        self.apply_reconcile_success(&desired_config, request.delete_missing);
+        self.apply_reconcile_success(
+            &desired_config,
+            &desired_safe_config_snapshot,
+            request.delete_missing,
+        );
         status.state = EngineConfigReconcileState::Succeeded;
         status.updated_at = timestamp_now();
         Ok(status)

@@ -350,13 +350,13 @@ async fn otlp_exporter_connects_through_connect_proxy_eager() {
     let proxy_addr = start_connect_proxy(proxy_hits.clone()).await;
 
     let settings = GrpcClientSettings {
-        grpc_endpoint: format!("https://localhost:{}", srv_addr.port()),
+        grpc_endpoint: format!("https://localhost:{}", srv_addr.port()).into(),
         tls: Some(TlsClientConfig {
             config: TlsConfig {
                 cert_file: None,
                 cert_pem: Some(client_cert_pem),
                 key_file: None,
-                key_pem: Some(client_key_pem),
+                key_pem: Some(client_key_pem.into()),
                 reload_interval: None,
             },
             ca_file: None,
@@ -394,13 +394,13 @@ async fn otlp_exporter_connects_through_connect_proxy_lazy() {
     let proxy_addr = start_connect_proxy(proxy_hits.clone()).await;
 
     let settings = GrpcClientSettings {
-        grpc_endpoint: format!("https://localhost:{}", srv_addr.port()),
+        grpc_endpoint: format!("https://localhost:{}", srv_addr.port()).into(),
         tls: Some(TlsClientConfig {
             config: TlsConfig {
                 cert_file: None,
                 cert_pem: Some(client_cert_pem),
                 key_file: None,
-                key_pem: Some(client_key_pem),
+                key_pem: Some(client_key_pem.into()),
                 reload_interval: None,
             },
             ca_file: None,
@@ -438,13 +438,13 @@ async fn otlp_exporter_connects_through_https_proxy_to_https_endpoint() {
     let (proxy_addr, proxy_ca_pem) = start_tls_connect_proxy(proxy_hits.clone()).await;
 
     let settings = GrpcClientSettings {
-        grpc_endpoint: format!("https://localhost:{}", srv_addr.port()),
+        grpc_endpoint: format!("https://localhost:{}", srv_addr.port()).into(),
         tls: Some(TlsClientConfig {
             config: TlsConfig {
                 cert_file: None,
                 cert_pem: Some(client_cert_pem),
                 key_file: None,
-                key_pem: Some(client_key_pem),
+                key_pem: Some(client_key_pem.into()),
                 reload_interval: None,
             },
             ca_file: None,
@@ -511,7 +511,7 @@ async fn otlp_exporter_connects_through_connect_proxy_http_endpoint() {
     let proxy_addr = start_connect_proxy(proxy_hits.clone()).await;
 
     let settings = GrpcClientSettings {
-        grpc_endpoint: format!("http://localhost:{}", srv_addr.port()),
+        grpc_endpoint: format!("http://localhost:{}", srv_addr.port()).into(),
         proxy: Some(ProxyConfig {
             http_proxy: Some(format!("http://{}:{}", proxy_addr.ip(), proxy_addr.port()).into()),
             ..ProxyConfig::default()
@@ -543,7 +543,7 @@ async fn otlp_exporter_respects_no_proxy() {
     let proxy_addr = start_connect_proxy(proxy_hits.clone()).await;
 
     let settings = GrpcClientSettings {
-        grpc_endpoint: format!("http://localhost:{}", srv_addr.port()),
+        grpc_endpoint: format!("http://localhost:{}", srv_addr.port()).into(),
         proxy: Some(ProxyConfig {
             http_proxy: Some(format!("http://{}:{}", proxy_addr.ip(), proxy_addr.port()).into()),
             // Should bypass proxy for localhost

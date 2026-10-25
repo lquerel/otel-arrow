@@ -27,14 +27,10 @@ fn operation_error_response(status: StatusCode, error: crate::ControlPlaneError)
     (status, Json(error.as_operation_error())).into_response()
 }
 
-/// Returns the full controller-owned engine configuration.
-///
-/// Credential header values are redacted from the response (see
-/// [`OtelDataflowSpec::redacted_for_snapshot`]) so secrets configured in node
-/// and extension `headers` are not exposed in cleartext through this endpoint.
+/// Returns committed source configuration, including sensitive operational values.
 pub async fn show_config(State(state): State<AppState>) -> impl IntoResponse {
     match state.controller.engine_config_snapshot() {
-        Ok(config) => (StatusCode::OK, Json(config.redacted_for_snapshot())).into_response(),
+        Ok(config) => (StatusCode::OK, Json(config)).into_response(),
         Err(error) => operation_error_response(StatusCode::INTERNAL_SERVER_ERROR, error),
     }
 }
@@ -42,7 +38,9 @@ pub async fn show_config(State(state): State<AppState>) -> impl IntoResponse {
 /// Reconciles the running controller state to a desired full engine config.
 pub async fn reconcile_config(
     State(state): State<AppState>,
-    Json(request): Json<crate::EngineConfigReconcileRequest>,
+    crate::PrivateConfigJson(request): crate::PrivateConfigJson<
+        crate::EngineConfigReconcileRequest,
+    >,
 ) -> impl IntoResponse {
     otel_info!("config.reconcile.requested");
 
@@ -239,7 +237,7 @@ mod tests {
     /// configuration.
     /// Guarantees: the handler returns the config snapshot directly.
     #[tokio::test]
-    async fn show_config_returns_engine_config_snapshot() {
+    async fn show_config_returns_committed_source_config() {
         let config = empty_engine_config();
         let response = show_config(State(test_app_state(stub(
             Ok(config.clone()),
@@ -257,14 +255,15 @@ mod tests {
         assert_eq!(decoded, config);
     }
 
-    /// Scenario: a node config contains credential header values.
-    /// Guarantees: `show_config` redacts them so the raw credential never
-    /// appears in the response body.
+    /// Scenario: Committed source contains component credentials and opaque engine metadata.
+    /// Guarantees: Admin returns sensitive source values without redaction, omission, or resolution.
     #[tokio::test]
-    async fn show_config_redacts_credential_header_values() {
+    async fn show_config_preserves_sensitive_source_values() {
         let yaml = r#"
 version: otel_dataflow/v1
-engine: {}
+engine:
+  custom:
+    private: {token: engine-secret}
 groups:
   default:
     pipelines:
@@ -276,8 +275,8 @@ groups:
           exporter:
             type: "urn:test:exporter:example"
             config:
-              headers:
-                authorization: "Bearer super-secret-token"
+              headers: {authorization: component-secret}
+              tls: {key_pem: inline-private-key}
         connections:
           - from: receiver
             to: exporter
@@ -295,14 +294,11 @@ groups:
             .await
             .expect("body should collect");
         let text = String::from_utf8(body.to_vec()).expect("config body is utf-8");
-        assert!(
-            !text.contains("Bearer super-secret-token"),
-            "raw credential must not appear in the config response: {text}"
-        );
-        assert!(
-            text.contains("[REDACTED]"),
-            "redacted placeholder should appear in the config response: {text}"
-        );
+        for secret in ["engine-secret", "component-secret", "inline-private-key"] {
+            assert!(text.contains(secret));
+        }
+        assert!(!text.contains("[REDACTED]"));
+        assert!(!text.contains("[OMITTED]"));
     }
 
     /// Scenario: the active control plane does not support full config
@@ -337,7 +333,7 @@ groups:
                 Ok(empty_engine_config()),
                 Ok(reconcile_status(EngineConfigReconcileState::Succeeded)),
             ))),
-            Json(reconcile_request()),
+            crate::PrivateConfigJson(reconcile_request()),
         )
         .await
         .into_response();
@@ -361,7 +357,7 @@ groups:
                 Ok(empty_engine_config()),
                 Ok(reconcile_status(EngineConfigReconcileState::Failed)),
             ))),
-            Json(reconcile_request()),
+            crate::PrivateConfigJson(reconcile_request()),
         )
         .await
         .into_response();
@@ -388,7 +384,7 @@ groups:
                     message: "desired config is invalid".to_owned(),
                 }),
             ))),
-            Json(reconcile_request()),
+            crate::PrivateConfigJson(reconcile_request()),
         )
         .await
         .into_response();
@@ -413,7 +409,7 @@ groups:
                 Ok(empty_engine_config()),
                 Err(ControlPlaneError::RolloutConflict),
             ))),
-            Json(reconcile_request()),
+            crate::PrivateConfigJson(reconcile_request()),
         )
         .await
         .into_response();
@@ -443,9 +439,10 @@ groups:
             .try_acquire_owned()
             .expect("test should acquire the only terminal permit");
 
-        let response = reconcile_config(State(state), Json(reconcile_request()))
-            .await
-            .into_response();
+        let response =
+            reconcile_config(State(state), crate::PrivateConfigJson(reconcile_request()))
+                .await
+                .into_response();
 
         assert_eq!(response.status(), StatusCode::CONFLICT);
         let body = to_bytes(response.into_body(), usize::MAX)

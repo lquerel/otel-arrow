@@ -36,10 +36,11 @@ use futures_channel::oneshot::Canceled;
 use linkme::distributed_slice;
 use otel_arrow_dfe_config::SignalType;
 use otel_arrow_dfe_config::error::Error as ConfigError;
-use otel_arrow_dfe_config::node::NodeUserConfig;
-use otel_arrow_dfe_config::validation::validate_typed_config;
 use otel_arrow_dfe_engine::ConsumerEffectHandlerExtension;
 use otel_arrow_dfe_engine::ExporterFactory;
+use otel_arrow_dfe_engine::component_config::{
+    ConfigSnapshotPolicy, ResolvedNodeConfig, resolve_omitted_config,
+};
 use otel_arrow_dfe_engine::config::ExporterConfig;
 use otel_arrow_dfe_engine::context::PipelineContext;
 use otel_arrow_dfe_engine::context_declaration::{
@@ -339,17 +340,27 @@ pub static KAFKA_EXPORTER_FACTORY: ExporterFactory<OtapPdata> = ExporterFactory 
     create:
         |pipeline_ctx: PipelineContext,
          node: NodeId,
-         node_config: Arc<NodeUserConfig>,
+         node_config: Arc<ResolvedNodeConfig>,
          exporter_config: &ExporterConfig,
          _capabilities: &otel_arrow_dfe_engine::capability::registry::Capabilities| {
             Ok(ExporterWrapper::local(
-                KafkaExporter::from_config(pipeline_ctx, &node_config.config)?,
+                KafkaExporter::new(
+                    pipeline_ctx,
+                    node_config
+                        .component_config::<KafkaExporterConfig>()?
+                        .as_ref()
+                        .clone(),
+                )
+                .map_err(|error| ConfigError::InvalidUserConfig {
+                    error: error.to_string(),
+                })?,
                 node,
-                node_config,
+                node_config.safe_config_snapshot(),
                 exporter_config,
             ))
         },
-    validate_config: validate_typed_config::<KafkaExporterConfig>,
+    resolve_config: resolve_omitted_config::<KafkaExporterConfig>,
+    snapshot_policy: ConfigSnapshotPolicy::Omit,
     context_declarations: Some(ContextDeclarationProvider::from_typed_config::<
         KafkaExporterConfig,
     >()),
@@ -1598,6 +1609,7 @@ pub mod test_support {
         use crate::exporters::kafka_exporter::partitioner::partition_key_from_transport_headers;
         use bytes::Bytes;
         use otel_arrow_dfe_config::ContextEntryName;
+        use otel_arrow_dfe_config::node::NodeUserConfig;
         use otel_arrow_dfe_config::transport_headers::{
             TransportHeader, TransportHeaders, ValueKind,
         };
@@ -1622,6 +1634,14 @@ pub mod test_support {
         use otel_arrow_dfe_engine::context_declaration::CompiledHeaderPropagationPolicy;
         use otel_arrow_dfe_engine::local::exporter::EffectHandler;
         use otel_arrow_dfe_engine::testing::test_node;
+
+        fn resolved_node_config(config: serde_json::Value) -> ResolvedNodeConfig {
+            let mut source = NodeUserConfig::new_exporter_config(KAFKA_EXPORTER_URN);
+            source.config = config;
+            let component = (KAFKA_EXPORTER_FACTORY.resolve_config)(&source.config).unwrap();
+            ResolvedNodeConfig::new(&source, component, KAFKA_EXPORTER_FACTORY.snapshot_policy)
+                .unwrap()
+        }
         use otel_arrow_dfe_telemetry::reporter::MetricsReporter;
 
         // rdkafka helpers used across integration tests.
@@ -1742,7 +1762,7 @@ pub mod test_support {
             let decls = (KAFKA_EXPORTER_FACTORY
                 .context_declarations
                 .expect("Kafka exporter should declare context")
-                .declarations)(&config)
+                .declarations)(&resolved_node_config(config))
             .unwrap();
             let expected: NodeContextDeclarations = [
                 ContextDeclaration::Consumes {
@@ -1784,7 +1804,7 @@ pub mod test_support {
             let decls = (KAFKA_EXPORTER_FACTORY
                 .context_declarations
                 .expect("Kafka exporter should declare context")
-                .declarations)(&config)
+                .declarations)(&resolved_node_config(config))
             .unwrap();
             assert!(decls.is_empty());
         }

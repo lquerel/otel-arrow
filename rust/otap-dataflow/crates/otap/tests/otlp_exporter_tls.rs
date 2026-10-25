@@ -89,13 +89,13 @@ async fn otlp_exporter_connects_with_mtls() {
 
     // Build client endpoint with exporter-style TLS config.
     let settings = GrpcClientSettings {
-        grpc_endpoint: format!("https://localhost:{}", addr.port()),
+        grpc_endpoint: format!("https://localhost:{}", addr.port()).into(),
         tls: Some(TlsClientConfig {
             config: TlsConfig {
                 cert_file: None,
                 cert_pem: Some(client_cert_pem),
                 key_file: None,
-                key_pem: Some(client_key_pem),
+                key_pem: Some(client_key_pem.into()),
                 reload_interval: None,
             },
             ca_file: None,
@@ -137,7 +137,7 @@ async fn otlp_exporter_connects_with_mtls() {
 async fn otlp_exporter_fails_with_invalid_ca_pem() {
     otel_arrow_dfe_otap::crypto::ensure_crypto_provider();
     let settings = GrpcClientSettings {
-        grpc_endpoint: "https://localhost:4317".to_string(),
+        grpc_endpoint: "https://localhost:4317".into(),
         tls: Some(TlsClientConfig {
             config: TlsConfig::default(),
             ca_file: None,
@@ -169,7 +169,7 @@ async fn otlp_exporter_allows_http_with_tls_config() {
     otel_arrow_dfe_otap::crypto::ensure_crypto_provider();
     let ca = generate_ca("Test CA");
     let settings = GrpcClientSettings {
-        grpc_endpoint: "http://localhost:4317".to_string(),
+        grpc_endpoint: "http://localhost:4317".into(),
         tls: Some(TlsClientConfig {
             config: TlsConfig::default(),
             ca_file: None,
@@ -188,7 +188,7 @@ async fn otlp_exporter_allows_http_with_tls_config() {
 async fn otlp_exporter_fails_partial_mtls() {
     otel_arrow_dfe_otap::crypto::ensure_crypto_provider();
     let settings = GrpcClientSettings {
-        grpc_endpoint: "https://localhost:4317".to_string(),
+        grpc_endpoint: "https://localhost:4317".into(),
         tls: Some(TlsClientConfig {
             config: TlsConfig {
                 cert_pem: Some("fake cert".to_string()),
@@ -254,7 +254,7 @@ async fn otlp_exporter_connects_with_tls_only() {
 
     // Build client endpoint with TLS but no client identity (TLS-only).
     let settings = GrpcClientSettings {
-        grpc_endpoint: format!("https://localhost:{}", addr.port()),
+        grpc_endpoint: format!("https://localhost:{}", addr.port()).into(),
         tls: Some(TlsClientConfig {
             config: TlsConfig::default(), // No client cert/key
             ca_file: None,

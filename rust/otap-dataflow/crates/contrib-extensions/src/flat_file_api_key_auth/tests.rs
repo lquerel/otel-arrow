@@ -149,12 +149,17 @@ fn factory_is_registered_with_capability() {
 fn create_bundle(config: serde_json::Value) -> Result<ExtensionBundle, ConfigError> {
     let (ext_ctx, _registry) = otel_arrow_dfe_engine::testing::test_extension_ctx();
     let name: otel_arrow_dfe_config::ExtensionId = "flat-file-api-key-auth".into();
-    let user_config = Arc::new(ExtensionUserConfig::new(
+    let user_config = otel_arrow_dfe_config::extension::ExtensionUserConfig::new(
         FLAT_FILE_API_KEY_AUTH_URN.into(),
         config,
-    ));
+    );
+    let resolved = Arc::new(ResolvedExtensionConfig::new(
+        &user_config,
+        resolve_config(&user_config.config)?,
+        ConfigSnapshotPolicy::Omit,
+    )?);
     let extension_config = ExtensionConfig::new(name.clone());
-    create(&ext_ctx, name, user_config, &extension_config)
+    create(&ext_ctx, name, resolved, &extension_config)
 }
 
 /// Scenario: The factory creates an extension from a valid inline configuration.

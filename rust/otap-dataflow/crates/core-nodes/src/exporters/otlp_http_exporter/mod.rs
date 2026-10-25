@@ -29,7 +29,6 @@ use http::{HeaderMap, HeaderValue, StatusCode};
 use linkme::distributed_slice;
 use otel_arrow_dfe_config::SignalType;
 use otel_arrow_dfe_config::error::Error as ConfigError;
-use otel_arrow_dfe_config::node::NodeUserConfig;
 use otel_arrow_dfe_engine::config::ExporterConfig;
 use otel_arrow_dfe_engine::context::PipelineContext;
 use otel_arrow_dfe_engine::control::{AckMsg, NackMsg, NodeControlMsg};
@@ -60,7 +59,6 @@ use otel_arrow_dfe_pdata::{OtapPayload, OtapPayloadHelpers, PayloadData};
 use otel_arrow_dfe_telemetry::diagnostics::DiagnosticErrorKind;
 use prost::Message as _;
 use reqwest::{Client, Response};
-use secrecy::ExposeSecret;
 
 use self::config::Config;
 use self::diagnostics::{NotificationOperation, emit_notification, emit_preparation};
@@ -119,7 +117,8 @@ pub static OTLP_HTTP_EXPORTER: ExporterFactory<OtapPdata> = ExporterFactory {
     create: factory_create,
     context_declarations: None,
     wiring_contract: WiringContract::UNRESTRICTED,
-    validate_config,
+    resolve_config,
+    snapshot_policy: otel_arrow_dfe_engine::component_config::ConfigSnapshotPolicy::TypedSafe,
 };
 
 /// Validates the OTLP HTTP exporter configuration at config load time.
@@ -127,7 +126,9 @@ pub static OTLP_HTTP_EXPORTER: ExporterFactory<OtapPdata> = ExporterFactory {
 /// Runs before any node is started (initial load and live reconfigure), so bad
 /// configuration is rejected fast and attributed to the offending node rather
 /// than surfacing as an opaque client error at startup.
-fn validate_config(config: &serde_json::Value) -> Result<(), ConfigError> {
+fn resolve_config(
+    config: &serde_json::Value,
+) -> Result<otel_arrow_dfe_engine::component_config::ResolvedComponentConfig, ConfigError> {
     let cfg: Config =
         serde_json::from_value(config.clone()).map_err(|e| ConfigError::InvalidUserConfig {
             error: e.to_string(),
@@ -137,26 +138,52 @@ fn validate_config(config: &serde_json::Value) -> Result<(), ConfigError> {
         .map_err(|e| ConfigError::InvalidUserConfig {
             error: e.to_string(),
         })?;
-    Ok(())
+    validate_endpoints(&cfg)?;
+    otel_arrow_dfe_engine::component_config::ResolvedComponentConfig::typed_safe(cfg)
 }
 
 fn factory_create(
     pipeline: PipelineContext,
     node: NodeId,
-    node_config: Arc<NodeUserConfig>,
+    node_config: Arc<otel_arrow_dfe_engine::component_config::ResolvedNodeConfig>,
     exporter_config: &ExporterConfig,
     capabilities: &otel_arrow_dfe_engine::capability::registry::Capabilities,
 ) -> Result<ExporterWrapper<OtapPdata>, ConfigError> {
     Ok(ExporterWrapper::local(
-        OtlpHttpExporter::from_config(pipeline, &node_config.config, capabilities)?,
+        OtlpHttpExporter::new(
+            pipeline,
+            (*node_config.component_config::<Config>()?).clone(),
+            capabilities,
+        )?,
         node,
-        node_config,
+        node_config.safe_config_snapshot(),
         exporter_config,
     ))
 }
 
 impl OtlpHttpExporter {
+    fn new(
+        pipeline_ctx: PipelineContext,
+        config: Config,
+        capabilities: &otel_arrow_dfe_engine::capability::registry::Capabilities,
+    ) -> Result<Self, ConfigError> {
+        validate_endpoints(&config)?;
+        let auth_provider = new_http_client_auth_provider(
+            capabilities,
+            HttpClientAuthProviders::BEARER_TOKEN
+                | HttpClientAuthProviders::API_KEY
+                | HttpClientAuthProviders::BASIC,
+        )?;
+        let metrics = OtlpHttpExporterMetrics::register(&pipeline_ctx, auth_provider.as_deref());
+        Ok(Self {
+            config,
+            metrics,
+            auth_provider,
+        })
+    }
+
     /// create a new instance of the `[OtlpHttpExporter]` from json config value
+    #[cfg(test)]
     pub(crate) fn from_config(
         pipeline_ctx: PipelineContext,
         config: &serde_json::Value,
@@ -168,85 +195,78 @@ impl OtlpHttpExporter {
             }
         })?;
 
-        // validate the endpoint URL
-        _ = reqwest::Url::parse(&config.endpoint).map_err(|e| ConfigError::InvalidUserConfig {
+        Self::new(pipeline_ctx, config, capabilities)
+    }
+}
+
+fn validate_endpoints(config: &Config) -> Result<(), ConfigError> {
+    // validate the endpoint URL
+    _ = reqwest::Url::parse(config.endpoint.expose()).map_err(|e| {
+        ConfigError::InvalidUserConfig {
             error: format!("invalid endpoint URL: {e}"),
+        }
+    })?;
+
+    // validate the endpoint overrides if supplied
+    if let Some(endpoint) = config.logs_endpoint.as_ref() {
+        _ = reqwest::Url::parse(endpoint.expose()).map_err(|e| ConfigError::InvalidUserConfig {
+            error: format!("invalid logs endpoint URL: {e}"),
         })?;
+    }
+    if let Some(endpoint) = config.metrics_endpoint.as_ref() {
+        _ = reqwest::Url::parse(endpoint.expose()).map_err(|e| ConfigError::InvalidUserConfig {
+            error: format!("invalid metrics endpoint URL: {e}"),
+        })?;
+    }
+    if let Some(endpoint) = config.traces_endpoint.as_ref() {
+        _ = reqwest::Url::parse(endpoint.expose()).map_err(|e| ConfigError::InvalidUserConfig {
+            error: format!("invalid traces endpoint URL: {e}"),
+        })?;
+    }
 
-        // validate the endpoint overrides if supplied
-        if let Some(endpoint) = config.logs_endpoint.as_ref() {
-            _ = reqwest::Url::parse(endpoint).map_err(|e| ConfigError::InvalidUserConfig {
-                error: format!("invalid logs endpoint URL: {e}"),
-            })?;
-        }
-        if let Some(endpoint) = config.metrics_endpoint.as_ref() {
-            _ = reqwest::Url::parse(endpoint).map_err(|e| ConfigError::InvalidUserConfig {
-                error: format!("invalid metrics endpoint URL: {e}"),
-            })?;
-        }
-        if let Some(endpoint) = config.traces_endpoint.as_ref() {
-            _ = reqwest::Url::parse(endpoint).map_err(|e| ConfigError::InvalidUserConfig {
-                error: format!("invalid traces endpoint URL: {e}"),
-            })?;
-        }
-
-        if let Some(tls) = &config.http.tls {
-            // server_name not currently supported
-            if let Some(_server_name) = &tls.server_name {
-                return Err(ConfigError::InvalidUserConfig {
-                    error: "TLS configuration error: server_name_override is not supported by \
+    if let Some(tls) = &config.http.tls {
+        // server_name not currently supported
+        if let Some(_server_name) = &tls.server_name {
+            return Err(ConfigError::InvalidUserConfig {
+                error: "TLS configuration error: server_name_override is not supported by \
                     the current Rust OTLP HTTP client implementation (reqwest/rustls) remove \
                     server_name_override."
-                        .into(),
-                });
-            }
-
-            if let Some(true) = tls.insecure {
-                // Keeping with the same behaviour in the golang collector: if this is
-                // configured, but the endpoints are start with https, we still send the
-                // request using https. Just warn about the ignored config mismatch.
-                let wants_https = config.endpoint.starts_with("https://")
-                    || config
-                        .logs_endpoint
-                        .as_ref()
-                        .map(|e| e.starts_with("https://"))
-                        .unwrap_or(false)
-                    || config
-                        .metrics_endpoint
-                        .as_ref()
-                        .map(|e| e.starts_with("https://"))
-                        .unwrap_or(false)
-                    || config
-                        .traces_endpoint
-                        .as_ref()
-                        .map(|e| e.starts_with("https://"))
-                        .unwrap_or(false);
-                if wants_https {
-                    otel_warn!(
-                        "otlp.exporter.http.validate_insecure_flag",
-                        message = "config setting http.tls.insecure = true is ignored. \
-                            requests will still be sent with TLS to endpoints configured \
-                            with scheme https"
-                    )
-                }
-            }
+                    .into(),
+            });
         }
 
-        let auth_provider = new_http_client_auth_provider(
-            capabilities,
-            HttpClientAuthProviders::BEARER_TOKEN
-                | HttpClientAuthProviders::API_KEY
-                | HttpClientAuthProviders::BASIC,
-        )?;
-
-        let metrics = OtlpHttpExporterMetrics::register(&pipeline_ctx, auth_provider.as_deref());
-
-        Ok(Self {
-            config,
-            metrics,
-            auth_provider,
-        })
+        if let Some(true) = tls.insecure {
+            // Keeping with the same behaviour in the golang collector: if this is
+            // configured, but the endpoints are start with https, we still send the
+            // request using https. Just warn about the ignored config mismatch.
+            let wants_https = config.endpoint.expose().starts_with("https://")
+                || config
+                    .logs_endpoint
+                    .as_ref()
+                    .map(|e| e.expose().starts_with("https://"))
+                    .unwrap_or(false)
+                || config
+                    .metrics_endpoint
+                    .as_ref()
+                    .map(|e| e.expose().starts_with("https://"))
+                    .unwrap_or(false)
+                || config
+                    .traces_endpoint
+                    .as_ref()
+                    .map(|e| e.expose().starts_with("https://"))
+                    .unwrap_or(false);
+            if wants_https {
+                otel_warn!(
+                    "otlp.exporter.http.validate_insecure_flag",
+                    message = "config setting http.tls.insecure = true is ignored. \
+                            requests will still be sent with TLS to endpoints configured \
+                            with scheme https"
+                )
+            }
+        }
     }
+
+    Ok(())
 }
 
 #[derive(Debug)]
@@ -273,27 +293,30 @@ impl Exporter<OtapPdata> for OtlpHttpExporter {
         let logs_endpoint = Rc::new(
             self.config
                 .logs_endpoint
-                .clone()
-                .unwrap_or(format!("{}{}", self.config.endpoint, LOGS_PATH)),
+                .as_ref()
+                .map(|endpoint| endpoint.expose().to_owned())
+                .unwrap_or_else(|| format!("{}{}", self.config.endpoint.expose(), LOGS_PATH)),
         );
         let metrics_endpoint = Rc::new(
             self.config
                 .metrics_endpoint
-                .clone()
-                .unwrap_or(format!("{}{}", self.config.endpoint, METRICS_PATH)),
+                .as_ref()
+                .map(|endpoint| endpoint.expose().to_owned())
+                .unwrap_or_else(|| format!("{}{}", self.config.endpoint.expose(), METRICS_PATH)),
         );
         let traces_endpoint = Rc::new(
             self.config
                 .traces_endpoint
-                .clone()
-                .unwrap_or(format!("{}{}", self.config.endpoint, TRACES_PATH)),
+                .as_ref()
+                .map(|endpoint| endpoint.expose().to_owned())
+                .unwrap_or_else(|| format!("{}{}", self.config.endpoint.expose(), TRACES_PATH)),
         );
 
         otel_info!(
             "otlp.exporter.http.start",
-            logs_endpoint = logs_endpoint.as_str(),
-            metrics_endpoint = metrics_endpoint.as_str(),
-            traces_endpoint = traces_endpoint.as_str(),
+            logs_endpoint = ?self.config.logs_endpoint.as_ref().unwrap_or(&self.config.endpoint),
+            metrics_endpoint = ?self.config.metrics_endpoint.as_ref().unwrap_or(&self.config.endpoint),
+            traces_endpoint = ?self.config.traces_endpoint.as_ref().unwrap_or(&self.config.endpoint),
         );
 
         let max_in_flight = self.config.max_in_flight.max(1);
@@ -1197,7 +1220,7 @@ impl HttpClientPool {
             let header_name = http::HeaderName::from_bytes(name.as_bytes()).map_err(|e| {
                 HttpClientError::InvalidConfig(format!("invalid header name \"{name}\": {e}"))
             })?;
-            let mut header_value = HeaderValue::from_str(value.expose_secret()).map_err(|e| {
+            let mut header_value = HeaderValue::from_str(value.expose()).map_err(|e| {
                 HttpClientError::InvalidConfig(format!("invalid value for header \"{name}\": {e}"))
             })?;
             // Mark the value sensitive so it is redacted in any `HeaderMap`
@@ -1270,6 +1293,8 @@ mod test {
     use hyper::service::service_fn;
     use hyper_util::rt::TokioIo;
     use otel_arrow_dfe_config::PortName;
+    use otel_arrow_dfe_config::node::NodeUserConfig;
+    use otel_arrow_dfe_config::secret::{OMITTED_VALUE, REDACTED_VALUE};
     use otel_arrow_dfe_engine::Interests;
     use otel_arrow_dfe_engine::capability::registry::Capabilities;
     use otel_arrow_dfe_engine::context::ControllerContext;
@@ -1315,6 +1340,174 @@ mod test {
     use otel_arrow_dfe_otap::otlp_http::{HttpServerSettings, serve, tune_max_concurrent_requests};
     use otel_arrow_dfe_otap::otlp_metrics::OtlpReceiverMetrics;
     use otel_arrow_dfe_otap::testing::TestCallData;
+
+    fn endpoint_source() -> NodeUserConfig {
+        let mut source = NodeUserConfig::new_exporter_config(OTLP_HTTP_EXPORTER_URN);
+        source.config = serde_json::json!({
+            "http": {},
+            "client_pool_size": 1,
+            "endpoint": "https://user:private-base@collector.example",
+            "logs_endpoint": "https://user:private-logs@collector.example/v1/logs",
+            "metrics_endpoint": "https://collector.example/v1/metrics?token=private-metrics",
+            "traces_endpoint": "https://collector.example/private-traces/v1/traces"
+        });
+        source
+    }
+
+    /// Scenario: The base endpoint and every signal override contain inline URL credentials.
+    /// Guarantees: Factory snapshots and Debug hide entire URLs while runtime access preserves them.
+    #[test]
+    fn resolved_endpoint_urls_are_redacted_and_available_to_runtime() {
+        let source = endpoint_source();
+        let resolved = OTLP_HTTP_EXPORTER
+            .resolve_node_config(source.clone())
+            .unwrap();
+        let typed = resolved.component_config::<Config>().unwrap();
+        let safe_config_snapshot =
+            serde_json::to_string(resolved.safe_config_snapshot().as_ref()).unwrap();
+        let debug = format!("{typed:?}");
+        for (field, runtime) in [
+            ("endpoint", typed.endpoint.expose()),
+            (
+                "logs_endpoint",
+                typed.logs_endpoint.as_ref().unwrap().expose(),
+            ),
+            (
+                "metrics_endpoint",
+                typed.metrics_endpoint.as_ref().unwrap().expose(),
+            ),
+            (
+                "traces_endpoint",
+                typed.traces_endpoint.as_ref().unwrap().expose(),
+            ),
+        ] {
+            assert_eq!(runtime, source.config[field].as_str().unwrap());
+            assert_eq!(resolved.safe_component_snapshot()[field], REDACTED_VALUE);
+        }
+        assert!(!safe_config_snapshot.contains("private-"));
+        assert!(!debug.contains("private-"));
+    }
+
+    /// Scenario: A real HTTP exporter resolves nested TLS/header secrets and an aliased public field.
+    /// Guarantees: The snapshot hides nested secrets while retaining normalized public values/defaults.
+    #[test]
+    fn http_factory_snapshot_preserves_public_fields_and_hides_nested_secrets() {
+        let mut source = endpoint_source();
+        source.config["http"] = serde_json::json!({
+            "headers": {"authorization": "private-auth", "x-api-key": "private-key"},
+            "tls": {"key_pem": "private-pem", "cert_pem": "public-certificate", "ca_file": "public-ca.pem"},
+            "compression_method": "gzip", "user_agent": "public-agent"
+        });
+        let resolved = OTLP_HTTP_EXPORTER
+            .resolve_node_config(source.clone())
+            .unwrap();
+        let safe = resolved.safe_component_snapshot();
+        assert_eq!(safe["http"]["headers"]["authorization"], REDACTED_VALUE);
+        assert_eq!(safe["http"]["headers"]["x-api-key"], REDACTED_VALUE);
+        assert_eq!(safe["http"]["tls"]["key_pem"], REDACTED_VALUE);
+        assert_eq!(safe["http"]["tls"]["cert_pem"], "public-certificate");
+        assert_eq!(safe["http"]["tls"]["ca_file"], "public-ca.pem");
+        assert_eq!(safe["http"]["compression"], "gzip");
+        assert!(safe["http"].get("compression_method").is_none());
+        assert_eq!(safe["http"]["user_agent"], "public-agent");
+        assert_eq!(safe["max_response_body_length"], 10 * 1024 * 1024);
+        assert_eq!(safe["client_pool_size"], 1);
+        assert!(!safe.to_string().contains("private-"));
+        let typed = resolved.component_config::<Config>().unwrap();
+        assert_eq!(typed.http.headers["authorization"].expose(), "private-auth");
+        assert_eq!(
+            typed
+                .http
+                .tls
+                .as_ref()
+                .unwrap()
+                .config
+                .key_pem
+                .as_ref()
+                .unwrap()
+                .expose(),
+            "private-pem"
+        );
+    }
+
+    /// Scenario: HTTP factory admission receives a typo at the component, transport, or TLS level.
+    /// Guarantees: Closed schemas reject unknown fields before runtime creation.
+    #[test]
+    fn http_factory_rejects_unknown_fields_at_every_security_level() {
+        for (parent, key) in [("", "endpont"), ("http", "header"), ("tls", "key_pm")] {
+            let mut source = endpoint_source();
+            match parent {
+                "" => source.config[key] = "private-value".into(),
+                "http" => source.config["http"][key] = "private-value".into(),
+                _ => source.config["http"]["tls"] = serde_json::json!({key: "private-value"}),
+            }
+            assert!(OTLP_HTTP_EXPORTER.resolve_node_config(source).is_err());
+        }
+    }
+
+    /// Scenario: Only the URL credential in the base endpoint or a signal override changes.
+    /// Guarantees: Identical redacted snapshots do not hide a runtime-significant URL change.
+    #[test]
+    fn resolved_endpoint_url_changes_are_not_runtime_equivalent() {
+        let source = endpoint_source();
+        let original = OTLP_HTTP_EXPORTER
+            .resolve_node_config(source.clone())
+            .unwrap();
+        for field in [
+            "endpoint",
+            "logs_endpoint",
+            "metrics_endpoint",
+            "traces_endpoint",
+        ] {
+            let mut changed = source.clone();
+            changed.config[field] = source.config[field]
+                .as_str()
+                .unwrap()
+                .replace("private-", "replacement-")
+                .into();
+            let changed = OTLP_HTTP_EXPORTER.resolve_node_config(changed).unwrap();
+            assert_eq!(
+                original.safe_component_snapshot(),
+                changed.safe_component_snapshot()
+            );
+            assert_ne!(
+                original, changed,
+                "{field} must participate in runtime equality"
+            );
+        }
+    }
+
+    /// Scenario: An HTTP config snapshot or a display marker is resubmitted for any endpoint URL.
+    /// Guarantees: Redacted and omitted URLs cannot silently replace the operational destination.
+    #[test]
+    fn resolved_endpoint_url_snapshots_are_not_replayable() {
+        let source = endpoint_source();
+        let resolved = OTLP_HTTP_EXPORTER
+            .resolve_node_config(source.clone())
+            .unwrap();
+        assert!(
+            OTLP_HTTP_EXPORTER
+                .resolve_node_config(resolved.safe_config_snapshot().as_ref().clone())
+                .is_err()
+        );
+        for field in [
+            "endpoint",
+            "logs_endpoint",
+            "metrics_endpoint",
+            "traces_endpoint",
+        ] {
+            for marker in [REDACTED_VALUE, OMITTED_VALUE] {
+                let mut replay = source.clone();
+                replay.config[field] = marker.into();
+                let error = OTLP_HTTP_EXPORTER
+                    .resolve_node_config(replay)
+                    .unwrap_err()
+                    .to_string();
+                assert!(error.contains("snapshot display markers"), "{error}");
+                assert!(!error.contains("private-"));
+            }
+        }
+    }
 
     /// run test HTTP server serving OTLP HTTP API. Internally, this uses the OTLP HTTP server that
     /// is used in OTLP Receiver. This returns a cancellation token (to shutdown the server when
@@ -2568,7 +2761,7 @@ mod test {
     fn default_test_config(endpoint: String) -> Config {
         Config {
             http: HttpClientSettings::default(),
-            endpoint,
+            endpoint: endpoint.into(),
             client_pool_size: NonZeroUsize::try_from(2).unwrap(),
             max_response_body_length: 1024,
             max_in_flight: 10,
@@ -3912,9 +4105,9 @@ mod test {
         let traces_endpoint = format!("http://{traces_endpoint_addr}/v1/traces");
 
         let config = Config {
-            logs_endpoint: Some(logs_endpoint),
-            metrics_endpoint: Some(metrics_endpoint),
-            traces_endpoint: Some(traces_endpoint),
+            logs_endpoint: Some(logs_endpoint.into()),
+            metrics_endpoint: Some(metrics_endpoint.into()),
+            traces_endpoint: Some(traces_endpoint.into()),
             ..default_test_config("http://placeholder".to_string())
         };
 
@@ -4537,7 +4730,7 @@ mod test {
                     cert_file: None,
                     cert_pem: Some(client.cert_pem.clone()),
                     key_file: None,
-                    key_pem: Some(client.key_pem.clone()),
+                    key_pem: Some(client.key_pem.clone().into()),
                     reload_interval: None,
                 },
                 ca_file: None,

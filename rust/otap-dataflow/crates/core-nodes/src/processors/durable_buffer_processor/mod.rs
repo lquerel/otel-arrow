@@ -117,7 +117,9 @@ use metrics::{LossAttributes, SignalLossAttributes};
 
 use otel_arrow_dfe_config::SignalType;
 use otel_arrow_dfe_config::error::Error as ConfigError;
-use otel_arrow_dfe_config::node::NodeUserConfig;
+use otel_arrow_dfe_engine::component_config::{
+    ConfigSnapshotPolicy, ResolvedNodeConfig, resolve_typed_config,
+};
 use otel_arrow_dfe_engine::config::ProcessorConfig;
 use otel_arrow_dfe_engine::context::PipelineContext;
 use otel_arrow_dfe_engine::control::Context8u8;
@@ -1852,16 +1854,11 @@ impl otel_arrow_dfe_engine::local::processor::Processor<OtapPdata> for DurableBu
 pub fn create_durable_buffer(
     pipeline_ctx: PipelineContext,
     node: NodeId,
-    node_config: Arc<NodeUserConfig>,
+    node_config: Arc<ResolvedNodeConfig>,
     processor_config: &ProcessorConfig,
     _capabilities: &otel_arrow_dfe_engine::capability::registry::Capabilities,
 ) -> Result<ProcessorWrapper<OtapPdata>, ConfigError> {
-    let config: DurableBufferConfig =
-        serde_json::from_value(node_config.config.clone()).map_err(|e| {
-            ConfigError::InvalidUserConfig {
-                error: format!("failed to parse durable buffer configuration: {}", e),
-            }
-        })?;
+    let config = (*node_config.component_config::<DurableBufferConfig>()?).clone();
 
     // Create processor with lazy engine initialization
     // The Quiver engine will be initialized on the first message when we're
@@ -1871,7 +1868,7 @@ pub fn create_durable_buffer(
     Ok(ProcessorWrapper::local(
         processor,
         node,
-        node_config,
+        node_config.safe_config_snapshot(),
         processor_config,
     ))
 }
@@ -1885,7 +1882,8 @@ pub static DURABLE_BUFFER_FACTORY: ProcessorFactory<OtapPdata> = ProcessorFactor
     create: create_durable_buffer,
     context_declarations: None,
     wiring_contract: otel_arrow_dfe_engine::wiring_contract::WiringContract::UNRESTRICTED,
-    validate_config: otel_arrow_dfe_config::validation::validate_typed_config::<DurableBufferConfig>,
+    resolve_config: resolve_typed_config::<DurableBufferConfig>,
+    snapshot_policy: ConfigSnapshotPolicy::TypedSafe,
 };
 
 #[cfg(test)]
@@ -2068,7 +2066,9 @@ mod tests {
         let processor = create_durable_buffer(
             pipeline_ctx,
             test_node("durable-buffer-retry-wakeup"),
-            Arc::new(node_config),
+            DURABLE_BUFFER_FACTORY
+                .resolve_node_config(node_config)
+                .expect("durable buffer config must resolve"),
             &ProcessorConfig::new("durable-buffer-retry-wakeup"),
             &otel_arrow_dfe_engine::capability::registry::Capabilities::empty(),
         )
@@ -2158,7 +2158,9 @@ mod tests {
         let processor = create_durable_buffer(
             pipeline_ctx,
             test_node("durable-buffer-unknown-wakeup"),
-            Arc::new(node_config),
+            DURABLE_BUFFER_FACTORY
+                .resolve_node_config(node_config)
+                .expect("durable buffer config must resolve"),
             &ProcessorConfig::with_channel_capacities("durable-buffer-unknown-wakeup", 1, 100),
             &otel_arrow_dfe_engine::capability::registry::Capabilities::empty(),
         )
@@ -2260,7 +2262,9 @@ mod tests {
         let processor = create_durable_buffer(
             pipeline_ctx,
             test_node("durable-buffer-shared-retry-wakeup"),
-            Arc::new(node_config),
+            DURABLE_BUFFER_FACTORY
+                .resolve_node_config(node_config)
+                .expect("durable buffer config must resolve"),
             &ProcessorConfig::with_channel_capacities("durable-buffer-shared-retry-wakeup", 1, 100),
             &otel_arrow_dfe_engine::capability::registry::Capabilities::empty(),
         )
@@ -2359,7 +2363,9 @@ mod tests {
         let processor = create_durable_buffer(
             pipeline_ctx,
             test_node("durable-buffer-shutdown-drain-deferred"),
-            Arc::new(node_config),
+            DURABLE_BUFFER_FACTORY
+                .resolve_node_config(node_config)
+                .expect("durable buffer config must resolve"),
             &ProcessorConfig::new("durable-buffer-shutdown-drain-deferred"),
             &otel_arrow_dfe_engine::capability::registry::Capabilities::empty(),
         )
@@ -2792,7 +2798,9 @@ mod tests {
         let processor = create_durable_buffer(
             pipeline_ctx,
             test_node("durable-buffer-utilization-test"),
-            Arc::new(node_config),
+            DURABLE_BUFFER_FACTORY
+                .resolve_node_config(node_config)
+                .expect("durable buffer config must resolve"),
             &ProcessorConfig::new("durable-buffer-utilization-test"),
             &otel_arrow_dfe_engine::capability::registry::Capabilities::empty(),
         )

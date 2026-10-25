@@ -364,7 +364,7 @@ fn validate_csv(input: &str, delimiter: u8) -> Result<usize, DataError> {
     }
 }
 
-#[derive(Debug, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub(super) struct ParseConfig {
     pub format: Format,
@@ -389,25 +389,25 @@ pub(super) enum Format {
     Csv,
 }
 
-#[derive(Debug, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub(super) enum Header {
     None,
 }
 
-#[derive(Debug, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub(super) enum ErrorPolicy {
     Preserve,
 }
 
-#[derive(Debug, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub(super) struct Source {
     pub source: String,
 }
 
-#[derive(Debug, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub(super) struct Timestamp {
     pub source: String,
@@ -415,27 +415,27 @@ pub(super) struct Timestamp {
     pub on_missing: MissingTimestamp,
 }
 
-#[derive(Debug, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub(super) enum TimestampFormat {
     Rfc3339,
 }
 
-#[derive(Debug, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub(super) enum MissingTimestamp {
     Observed,
     Preserve,
 }
 
-#[derive(Debug, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub(super) struct Severity {
     pub source: String,
     pub mapping: BTreeMap<String, u8>,
 }
 
-#[derive(Debug, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub(super) struct Limits {
     pub max_input_bytes: NonZeroUsize,

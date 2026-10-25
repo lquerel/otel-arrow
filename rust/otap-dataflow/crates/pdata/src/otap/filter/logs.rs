@@ -20,11 +20,11 @@ use crate::proto::opentelemetry::arrow::v1::ArrowPayloadType;
 use crate::schema::consts;
 use arrow::array::{BooleanArray, Float64Array, Int32Array, Int64Array, StringArray};
 use arrow::buffer::BooleanBuffer;
-use serde::Deserialize;
+use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 
 /// struct that describes the overall requirements to use in order to filter logs
-#[derive(Debug, Clone, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct LogFilter {
     // Include match properties describe logs that should be included in the Collector Service pipeline,
     // all other logs should be dropped from further processing.
@@ -45,7 +45,7 @@ pub struct LogFilter {
 }
 
 /// LogMatchProperties specifies the set of properties in a log to match against and the type of string pattern matching to use.
-#[derive(Debug, Clone, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct LogMatchProperties {
     // MatchType specifies the type of matching desired
     #[serde(default = "default_match_type")]
@@ -76,7 +76,7 @@ pub struct LogMatchProperties {
 }
 
 /// LogSeverityNumberMatchProperties specifies the requirements needed to match on the log severity field
-#[derive(Debug, Clone, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct LogSeverityNumberMatchProperties {
     // Min is the minimum severity needed for the log record to match.
     // This corresponds to the short names specified here:

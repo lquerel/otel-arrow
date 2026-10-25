@@ -22,8 +22,8 @@ use otel_arrow_dfe_config::policy::{CoreAllocation, CoreRange};
 // Side-effect imports: link the crates so their `linkme` distributed-slice
 // registrations (component factories) are visible in `OTAP_PIPELINE_FACTORY`.
 use otel_arrow_dfe_contrib_nodes as _;
-use otel_arrow_dfe_controller::Controller;
 use otel_arrow_dfe_controller::startup;
+use otel_arrow_dfe_controller::{Controller, ControllerRunOptions};
 use otel_arrow_dfe_core_nodes as _;
 use otel_arrow_dfe_core_nodes::exporters::console_exporter::claim_structured_stdout;
 #[cfg(feature = "dev-tools")]
@@ -124,8 +124,8 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         args.http_admin_bind,
     );
 
-    // Validate that every node URN maps to a registered component.
-    startup::validate_engine_components(&engine_cfg, &OTAP_PIPELINE_FACTORY)?;
+    let prepared = Controller::new(&OTAP_PIPELINE_FACTORY)
+        .prepare(engine_cfg, ControllerRunOptions::default())?;
 
     if args.validate_and_exit {
         println!("Configuration '{}' is valid.", args.config.display());
@@ -134,11 +134,10 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     // Reserve stdout for records before any pipeline starts; without this, a
     // `record_json` console exporter fails when it is created.
-    claim_structured_stdout(&engine_cfg);
+    claim_structured_stdout(prepared.resolved_pipelines())?;
 
     // Run the engine.
-    let controller = Controller::new(&OTAP_PIPELINE_FACTORY);
-    let result = controller.run_forever(engine_cfg);
+    let result = prepared.run_forever();
     // This binary owns the console writers, so it stops them before it reports the
     // result and exits; a stalled or closed stderr cannot hang the exit.
     startup::shutdown_console_and_exit(&result)

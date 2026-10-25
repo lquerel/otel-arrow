@@ -18,10 +18,12 @@ use metrics::{
     TrafficGeneratorMetrics,
 };
 use otel_arrow_dfe_channel::error::{RecvError, SendError};
-use otel_arrow_dfe_config::node::NodeUserConfig;
 use otel_arrow_dfe_config::transport_headers::{TransportHeader, TransportHeaders};
 use otel_arrow_dfe_config::{ContextEntryName, error::Error as ConfigError};
 use otel_arrow_dfe_engine::MessageSourceLocalEffectHandlerExtension;
+use otel_arrow_dfe_engine::component_config::{
+    ConfigSnapshotPolicy, ResolvedComponentConfig, ResolvedNodeConfig,
+};
 use otel_arrow_dfe_engine::config::ReceiverConfig;
 use otel_arrow_dfe_engine::context::PipelineContext;
 use otel_arrow_dfe_engine::context_declaration::{
@@ -114,30 +116,29 @@ pub static TRAFFIC_GENERATOR_RECEIVER: ReceiverFactory<OtapPdata> = ReceiverFact
     create:
         |pipeline: PipelineContext,
          node: NodeId,
-         node_config: Arc<NodeUserConfig>,
+         node_config: Arc<ResolvedNodeConfig>,
          receiver_config: &ReceiverConfig,
          _capabilities: &otel_arrow_dfe_engine::capability::registry::Capabilities| {
             Ok(ReceiverWrapper::local(
-                TrafficGeneratorReceiver::from_config(pipeline, &node_config.config)?,
+                TrafficGeneratorReceiver::new(
+                    pipeline,
+                    node_config.component_config::<Config>()?.as_ref().clone(),
+                )?,
                 node,
-                node_config,
+                node_config.safe_config_snapshot(),
                 receiver_config,
             ))
         },
     context_declarations: Some(ContextDeclarationProvider::from_typed_config::<Config>()),
     wiring_contract: otel_arrow_dfe_engine::wiring_contract::WiringContract::UNRESTRICTED,
-    validate_config,
+    resolve_config: |value| {
+        Ok(ResolvedComponentConfig::omitted(validate_config_impl(
+            value,
+        )?))
+    },
+    // Resource attributes and registry URLs are free-form inputs and may carry secrets.
+    snapshot_policy: ConfigSnapshotPolicy::Omit,
 };
-
-/// Validates the Traffic Generator receiver configuration at config load time.
-///
-/// Runs before any node is started (initial load and live reconfigure), so bad
-/// configuration is rejected fast and attributed to the offending node rather
-/// than surfacing as an opaque client error at startup.
-fn validate_config(config: &Value) -> Result<(), otel_arrow_dfe_config::error::Error> {
-    let _ = validate_config_impl(config)?;
-    Ok(())
-}
 
 fn validate_config_impl(config: &Value) -> Result<Config, otel_arrow_dfe_config::error::Error> {
     let config: Config = serde_json::from_value(config.clone()).map_err(|err| {
@@ -537,7 +538,10 @@ impl TrafficGeneratorReceiver {
 ///
 /// Returns `None` when the config map is empty (zero overhead).
 fn build_transport_headers(
-    config_headers: &HashMap<ContextEntryName, Option<String>>,
+    config_headers: &HashMap<
+        ContextEntryName,
+        Option<otel_arrow_dfe_config::secret::RedactedString>,
+    >,
 ) -> Option<TransportHeaders> {
     if config_headers.is_empty() {
         return None;
@@ -549,7 +553,7 @@ fn build_transport_headers(
         // treated as binary (the gRPC binary metadata convention).
         if name.as_str().ends_with("-bin") {
             let resolved_value = match value {
-                Some(v) => v.as_bytes().to_vec(),
+                Some(v) => v.expose().as_bytes().to_vec(),
                 None => {
                     let mut buf = [0u8; 16];
                     rand::RngExt::fill(&mut rand::rng(), &mut buf);
@@ -559,7 +563,7 @@ fn build_transport_headers(
             headers.push(TransportHeader::binary(name.clone(), resolved_value));
         } else {
             let resolved_value = match value {
-                Some(v) => v.as_bytes().to_vec(),
+                Some(v) => v.expose().as_bytes().to_vec(),
                 None => {
                     // Generate bytes in ASCII printable range (space..tilde)
                     let mut rng = rand::rng();
@@ -821,6 +825,52 @@ impl ConfigNodeContextDeclaration for Config {
 
 #[cfg(test)]
 mod tests {
+    /// Scenario: Submitted generator headers contain credentials and resource attributes use aliases.
+    /// Guarantees: Snapshots omit the config; typed equality detects secrets and normalizes aliases.
+    #[test]
+    fn resolution_omits_secrets_and_compares_typed_values() {
+        let resolve = TRAFFIC_GENERATOR_RECEIVER.resolve_config;
+        let first = serde_json::json!({
+            "traffic_config": {"log_weight": 1}, "data_source": "synthetic",
+            "transport_headers": {"authorization": "Bearer private-token"},
+            "resource_attributes": {"tenant.id": "private-tenant"}
+        });
+        let original = resolve(&first).unwrap();
+        assert_eq!(
+            original.safe_config_snapshot(),
+            otel_arrow_dfe_config::secret::OMITTED_VALUE
+        );
+        let typed = original.get::<Config>().unwrap();
+        assert_eq!(
+            typed
+                .transport_headers()
+                .values()
+                .next()
+                .unwrap()
+                .as_ref()
+                .unwrap()
+                .expose(),
+            "Bearer private-token"
+        );
+        assert!(
+            !serde_json::to_string(typed.as_ref())
+                .unwrap()
+                .contains("private-token")
+        );
+        let mut alias = first.clone();
+        alias["resource_attributes"] =
+            serde_json::json!([{"attrs": {"tenant.id": "private-tenant"}, "weight": 1}]);
+        assert_eq!(original, resolve(&alias).unwrap());
+        alias["transport_headers"]["authorization"] = "Bearer replacement-token".into();
+        let replacement = resolve(&alias).unwrap();
+        assert_eq!(
+            original.safe_config_snapshot(),
+            replacement.safe_config_snapshot()
+        );
+        assert_ne!(original, replacement);
+        alias["transport_headers"]["authorization"] = "[REDACTED]".into();
+        assert!(resolve(&alias).is_err());
+    }
     use super::config::{DataSource, GenerationStrategy};
     use super::*;
 
@@ -829,6 +879,18 @@ mod tests {
     use otel_arrow_dfe_config::transport_headers::ValueKind;
     use otel_arrow_dfe_engine::context::ControllerContext;
     use otel_arrow_dfe_engine::context_declaration::ContextDeclaration;
+
+    fn resolved_node_config(config: Value) -> ResolvedNodeConfig {
+        let mut source = NodeUserConfig::new_receiver_config(TRAFFIC_GENERATOR_RECEIVER_URN);
+        source.config = config;
+        let component = (TRAFFIC_GENERATOR_RECEIVER.resolve_config)(&source.config).unwrap();
+        ResolvedNodeConfig::new(
+            &source,
+            component,
+            TRAFFIC_GENERATOR_RECEIVER.snapshot_policy,
+        )
+        .unwrap()
+    }
     use otel_arrow_dfe_engine::receiver::ReceiverWrapper;
     use otel_arrow_dfe_engine::testing::{
         receiver::{NotSendValidateContext, TestContext, TestRuntime},
@@ -1960,7 +2022,7 @@ mod tests {
         let decls = (TRAFFIC_GENERATOR_RECEIVER
             .context_declarations
             .expect("traffic generator should declare context")
-            .declarations)(&config)
+            .declarations)(&resolved_node_config(config.clone()))
         .unwrap();
         assert_eq!(decls.len(), 3);
 
@@ -1992,8 +2054,8 @@ mod tests {
     #[test]
     fn traffic_gen_headers_preserve_logical_names() {
         let headers = build_transport_headers(&HashMap::from([
-            (context_name("X-Request-Id"), Some("request".to_string())),
-            (context_name("X-Trace-Bin"), Some("trace".to_string())),
+            (context_name("X-Request-Id"), Some("request".into())),
+            (context_name("X-Trace-Bin"), Some("trace".into())),
         ]))
         .expect("configured headers produce transport headers");
         let request_header = headers
@@ -2029,7 +2091,7 @@ mod tests {
         let decls = (TRAFFIC_GENERATOR_RECEIVER
             .context_declarations
             .expect("traffic generator should declare context")
-            .declarations)(&config)
+            .declarations)(&resolved_node_config(config))
         .unwrap();
         assert!(decls.is_empty());
     }
@@ -2057,7 +2119,7 @@ mod tests {
         let declarations = (TRAFFIC_GENERATOR_RECEIVER
             .context_declarations
             .expect("traffic generator should declare context")
-            .declarations)(&config)
+            .declarations)(&resolved_node_config(config))
         .expect("case-distinct names should remain valid");
         let names = declarations
             .iter()
@@ -2095,13 +2157,13 @@ mod tests {
         });
 
         assert!(
-            (TRAFFIC_GENERATOR_RECEIVER.validate_config)(&valid_config).is_ok(),
-            "traffic_generator_receiver factory should call validate_config"
+            (TRAFFIC_GENERATOR_RECEIVER.resolve_config)(&valid_config).is_ok(),
+            "traffic_generator_receiver factory should resolve valid config"
         );
 
         assert!(
-            (TRAFFIC_GENERATOR_RECEIVER.validate_config)(&invalid_config).is_err(),
-            "traffic_generator_receiver factory should call validate_config"
+            (TRAFFIC_GENERATOR_RECEIVER.resolve_config)(&invalid_config).is_err(),
+            "traffic_generator_receiver factory should reject invalid config"
         );
     }
 }

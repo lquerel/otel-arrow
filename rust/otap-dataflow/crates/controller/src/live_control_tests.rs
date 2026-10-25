@@ -7,6 +7,7 @@ use otel_arrow_dfe_config::ContextEntryName;
 use otel_arrow_dfe_config::engine::ResolvedPipelineRole;
 use otel_arrow_dfe_config::observed_state::ObservedStateSettings;
 use otel_arrow_dfe_config::settings::telemetry::logs::LogLevel;
+use otel_arrow_dfe_engine::component_config::{ResolvedComponentConfig, ResolvedNodeConfig};
 use otel_arrow_dfe_engine::config::{ExporterConfig, ProcessorConfig, ReceiverConfig};
 use otel_arrow_dfe_engine::context_declaration::{
     ConfigNodeContextDeclaration, ContextDeclaration, ContextDeclarationProvider, ContextDomain,
@@ -39,6 +40,9 @@ use tracing::{Event, Subscriber};
 use tracing_subscriber::Registry;
 use tracing_subscriber::layer::{Context, Layer, SubscriberExt};
 
+#[path = "live_control_resolution_tests.rs"]
+mod configuration_resolution;
+
 struct CountingLayer(Arc<AtomicUsize>);
 
 impl<S: Subscriber> Layer<S> for CountingLayer {
@@ -60,10 +64,10 @@ fn available_core_ids() -> Vec<CoreId> {
     ]
 }
 
-fn test_validate_config(
-    _config: &serde_json::Value,
-) -> Result<(), otel_arrow_dfe_config::error::Error> {
-    Ok(())
+fn test_resolve_config(
+    config: &serde_json::Value,
+) -> Result<ResolvedComponentConfig, otel_arrow_dfe_config::error::Error> {
+    Ok(ResolvedComponentConfig::omitted(config.clone()))
 }
 
 const CONTEXT_BINDINGS_TEST_RECEIVER_URN: &str = "urn:test:receiver:context-bindings";
@@ -98,7 +102,7 @@ fn wait_for_context_bindings_test_capture() -> std::sync::Weak<CompiledContextBi
     }
 }
 
-#[derive(Deserialize)]
+#[derive(Deserialize, PartialEq)]
 struct ContextBindingsTestConfig {
     produces: ContextEntryName,
     #[serde(default)]
@@ -117,14 +121,9 @@ impl ConfigNodeContextDeclaration for ContextBindingsTestConfig {
 }
 
 fn context_bindings_test_declarations(
-    value: &serde_json::Value,
+    resolved: &ResolvedNodeConfig,
 ) -> Result<NodeContextDeclarations, otel_arrow_dfe_config::error::Error> {
-    let config: ContextBindingsTestConfig =
-        serde_json::from_value(value.clone()).map_err(|error| {
-            otel_arrow_dfe_config::error::Error::InvalidUserConfig {
-                error: error.to_string(),
-            }
-        })?;
+    let config = resolved.component_config::<ContextBindingsTestConfig>()?;
     if config.probe_controller_lock {
         let runtime = CONTEXT_BINDINGS_TEST_RUNTIME
             .lock()
@@ -144,19 +143,26 @@ fn context_bindings_test_declarations(
     Ok(config.context_declarations())
 }
 
+fn resolve_context_bindings_test_config(
+    value: &serde_json::Value,
+) -> Result<ResolvedComponentConfig, otel_arrow_dfe_config::error::Error> {
+    let config: ContextBindingsTestConfig =
+        serde_json::from_value(value.clone()).map_err(|error| {
+            otel_arrow_dfe_config::error::Error::InvalidUserConfig {
+                error: error.to_string(),
+            }
+        })?;
+    Ok(ResolvedComponentConfig::omitted(config))
+}
+
 fn context_bindings_test_receiver_create(
     pipeline_ctx: PipelineContext,
     node: otel_arrow_dfe_engine::node::NodeId,
-    node_config: Arc<NodeUserConfig>,
+    node_config: Arc<ResolvedNodeConfig>,
     receiver_config: &ReceiverConfig,
     _capabilities: &otel_arrow_dfe_engine::capability::registry::Capabilities,
 ) -> Result<ReceiverWrapper<()>, otel_arrow_dfe_config::error::Error> {
-    let config: ContextBindingsTestConfig = serde_json::from_value(node_config.config.clone())
-        .map_err(
-            |error| otel_arrow_dfe_config::error::Error::InvalidUserConfig {
-                error: error.to_string(),
-            },
-        )?;
+    let config = node_config.component_config::<ContextBindingsTestConfig>()?;
     config.validate_context_declarations(&pipeline_ctx)?;
     let policy = pipeline_ctx.compiled_context_bindings();
     *CONTEXT_BINDINGS_TEST_CAPTURE
@@ -165,7 +171,7 @@ fn context_bindings_test_receiver_create(
     Ok(ReceiverWrapper::local(
         RecoveryTestReceiver,
         node,
-        node_config,
+        node_config.safe_config_snapshot(),
         receiver_config,
     ))
 }
@@ -173,7 +179,7 @@ fn context_bindings_test_receiver_create(
 fn test_receiver_create(
     _pipeline_ctx: PipelineContext,
     _node: otel_arrow_dfe_engine::node::NodeId,
-    _node_config: Arc<NodeUserConfig>,
+    _node_config: Arc<ResolvedNodeConfig>,
     _receiver_config: &ReceiverConfig,
     _capabilities: &otel_arrow_dfe_engine::capability::registry::Capabilities,
 ) -> Result<ReceiverWrapper<()>, otel_arrow_dfe_config::error::Error> {
@@ -183,7 +189,7 @@ fn test_receiver_create(
 fn test_exporter_create(
     _pipeline_ctx: PipelineContext,
     _node: otel_arrow_dfe_engine::node::NodeId,
-    _node_config: Arc<NodeUserConfig>,
+    _node_config: Arc<ResolvedNodeConfig>,
     _exporter_config: &ExporterConfig,
     _capabilities: &otel_arrow_dfe_engine::capability::registry::Capabilities,
 ) -> Result<ExporterWrapper<()>, otel_arrow_dfe_config::error::Error> {
@@ -193,7 +199,7 @@ fn test_exporter_create(
 fn test_processor_create(
     _pipeline_ctx: PipelineContext,
     _node: otel_arrow_dfe_engine::node::NodeId,
-    _node_config: Arc<NodeUserConfig>,
+    _node_config: Arc<ResolvedNodeConfig>,
     _processor_config: &ProcessorConfig,
     _capabilities: &otel_arrow_dfe_engine::capability::registry::Capabilities,
 ) -> Result<ProcessorWrapper<()>, otel_arrow_dfe_config::error::Error> {
@@ -246,14 +252,14 @@ impl exporter::Exporter<()> for RecoveryTestExporter {
 fn recovery_test_receiver_create(
     _pipeline_ctx: PipelineContext,
     node: otel_arrow_dfe_engine::node::NodeId,
-    node_config: Arc<NodeUserConfig>,
+    node_config: Arc<ResolvedNodeConfig>,
     receiver_config: &ReceiverConfig,
     _capabilities: &otel_arrow_dfe_engine::capability::registry::Capabilities,
 ) -> Result<ReceiverWrapper<()>, otel_arrow_dfe_config::error::Error> {
     Ok(ReceiverWrapper::local(
         RecoveryTestReceiver,
         node,
-        node_config,
+        node_config.safe_config_snapshot(),
         receiver_config,
     ))
 }
@@ -261,14 +267,14 @@ fn recovery_test_receiver_create(
 fn recovery_test_exporter_create(
     _pipeline_ctx: PipelineContext,
     node: otel_arrow_dfe_engine::node::NodeId,
-    node_config: Arc<NodeUserConfig>,
+    node_config: Arc<ResolvedNodeConfig>,
     exporter_config: &ExporterConfig,
     _capabilities: &otel_arrow_dfe_engine::capability::registry::Capabilities,
 ) -> Result<ExporterWrapper<()>, otel_arrow_dfe_config::error::Error> {
     Ok(ExporterWrapper::local(
         RecoveryTestExporter,
         node,
-        node_config,
+        node_config.safe_config_snapshot(),
         exporter_config,
     ))
 }
@@ -279,28 +285,32 @@ static TEST_RECEIVER_FACTORIES: &[ReceiverFactory<()>] = &[
         create: test_receiver_create,
         context_declarations: None,
         wiring_contract: WiringContract::UNRESTRICTED,
-        validate_config: test_validate_config,
+        resolve_config: test_resolve_config,
+        snapshot_policy: ConfigSnapshotPolicy::Omit,
     },
     ReceiverFactory {
         name: "urn:otel:receiver:topic",
         create: test_receiver_create,
         context_declarations: None,
         wiring_contract: WiringContract::UNRESTRICTED,
-        validate_config: test_validate_config,
+        resolve_config: test_resolve_config,
+        snapshot_policy: ConfigSnapshotPolicy::Omit,
     },
     ReceiverFactory {
         name: "urn:otel:receiver:otlp",
         create: test_receiver_create,
         context_declarations: None,
         wiring_contract: WiringContract::UNRESTRICTED,
-        validate_config: test_validate_config,
+        resolve_config: test_resolve_config,
+        snapshot_policy: ConfigSnapshotPolicy::Omit,
     },
     ReceiverFactory {
         name: "urn:otel:receiver:internal_telemetry",
         create: test_receiver_create,
         context_declarations: None,
         wiring_contract: WiringContract::UNRESTRICTED,
-        validate_config: test_validate_config,
+        resolve_config: test_resolve_config,
+        snapshot_policy: ConfigSnapshotPolicy::Omit,
     },
 ];
 
@@ -309,7 +319,8 @@ static TEST_PROCESSOR_FACTORIES: &[ProcessorFactory<()>] = &[ProcessorFactory {
     create: test_processor_create,
     context_declarations: None,
     wiring_contract: WiringContract::UNRESTRICTED,
-    validate_config: test_validate_config,
+    resolve_config: test_resolve_config,
+    snapshot_policy: ConfigSnapshotPolicy::Omit,
 }];
 
 static TEST_EXPORTER_FACTORIES: &[ExporterFactory<()>] = &[
@@ -318,28 +329,32 @@ static TEST_EXPORTER_FACTORIES: &[ExporterFactory<()>] = &[
         create: test_exporter_create,
         context_declarations: None,
         wiring_contract: WiringContract::UNRESTRICTED,
-        validate_config: test_validate_config,
+        resolve_config: test_resolve_config,
+        snapshot_policy: ConfigSnapshotPolicy::Omit,
     },
     ExporterFactory {
         name: "urn:otel:exporter:topic",
         create: test_exporter_create,
         context_declarations: None,
         wiring_contract: WiringContract::UNRESTRICTED,
-        validate_config: test_validate_config,
+        resolve_config: test_resolve_config,
+        snapshot_policy: ConfigSnapshotPolicy::Omit,
     },
     ExporterFactory {
         name: "urn:otel:exporter:console",
         create: test_exporter_create,
         context_declarations: None,
         wiring_contract: WiringContract::UNRESTRICTED,
-        validate_config: test_validate_config,
+        resolve_config: test_resolve_config,
+        snapshot_policy: ConfigSnapshotPolicy::Omit,
     },
     ExporterFactory {
         name: "urn:otel:exporter:noop",
         create: test_exporter_create,
         context_declarations: None,
         wiring_contract: WiringContract::UNRESTRICTED,
-        validate_config: test_validate_config,
+        resolve_config: test_resolve_config,
+        snapshot_policy: ConfigSnapshotPolicy::Omit,
     },
 ];
 
@@ -358,16 +373,16 @@ static CONTEXT_BINDINGS_TEST_RECEIVER_FACTORIES: &[ReceiverFactory<()>] = &[
             declarations: context_bindings_test_declarations,
         }),
         wiring_contract: WiringContract::UNRESTRICTED,
-        validate_config: otel_arrow_dfe_config::validation::validate_typed_config::<
-            ContextBindingsTestConfig,
-        >,
+        resolve_config: resolve_context_bindings_test_config,
+        snapshot_policy: ConfigSnapshotPolicy::Omit,
     },
     ReceiverFactory {
         name: "urn:otel:receiver:internal_telemetry",
         create: test_receiver_create,
         context_declarations: None,
         wiring_contract: WiringContract::UNRESTRICTED,
-        validate_config: test_validate_config,
+        resolve_config: test_resolve_config,
+        snapshot_policy: ConfigSnapshotPolicy::Omit,
     },
 ];
 
@@ -377,21 +392,24 @@ static CONTEXT_BINDINGS_TEST_EXPORTER_FACTORIES: &[ExporterFactory<()>] = &[
         create: recovery_test_exporter_create,
         context_declarations: None,
         wiring_contract: WiringContract::UNRESTRICTED,
-        validate_config: test_validate_config,
+        resolve_config: test_resolve_config,
+        snapshot_policy: ConfigSnapshotPolicy::Omit,
     },
     ExporterFactory {
         name: "urn:otel:exporter:console",
         create: test_exporter_create,
         context_declarations: None,
         wiring_contract: WiringContract::UNRESTRICTED,
-        validate_config: test_validate_config,
+        resolve_config: test_resolve_config,
+        snapshot_policy: ConfigSnapshotPolicy::Omit,
     },
     ExporterFactory {
         name: "urn:otel:exporter:noop",
         create: test_exporter_create,
         context_declarations: None,
         wiring_contract: WiringContract::UNRESTRICTED,
-        validate_config: test_validate_config,
+        resolve_config: test_resolve_config,
+        snapshot_policy: ConfigSnapshotPolicy::Omit,
     },
 ];
 
@@ -408,14 +426,16 @@ static RECOVERY_TEST_RECEIVER_FACTORIES: &[ReceiverFactory<()>] = &[
         create: recovery_test_receiver_create,
         context_declarations: None,
         wiring_contract: WiringContract::UNRESTRICTED,
-        validate_config: test_validate_config,
+        resolve_config: test_resolve_config,
+        snapshot_policy: ConfigSnapshotPolicy::Omit,
     },
     ReceiverFactory {
         name: "urn:otel:receiver:internal_telemetry",
         create: recovery_test_receiver_create,
         context_declarations: None,
         wiring_contract: WiringContract::UNRESTRICTED,
-        validate_config: test_validate_config,
+        resolve_config: test_resolve_config,
+        snapshot_policy: ConfigSnapshotPolicy::Omit,
     },
 ];
 
@@ -425,21 +445,24 @@ static RECOVERY_TEST_EXPORTER_FACTORIES: &[ExporterFactory<()>] = &[
         create: recovery_test_exporter_create,
         context_declarations: None,
         wiring_contract: WiringContract::UNRESTRICTED,
-        validate_config: test_validate_config,
+        resolve_config: test_resolve_config,
+        snapshot_policy: ConfigSnapshotPolicy::Omit,
     },
     ExporterFactory {
         name: "urn:otel:exporter:console",
         create: recovery_test_exporter_create,
         context_declarations: None,
         wiring_contract: WiringContract::UNRESTRICTED,
-        validate_config: test_validate_config,
+        resolve_config: test_resolve_config,
+        snapshot_policy: ConfigSnapshotPolicy::Omit,
     },
     ExporterFactory {
         name: "urn:otel:exporter:noop",
         create: recovery_test_exporter_create,
         context_declarations: None,
         wiring_contract: WiringContract::UNRESTRICTED,
-        validate_config: test_validate_config,
+        resolve_config: test_resolve_config,
+        snapshot_policy: ConfigSnapshotPolicy::Omit,
     },
 ];
 
@@ -504,6 +527,7 @@ fn test_runtime_with_log_filter_and_topology(
         topology,
         log_filter,
         log_filter_handle,
+        ControllerExtensionRegistry::empty(),
     )
 }
 
@@ -513,6 +537,7 @@ fn test_runtime_with_supplied_log_filter_and_topology(
     topology: NumaTopology,
     log_filter: RuntimeLogFilter,
     log_filter_handle: RuntimeLogFilterHandle,
+    controller_extensions: ControllerExtensionRegistry,
 ) -> (
     Arc<ControllerRuntime<()>>,
     RuntimeLogFilterHandle,
@@ -528,13 +553,33 @@ fn test_runtime_with_supplied_log_filter_and_topology(
         Controller::<()>::declare_topics(config).expect("declared topics should be valid");
     let (memory_pressure_tx, _memory_pressure_rx) =
         tokio::sync::watch::channel(MemoryPressureChanged::initial());
+    let candidate = Controller::new(pipeline_factory)
+        .resolve_engine_candidate(config.clone(), &controller_extensions)
+        .expect("test engine config resolves");
+    let component_configs: HashMap<_, _> = candidate
+        .pipelines
+        .iter()
+        .chain(std::iter::once(&candidate.observability))
+        .map(|pipeline| {
+            (
+                PipelineKey::new(
+                    pipeline.policy.pipeline_group_id.clone(),
+                    pipeline.policy.pipeline_id.clone(),
+                ),
+                pipeline.runtime.clone(),
+            )
+        })
+        .collect();
     let context = pipeline_factory
-        .compile_initial_context(&config.resolve())
+        .compile_initial_context_with_components(&config.resolve(), &component_configs)
         .expect("test context bindings should compile");
+    let observability_component_config = candidate.observability.runtime.clone();
 
     (
         Arc::new(ControllerRuntime::new(
             pipeline_factory,
+            controller_extensions,
+            candidate.controller_extensions.clone(),
             ControllerContext::new(registry),
             observed_state_store,
             observed_state_handle,
@@ -542,6 +587,8 @@ fn test_runtime_with_supplied_log_filter_and_topology(
             metrics_reporter,
             declared_topics,
             context.runtime_requirements,
+            observability_component_config,
+            component_configs,
             context.bindings,
             available_core_ids(),
             topology,
@@ -550,7 +597,8 @@ fn test_runtime_with_supplied_log_filter_and_topology(
             log_filter_handle.clone(),
             Duration::from_secs(1),
             memory_pressure_tx,
-            config.clone(),
+            candidate.source,
+            candidate.safe_config_snapshot,
         )),
         log_filter_handle,
         log_filter,
@@ -811,8 +859,13 @@ fn register_committed_pipeline(
     let listener_group_snapshot = Arc::new(listener_group::snapshot_for_pipeline(
         &resolved, &placement, 0,
     ));
+    let runtime_resolved = runtime
+        .pipeline_factory
+        .resolve_pipeline_config(&resolved.pipeline)
+        .expect("component configs resolve");
     let deployment = LogicalPipelineDeployment::new(
         resolved,
+        runtime_resolved,
         context_bindings,
         generation,
         placement,
@@ -3282,9 +3335,9 @@ fn panic_report_formats_summary_and_detail() {
         Some(3),
     );
 
-    assert_eq!(report.summary_message(), "rollout worker panicked: boom");
+    assert_eq!(report.summary_message(), "rollout worker panicked");
     let detail = report.detail_message();
-    assert!(detail.contains("rollout worker panicked: boom"));
+    assert!(detail.contains("rollout worker panicked"));
     assert!(detail.contains("thread_name=rollout-g1-p1"));
     assert!(detail.contains("thread_id=17"));
     assert!(detail.contains("core_id=3"));
@@ -3292,16 +3345,12 @@ fn panic_report_formats_summary_and_detail() {
 }
 
 /// Scenario: a panic is raised with a non-string payload.
-/// Guarantees: the captured panic summary stays readable and avoids the older
-/// generic placeholder text.
+/// Guarantees: the captured summary identifies the worker without retaining any payload value.
 #[test]
 fn panic_report_non_string_payload_has_useful_fallback() {
     let report = PanicReport::capture("shutdown worker", Box::new(7usize), None, None, None);
 
-    assert_eq!(
-        report.summary_message(),
-        "shutdown worker panicked: non-string panic payload"
-    );
+    assert_eq!(report.summary_message(), "shutdown worker panicked");
     assert!(
         !report
             .summary_message()
@@ -3366,7 +3415,7 @@ connections:
         status
             .failure_reason
             .as_deref()
-            .is_some_and(|message| message.contains("rollout worker panicked: boom"))
+            .is_some_and(|message| message.contains("rollout worker panicked"))
     );
     assert!(
         status
@@ -3936,7 +3985,7 @@ fn create_group_adds_empty_group_to_live_config() {
     let group_id: PipelineGroupId = "g1".to_string().into();
     assert_eq!(created, group);
     assert_eq!(runtime.group_details_snapshot(&group_id), Some(group));
-    let snapshot = runtime.engine_config_snapshot();
+    let snapshot = runtime.safe_config_snapshot();
     assert!(snapshot.groups.contains_key(&group_id));
     assert!(snapshot.groups[&group_id].pipelines.is_empty());
 }
@@ -3999,7 +4048,7 @@ fn delete_pipeline_removes_stopped_pipeline_from_live_config() {
 
     assert_eq!(status.state, "succeeded");
     assert!(status.shutdown.is_none());
-    let snapshot = runtime.engine_config_snapshot();
+    let snapshot = runtime.safe_config_snapshot();
     let group_id: PipelineGroupId = "g1".into();
     let pipeline_id: PipelineId = "p1".into();
     assert!(snapshot.groups.contains_key(&group_id));
@@ -4548,7 +4597,7 @@ fn delete_pipeline_rejects_missing_targets() {
         .expect_err("missing pipeline should be rejected");
     assert_eq!(missing_pipeline, ControlPlaneError::PipelineNotFound);
 
-    let snapshot = runtime.engine_config_snapshot();
+    let snapshot = runtime.safe_config_snapshot();
     assert!(
         snapshot.groups[&PipelineGroupId::from("g1")]
             .pipelines
@@ -4681,7 +4730,7 @@ fn delete_group_removes_empty_group_from_live_config() {
     assert!(status.pipelines.is_empty());
     assert!(
         !runtime
-            .engine_config_snapshot()
+            .safe_config_snapshot()
             .groups
             .contains_key(&PipelineGroupId::from("g1"))
     );
@@ -4725,7 +4774,7 @@ groups:
     );
     assert!(
         !runtime
-            .engine_config_snapshot()
+            .safe_config_snapshot()
             .groups
             .contains_key(&PipelineGroupId::from("g1"))
     );
@@ -4771,7 +4820,7 @@ fn reconcile_engine_config_reports_noop_for_matching_live_config() {
     assert_eq!(status.changes[0].state, "succeeded");
     assert!(
         runtime
-            .engine_config_snapshot()
+            .safe_config_snapshot()
             .groups
             .contains_key(&PipelineGroupId::from("g1"))
     );
@@ -4885,6 +4934,7 @@ fn initial_config_activation_applies_log_level_before_noop_reconciliation() {
             NumaTopology::unknown(),
             log_filter,
             log_filter_handle,
+            ControllerExtensionRegistry::empty(),
         );
 
     assert_eq!(log_filter_handle.effective_level().as_str(), "info");
@@ -4942,7 +4992,7 @@ fn reconcile_engine_config_deletes_missing_resources_by_default() {
     );
     assert!(
         !runtime
-            .engine_config_snapshot()
+            .safe_config_snapshot()
             .groups
             .contains_key(&PipelineGroupId::from("g1"))
     );
@@ -5078,7 +5128,7 @@ fn reconcile_engine_config_preserves_missing_resources_when_requested() {
     assert_eq!(status.state, EngineConfigReconcileState::Succeeded);
     assert_eq!(status.changes.len(), 1);
     assert_eq!(status.changes[0].action, ConfigChangeAction::Noop);
-    let snapshot = runtime.engine_config_snapshot();
+    let snapshot = runtime.safe_config_snapshot();
     for pipeline_id in ["p1", "p2"] {
         assert!(
             snapshot.groups[&PipelineGroupId::from("g1")]
@@ -5123,8 +5173,37 @@ fn reconcile_engine_config_does_not_publish_scaffold_on_conflict() {
         .expect_err("active rollout should reject full-config reconciliation");
 
     assert_eq!(err, ControlPlaneError::RolloutConflict);
-    assert!(runtime.engine_config_snapshot().engine.custom.is_empty());
+    assert!(runtime.safe_config_snapshot().engine.custom.is_empty());
     assert_eq!(log_filter_handle.effective_level().as_str(), "warn");
+}
+
+/// Scenario: An engine custom value contains arbitrary secret-bearing data.
+/// Guarantees: Source retains it privately, effective output omits it, and replay is rejected.
+#[test]
+fn engine_custom_values_are_omitted_and_safe_snapshot_is_not_replayable() {
+    let mut config = empty_engine_config();
+    _ = config.engine.custom.insert(
+        "plugin".to_owned(),
+        serde_json::json!({"credential": "never-export-this"}),
+    );
+    let runtime = test_runtime(&config);
+
+    assert_eq!(runtime.source_config_snapshot(), config);
+    let safe_config_snapshot = runtime.safe_config_snapshot();
+    assert_eq!(safe_config_snapshot.engine.custom["plugin"], OMITTED_VALUE);
+    assert!(
+        !serde_json::to_string(&safe_config_snapshot)
+            .unwrap()
+            .contains("never-export-this")
+    );
+
+    let error = Controller::<()>::new(&TEST_PIPELINE_FACTORY)
+        .resolve_engine_candidate(
+            safe_config_snapshot.as_config().clone(),
+            &ControllerExtensionRegistry::empty(),
+        )
+        .expect_err("safe config snapshots must not be accepted as source config");
+    assert!(error.to_string().contains("snapshot-only marker"));
 }
 
 /// Scenario: full-config reconciliation would change an existing topic
@@ -5204,7 +5283,7 @@ groups:
         }
         other => panic!("unexpected error: {other:?}"),
     }
-    assert_eq!(runtime.engine_config_snapshot(), config);
+    assert_eq!(runtime.source_config_snapshot(), config);
 }
 
 #[test]
@@ -5288,7 +5367,7 @@ groups:
         }
         other => panic!("unexpected error: {other:?}"),
     }
-    assert_eq!(runtime.engine_config_snapshot(), config);
+    assert_eq!(runtime.source_config_snapshot(), config);
 }
 
 #[test]
@@ -5473,7 +5552,7 @@ groups:
         }
         other => panic!("unexpected error: {other:?}"),
     }
-    assert_eq!(runtime.engine_config_snapshot(), config);
+    assert_eq!(runtime.source_config_snapshot(), config);
 }
 
 /// Scenario: a detached shutdown worker panics before it reaches the normal
@@ -5510,7 +5589,7 @@ fn shutdown_worker_panic_marks_failed_and_clears_conflict() {
         status
             .failure_reason
             .as_deref()
-            .is_some_and(|message| message.contains("shutdown worker panicked: boom"))
+            .is_some_and(|message| message.contains("shutdown worker panicked"))
     );
     assert!(
         status
@@ -7187,7 +7266,7 @@ fn runtime_thread_panic_populates_error_source_in_observed_status() {
         "Pipeline encountered a runtime error."
     );
     assert_eq!(error["error_kind"], "panic");
-    assert_eq!(error["message"], "runtime thread panicked: boom");
+    assert_eq!(error["message"], "runtime thread panicked");
     let source = error["source"]
         .as_str()
         .expect("runtime panic source should be serialized");
@@ -7203,7 +7282,7 @@ static LAUNCH_PROCEED: std::sync::atomic::AtomicBool = std::sync::atomic::Atomic
 fn blocking_create(
     _pipeline_ctx: PipelineContext,
     node: otel_arrow_dfe_engine::node::NodeId,
-    node_config: Arc<NodeUserConfig>,
+    node_config: Arc<ResolvedNodeConfig>,
     receiver_config: &ReceiverConfig,
     _capabilities: &otel_arrow_dfe_engine::capability::registry::Capabilities,
 ) -> Result<ReceiverWrapper<()>, otel_arrow_dfe_config::error::Error> {
@@ -7216,7 +7295,7 @@ fn blocking_create(
     Ok(ReceiverWrapper::local(
         RecoveryTestReceiver,
         node,
-        node_config,
+        node_config.safe_config_snapshot(),
         receiver_config,
     ))
 }
@@ -7236,14 +7315,16 @@ async fn has_active_instances_checks_multiple_state_fields() {
             name: "urn:test:receiver:example",
             create: blocking_create,
             wiring_contract: WiringContract::UNRESTRICTED,
-            validate_config: test_validate_config,
+            resolve_config: test_resolve_config,
+            snapshot_policy: ConfigSnapshotPolicy::Omit,
             context_declarations: None,
         },
         ReceiverFactory {
             name: "urn:otel:receiver:internal_telemetry",
             create: test_receiver_create,
             wiring_contract: WiringContract::UNRESTRICTED,
-            validate_config: test_validate_config,
+            resolve_config: test_resolve_config,
+            snapshot_policy: ConfigSnapshotPolicy::Omit,
             context_declarations: None,
         },
     ]));
@@ -8237,6 +8318,7 @@ fn state_dir_changes_rejected_by_control_plane_entry_points() {
                 None,
                 None,
                 None,
+                None,
             ) {
                 Err(error) => error,
                 Ok(_) => panic!("rollout must reject state directory mutation"),
@@ -8250,7 +8332,7 @@ fn state_dir_changes_rejected_by_control_plane_entry_points() {
                     "{error:?}"
                 );
             }
-            assert_eq!(runtime.engine_config_snapshot(), config);
+            assert_eq!(runtime.source_config_snapshot(), config);
             let state = runtime.state.lock().unwrap();
             assert_eq!(state.config_revision, revision);
             assert!(state.active_rollouts.is_empty());
@@ -8291,7 +8373,7 @@ fn unchanged_state_dir_allows_control_plane_operations() {
     };
     let plan = runtime.prepare_rollout_plan("g1", "p1", &request).unwrap();
     assert_eq!(plan.action, RolloutAction::NoOp);
-    assert_eq!(runtime.engine_config_snapshot(), config);
+    assert_eq!(runtime.source_config_snapshot(), config);
 }
 
 /// Scenario: startup configures a root on an unsupported platform.

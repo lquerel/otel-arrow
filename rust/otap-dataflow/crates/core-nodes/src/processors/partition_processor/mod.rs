@@ -15,8 +15,13 @@ use std::sync::Arc;
 
 use async_trait::async_trait;
 use linkme::distributed_slice;
+#[cfg(test)]
+use otel_arrow_dfe_config::node::NodeUserConfig;
 use otel_arrow_dfe_config::transport_headers::{TransportHeader, ValueKind};
-use otel_arrow_dfe_config::{SignalType, context::ContextEntryName, node::NodeUserConfig};
+use otel_arrow_dfe_config::{SignalType, context::ContextEntryName};
+use otel_arrow_dfe_engine::component_config::{
+    ConfigSnapshotPolicy, ResolvedComponentConfig, ResolvedNodeConfig,
+};
 use otel_arrow_dfe_engine::config::ProcessorConfig;
 use otel_arrow_dfe_engine::context_declaration::{
     ConfigNodeContextDeclaration, ContextDeclaration, ContextDeclarationProvider, ContextDomain,
@@ -59,15 +64,18 @@ pub const PARTITION_PROCESSOR_URN: &str = "urn:otel:processor:partition";
 fn create_partition_processor(
     pipeline_ctx: PipelineContext,
     node_id: NodeId,
-    user_config: Arc<NodeUserConfig>,
+    user_config: Arc<ResolvedNodeConfig>,
     processor_config: &ProcessorConfig,
     _capabilities: &otel_arrow_dfe_engine::capability::registry::Capabilities,
 ) -> Result<ProcessorWrapper<OtapPdata>, otel_arrow_dfe_config::error::Error> {
-    let processor = PartitionProcessor::from_config(&pipeline_ctx, &user_config.config)?;
+    let processor = PartitionProcessor::from_typed_config(
+        &pipeline_ctx,
+        (*user_config.component_config::<Config>()?).clone(),
+    )?;
     Ok(ProcessorWrapper::local(
         processor,
         node_id,
-        user_config,
+        user_config.safe_config_snapshot(),
         processor_config,
     ))
 }
@@ -80,7 +88,7 @@ pub static PARTITION_PROCESSOR_FACTORY: ProcessorFactory<OtapPdata> = ProcessorF
     create: create_partition_processor,
     context_declarations: Some(ContextDeclarationProvider::from_typed_config::<Config>()),
     wiring_contract: WiringContract::UNRESTRICTED,
-    validate_config: |value| {
+    resolve_config: |value| {
         let config: Config = serde_json::from_value(value.clone()).map_err(|e| {
             otel_arrow_dfe_config::error::Error::InvalidUserConfig {
                 error: e.to_string(),
@@ -89,13 +97,13 @@ pub static PARTITION_PROCESSOR_FACTORY: ProcessorFactory<OtapPdata> = ProcessorF
 
         // try to parse and plan the OPL expression - this will provide early feedback
         // about invalid expressions in user's config
-        match config.partition_by {
+        match &config.partition_by {
             PartitionByConfig::OplExpression(opl_expression) => {
                 let (expr, function_defs) =
-                    OplParser::parse_expr_with_options(&opl_expression, default_parser_options())
+                    OplParser::parse_expr_with_options(opl_expression, default_parser_options())
                         .map_err(|e| otel_arrow_dfe_config::error::Error::InvalidUserConfig {
-                        error: format!("Could not parse OPL Expression: {e:?}"),
-                    })?;
+                            error: format!("Could not parse OPL Expression: {e:?}"),
+                        })?;
 
                 let _ = Partitioner::try_new(expr, function_defs).map_err(|e| {
                     otel_arrow_dfe_config::error::Error::InvalidUserConfig {
@@ -104,8 +112,9 @@ pub static PARTITION_PROCESSOR_FACTORY: ProcessorFactory<OtapPdata> = ProcessorF
                 })?;
             }
         };
-        Ok(())
+        Ok(ResolvedComponentConfig::omitted(config))
     },
+    snapshot_policy: ConfigSnapshotPolicy::Omit,
 };
 
 /// partition processor.
@@ -118,17 +127,10 @@ pub struct PartitionProcessor {
 }
 
 impl PartitionProcessor {
-    fn from_config(
+    fn from_typed_config(
         pipeline_ctx: &PipelineContext,
-        config: &Value,
+        config: Config,
     ) -> Result<Self, otel_arrow_dfe_config::error::Error> {
-        let config: Config = serde_json::from_value(config.clone()).map_err(|e| {
-            otel_arrow_dfe_config::error::Error::InvalidUserConfig {
-                error: format!("Failed to parse PartitionProcessor config: {e}"),
-            }
-        })?;
-        config.validate_context_declarations(pipeline_ctx)?;
-
         let partitioner = match config.partition_by {
             PartitionByConfig::OplExpression(opl_expression) => {
                 let (expr, function_defs) =
@@ -596,7 +598,7 @@ mod test {
         create_partition_processor(
             pipeline_context,
             node_id,
-            Arc::new(node_config),
+            PARTITION_PROCESSOR_FACTORY.resolve_node_config(node_config)?,
             runtime.config(),
             &Capabilities::empty(),
         )

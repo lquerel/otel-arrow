@@ -5,9 +5,11 @@
 
 use async_trait::async_trait;
 use linkme::distributed_slice;
-use otel_arrow_dfe_config::node::NodeUserConfig;
 use otel_arrow_dfe_engine::MessageSourceLocalEffectHandlerExtension;
 use otel_arrow_dfe_engine::ProcessorFactory;
+use otel_arrow_dfe_engine::component_config::{
+    ConfigSnapshotPolicy, ResolvedNodeConfig, resolve_no_config,
+};
 use otel_arrow_dfe_engine::config::ProcessorConfig;
 use otel_arrow_dfe_engine::context::PipelineContext;
 use otel_arrow_dfe_engine::control::NodeControlMsg;
@@ -44,14 +46,14 @@ pub static FANOUT_PROCESSOR_FACTORY: ProcessorFactory<OtapPdata> = ProcessorFact
     create:
         |pipeline_ctx: PipelineContext,
          node: NodeId,
-         node_config: Arc<NodeUserConfig>,
+         node_config: Arc<ResolvedNodeConfig>,
          processor_config: &ProcessorConfig,
          _capabilities: &otel_arrow_dfe_engine::capability::registry::Capabilities| {
             let metrics = FanoutMetrics::register(&pipeline_ctx);
             Ok(ProcessorWrapper::local(
                 FanoutProcessor { metrics },
                 node,
-                node_config,
+                node_config.safe_config_snapshot(),
                 processor_config,
             ))
         },
@@ -59,7 +61,8 @@ pub static FANOUT_PROCESSOR_FACTORY: ProcessorFactory<OtapPdata> = ProcessorFact
     wiring_contract: otel_arrow_dfe_engine::wiring_contract::WiringContract {
         output_fanout: otel_arrow_dfe_engine::wiring_contract::OutputFanoutRule::AtMostPerOutput(1),
     },
-    validate_config: otel_arrow_dfe_config::validation::no_config,
+    resolve_config: resolve_no_config,
+    snapshot_policy: ConfigSnapshotPolicy::TypedSafe,
 };
 
 #[async_trait(?Send)]

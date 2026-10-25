@@ -50,6 +50,9 @@ use otel_arrow_dfe_config::error::Error as ConfigError;
 use otel_arrow_dfe_config::node::NodeUserConfig;
 use otel_arrow_dfe_config::{SignalFormat, SignalType};
 use otel_arrow_dfe_engine::MessageSourceLocalEffectHandlerExtension;
+use otel_arrow_dfe_engine::component_config::{
+    ConfigSnapshotPolicy, ResolvedComponentConfig, ResolvedNodeConfig,
+};
 use otel_arrow_dfe_engine::{
     ConsumerEffectHandlerExtension, Interests, LocalWakeupRequirements,
     ProcessorRuntimeRequirements, ProducerEffectHandlerExtension,
@@ -130,7 +133,7 @@ const fn signal_from_wakeup_slot(slot: WakeupSlot) -> Option<(SignalFormat, Sign
 }
 
 /// Min/max size for a specific format
-#[derive(Debug, Clone, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct FormatConfig {
     /// Lower bound of the acceptable batch size. Measured in the quantity
     /// indicated by `sizer`. When pending data reaches this threshold a
@@ -226,7 +229,7 @@ trait Batcher<T: OtapPayloadHelpers> {
 }
 
 /// Batch processor configuration.
-#[derive(Debug, Clone, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct Config {
     /// The OTAP configuration.
     #[serde(default = "default_otap")]
@@ -719,6 +722,14 @@ impl BatchProcessor {
         config.validate()?;
         config.warn_if_forwarding_everything();
 
+        Self::build_from_config(config, metrics)
+    }
+
+    /// Builds the processor from a factory-resolved configuration.
+    pub fn build_from_config(
+        config: Config,
+        metrics: MetricSet<BatchProcessorMetrics>,
+    ) -> Result<Self, ConfigError> {
         let otap_signals: Option<SignalBatches<OtapArrowRecords>> = config
             .format
             .has_otap()
@@ -1367,15 +1378,18 @@ impl BatchProcessor {
 pub fn create_otap_batch_processor(
     pipeline_ctx: otel_arrow_dfe_engine::context::PipelineContext,
     node: NodeId,
-    node_config: Arc<NodeUserConfig>,
+    node_config: Arc<ResolvedNodeConfig>,
     processor_config: &ProcessorConfig,
 ) -> Result<ProcessorWrapper<OtapPdata>, ConfigError> {
     let metrics = BatchProcessorMetrics::register(&pipeline_ctx);
-    let proc = BatchProcessor::build_from_json(&node_config.config, metrics)?;
+    let proc = BatchProcessor::build_from_config(
+        (*node_config.component_config::<Config>()?).clone(),
+        metrics,
+    )?;
     Ok(ProcessorWrapper::local(
         proc,
         node,
-        node_config,
+        node_config.safe_config_snapshot(),
         processor_config,
     ))
 }
@@ -1764,14 +1778,23 @@ pub static OTAP_BATCH_PROCESSOR_FACTORY: otel_arrow_dfe_engine::ProcessorFactory
         create:
             |pipeline_ctx: otel_arrow_dfe_engine::context::PipelineContext,
              node: NodeId,
-             node_config: Arc<NodeUserConfig>,
+             node_config: Arc<ResolvedNodeConfig>,
              proc_cfg: &ProcessorConfig,
              _capabilities: &otel_arrow_dfe_engine::capability::registry::Capabilities| {
                 create_otap_batch_processor(pipeline_ctx, node, node_config, proc_cfg)
             },
         context_declarations: None,
         wiring_contract: otel_arrow_dfe_engine::wiring_contract::WiringContract::UNRESTRICTED,
-        validate_config: otel_arrow_dfe_config::validation::validate_typed_config::<Config>,
+        resolve_config: |value| {
+            let config: Config = serde_json::from_value(value.clone()).map_err(|error| {
+                ConfigError::InvalidUserConfig {
+                    error: format!("invalid OTAP batch processor config: {error}"),
+                }
+            })?;
+            config.validate()?;
+            ResolvedComponentConfig::typed_safe(config)
+        },
+        snapshot_policy: ConfigSnapshotPolicy::TypedSafe,
     };
 
 #[cfg(test)]
@@ -1810,8 +1833,30 @@ mod tests {
     };
     use otel_arrow_dfe_telemetry::registry::TelemetryRegistryHandle;
     use serde_json::json;
-    use std::sync::Arc;
     use std::time::{Duration, Instant};
+
+    /// Scenario: batch configuration omits config instead of supplying an explicit empty object.
+    /// Guarantees: factory resolution applies identical typed defaults, snapshots, and runtime equivalence.
+    #[test]
+    fn omitted_config_resolves_to_batch_defaults() {
+        let omitted = serde_yaml::from_str("type: processor:batch").unwrap();
+        let explicit = serde_yaml::from_str("type: processor:batch\nconfig: {}").unwrap();
+        let omitted = OTAP_BATCH_PROCESSOR_FACTORY
+            .resolve_node_config(omitted)
+            .unwrap();
+        let explicit = OTAP_BATCH_PROCESSOR_FACTORY
+            .resolve_node_config(explicit)
+            .unwrap();
+        assert_eq!(
+            *omitted.component_config::<Config>().unwrap(),
+            Config::default()
+        );
+        assert_eq!(
+            omitted.safe_config_snapshot(),
+            explicit.safe_config_snapshot()
+        );
+        assert_eq!(omitted, explicit);
+    }
 
     /// Helper to create test pipeline context
     fn create_test_pipeline_context() -> (
@@ -1849,9 +1894,11 @@ mod tests {
         let mut node_config = NodeUserConfig::new_processor_config(OTAP_BATCH_PROCESSOR_URN);
         node_config.config = cfg;
         let proc_config = ProcessorConfig::new("batch");
-        let proc =
-            create_otap_batch_processor(pipeline_ctx, node, Arc::new(node_config), &proc_config)
-                .expect("create processor");
+        let node_config = OTAP_BATCH_PROCESSOR_FACTORY
+            .resolve_node_config(node_config)
+            .expect("batch processor config must resolve");
+        let proc = create_otap_batch_processor(pipeline_ctx, node, node_config, &proc_config)
+            .expect("create processor");
 
         let phase = rt.set_processor(proc);
 
@@ -1897,7 +1944,9 @@ mod tests {
         );
         nuc.add_output("main_output");
         nuc.set_default_output("main_output");
-        let nuc = Arc::new(nuc);
+        let nuc = OTAP_BATCH_PROCESSOR_FACTORY
+            .resolve_node_config(nuc)
+            .expect("batch processor config must resolve");
 
         // Create processor via factory and ensure the provided NodeUserConfig is preserved
         let proc_cfg = ProcessorConfig::new("batch");

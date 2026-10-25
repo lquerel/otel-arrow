@@ -3,10 +3,10 @@
 
 //! Validation helpers for node configuration.
 //!
-//! These helpers are intended for use with the `validate_config` field on
-//! factory structs ([`ReceiverFactory`], [`ProcessorFactory`], [`ExporterFactory`]).
+//! These helpers support component resolver implementations that reject
+//! submitted configuration before constructing a resolved runtime value.
 //!
-//! **Scope:** `validate_config` performs *static* validation only -- it checks
+//! **Scope:** validation performs *static* checks -- it verifies
 //! that the config value can be deserialized into the expected type. It does
 //! **not** detect runtime issues such as port conflicts, unreachable endpoints,
 //! missing files, or other conditions that only manifest when the engine starts.
@@ -26,13 +26,12 @@ pub fn deserialize_typed_config<T: serde::de::DeserializeOwned>(
 /// Validates that a JSON config value can be deserialized into the expected
 /// configuration type `T`.
 ///
-/// This is the most common validator: pass it as a monomorphised function
-/// pointer and the compiler ensures every component with a typed `Config`
-/// struct gets deserialization-level validation for free.
+/// Resolver implementations may use this helper for an auxiliary static check.
+/// Factory registrations must return their typed value through a resolver.
 ///
 /// # Example
 /// ```ignore
-/// validate_config: validate_typed_config::<MyComponentConfig>,
+/// validate_typed_config::<AuxiliaryConfig>(raw)?;
 /// ```
 pub fn validate_typed_config<T: serde::de::DeserializeOwned>(
     raw: &serde_json::Value,
@@ -43,13 +42,13 @@ pub fn validate_typed_config<T: serde::de::DeserializeOwned>(
 
 /// Validator for components that accept **no** user configuration.
 ///
-/// Accepts `Value::Null` (config key omitted / set to `null`) and empty
+/// Accepts `Value::Null` (config explicitly set to `null`) and empty
 /// objects `{}`. Rejects anything else so that typos or misplaced config
 /// blocks are caught early.
 ///
 /// # Example
 /// ```ignore
-/// validate_config: no_config,
+/// no_config(raw)?;
 /// ```
 pub fn no_config(config: &serde_json::Value) -> Result<(), Error> {
     match config {

@@ -45,6 +45,15 @@ admin control-plane adapter and by detached rollout/shutdown workers. Pipeline
 threads receive a `Weak<ControllerRuntime<_>>` so they can report exits without
 extending the controller lifetime.
 
+The controller stores source configuration, factory-resolved typed
+runtime state, and a `SafeConfigSnapshot` as separate but coordinated
+representations. Planning resolves all three before admission, runtime
+equivalence uses the typed state, and Admin and OpAMP reads return committed
+source, including sensitive values. Safe snapshots remain available for future
+configuration events, not these trusted management interfaces. See
+[Configuration Framework Design](../../../../docs/configuration-resolution.md)
+for the representation, reconciliation, and privacy contracts.
+
 ## Lifecycle Model
 
 Live control separates three related concepts:
@@ -78,10 +87,11 @@ all active instances.
   Observed-state compaction is invoked only after active rollout/shutdown work
   no longer needs generation-specific entries.
 - The current consistency scope is one logical pipeline. Planning validates a
-  candidate against a cloned full config snapshot, but commit patches only that
-  pipeline into the latest live config. This intentionally does not provide
-  whole-config serializability across concurrent operations on different
-  logical pipelines.
+  candidate against a cloned full source config and resolves the complete
+  candidate, but commit patches only that pipeline's source, safe snapshot, and
+  resolved records into the latest live state. This intentionally does not
+  provide whole-config serializability across concurrent operations on
+  different logical pipelines.
 - Terminal rollout and shutdown records are retained in memory with both a
   per-logical-pipeline cap and a TTL. This keeps recent admin lookups useful
   without unbounded history growth.

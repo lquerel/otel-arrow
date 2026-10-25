@@ -9,9 +9,11 @@ use async_trait::async_trait;
 use linkme::distributed_slice;
 use otel_arrow_dfe_config::NodeId as NodeName;
 use otel_arrow_dfe_config::error::Error as ConfigError;
-use otel_arrow_dfe_config::node::NodeUserConfig;
 use otel_arrow_dfe_config::transport_headers::TransportHeaders;
 use otel_arrow_dfe_engine::ExporterFactory;
+use otel_arrow_dfe_engine::component_config::{
+    ConfigSnapshotPolicy, ResolvedNodeConfig, resolve_typed_config,
+};
 use otel_arrow_dfe_engine::config::ExporterConfig;
 use otel_arrow_dfe_engine::context::PipelineContext;
 use otel_arrow_dfe_engine::context_declaration::{
@@ -34,7 +36,7 @@ use otel_arrow_dfe_pdata::proto::OtlpProtoMessage;
 use otel_arrow_dfe_telemetry::metrics::MetricSet;
 use otel_arrow_dfe_telemetry::otel_error;
 use otel_arrow_dfe_telemetry_macros::metric_set;
-use serde::Deserialize;
+use serde::{Deserialize, Serialize};
 use std::collections::HashSet;
 use std::sync::Arc;
 use tokio::time::{Duration, Instant};
@@ -46,7 +48,7 @@ const DEFAULT_IDLE_TIMEOUT_SECS: u64 = 3;
 /// URN that identifies the validation exporter within OTAP pipelines.
 pub const VALIDATION_EXPORTER_URN: &str = "urn:otel:exporter:validation";
 
-#[derive(Debug, Deserialize)]
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 struct ValidationExporterConfig {
     suv_input: NodeName,
     #[serde(default)]
@@ -110,13 +112,16 @@ pub static VALIDATION_EXPORTER_FACTORY: ExporterFactory<OtapPdata> = ExporterFac
     create:
         |pipeline_ctx: PipelineContext,
          node: NodeId,
-         node_config: Arc<NodeUserConfig>,
+         node_config: Arc<ResolvedNodeConfig>,
          exporter_config: &ExporterConfig,
          _capabilities: &otel_arrow_dfe_engine::capability::registry::Capabilities| {
             Ok(ExporterWrapper::local(
-                ValidationExporter::from_config(pipeline_ctx, &node_config.config)?,
+                ValidationExporter::from_typed_config(
+                    pipeline_ctx,
+                    (*node_config.component_config::<ValidationExporterConfig>()?).clone(),
+                )?,
                 node,
-                node_config,
+                node_config.safe_config_snapshot(),
                 exporter_config,
             ))
         },
@@ -124,9 +129,8 @@ pub static VALIDATION_EXPORTER_FACTORY: ExporterFactory<OtapPdata> = ExporterFac
         ValidationExporterConfig,
     >()),
     wiring_contract: otel_arrow_dfe_engine::wiring_contract::WiringContract::UNRESTRICTED,
-    validate_config: otel_arrow_dfe_config::validation::validate_typed_config::<
-        ValidationExporterConfig,
-    >,
+    resolve_config: resolve_typed_config::<ValidationExporterConfig>,
+    snapshot_policy: ConfigSnapshotPolicy::TypedSafe,
 };
 
 impl ConfigNodeContextDeclaration for ValidationExporterConfig {
@@ -210,14 +214,20 @@ impl ValidationExporter {
         pipeline_ctx: PipelineContext,
         config: &serde_json::Value,
     ) -> Result<Self, ConfigError> {
-        let metrics = ValidationExporterMetrics::register(&pipeline_ctx);
         let config: ValidationExporterConfig =
             serde_json::from_value(config.clone()).map_err(|e| {
                 otel_arrow_dfe_config::error::Error::InvalidUserConfig {
                     error: e.to_string(),
                 }
             })?;
-        config.validate_context_declarations(&pipeline_ctx)?;
+        Self::from_typed_config(pipeline_ctx, config)
+    }
+
+    fn from_typed_config(
+        pipeline_ctx: PipelineContext,
+        config: ValidationExporterConfig,
+    ) -> Result<Self, ConfigError> {
+        let metrics = ValidationExporterMetrics::register(&pipeline_ctx);
         let suv_node = pipeline_ctx
             .node_by_name(&config.suv_input)
             .ok_or_else(|| ConfigError::InvalidUserConfig {
@@ -315,6 +325,7 @@ impl Exporter<OtapPdata> for ValidationExporter {
 mod tests {
     use super::*;
     use otel_arrow_dfe_config::ContextEntryName;
+    use otel_arrow_dfe_config::node::NodeUserConfig;
     use otel_arrow_dfe_engine::context_declaration::{
         ContextConsumerSelector, ContextDeclaration, ContextEntrySelector,
     };
@@ -344,6 +355,19 @@ mod tests {
         }
     }
 
+    fn resolved_node_config(config: serde_json::Value) -> ResolvedNodeConfig {
+        let mut source = NodeUserConfig::new_exporter_config(VALIDATION_EXPORTER_URN);
+        source.config = config;
+        let component = (VALIDATION_EXPORTER_FACTORY.resolve_config)(&source.config)
+            .expect("resolved validation exporter config");
+        ResolvedNodeConfig::new(
+            &source,
+            component,
+            VALIDATION_EXPORTER_FACTORY.snapshot_policy,
+        )
+        .expect("resolved validation exporter node")
+    }
+
     /// Scenario: validation checks header names and values.
     /// Guarantees: context reads are sorted and deduplicated.
     #[test]
@@ -366,10 +390,11 @@ mod tests {
             ]
         });
 
+        let resolved = resolved_node_config(config);
         let decls = (VALIDATION_EXPORTER_FACTORY
             .context_declarations
             .expect("validation exporter should declare context")
-            .declarations)(&config)
+            .declarations)(&resolved)
         .unwrap();
         assert_eq!(
             decls,
@@ -397,11 +422,12 @@ mod tests {
             ]
         });
 
+        let resolved = resolved_node_config(config);
         assert_eq!(
             (VALIDATION_EXPORTER_FACTORY
                 .context_declarations
                 .expect("validation exporter should declare context")
-                .declarations)(&config)
+                .declarations)(&resolved)
             .unwrap(),
             [consumes(&["X-Secret"])].into_iter().collect()
         );
@@ -418,10 +444,11 @@ mod tests {
             ]
         });
 
+        let resolved = resolved_node_config(config);
         let decls = (VALIDATION_EXPORTER_FACTORY
             .context_declarations
             .expect("validation exporter should declare context")
-            .declarations)(&config)
+            .declarations)(&resolved)
         .unwrap();
         assert!(decls.is_empty());
     }
