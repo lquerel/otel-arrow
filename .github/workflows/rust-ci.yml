@@ -216,7 +216,7 @@ jobs:
           name: nextest-archive-${{ matrix.os }}
           path: ./rust/${{ matrix.folder }}
       - name: Run tests (partition ${{ matrix.partition }}/3)
-        run: cargo nextest run --profile ci --config-file .config/nextest.toml --archive-file nextest-archive.tar.zst --partition count:${{ matrix.partition }}/3
+        run: cargo nextest run --profile ci --config-file .config/nextest.toml --archive-file nextest-archive.tar.zst --partition slice:${{ matrix.partition }}/3
         working-directory: ./rust/${{ matrix.folder }}
       - name: Write JUnit artifact metadata
         if: always()
@@ -672,7 +672,7 @@ jobs:
           name: nextest-archive-ubuntu-latest
           path: ./rust/otap-dataflow
       - name: Run tests (partition ${{ matrix.partition }}/3)
-        run: cargo nextest run --profile ci --config-file .config/nextest.toml --archive-file nextest-archive.tar.zst --partition count:${{ matrix.partition }}/3
+        run: cargo nextest run --profile ci --config-file .config/nextest.toml --archive-file nextest-archive.tar.zst --partition slice:${{ matrix.partition }}/3
         working-directory: ./rust/otap-dataflow
       - name: Write JUnit artifact metadata
         if: always()
@@ -719,7 +719,7 @@ jobs:
           name: nextest-archive-windows-latest
           path: ./rust/otap-dataflow
       - name: Run tests (partition ${{ matrix.partition }}/3)
-        run: cargo nextest run --profile ci --config-file .config/nextest.toml --archive-file nextest-archive.tar.zst --partition count:${{ matrix.partition }}/3
+        run: cargo nextest run --profile ci --config-file .config/nextest.toml --archive-file nextest-archive.tar.zst --partition slice:${{ matrix.partition }}/3
         working-directory: ./rust/otap-dataflow
       - name: Write JUnit artifact metadata
         if: always()

@@ -1,2 +1,5 @@
 [alias]
 xtask = "run --package xtask --bin xtask --"
+check-fast = "run --package xtask --bin xtask -- check --nextest"
+test-fast = "nextest run --locked --workspace"
+test-docs = "test --locked --workspace --doc"

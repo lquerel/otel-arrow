@@ -485,6 +485,12 @@ module_name_repetitions = "allow"
 broken_intra_doc_links = "deny"
 missing_crate_level_docs = "deny"
 
+[profile.test]
+# Keep file/line backtraces without the full type/variable debug information
+# that makes workspace test binaries and nextest archives unnecessarily large.
+# Use CARGO_PROFILE_TEST_DEBUG=2 when inspecting variables in a debugger.
+debug = "line-tables-only"
+
 [profile.release]
 debug = "line-tables-only"  # minimum required for profiling
 

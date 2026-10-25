@@ -22,11 +22,42 @@ Use the xtask commands below depending on the stage of development:
   validation suite: structure checks, formatting, clippy on `--all-targets`,
   and `cargo test --workspace`.
 
-For this workspace, we keep `cargo test --workspace` as the default full test
-runner instead of `nextest`. In local measurements, `nextest` was slower for
-the full check path, likely because many of the longest tests are concentrated
-in a few large integration-style binaries, so the extra runner orchestration did
-not offset the limited parallelism gains.
+With [cargo-nextest](https://nexte.st/docs/installation/pre-built-binaries/)
+0.9.127 or newer installed, use `cargo check-fast` for the full validation suite
+with nextest for unit/integration tests and Cargo for doctests. This is an alias
+for `cargo xtask check --nextest`; add `--diagnostics` to collect build timings.
+Doctests run even if nextest reports a failure, and either failure makes the
+full check fail. `cargo xtask check` remains available with Cargo as its runner.
+
+For faster feedback while editing one crate, use `cargo check -p CRATE` and
+`cargo nextest run -p CRATE`. To run all workspace tests without the formatting
+and linting steps, use `cargo test-fast` followed by `cargo test-docs`. Nextest
+does not run doctests, so `test-fast` alone is not the full test suite. Keep the
+full check before sending changes; CI also covers the all-features scope.
+
+The nextest configuration starts measured long-running tests first while
+retaining retries, timeouts, and the default CPU-based concurrency. The default
+profile's priorities are inherited by CI. Refresh the exact test-name list from
+JUnit timings when runtimes change. Local warm-suite measurements motivated
+this scheduling choice; performance on CI's smaller, partitioned workers should
+be measured separately.
+
+## Test build artifacts
+
+The test profile uses `debug = "line-tables-only"` to retain backtrace file and
+line information while reducing test binaries, linking work, and CI archive
+I/O. Optimization levels, debug assertions, and overflow checks keep their
+normal test-profile settings. For debugger sessions that need variables and
+types, restore full debug information for that command:
+
+```sh
+CARGO_PROFILE_TEST_DEBUG=2 cargo test -p CRATE
+```
+
+Changing this setting requires a separate artifact rebuild. Keep the Rust
+toolchain, profile, features, and compiler flags consistent between ordinary
+runs to reuse cached artifacts. Compiler caching and linker selection remain
+controlled by your Cargo configuration.
 
 ## Rust toolchain
 

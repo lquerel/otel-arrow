@@ -1,3 +1,6 @@
+# slice partitioning requires nextest 0.9.127 or newer.
+nextest-version = "0.9.127"
+
 [profile.default]
 slow-timeout = { period = "60s", terminate-after = 2 }
 retries = 2
@@ -28,3 +31,113 @@ path = "junit.xml"
 # [[profile.ci.overrides]]
 # filter = "test(/.*timeout.*/)"  # regex pattern
 # retries = 5
+
+# Start the long tail first, for both local runs and the inheriting CI profile.
+# Selected from three warm workspace runs on 2026-10-25: median >= 8 seconds.
+# Keep exact names so newly added tests retain the default priority; refresh this
+# list from JUnit timings when test runtimes change. Retries/timeouts are inherited.
+
+[[profile.default.overrides]]
+filter = """
+package(=otel-arrow-dfe-contrib-nodes) & (
+    test(=exporters::azure_monitor_exporter::gzip_batcher::tests::test_batch_utilization_hex_json_data)
+    | test(=exporters::azure_monitor_exporter::gzip_batcher::tests::test_batch_utilization_json_log_data)
+    | test(=exporters::azure_monitor_exporter::gzip_batcher::tests::test_batch_utilization_tiny_json_entries)
+    | test(=exporters::azure_monitor_exporter::gzip_batcher::tests::test_cef_syslog_batch_dimensions)
+    | test(=exporters::azure_monitor_exporter::gzip_batcher::tests::test_uncompressed_limit_enforced_with_identical_entries)
+    | test(=exporters::kafka_exporter::exporter::test_support::tests::bounded_concurrency_caps_in_flight_and_delivers)
+    | test(=exporters::kafka_exporter::exporter::test_support::tests::cutover_new_exporter_different_broker_starts_before_old_shuts_down)
+    | test(=exporters::kafka_exporter::exporter::test_support::tests::cutover_new_exporter_multi_signal_starts_before_old_shuts_down)
+    | test(=exporters::kafka_exporter::exporter::test_support::tests::cutover_new_exporter_same_broker_distinct_topics_starts_before_old_shuts_down)
+    | test(=exporters::kafka_exporter::exporter::test_support::tests::cutover_new_exporter_same_broker_starts_before_old_shuts_down)
+    | test(=exporters::kafka_exporter::exporter::test_support::tests::default_max_in_flight_preserves_partition_ordering)
+    | test(=exporters::kafka_exporter::exporter::test_support::tests::delivery_success_increments_exported)
+    | test(=exporters::kafka_exporter::exporter::test_support::tests::encoding_failure_increments_failure_metric_per_signal)
+    | test(=exporters::kafka_exporter::exporter::test_support::tests::enqueue_failure_reports_nack_without_tracking)
+    | test(=exporters::kafka_exporter::exporter::test_support::tests::exact_match_allowed_topic_delivered_and_unlisted_nacked)
+    | test(=exporters::kafka_exporter::exporter::test_support::tests::export_counts_one_per_batch_regardless_of_record_count)
+    | test(=exporters::kafka_exporter::exporter::test_support::tests::exports_all_three_signals_to_distinct_topics)
+    | test(=exporters::kafka_exporter::exporter::test_support::tests::exports_logs_gzip_round_trips)
+    | test(=exporters::kafka_exporter::exporter::test_support::tests::exports_logs_lz4_round_trips)
+    | test(=exporters::kafka_exporter::exporter::test_support::tests::exports_logs_snappy_round_trips)
+    | test(=exporters::kafka_exporter::exporter::test_support::tests::exports_logs_with_acks_all_round_trips)
+    | test(=exporters::kafka_exporter::exporter::test_support::tests::exports_logs_with_acks_none_round_trips)
+    | test(=exporters::kafka_exporter::exporter::test_support::tests::exports_logs_zstd_round_trips)
+    | test(=exporters::kafka_exporter::exporter::test_support::tests::final_snapshot_reflects_all_activity_up_to_shutdown)
+    | test(=exporters::kafka_exporter::exporter::test_support::tests::linger_batches_multiple_records_and_preserves_order)
+    | test(=exporters::kafka_exporter::exporter::test_support::tests::null_key_distributes_evenly_across_partitions)
+    | test(=exporters::kafka_exporter::exporter::test_support::tests::otlp_and_otap_payloads_persist_on_broker)
+    | test(=exporters::kafka_exporter::exporter::test_support::tests::oversized_payload_is_permanently_nacked_and_loop_survives)
+    | test(=exporters::kafka_exporter::exporter::test_support::tests::parked_pdata_is_enqueued_before_shutdown)
+    | test(=exporters::kafka_exporter::exporter::test_support::tests::pipelined_export_counts_one_per_batch)
+    | test(=exporters::kafka_exporter::exporter::test_support::tests::pipelined_preserves_per_partition_order_with_keys)
+    | test(=exporters::kafka_exporter::exporter::test_support::tests::pipelined_sends_all_deliver_and_ack)
+    | test(=exporters::kafka_exporter::exporter::test_support::tests::preserves_per_partition_order)
+    | test(=exporters::kafka_exporter::exporter::test_support::tests::prolonged_outage_keeps_pipelined_sends_bounded)
+    | test(=exporters::kafka_exporter::exporter::test_support::tests::reconfigure_bound_change_with_in_flight_batch_loses_nothing)
+    | test(=exporters::kafka_exporter::exporter::test_support::tests::reconfigure_drains_pipelined_in_flight_before_swap)
+    | test(=exporters::kafka_exporter::exporter::test_support::tests::reconfigure_lowers_max_in_flight_and_still_delivers)
+    | test(=exporters::kafka_exporter::exporter::test_support::tests::reconfigure_raises_max_in_flight_and_still_delivers)
+    | test(=exporters::kafka_exporter::exporter::test_support::tests::recovers_across_broker_restart_and_leader_reassignment)
+    | test(=exporters::kafka_exporter::exporter::test_support::tests::recovers_after_prolonged_produce_outage)
+    | test(=exporters::kafka_exporter::exporter::test_support::tests::same_partition_key_maps_to_stable_partition)
+    | test(=exporters::kafka_exporter::exporter::test_support::tests::shutdown_delivers_all_records_without_duplication)
+    | test(=exporters::kafka_exporter::exporter::test_support::tests::shutdown_drains_pipelined_in_flight_sends)
+    | test(=exporters::kafka_exporter::exporter::test_support::tests::shutdown_flushes_buffered_records)
+    | test(=exporters::kafka_exporter::exporter::test_support::tests::terminal_snapshot_exposes_both_metric_sets_with_expected_units)
+    | test(=exporters::kafka_exporter::exporter::test_support::tests::topic_source_attributes_reflect_header_vs_static_routing)
+    | test(=receivers::kafka_receiver::receiver::tests::lifecycle::cutover_new_receiver_distinct_generation_is_not_stalled)
+    | test(=receivers::kafka_receiver::receiver::tests::lifecycle::cutover_new_receiver_same_group_acquires_partition_before_old_drains)
+    | test(=receivers::kafka_receiver::receiver::tests::lifecycle::cutover_new_receiver_starts_before_old_drains_redelivers_uncommitted_multi_partition)
+    | test(=receivers::kafka_receiver::receiver::tests::lifecycle::cutover_new_receiver_starts_before_old_drains_redelivers_uncommitted_single_partition)
+    | test(=receivers::kafka_receiver::receiver::tests::lifecycle::cutover_same_generation_same_instance_id_stalls_new_receiver)
+    | test(=receivers::kafka_receiver::receiver::tests::lifecycle::draining_receiver_does_not_reacquire_partitions_after_new_member_joins)
+    | test(=receivers::kafka_receiver::receiver::tests::lifecycle::draining_receiver_leaves_group_so_peer_gains_partitions)
+    | test(=receivers::kafka_receiver::receiver::tests::offsets::restart_redelivers_uncommitted_offsets)
+    | test(=receivers::kafka_receiver::receiver::tests::rebalance::idempotent_redelivery_under_new_generation_is_reprocessed_not_skipped)
+    | test(=receivers::kafka_receiver::receiver::tests::rebalance::inflight_records_on_revoke_are_redelivered_with_bounded_duplication)
+    | test(=receivers::kafka_receiver::receiver::tests::rebalance::rebalance_cooperative_sticky_retains_owned_partitions)
+    | test(=receivers::kafka_receiver::receiver::tests::rebalance::rebalance_revoke_commits_before_reassign)
+    | test(=receivers::kafka_receiver::receiver::tests::rebalance::rebalance_revoke_then_reassign_preserves_new_records)
+    | test(=receivers::kafka_receiver::receiver::tests::rebalance::rebalance_two_receivers_scale_up_down_distribute_without_loss_or_double_commit)
+    | test(=receivers::kafka_receiver::receiver::tests::rebalance::stale_ack_after_revoke_counts_feedback_after_revocation)
+    | test(=receivers::kafka_receiver::receiver::tests::rebalance::stale_nack_after_revoke_counts_feedback_after_revocation)
+    | test(=receivers::kafka_receiver::receiver::tests::replay::transient_nack_reassignment_to_same_consumer_redelivers_failed_offset)
+    | test(=receivers::kafka_receiver::receiver::tests::replay::transient_nack_rebalance_replays_failed_offset_on_new_owner)
+    | test(=receivers::kafka_receiver::receiver::tests::resilience::broker_outage_then_recovery_resumes_without_loss)
+)
+"""
+priority = 100
+
+[[profile.default.overrides]]
+filter = """
+package(=otel-arrow-dfe-core-nodes) & (
+    test(=receivers::syslog_cef_receiver::telemetry_tests::tcp_drain_flushes_buffered_message)
+)
+"""
+priority = 100
+
+[[profile.default.overrides]]
+filter = """
+package(=otel-arrow-dfe-otap) & (
+    test(=tests::test_tls_reload_integration)
+)
+"""
+priority = 100
+
+[[profile.default.overrides]]
+filter = """
+package(=otel-arrow-dfe-pdata) & (
+    test(=otap::batching_tests::test_simple_batch_metrics)
+    | test(=otap::transform::reindex::tests::test_logs_greedy_violation_no_overflow)
+)
+"""
+priority = 100
+
+[[profile.default.overrides]]
+filter = """
+package(=otel-arrow-dfe-scraper) & (
+    test(=controller::tests::recovery_tests::transient_database_failures_recover_without_pipeline_restart)
+)
+"""
+priority = 100

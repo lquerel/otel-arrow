@@ -3,6 +3,12 @@
 `cargo xtask check --diagnostics` runs the normal full check suite and prints
 an end-of-run summary to help explain where time was spent.
 
+Use `cargo check-fast --diagnostics` (equivalently,
+`cargo xtask check --nextest --diagnostics`) to use nextest for the test step
+and a separate Cargo doctest step. Both runners emit Cargo compilation timing
+reports. The nextest path reports the `test` and `doctest` steps separately;
+the Cargo per-binary timing summary below is available with the default runner.
+
 Use it when:
 
 - `cargo xtask check` feels unexpectedly slow

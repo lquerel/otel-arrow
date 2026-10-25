@@ -235,9 +235,7 @@ impl DiagnosticsCollector {
         if self.test_binaries.is_empty() {
             println!(
                 "  {}",
-                render_warning(
-                    "diagnostics unavailable on stable at per-test level; showing test binaries was not possible from this run"
-                )
+                render_warning("per-binary test timings were not reported by the selected runner")
             );
             return;
         }

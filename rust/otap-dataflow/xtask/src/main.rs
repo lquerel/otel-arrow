@@ -74,7 +74,7 @@ pub fn print_help() -> anyhow::Result<()> {
 Usage: Execute the command using `cargo xtask <task>`, e.g., `cargo xtask check`.
 
 Tasks:
-  - check [--diagnostics]: Run the required full validation suite: structure check, cargo fmt --all, cargo clippy --workspace --all-targets, a no_std build of the crates that support it, and cargo test --workspace. The optional diagnostics flag prints end-of-run timing and hotspot summaries.
+  - check [--diagnostics] [--nextest]: Run the required full validation suite: structure check, cargo fmt --all, cargo clippy --workspace --all-targets, a no_std build of the crates that support it, and workspace tests. By default tests use cargo test --workspace. With --nextest, run nextest and then cargo test --workspace --doc. The optional diagnostics flag prints end-of-run timing and hotspot summaries.
   - quick-check: Run a faster iterative subset: structure check, cargo fmt --all, cargo clippy --workspace --lib --bins --tests, and cargo test --workspace --lib --bins --tests --no-run. This is not a replacement for `cargo xtask check`.
   - check-benches: Lint and compile bench targets only.
   - structure-check: Validate the entire structure of the project.
@@ -89,6 +89,7 @@ Tasks:
 #[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
 struct CheckOptions {
     diagnostics: bool,
+    nextest: bool,
 }
 
 fn parse_check_options(args: &[String]) -> anyhow::Result<CheckOptions> {
@@ -96,6 +97,7 @@ fn parse_check_options(args: &[String]) -> anyhow::Result<CheckOptions> {
     for arg in args {
         match arg.as_str() {
             "--diagnostics" => options.diagnostics = true,
+            "--nextest" => options.nextest = true,
             _ => anyhow::bail!("Unknown `cargo xtask check` argument: {arg}"),
         }
     }
@@ -325,6 +327,9 @@ fn test_all(
     options: CheckOptions,
     diagnostics: Option<&mut diagnostics::DiagnosticsCollector>,
 ) -> anyhow::Result<()> {
+    if options.nextest {
+        return test_with_nextest(options, diagnostics);
+    }
     println!("\u{1F680} Running workspace tests with cargo test...");
     let mut args = vec!["test".to_owned(), "--workspace".to_owned()];
     if options.diagnostics {
@@ -358,6 +363,67 @@ fn test_all(
     result?;
     println!("\u{2705} All tests passed successfully.\n");
     Ok(())
+}
+
+fn test_with_nextest(
+    options: CheckOptions,
+    mut diagnostics: Option<&mut diagnostics::DiagnosticsCollector>,
+) -> anyhow::Result<()> {
+    println!("Running workspace tests with nextest, followed by doctests...");
+    if let Some(collector) = diagnostics.as_deref_mut() {
+        collector.note(
+            "nextest reports individual tests; Cargo's per-binary test timing summary is unavailable with --nextest".to_owned(),
+        );
+    }
+    let result = run_nextest_test_steps(options.diagnostics, |step, args| {
+        let start = Instant::now();
+        if let Some(collector) = diagnostics.as_deref_mut() {
+            let result = run_capture("cargo", args).and_then(|outcome| {
+                collector.record_compile_step(step, &outcome.lines);
+                ensure_success("cargo", outcome.status)
+            });
+            collector.record_step(step, start.elapsed(), step_status_from_result(&result));
+            result
+        } else {
+            let args: Vec<&str> = args.iter().map(String::as_str).collect();
+            run("cargo", &args)
+        }
+    });
+    if result.is_err()
+        && let Some(collector) = diagnostics.as_ref()
+    {
+        collector.print_summary();
+    }
+    result?;
+    println!("All workspace tests and doctests passed successfully.\n");
+    Ok(())
+}
+
+fn run_nextest_test_steps(
+    timings: bool,
+    mut execute: impl FnMut(&'static str, &[String]) -> anyhow::Result<()>,
+) -> anyhow::Result<()> {
+    let mut nextest = vec!["nextest", "run", "--locked", "--workspace"];
+    let mut doctests = vec!["test", "--locked", "--workspace", "--doc"];
+    if timings {
+        nextest.push("--timings");
+        doctests.push("--timings");
+    }
+    let nextest: Vec<String> = nextest.into_iter().map(str::to_owned).collect();
+    let doctests: Vec<String> = doctests.into_iter().map(str::to_owned).collect();
+    let tests_result = execute("test", &nextest);
+    // Doctests remain part of the full check even if unit/integration tests fail.
+    let docs_result = execute("doctest", &doctests);
+    match (tests_result, docs_result) {
+        (Ok(()), Ok(())) => Ok(()),
+        (Err(error), Ok(())) => Err(error.context("nextest workspace tests failed")),
+        (Ok(()), Err(error)) => Err(error.context("workspace doctests failed")),
+        (Err(tests), Err(docs)) => {
+            anyhow::bail!(
+                "nextest workspace tests failed: {tests:#}; workspace doctests failed: {docs:#}"
+            )
+        }
+    }
 }
 
 fn test_quick() -> anyhow::Result<()> {
@@ -486,6 +552,57 @@ fn step_status_from_status(status: ExitStatus) -> diagnostics::StepStatus {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// Scenario: A developer requests nextest and timing diagnostics for a full check.
+    /// Guarantees: Both options are accepted together without changing the default runner.
+    #[test]
+    fn parse_check_options_accepts_nextest_and_diagnostics() {
+        let options = parse_check_options(&["--nextest".into(), "--diagnostics".into()])
+            .expect("both check options should parse");
+        assert!(options.nextest && options.diagnostics);
+        assert!(!parse_check_options(&[]).unwrap().nextest);
+    }
+
+    /// Scenario: Nextest fails during a full check that also needs doctest coverage.
+    /// Guarantees: Doctests still run and the overall check reports the nextest failure.
+    #[test]
+    fn nextest_failure_does_not_skip_doctests() {
+        let mut ran_doctests = false;
+        let result = run_nextest_test_steps(true, |step, args| {
+            assert!(args.iter().any(|arg| arg == "--workspace"));
+            assert!(args.iter().any(|arg| arg == "--timings"));
+            if step == "test" {
+                anyhow::bail!("unit test failure");
+            }
+            ran_doctests = args.iter().any(|arg| arg == "--doc");
+            Ok(())
+        });
+        assert!(ran_doctests);
+        assert!(format!("{:#}", result.unwrap_err()).contains("unit test failure"));
+    }
+
+    /// Scenario: Unit/integration tests pass but a documentation example fails.
+    /// Guarantees: The fast full check cannot report success when doctests fail.
+    #[test]
+    fn nextest_check_propagates_doctest_failure() {
+        let result = run_nextest_test_steps(false, |step, _| {
+            if step == "doctest" {
+                anyhow::bail!("documentation example failure");
+            }
+            Ok(())
+        });
+        assert!(format!("{:#}", result.unwrap_err()).contains("documentation example failure"));
+    }
+
+    /// Scenario: Both the nextest suite and documentation examples fail.
+    /// Guarantees: The full-check error retains both failures for diagnosis.
+    #[test]
+    fn nextest_check_reports_both_failures() {
+        let result = run_nextest_test_steps(false, |step, _| anyhow::bail!("{step} failed"));
+        let message = format!("{:#}", result.unwrap_err());
+        assert!(message.contains("nextest workspace tests failed: test failed"));
+        assert!(message.contains("workspace doctests failed: doctest failed"));
+    }
 
     #[test]
     fn parse_check_options_accepts_diagnostics_flag() {
