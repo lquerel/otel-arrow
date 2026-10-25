@@ -19,6 +19,7 @@ pub use propagation::CompiledHeaderPropagationPolicy;
 use propagation::CompiledHeaderPropagationPolicy as HeaderPropagationPolicy;
 
 use crate::PipelineFactory;
+use crate::component_config::{ResolvedNodeConfig, ResolvedPipelineConfig};
 use crate::error::Error as EngineError;
 use otel_arrow_dfe_config::authorized_identity_policy::AuthorizedIdentityPolicy;
 use otel_arrow_dfe_config::context_policy::{
@@ -310,11 +311,11 @@ pub struct ContextDeclarationProvider {
     pub declarations: ContextDeclarationFn,
 }
 
-/// Derives deterministic declarations from serialized node configuration.
-pub type ContextDeclarationFn = fn(&serde_json::Value) -> Result<NodeContextDeclarations, Error>;
+/// Derives deterministic declarations from factory-resolved node configuration.
+pub type ContextDeclarationFn = fn(&ResolvedNodeConfig) -> Result<NodeContextDeclarations, Error>;
 
 /// Derives and validates context declarations from typed node configuration.
-pub trait ConfigNodeContextDeclaration: serde::de::DeserializeOwned {
+pub trait ConfigNodeContextDeclaration: Send + Sync + 'static {
     /// Declares the context reads and writes for this configuration.
     fn context_declarations(&self) -> NodeContextDeclarations;
 
@@ -399,17 +400,14 @@ impl ContextDeclarationProvider {
     }
 }
 
-/// Deserializes typed node configuration and derives its context declarations.
+/// Downcasts factory-resolved node configuration and derives its context declarations.
 fn typed_context_declarations<T>(
-    config: &serde_json::Value,
+    config: &ResolvedNodeConfig,
 ) -> Result<NodeContextDeclarations, Error>
 where
     T: ConfigNodeContextDeclaration,
 {
-    Ok(
-        otel_arrow_dfe_config::validation::deserialize_typed_config::<T>(config)?
-            .context_declarations(),
-    )
+    Ok(config.component_config::<T>()?.context_declarations())
 }
 
 /// Context bindings compiled for all pipelines in one resolved configuration.
@@ -791,7 +789,17 @@ impl<PData: 'static + Clone + std::fmt::Debug> PipelineFactory<PData> {
         &self,
         resolved: &ResolvedOtelDataflowSpec,
     ) -> Result<PreparedContext, EngineError> {
-        let declarations = self.context_declarations(resolved)?;
+        let component_configs = self.resolve_context_component_configs(resolved)?;
+        self.compile_initial_context_with_components(resolved, &component_configs)
+    }
+
+    /// Compiles startup requirements from component configurations resolved during admission.
+    pub fn compile_initial_context_with_components(
+        &self,
+        resolved: &ResolvedOtelDataflowSpec,
+        component_configs: &HashMap<PipelineKey, ResolvedPipelineConfig>,
+    ) -> Result<PreparedContext, EngineError> {
+        let declarations = self.context_declarations(resolved, component_configs)?;
         let runtime_requirements = ContextRuntimeRequirements::compile(&declarations);
         let bindings = Self::compile_bindings(declarations, &runtime_requirements);
         Ok(PreparedContext {
@@ -806,7 +814,22 @@ impl<PData: 'static + Clone + std::fmt::Debug> PipelineFactory<PData> {
         resolved: &ResolvedOtelDataflowSpec,
         installed_requirements: &ContextRuntimeRequirements,
     ) -> Result<PreparedContext, EngineError> {
-        let declarations = self.context_declarations(resolved)?;
+        let component_configs = self.resolve_context_component_configs(resolved)?;
+        self.compile_candidate_context_with_components(
+            resolved,
+            &component_configs,
+            installed_requirements,
+        )
+    }
+
+    /// Compiles candidate bindings from component configurations resolved during admission.
+    pub fn compile_candidate_context_with_components(
+        &self,
+        resolved: &ResolvedOtelDataflowSpec,
+        component_configs: &HashMap<PipelineKey, ResolvedPipelineConfig>,
+        installed_requirements: &ContextRuntimeRequirements,
+    ) -> Result<PreparedContext, EngineError> {
+        let declarations = self.context_declarations(resolved, component_configs)?;
         let runtime_requirements = ContextRuntimeRequirements::compile(&declarations);
         let bindings = Self::compile_bindings(declarations, installed_requirements);
         Ok(PreparedContext {
@@ -824,9 +847,29 @@ impl<PData: 'static + Clone + std::fmt::Debug> PipelineFactory<PData> {
     }
 
     /// Collects and validates component and engine declarations for each resolved pipeline node.
+    fn resolve_context_component_configs(
+        &self,
+        resolved: &ResolvedOtelDataflowSpec,
+    ) -> Result<HashMap<PipelineKey, ResolvedPipelineConfig>, EngineError> {
+        resolved
+            .pipelines
+            .iter()
+            .map(|pipeline| {
+                let key = PipelineKey::new(
+                    pipeline.pipeline_group_id.clone(),
+                    pipeline.pipeline_id.clone(),
+                );
+                self.resolve_pipeline_config(&pipeline.pipeline)
+                    .map(|config| (key, config))
+            })
+            .collect()
+    }
+
+    /// Collects and validates declarations from already-resolved component configurations.
     fn context_declarations(
         &self,
         resolved: &ResolvedOtelDataflowSpec,
+        component_configs: &HashMap<PipelineKey, ResolvedPipelineConfig>,
     ) -> Result<ContextDeclarationsByPipeline, EngineError> {
         let mut declarations = ContextDeclarationsByPipeline::new();
 
@@ -835,12 +878,31 @@ impl<PData: 'static + Clone + std::fmt::Debug> PipelineFactory<PData> {
                 pipeline.pipeline_group_id.clone(),
                 pipeline.pipeline_id.clone(),
             );
+            let component_pipeline = component_configs.get(&pipeline_key).ok_or_else(|| {
+                EngineError::ConfigError(Box::new(Error::InvalidUserConfig {
+                    error: format!(
+                        "factory-resolved config is missing pipeline {}:{}",
+                        pipeline.pipeline_group_id.as_ref(),
+                        pipeline.pipeline_id.as_ref()
+                    ),
+                }))
+            })?;
             let mut declarations_by_node = HashMap::new();
             for (node_id, node_config) in pipeline.pipeline.node_iter() {
+                let resolved_node = component_pipeline.node(node_id).ok_or_else(|| {
+                    EngineError::ConfigError(Box::new(Error::InvalidUserConfig {
+                        error: format!(
+                            "factory-resolved config is missing node `{}` in pipeline {}:{}",
+                            node_id.as_ref(),
+                            pipeline.pipeline_group_id.as_ref(),
+                            pipeline.pipeline_id.as_ref()
+                        ),
+                    }))
+                })?;
                 let component_declarations = self.node_context_declarations(
                     node_config.kind(),
                     node_config.r#type.as_ref(),
-                    &node_config.config,
+                    resolved_node,
                 )?;
                 let wrapper_declarations = Self::wrapper_context_declarations(
                     node_config,
@@ -916,43 +978,41 @@ impl<PData: 'static + Clone + std::fmt::Debug> PipelineFactory<PData> {
         Ok(declarations)
     }
 
-    /// Validates node configuration and rejects engine-owned factory declarations.
+    /// Collects component declarations and rejects engine-owned factory declarations.
     fn node_context_declarations(
         &self,
         kind: NodeKind,
         urn: &str,
-        config: &serde_json::Value,
+        config: &ResolvedNodeConfig,
     ) -> Result<NodeContextDeclarations, EngineError> {
         let missing_factory = || {
             EngineError::ConfigError(Box::new(Error::InvalidUserConfig {
                 error: format!("node factory `{urn}` is not registered"),
             }))
         };
-        let (validate_config, context_declarations) = match kind {
+        let context_declarations = match kind {
             NodeKind::Receiver => {
                 let factory = self
                     .get_receiver_factory_map()
                     .get(urn)
                     .ok_or_else(&missing_factory)?;
-                (factory.validate_config, factory.context_declarations)
+                factory.context_declarations
             }
             NodeKind::Processor => {
                 let factory = self
                     .get_processor_factory_map()
                     .get(urn)
                     .ok_or_else(&missing_factory)?;
-                (factory.validate_config, factory.context_declarations)
+                factory.context_declarations
             }
             NodeKind::Exporter => {
                 let factory = self
                     .get_exporter_factory_map()
                     .get(urn)
                     .ok_or_else(&missing_factory)?;
-                (factory.validate_config, factory.context_declarations)
+                factory.context_declarations
             }
         };
-        // Validate before collecting declarations. Nodes are not constructed yet.
-        validate_config(config).map_err(|error| EngineError::ConfigError(Box::new(error)))?;
 
         let declarations = context_declarations
             .map(|provider| {
@@ -988,7 +1048,7 @@ mod tests {
     use otel_arrow_dfe_config::transport_headers_policy::{CaptureDefaults, CaptureRule};
 
     /// Typed component configuration used to exercise declaration validation.
-    #[derive(serde::Deserialize)]
+    #[derive(serde::Deserialize, PartialEq)]
     struct TestDeclarationConfig {
         /// Selected primitive or composite member name.
         entry: ContextEntryName,
@@ -1059,7 +1119,7 @@ mod tests {
     fn unused_test_receiver(
         _: crate::context::PipelineContext,
         _: crate::node::NodeId,
-        _: Arc<NodeUserConfig>,
+        _: Arc<ResolvedNodeConfig>,
         _: &crate::config::ReceiverConfig,
         _: &crate::capability::registry::Capabilities,
     ) -> Result<crate::receiver::ReceiverWrapper<()>, Error> {
@@ -1070,7 +1130,7 @@ mod tests {
     fn unused_test_exporter(
         _: crate::context::PipelineContext,
         _: crate::node::NodeId,
-        _: Arc<NodeUserConfig>,
+        _: Arc<ResolvedNodeConfig>,
         _: &crate::config::ExporterConfig,
         _: &crate::capability::registry::Capabilities,
     ) -> Result<crate::exporter::ExporterWrapper<()>, Error> {
@@ -1081,16 +1141,33 @@ mod tests {
     fn unused_test_processor(
         _: crate::context::PipelineContext,
         _: crate::node::NodeId,
-        _: Arc<NodeUserConfig>,
+        _: Arc<ResolvedNodeConfig>,
         _: &crate::config::ProcessorConfig,
         _: &crate::capability::registry::Capabilities,
     ) -> Result<crate::processor::ProcessorWrapper<()>, Error> {
         unreachable!("context compilation does not construct test nodes")
     }
 
-    /// Accepts configuration for test factories that need no typed validation.
-    fn accept_test_config(_: &serde_json::Value) -> Result<(), Error> {
-        Ok(())
+    /// Resolves arbitrary test configuration while omitting its snapshot.
+    fn resolve_test_config(
+        config: &serde_json::Value,
+    ) -> Result<crate::component_config::ResolvedComponentConfig, Error> {
+        Ok(crate::component_config::ResolvedComponentConfig::omitted(
+            config.clone(),
+        ))
+    }
+
+    /// Resolves the typed declaration test configuration.
+    fn resolve_test_declaration_config(
+        config: &serde_json::Value,
+    ) -> Result<crate::component_config::ResolvedComponentConfig, Error> {
+        let config: TestDeclarationConfig =
+            serde_json::from_value(config.clone()).map_err(|error| Error::InvalidUserConfig {
+                error: error.to_string(),
+            })?;
+        Ok(crate::component_config::ResolvedComponentConfig::omitted(
+            config,
+        ))
     }
 
     /// Registers test receivers without constructing runtime nodes.
@@ -1100,14 +1177,16 @@ mod tests {
             create: unused_test_receiver,
             context_declarations: None,
             wiring_contract: crate::wiring_contract::WiringContract::UNRESTRICTED,
-            validate_config: otel_arrow_dfe_config::validation::no_config,
+            resolve_config: crate::component_config::resolve_no_config,
+            snapshot_policy: crate::component_config::ConfigSnapshotPolicy::TypedSafe,
         },
         crate::ReceiverFactory {
             name: "urn:otel:receiver:internal_telemetry",
             create: unused_test_receiver,
             context_declarations: None,
             wiring_contract: crate::wiring_contract::WiringContract::UNRESTRICTED,
-            validate_config: accept_test_config,
+            resolve_config: resolve_test_config,
+            snapshot_policy: crate::component_config::ConfigSnapshotPolicy::Omit,
         },
     ];
 
@@ -1118,21 +1197,24 @@ mod tests {
             create: unused_test_exporter,
             context_declarations: None,
             wiring_contract: crate::wiring_contract::WiringContract::UNRESTRICTED,
-            validate_config: otel_arrow_dfe_config::validation::no_config,
+            resolve_config: crate::component_config::resolve_no_config,
+            snapshot_policy: crate::component_config::ConfigSnapshotPolicy::TypedSafe,
         },
         crate::ExporterFactory {
             name: "urn:otel:exporter:noop",
             create: unused_test_exporter,
             context_declarations: None,
             wiring_contract: crate::wiring_contract::WiringContract::UNRESTRICTED,
-            validate_config: otel_arrow_dfe_config::validation::no_config,
+            resolve_config: crate::component_config::resolve_no_config,
+            snapshot_policy: crate::component_config::ConfigSnapshotPolicy::TypedSafe,
         },
         crate::ExporterFactory {
             name: "urn:otel:exporter:console",
             create: unused_test_exporter,
             context_declarations: None,
             wiring_contract: crate::wiring_contract::WiringContract::UNRESTRICTED,
-            validate_config: otel_arrow_dfe_config::validation::no_config,
+            resolve_config: crate::component_config::resolve_no_config,
+            snapshot_policy: crate::component_config::ConfigSnapshotPolicy::TypedSafe,
         },
         crate::ExporterFactory {
             name: "urn:test:exporter:context",
@@ -1141,9 +1223,8 @@ mod tests {
                 TestDeclarationConfig,
             >()),
             wiring_contract: crate::wiring_contract::WiringContract::UNRESTRICTED,
-            validate_config: otel_arrow_dfe_config::validation::validate_typed_config::<
-                TestDeclarationConfig,
-            >,
+            resolve_config: resolve_test_declaration_config,
+            snapshot_policy: crate::component_config::ConfigSnapshotPolicy::Omit,
         },
     ];
 
@@ -1153,7 +1234,8 @@ mod tests {
         create: unused_test_processor,
         context_declarations: None,
         wiring_contract: crate::wiring_contract::WiringContract::UNRESTRICTED,
-        validate_config: accept_test_config,
+        resolve_config: resolve_test_config,
+        snapshot_policy: crate::component_config::ConfigSnapshotPolicy::Omit,
     }];
 
     /// Builds a pipeline factory from the test node registrations.

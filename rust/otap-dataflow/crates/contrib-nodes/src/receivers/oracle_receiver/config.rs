@@ -42,6 +42,7 @@ const fn default_fetch_size_rows() -> usize {
 }
 
 /// Validated configuration for one Oracle snapshot or keyset query.
+#[derive(PartialEq)]
 pub struct OracleReceiverConfig {
     source_id: String,
     connection: OracleConnectionConfig,
@@ -286,7 +287,7 @@ struct RawOracleConfig {
     checkpoint: CheckpointConfig,
 }
 
-#[derive(Deserialize)]
+#[derive(Deserialize, PartialEq)]
 #[serde(deny_unknown_fields)]
 struct OracleConnectionConfig {
     connect_string: String,

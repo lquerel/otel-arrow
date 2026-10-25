@@ -15,7 +15,6 @@ otel_arrow_dfe_telemetry::otel_component_scope!(
 #[cfg(target_os = "linux")]
 use async_trait::async_trait;
 use linkme::distributed_slice;
-use otel_arrow_dfe_config::node::NodeUserConfig;
 #[cfg(target_os = "linux")]
 use otel_arrow_dfe_engine::MessageSourceLocalEffectHandlerExtension;
 use otel_arrow_dfe_engine::ReceiverFactory;
@@ -146,21 +145,22 @@ pub static HOST_METRICS_RECEIVER: ReceiverFactory<OtapPdata> = ReceiverFactory {
     create:
         |pipeline: PipelineContext,
          node: NodeId,
-         node_config: Arc<NodeUserConfig>,
+         node_config: Arc<otel_arrow_dfe_engine::component_config::ResolvedNodeConfig>,
          receiver_config: &ReceiverConfig,
          _capabilities: &otel_arrow_dfe_engine::capability::registry::Capabilities| {
             create_host_metrics_receiver(pipeline, node, node_config, receiver_config)
         },
     context_declarations: None,
     wiring_contract: otel_arrow_dfe_engine::wiring_contract::WiringContract::UNRESTRICTED,
-    validate_config: validate_host_metrics_config,
+    resolve_config: resolve_host_metrics_config,
+    snapshot_policy: otel_arrow_dfe_engine::component_config::ConfigSnapshotPolicy::CustomSafe,
 };
 
 #[cfg(target_os = "linux")]
 fn create_host_metrics_receiver(
     pipeline: PipelineContext,
     node: NodeId,
-    node_config: Arc<NodeUserConfig>,
+    node_config: Arc<otel_arrow_dfe_engine::component_config::ResolvedNodeConfig>,
     receiver_config: &ReceiverConfig,
 ) -> Result<ReceiverWrapper<OtapPdata>, otel_arrow_dfe_config::error::Error> {
     if pipeline.num_cores() > 1 {
@@ -168,12 +168,13 @@ fn create_host_metrics_receiver(
             error: "host-wide collection must run in a one-core source pipeline; use receiver:host_metrics -> exporter:topic and fan out downstream".to_owned(),
         });
     }
-    let mut receiver = HostMetricsReceiver::from_config(&node_config.config)?;
+    let resolved = node_config.component_config::<RuntimeConfig>()?;
+    let mut receiver = HostMetricsReceiver::from_resolved(resolved.as_ref().clone())?;
     receiver.metrics = Some(HostMetricsReceiverMetrics::register(&pipeline));
     Ok(ReceiverWrapper::local(
         receiver,
         node,
-        node_config,
+        node_config.safe_config_snapshot(),
         receiver_config,
     ))
 }
@@ -182,41 +183,66 @@ fn create_host_metrics_receiver(
 fn create_host_metrics_receiver(
     _pipeline: PipelineContext,
     _node: NodeId,
-    _node_config: Arc<NodeUserConfig>,
+    _node_config: Arc<otel_arrow_dfe_engine::component_config::ResolvedNodeConfig>,
     _receiver_config: &ReceiverConfig,
 ) -> Result<ReceiverWrapper<OtapPdata>, otel_arrow_dfe_config::error::Error> {
     Err(unsupported_platform_error())
 }
 
 #[cfg(target_os = "linux")]
-fn validate_host_metrics_config(config: &Value) -> Result<(), otel_arrow_dfe_config::error::Error> {
-    let config: Config = serde_json::from_value(config.clone()).map_err(|e| {
+fn resolve_host_metrics_config(
+    config: &Value,
+) -> Result<
+    otel_arrow_dfe_engine::component_config::ResolvedComponentConfig,
+    otel_arrow_dfe_config::error::Error,
+> {
+    let mut config: Config = serde_json::from_value(config.clone()).map_err(|e| {
         otel_arrow_dfe_config::error::Error::InvalidUserConfig {
             error: e.to_string(),
         }
     })?;
-    RuntimeConfig::try_from(config).map(|_| ())
+    let runtime = RuntimeConfig::try_from(config.clone())?;
+    config.host_view.root_path = runtime.root_path.clone();
+    config.root_path = None;
+    let snapshot = serde_json::to_value(&config).map_err(|error| {
+        otel_arrow_dfe_config::error::Error::InvalidUserConfig {
+            error: error.to_string(),
+        }
+    })?;
+    Ok(
+        otel_arrow_dfe_engine::component_config::ResolvedComponentConfig::custom_safe(
+            runtime, snapshot,
+        ),
+    )
 }
 
 #[cfg(not(target_os = "linux"))]
-fn validate_host_metrics_config(
+fn resolve_host_metrics_config(
     _config: &serde_json::Value,
-) -> Result<(), otel_arrow_dfe_config::error::Error> {
+) -> Result<
+    otel_arrow_dfe_engine::component_config::ResolvedComponentConfig,
+    otel_arrow_dfe_config::error::Error,
+> {
     Err(unsupported_platform_error())
 }
 
 #[cfg(target_os = "linux")]
 impl HostMetricsReceiver {
-    /// Creates a new host metrics receiver.
-    pub fn new(config: Config) -> Result<Self, otel_arrow_dfe_config::error::Error> {
-        let root_path = normalized_root_path(Some(effective_root_path(&config)?))?;
-        let lease = HostMetricsLease::acquire(root_path)?;
-        let config = RuntimeConfig::try_from(config)?;
+    fn from_resolved(config: RuntimeConfig) -> Result<Self, otel_arrow_dfe_config::error::Error> {
+        let lease = HostMetricsLease::acquire(config.root_path.clone())?;
         Ok(Self {
             config,
             _lease: lease,
             metrics: None,
         })
+    }
+
+    /// Creates a new host metrics receiver.
+    pub fn new(config: Config) -> Result<Self, otel_arrow_dfe_config::error::Error> {
+        let root_path = normalized_root_path(Some(effective_root_path(&config)?))?;
+        let config = RuntimeConfig::try_from(config)?;
+        debug_assert_eq!(config.root_path, root_path);
+        Self::from_resolved(config)
     }
 
     /// Creates a host metrics receiver from JSON config.
@@ -765,6 +791,30 @@ fn encode_snapshot(snapshot: HostSnapshot) -> Result<OtapPdata, arrow::error::Ar
 
 #[cfg(test)]
 mod tests {
+    /// Scenario: Legacy root paths and default-equivalent family intervals are resolved.
+    /// Guarantees: Comparison uses the normalized runtime values rather than snapshot syntax.
+    #[cfg(target_os = "linux")]
+    #[test]
+    fn resolution_compares_normalized_runtime_values() {
+        let resolve = HOST_METRICS_RECEIVER.resolve_config;
+        let legacy = resolve(&serde_json::json!({"root_path": "/host"})).unwrap();
+        let canonical = resolve(&serde_json::json!({"host_view": {"root_path": "/host"}})).unwrap();
+        assert_eq!(legacy, canonical);
+        assert_eq!(
+            legacy.safe_config_snapshot(),
+            canonical.safe_config_snapshot()
+        );
+        let defaults = resolve(&serde_json::json!({})).unwrap();
+        // The default collection interval is used below rather than assuming a wall-clock value.
+        let mut explicit_config = serde_json::json!({"families": {"cpu": {}}});
+        explicit_config["families"]["cpu"]["interval"] =
+            defaults.safe_config_snapshot()["collection_interval"].clone();
+        assert_eq!(defaults, resolve(&explicit_config).unwrap());
+        assert_ne!(
+            legacy,
+            resolve(&serde_json::json!({"root_path": "/other"})).unwrap()
+        );
+    }
     use super::*;
 
     #[test]
@@ -1297,7 +1347,7 @@ mod tests {
         });
 
         assert!(matches!(
-            (HOST_METRICS_RECEIVER.validate_config)(&config),
+            (HOST_METRICS_RECEIVER.resolve_config)(&config),
             Err(otel_arrow_dfe_config::error::Error::InvalidUserConfig { .. })
         ));
     }

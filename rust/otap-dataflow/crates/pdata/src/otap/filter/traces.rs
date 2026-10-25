@@ -18,11 +18,11 @@ use crate::proto::opentelemetry::arrow::v1::ArrowPayloadType;
 use crate::schema::consts;
 use arrow::array::{BooleanArray, StringArray};
 use arrow::buffer::BooleanBuffer;
-use serde::Deserialize;
+use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 
 /// struct that describes the overall requirements to use in order to filter traces
-#[derive(Debug, Clone, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct TraceFilter {
     // Include match properties describe traces that should be included in the Collector Service pipeline,
     // all other traces should be dropped from further processing.
@@ -36,7 +36,7 @@ pub struct TraceFilter {
 }
 
 /// TraceMatchProperties specifies the set of properties in a trace to match against and the type of string pattern matching to use.
-#[derive(Debug, Clone, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct TraceMatchProperties {
     // MatchType specifies the type of matching desired
     #[serde(default = "default_match_type")]

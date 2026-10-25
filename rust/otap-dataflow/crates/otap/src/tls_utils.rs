@@ -123,9 +123,10 @@ pub async fn load_server_tls_config(
             })?;
             (cert, key)
         }
-        (None, None, Some(cert_pem), Some(key_pem)) => {
-            (cert_pem.as_bytes().to_vec(), key_pem.as_bytes().to_vec())
-        }
+        (None, None, Some(cert_pem), Some(key_pem)) => (
+            cert_pem.as_bytes().to_vec(),
+            key_pem.expose().as_bytes().to_vec(),
+        ),
         (None, None, None, None) => {
             return Ok(None);
         }
@@ -475,7 +476,7 @@ pub(crate) async fn capture_client_tls_material(
             .config
             .key_pem
             .as_ref()
-            .is_some_and(|pem| !pem.trim().is_empty());
+            .is_some_and(|pem| !pem.expose().trim().is_empty());
 
     // Note: Providing a TLS config block forces TLS regardless of scheme.
 
@@ -552,8 +553,8 @@ pub(crate) async fn capture_client_tls_material(
             config
                 .config
                 .key_pem
-                .as_deref()
-                .unwrap_or_default()
+                .as_ref()
+                .map_or("", |key| key.expose())
                 .as_bytes()
                 .to_vec()
         };
@@ -1825,8 +1826,9 @@ pub async fn build_reloadable_server_config(
             .collect::<Result<Vec<_>, _>>()
             .map_err(|e| io::Error::new(io::ErrorKind::InvalidData, e))?;
 
-        let key = PrivateKeyDer::from_pem_reader(&mut io::BufReader::new(key_pem.as_bytes()))
-            .map_err(|e| io::Error::new(io::ErrorKind::InvalidData, e))?;
+        let key =
+            PrivateKeyDer::from_pem_reader(&mut io::BufReader::new(key_pem.expose().as_bytes()))
+                .map_err(|e| io::Error::new(io::ErrorKind::InvalidData, e))?;
 
         builder
             .with_single_cert(certs, key)
@@ -2206,7 +2208,7 @@ mod tests {
         let config = TlsServerConfig {
             config: TlsConfig {
                 cert_pem: None,
-                key_pem: Some("fake key".to_string()),
+                key_pem: Some("fake key".into()),
                 cert_file: None,
                 key_file: None,
                 reload_interval: None,
@@ -2234,7 +2236,7 @@ mod tests {
         let config = TlsServerConfig {
             config: TlsConfig {
                 cert_pem: Some(cert_pem),
-                key_pem: Some(key_pem),
+                key_pem: Some(key_pem.into()),
                 cert_file: None,
                 key_file: None,
                 reload_interval: None,
@@ -3034,7 +3036,7 @@ mod tests {
                 cert_file: None,
                 cert_pem: Some(cert.cert_pem),
                 key_file: None,
-                key_pem: Some(other.key_pem),
+                key_pem: Some(other.key_pem.into()),
                 reload_interval: None,
             },
             ca_file: None,
@@ -3065,7 +3067,7 @@ mod tests {
                 cert_file: None,
                 cert_pem: Some(leaf.cert_pem.clone()),
                 key_file: None,
-                key_pem: Some(leaf.key_pem.clone()),
+                key_pem: Some(leaf.key_pem.clone().into()),
                 reload_interval: None,
             },
             ca_file: None,

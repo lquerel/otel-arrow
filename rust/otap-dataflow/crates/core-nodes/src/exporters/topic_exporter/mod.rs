@@ -15,7 +15,6 @@ use futures::stream::{FuturesUnordered, StreamExt};
 use linkme::distributed_slice;
 use metrics::{TopicExporterMetrics, TopicRejectionReason, TopicTrackedResult};
 use otel_arrow_dfe_config::error::Error as ConfigError;
-use otel_arrow_dfe_config::node::NodeUserConfig;
 use otel_arrow_dfe_config::topic::{TopicAckPropagationMode, TopicQueueOnFullPolicy};
 use otel_arrow_dfe_config::{SignalType, TopicName};
 use otel_arrow_dfe_engine::config::ExporterConfig;
@@ -46,7 +45,7 @@ use std::sync::Arc;
 pub const TOPIC_EXPORTER_URN: &str = "urn:otel:exporter:topic";
 
 /// Topic exporter configuration.
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct TopicExporterConfig {
     /// Topic name to publish to.
@@ -94,10 +93,10 @@ pub static TOPIC_EXPORTER: ExporterFactory<OtapPdata> = ExporterFactory {
     create:
         |pipeline: PipelineContext,
          node: NodeId,
-         node_config: Arc<NodeUserConfig>,
+         node_config: Arc<otel_arrow_dfe_engine::component_config::ResolvedNodeConfig>,
          exporter_config: &ExporterConfig,
          _capabilities: &otel_arrow_dfe_engine::capability::registry::Capabilities| {
-            let config = TopicExporter::parse_config(&node_config.config)?;
+            let config = node_config.component_config::<TopicExporterConfig>()?;
             let topic_set = pipeline.topic_set::<OtapPdata>().ok_or_else(|| {
                 ConfigError::InvalidUserConfig {
                     error: "Topic set is not available in pipeline context".to_owned(),
@@ -129,13 +128,16 @@ pub static TOPIC_EXPORTER: ExporterFactory<OtapPdata> = ExporterFactory {
                     metrics,
                 },
                 node,
-                node_config,
+                node_config.safe_config_snapshot(),
                 exporter_config,
             ))
         },
     context_declarations: None,
     wiring_contract: otel_arrow_dfe_engine::wiring_contract::WiringContract::UNRESTRICTED,
-    validate_config: |config| TopicExporter::parse_config(config).map(|_| ()),
+    resolve_config: otel_arrow_dfe_engine::component_config::resolve_typed_config::<
+        TopicExporterConfig,
+    >,
+    snapshot_policy: otel_arrow_dfe_engine::component_config::ConfigSnapshotPolicy::TypedSafe,
 };
 
 impl TopicExporter {
@@ -716,7 +718,6 @@ mod tests {
     use otel_arrow_dfe_telemetry::metrics::MetricSetSnapshot;
     use otel_arrow_dfe_telemetry::reporter::MetricsReporter;
     use serde_json::json;
-    use std::sync::Arc;
     use std::time::{Duration, Instant};
 
     fn metric_value(
@@ -825,7 +826,9 @@ mod tests {
             let mut exporter = (TOPIC_EXPORTER.create)(
                 exporter_ctx,
                 exporter_node.clone(),
-                Arc::new(exporter_user_cfg),
+                TOPIC_EXPORTER
+                    .resolve_node_config(exporter_user_cfg)
+                    .expect("topic exporter config must resolve"),
                 &ExporterConfig::new("topic_exporter"),
                 &otel_arrow_dfe_engine::capability::registry::Capabilities::empty(),
             )
@@ -980,7 +983,9 @@ mod tests {
             let mut exporter = (TOPIC_EXPORTER.create)(
                 exporter_ctx,
                 exporter_node.clone(),
-                Arc::new(exporter_user_cfg),
+                TOPIC_EXPORTER
+                    .resolve_node_config(exporter_user_cfg)
+                    .expect("topic exporter config must resolve"),
                 &ExporterConfig::new("topic_exporter"),
                 &otel_arrow_dfe_engine::capability::registry::Capabilities::empty(),
             )
@@ -1157,7 +1162,9 @@ mod tests {
             let mut exporter = (TOPIC_EXPORTER.create)(
                 exporter_ctx,
                 exporter_node.clone(),
-                Arc::new(exporter_user_cfg),
+                TOPIC_EXPORTER
+                    .resolve_node_config(exporter_user_cfg)
+                    .expect("topic exporter config must resolve"),
                 &ExporterConfig::new("topic_exporter"),
                 &otel_arrow_dfe_engine::capability::registry::Capabilities::empty(),
             )
@@ -1338,7 +1345,9 @@ mod tests {
             let mut exporter = (TOPIC_EXPORTER.create)(
                 exporter_ctx,
                 exporter_node.clone(),
-                Arc::new(exporter_user_cfg),
+                TOPIC_EXPORTER
+                    .resolve_node_config(exporter_user_cfg)
+                    .expect("topic exporter config must resolve"),
                 &ExporterConfig::new("topic_exporter"),
                 &otel_arrow_dfe_engine::capability::registry::Capabilities::empty(),
             )

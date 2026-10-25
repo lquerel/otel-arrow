@@ -56,9 +56,12 @@ cargo run -- --config configs/otlp-otlp.yaml --validate-and-exit
 ```
 
 Validation parses YAML or JSON, validates the root model, checks graph
-references, checks that every node type is registered in the binary, and runs
-node-specific config validation when the component provides it. It also compiles
-context bindings, including qualified propagation selectors.
+references, and resolves every node and extension through its registered
+factory. Mandatory resolution parses, validates, defaults, and normalizes
+component configuration and precomputes safe snapshots. It also compiles
+context bindings, including qualified propagation selectors. See
+[Configuration Framework Design](configuration-resolution.md) for the
+source, typed runtime state, and safe snapshot contracts.
 
 After loading, the CLI can override selected engine-level settings:
 

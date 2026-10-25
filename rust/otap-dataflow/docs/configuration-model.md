@@ -195,8 +195,12 @@ Live reconfiguration is intentionally narrower than root-file loading:
   supported for the target pipeline.
 - Scale-only changes use the same pipeline update path when the effective
   runtime change is `policies.resources.core_allocation`.
-- Group-level, engine-level, and topic-broker mutation are out of scope for the
-  current live reconfiguration API.
+- Per-pipeline updates do not change group-level or engine-level policy.
+  Full-engine reconciliation can update that metadata after all requested
+  pipeline operations succeed; it is not transactional across pipelines.
+- Runtime topic-broker and memory-limiter mutation remain unsupported.
+  Runtime changes to controller extensions or the observability pipeline
+  require a restart.
 
 For the API flow, rollout behavior, rollback handling, and current limits, see
 [admin/live-reconfiguration.md](admin/live-reconfiguration.md).
@@ -459,9 +463,11 @@ linking it with a side-effect import. See
 [Developing Controller Extensions](../README.md#developing-controller-extensions)
 for implementation guidance.
 
-Each controller extension factory provides static config validation, so
-`--validate-and-exit` rejects unknown controller extension types and invalid
-extension-specific config without starting the extension.
+Every controller extension factory declares a mandatory typed resolver and
+snapshot policy. `--validate-and-exit` rejects unknown controller extension
+types and invalid configuration without starting the extension. See
+[Configuration Framework Design](configuration-resolution.md) for the
+factory contract and reporting boundaries.
 
 The built-in read-only controller monitor is available in the stock
 `df_engine` binary:

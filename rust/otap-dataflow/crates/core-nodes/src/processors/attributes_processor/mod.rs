@@ -44,8 +44,12 @@ use async_trait::async_trait;
 use linkme::distributed_slice;
 use otel_arrow_dfe_config::SignalType;
 use otel_arrow_dfe_config::error::Error as ConfigError;
+#[cfg(test)]
 use otel_arrow_dfe_config::node::NodeUserConfig;
 use otel_arrow_dfe_engine::MessageSourceLocalEffectHandlerExtension;
+use otel_arrow_dfe_engine::component_config::{
+    ConfigSnapshotPolicy, ResolvedComponentConfig, ResolvedNodeConfig,
+};
 use otel_arrow_dfe_engine::config::ProcessorConfig;
 use otel_arrow_dfe_engine::context::PipelineContext;
 use otel_arrow_dfe_engine::error::Error as EngineError;
@@ -78,7 +82,7 @@ mod metrics;
 /// URN for the AttributesProcessor
 pub const ATTRIBUTES_PROCESSOR_URN: &str = "urn:otel:processor:attribute";
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 /// Actions that can be performed on attributes.
 #[serde(tag = "action", rename_all = "lowercase")]
 pub enum Action {
@@ -146,7 +150,7 @@ pub enum Action {
     Unsupported,
 }
 
-#[derive(Debug, Clone, Copy, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "lowercase")]
 /// Supported hash algorithms for the `hash` action.
 pub enum HashAlgorithm {
@@ -158,7 +162,7 @@ const fn default_hash_algorithm() -> HashAlgorithm {
     HashAlgorithm::Sha256
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, Default)]
 /// Configuration for the AttributesProcessor.
 ///
 /// Accepts configuration in the same format as the OpenTelemetry Collector's attributes processor.
@@ -177,6 +181,21 @@ pub struct Config {
     pub apply_to: Option<Vec<String>>,
 }
 
+#[derive(Clone)]
+struct ResolvedAttributesConfig {
+    semantic_config: Config,
+    transform: Arc<AttributesTransform>,
+    has_resource_domain: bool,
+    has_scope_domain: bool,
+    has_signal_domain: bool,
+}
+
+impl PartialEq for ResolvedAttributesConfig {
+    fn eq(&self, other: &Self) -> bool {
+        self.semantic_config == other.semantic_config
+    }
+}
+
 /// Processor that applies attribute transformations to OTAP attribute batches.
 ///
 /// Implements the OpenTelemetry Collector's attributes processor functionality using
@@ -184,7 +203,7 @@ pub struct Config {
 /// signal-specific attributes) for logs, metrics, and traces telemetry.
 pub struct AttributesProcessor {
     // Pre-computed transform to avoid rebuilding per message
-    transform: AttributesTransform,
+    transform: Arc<AttributesTransform>,
     // Pre-computed flags for domain lookup
     has_resource_domain: bool,
     has_scope_domain: bool,
@@ -217,6 +236,24 @@ impl AttributesProcessor {
         pipeline_ctx: PipelineContext,
         config: Config,
     ) -> Result<Self, otel_arrow_dfe_config::error::Error> {
+        Ok(Self::from_resolved(
+            pipeline_ctx,
+            &Self::resolve_config(config)?,
+        ))
+    }
+
+    fn resolve_config(mut config: Config) -> Result<ResolvedAttributesConfig, ConfigError> {
+        let domains = parse_apply_to(config.apply_to.as_ref());
+        let mut normalized_domains = domains
+            .iter()
+            .map(|domain| match domain {
+                ApplyDomain::Signal => "signal".to_owned(),
+                ApplyDomain::Resource => "resource".to_owned(),
+                ApplyDomain::Scope => "scope".to_owned(),
+            })
+            .collect::<Vec<_>>();
+        normalized_domains.sort();
+        config.apply_to = Some(normalized_domains);
         let mut renames = BTreeMap::new();
         let mut deletes = BTreeSet::new();
         let mut inserts = BTreeMap::new();
@@ -224,7 +261,7 @@ impl AttributesProcessor {
         let mut updates = BTreeMap::new();
         let mut hashes = BTreeMap::new();
 
-        for action in config.actions {
+        for action in config.actions.clone() {
             match action {
                 Action::Delete { key } => {
                     let _ = deletes.insert(key);
@@ -257,8 +294,6 @@ impl AttributesProcessor {
                 Action::Unsupported => {}
             }
         }
-
-        let domains = parse_apply_to(config.apply_to.as_ref());
 
         // Pre-compute domain checks
         let has_resource_domain = domains.contains(&ApplyDomain::Resource);
@@ -311,18 +346,28 @@ impl AttributesProcessor {
             }
         })?;
 
-        Ok(Self {
-            transform,
+        Ok(ResolvedAttributesConfig {
+            semantic_config: config,
+            transform: Arc::new(transform),
             has_resource_domain,
             has_scope_domain,
             has_signal_domain,
-            metrics: metrics::AttributesProcessorMetrics::new(&pipeline_ctx),
-            compute_duration: ComputeDuration::new(&pipeline_ctx),
         })
     }
 
+    fn from_resolved(pipeline_ctx: PipelineContext, config: &ResolvedAttributesConfig) -> Self {
+        Self {
+            transform: Arc::clone(&config.transform),
+            has_resource_domain: config.has_resource_domain,
+            has_scope_domain: config.has_scope_domain,
+            has_signal_domain: config.has_signal_domain,
+            metrics: metrics::AttributesProcessorMetrics::new(&pipeline_ctx),
+            compute_duration: ComputeDuration::new(&pipeline_ctx),
+        }
+    }
+
     #[inline]
-    const fn is_noop(&self) -> bool {
+    fn is_noop(&self) -> bool {
         self.transform.rename.is_none()
             && self.transform.delete.is_none()
             && self.transform.insert.is_none()
@@ -536,14 +581,19 @@ fn parse_apply_to(apply_to: Option<&Vec<String>>) -> HashSet<ApplyDomain> {
 pub fn create_attributes_processor(
     pipeline_ctx: PipelineContext,
     node: NodeId,
-    node_config: Arc<NodeUserConfig>,
+    node_config: Arc<ResolvedNodeConfig>,
     processor_config: &ProcessorConfig,
 ) -> Result<ProcessorWrapper<OtapPdata>, ConfigError> {
-    let proc = AttributesProcessor::from_config(pipeline_ctx, &node_config.config)?;
+    let proc = AttributesProcessor::from_resolved(
+        pipeline_ctx,
+        node_config
+            .component_config::<ResolvedAttributesConfig>()?
+            .as_ref(),
+    );
     Ok(ProcessorWrapper::local(
         proc,
         node,
-        node_config,
+        node_config.safe_config_snapshot(),
         processor_config,
     ))
 }
@@ -558,14 +608,22 @@ pub static ATTRIBUTES_PROCESSOR_FACTORY: otel_arrow_dfe_engine::ProcessorFactory
         create:
             |pipeline_ctx: PipelineContext,
              node: NodeId,
-             node_config: Arc<NodeUserConfig>,
+             node_config: Arc<ResolvedNodeConfig>,
              proc_cfg: &ProcessorConfig,
              _capabilities: &otel_arrow_dfe_engine::capability::registry::Capabilities| {
                 create_attributes_processor(pipeline_ctx, node, node_config, proc_cfg)
             },
         context_declarations: None,
         wiring_contract: otel_arrow_dfe_engine::wiring_contract::WiringContract::UNRESTRICTED,
-        validate_config: otel_arrow_dfe_config::validation::validate_typed_config::<Config>,
+        resolve_config: |raw| {
+            let config =
+                otel_arrow_dfe_config::validation::deserialize_typed_config::<Config>(raw)?;
+            Ok(ResolvedComponentConfig::omitted(
+                AttributesProcessor::resolve_config(config)?,
+            ))
+        },
+        // Literal attribute values and hash salts can contain private operational data.
+        snapshot_policy: ConfigSnapshotPolicy::Omit,
     };
 
 // Per-domain payload slices used by apply_transform_with_stats.
@@ -593,6 +651,33 @@ mod payload_sets {
 
 #[cfg(test)]
 mod tests {
+    /// Scenario: An attribute action conflicts with another action before pipeline creation.
+    /// Guarantees: The resolver rejects the transform during admission and omits private literals.
+    #[test]
+    fn resolver_validates_transforms_before_creation() {
+        let resolve = ATTRIBUTES_PROCESSOR_FACTORY.resolve_config;
+        assert!(
+            resolve(&serde_json::json!({"actions": [
+                {"action": "rename", "source_key": "old", "destination_key": "new"},
+                {"action": "delete", "key": "old"}
+            ]}))
+            .is_err()
+        );
+        let raw = serde_json::json!({"actions": [
+            {"action": "insert", "key": "tenant", "value": "private-literal"}
+        ]});
+        let default = resolve(&raw).unwrap();
+        let mut explicit = raw;
+        explicit["apply_to"] = serde_json::json!(["signal", "signal"]);
+        assert_eq!(default, resolve(&explicit).unwrap());
+        assert_eq!(
+            default.safe_config_snapshot(),
+            otel_arrow_dfe_config::secret::OMITTED_VALUE
+        );
+        let first = default.get::<ResolvedAttributesConfig>().unwrap();
+        let second = default.clone().get::<ResolvedAttributesConfig>().unwrap();
+        assert!(Arc::ptr_eq(&first.transform, &second.transform));
+    }
     use super::*;
     use bytes::BytesMut;
     use otel_arrow_dfe_engine::context::ControllerContext;
@@ -613,6 +698,12 @@ mod tests {
     use otel_arrow_dfe_telemetry::registry::TelemetryRegistryHandle;
     use prost::Message as _;
     use serde_json::json;
+
+    fn resolved_node_config(source: NodeUserConfig) -> Arc<ResolvedNodeConfig> {
+        ATTRIBUTES_PROCESSOR_FACTORY
+            .resolve_node_config(source)
+            .expect("attributes processor config must resolve")
+    }
 
     fn build_logs_with_attrs(
         res_attrs: Vec<KeyValue>,
@@ -694,9 +785,13 @@ mod tests {
         let rt: TestRuntime<OtapPdata> = TestRuntime::new();
         let mut node_config = NodeUserConfig::new_processor_config(ATTRIBUTES_PROCESSOR_URN);
         node_config.config = cfg;
-        let proc =
-            create_attributes_processor(pipeline_ctx, node, Arc::new(node_config), rt.config())
-                .expect("create processor");
+        let proc = create_attributes_processor(
+            pipeline_ctx,
+            node,
+            resolved_node_config(node_config),
+            rt.config(),
+        )
+        .expect("create processor");
         let phase = rt.set_processor(proc);
 
         phase
@@ -842,9 +937,13 @@ mod tests {
         let rt: TestRuntime<OtapPdata> = TestRuntime::new();
         let mut node_config = NodeUserConfig::new_processor_config(ATTRIBUTES_PROCESSOR_URN);
         node_config.config = cfg;
-        let proc =
-            create_attributes_processor(pipeline_ctx, node, Arc::new(node_config), rt.config())
-                .expect("create processor");
+        let proc = create_attributes_processor(
+            pipeline_ctx,
+            node,
+            resolved_node_config(node_config),
+            rt.config(),
+        )
+        .expect("create processor");
         let phase = rt.set_processor(proc);
 
         phase
@@ -959,9 +1058,13 @@ mod tests {
         let rt: TestRuntime<OtapPdata> = TestRuntime::new();
         let mut node_config = NodeUserConfig::new_processor_config(ATTRIBUTES_PROCESSOR_URN);
         node_config.config = cfg;
-        let proc =
-            create_attributes_processor(pipeline_ctx, node, Arc::new(node_config), rt.config())
-                .expect("create processor");
+        let proc = create_attributes_processor(
+            pipeline_ctx,
+            node,
+            resolved_node_config(node_config),
+            rt.config(),
+        )
+        .expect("create processor");
         let phase = rt.set_processor(proc);
 
         phase
@@ -1040,9 +1143,13 @@ mod tests {
         let rt: TestRuntime<OtapPdata> = TestRuntime::new();
         let mut node_config = NodeUserConfig::new_processor_config(ATTRIBUTES_PROCESSOR_URN);
         node_config.config = cfg;
-        let proc =
-            create_attributes_processor(pipeline_ctx, node, Arc::new(node_config), rt.config())
-                .expect("create processor");
+        let proc = create_attributes_processor(
+            pipeline_ctx,
+            node,
+            resolved_node_config(node_config),
+            rt.config(),
+        )
+        .expect("create processor");
         let phase = rt.set_processor(proc);
 
         phase
@@ -1108,9 +1215,13 @@ mod tests {
         let rt: TestRuntime<OtapPdata> = TestRuntime::new();
         let mut node_config = NodeUserConfig::new_processor_config(ATTRIBUTES_PROCESSOR_URN);
         node_config.config = cfg;
-        let proc =
-            create_attributes_processor(pipeline_ctx, node, Arc::new(node_config), rt.config())
-                .expect("create processor");
+        let proc = create_attributes_processor(
+            pipeline_ctx,
+            node,
+            resolved_node_config(node_config),
+            rt.config(),
+        )
+        .expect("create processor");
         let phase = rt.set_processor(proc);
 
         phase
@@ -1195,9 +1306,13 @@ mod tests {
         let rt: TestRuntime<OtapPdata> = TestRuntime::new();
         let mut node_config = NodeUserConfig::new_processor_config(ATTRIBUTES_PROCESSOR_URN);
         node_config.config = cfg;
-        let proc =
-            create_attributes_processor(pipeline_ctx, node, Arc::new(node_config), rt.config())
-                .expect("create processor");
+        let proc = create_attributes_processor(
+            pipeline_ctx,
+            node,
+            resolved_node_config(node_config),
+            rt.config(),
+        )
+        .expect("create processor");
         let phase = rt.set_processor(proc);
 
         phase
@@ -1290,9 +1405,13 @@ mod tests {
         let rt: TestRuntime<OtapPdata> = TestRuntime::new();
         let mut node_config = NodeUserConfig::new_processor_config(ATTRIBUTES_PROCESSOR_URN);
         node_config.config = cfg;
-        let proc =
-            create_attributes_processor(pipeline_ctx, node, Arc::new(node_config), rt.config())
-                .expect("create processor");
+        let proc = create_attributes_processor(
+            pipeline_ctx,
+            node,
+            resolved_node_config(node_config),
+            rt.config(),
+        )
+        .expect("create processor");
         let phase = rt.set_processor(proc);
         phase
             .run_test(|mut ctx| async move {
@@ -1367,9 +1486,13 @@ mod tests {
         let rt: TestRuntime<OtapPdata> = TestRuntime::new();
         let mut node_config = NodeUserConfig::new_processor_config(ATTRIBUTES_PROCESSOR_URN);
         node_config.config = cfg;
-        let proc =
-            create_attributes_processor(pipeline_ctx, node, Arc::new(node_config), rt.config())
-                .expect("create processor");
+        let proc = create_attributes_processor(
+            pipeline_ctx,
+            node,
+            resolved_node_config(node_config),
+            rt.config(),
+        )
+        .expect("create processor");
         let phase = rt.set_processor(proc);
         phase
             .run_test(|mut ctx| async move {
@@ -1462,9 +1585,13 @@ mod tests {
         let rt: TestRuntime<OtapPdata> = TestRuntime::new();
         let mut node_config = NodeUserConfig::new_processor_config(ATTRIBUTES_PROCESSOR_URN);
         node_config.config = cfg;
-        let proc =
-            create_attributes_processor(pipeline_ctx, node, Arc::new(node_config), rt.config())
-                .expect("create processor");
+        let proc = create_attributes_processor(
+            pipeline_ctx,
+            node,
+            resolved_node_config(node_config),
+            rt.config(),
+        )
+        .expect("create processor");
         let phase = rt.set_processor(proc);
         phase
             .run_test(|mut ctx| async move {
@@ -1552,9 +1679,13 @@ mod tests {
         let rt: TestRuntime<OtapPdata> = TestRuntime::new();
         let mut node_config = NodeUserConfig::new_processor_config(ATTRIBUTES_PROCESSOR_URN);
         node_config.config = cfg;
-        let proc =
-            create_attributes_processor(pipeline_ctx, node, Arc::new(node_config), rt.config())
-                .expect("create processor");
+        let proc = create_attributes_processor(
+            pipeline_ctx,
+            node,
+            resolved_node_config(node_config),
+            rt.config(),
+        )
+        .expect("create processor");
         let phase = rt.set_processor(proc);
         phase
             .run_test(|mut ctx| async move {
@@ -1624,9 +1755,13 @@ mod tests {
         let rt: TestRuntime<OtapPdata> = TestRuntime::new();
         let mut node_config = NodeUserConfig::new_processor_config(ATTRIBUTES_PROCESSOR_URN);
         node_config.config = cfg;
-        let proc =
-            create_attributes_processor(pipeline_ctx, node, Arc::new(node_config), rt.config())
-                .expect("create processor");
+        let proc = create_attributes_processor(
+            pipeline_ctx,
+            node,
+            resolved_node_config(node_config),
+            rt.config(),
+        )
+        .expect("create processor");
         let phase = rt.set_processor(proc);
 
         phase
@@ -1695,9 +1830,13 @@ mod tests {
         let rt: TestRuntime<OtapPdata> = TestRuntime::new();
         let mut node_config = NodeUserConfig::new_processor_config(ATTRIBUTES_PROCESSOR_URN);
         node_config.config = cfg;
-        let proc =
-            create_attributes_processor(pipeline_ctx, node, Arc::new(node_config), rt.config())
-                .expect("create processor");
+        let proc = create_attributes_processor(
+            pipeline_ctx,
+            node,
+            resolved_node_config(node_config),
+            rt.config(),
+        )
+        .expect("create processor");
         let phase = rt.set_processor(proc);
 
         phase
@@ -1763,9 +1902,13 @@ mod tests {
         let rt: TestRuntime<OtapPdata> = TestRuntime::new();
         let mut node_config = NodeUserConfig::new_processor_config(ATTRIBUTES_PROCESSOR_URN);
         node_config.config = cfg;
-        let proc =
-            create_attributes_processor(pipeline_ctx, node, Arc::new(node_config), rt.config())
-                .expect("create processor");
+        let proc = create_attributes_processor(
+            pipeline_ctx,
+            node,
+            resolved_node_config(node_config),
+            rt.config(),
+        )
+        .expect("create processor");
         let phase = rt.set_processor(proc);
 
         phase
@@ -1834,9 +1977,13 @@ mod tests {
         let rt: TestRuntime<OtapPdata> = TestRuntime::new();
         let mut node_config = NodeUserConfig::new_processor_config(ATTRIBUTES_PROCESSOR_URN);
         node_config.config = cfg;
-        let proc =
-            create_attributes_processor(pipeline_ctx, node, Arc::new(node_config), rt.config())
-                .expect("create processor");
+        let proc = create_attributes_processor(
+            pipeline_ctx,
+            node,
+            resolved_node_config(node_config),
+            rt.config(),
+        )
+        .expect("create processor");
         let phase = rt.set_processor(proc);
 
         phase
@@ -1919,9 +2066,13 @@ mod tests {
         let rt: TestRuntime<OtapPdata> = TestRuntime::new();
         let mut node_config = NodeUserConfig::new_processor_config(ATTRIBUTES_PROCESSOR_URN);
         node_config.config = cfg;
-        let proc =
-            create_attributes_processor(pipeline_ctx, node, Arc::new(node_config), rt.config())
-                .expect("create processor");
+        let proc = create_attributes_processor(
+            pipeline_ctx,
+            node,
+            resolved_node_config(node_config),
+            rt.config(),
+        )
+        .expect("create processor");
         let phase = rt.set_processor(proc);
 
         phase
@@ -1990,9 +2141,13 @@ mod tests {
         let rt: TestRuntime<OtapPdata> = TestRuntime::new();
         let mut node_config = NodeUserConfig::new_processor_config(ATTRIBUTES_PROCESSOR_URN);
         node_config.config = cfg;
-        let proc =
-            create_attributes_processor(pipeline_ctx, node, Arc::new(node_config), rt.config())
-                .expect("create processor");
+        let proc = create_attributes_processor(
+            pipeline_ctx,
+            node,
+            resolved_node_config(node_config),
+            rt.config(),
+        )
+        .expect("create processor");
         let phase = rt.set_processor(proc);
 
         phase
@@ -2067,9 +2222,13 @@ mod tests {
         let rt: TestRuntime<OtapPdata> = TestRuntime::new();
         let mut node_config = NodeUserConfig::new_processor_config(ATTRIBUTES_PROCESSOR_URN);
         node_config.config = cfg;
-        let proc =
-            create_attributes_processor(pipeline_ctx, node, Arc::new(node_config), rt.config())
-                .expect("create processor");
+        let proc = create_attributes_processor(
+            pipeline_ctx,
+            node,
+            resolved_node_config(node_config),
+            rt.config(),
+        )
+        .expect("create processor");
         let phase = rt.set_processor(proc);
 
         phase
@@ -2148,9 +2307,13 @@ mod tests {
         let rt: TestRuntime<OtapPdata> = TestRuntime::new();
         let mut node_config = NodeUserConfig::new_processor_config(ATTRIBUTES_PROCESSOR_URN);
         node_config.config = cfg;
-        let proc =
-            create_attributes_processor(pipeline_ctx, node, Arc::new(node_config), rt.config())
-                .expect("create processor");
+        let proc = create_attributes_processor(
+            pipeline_ctx,
+            node,
+            resolved_node_config(node_config),
+            rt.config(),
+        )
+        .expect("create processor");
         let phase = rt.set_processor(proc);
 
         phase
@@ -2228,9 +2391,13 @@ mod tests {
         let rt: TestRuntime<OtapPdata> = TestRuntime::new();
         let mut node_config = NodeUserConfig::new_processor_config(ATTRIBUTES_PROCESSOR_URN);
         node_config.config = cfg;
-        let proc =
-            create_attributes_processor(pipeline_ctx, node, Arc::new(node_config), rt.config())
-                .expect("create processor");
+        let proc = create_attributes_processor(
+            pipeline_ctx,
+            node,
+            resolved_node_config(node_config),
+            rt.config(),
+        )
+        .expect("create processor");
         let phase = rt.set_processor(proc);
 
         phase
@@ -2285,9 +2452,13 @@ mod tests {
         let rt: TestRuntime<OtapPdata> = TestRuntime::new();
         let mut node_config = NodeUserConfig::new_processor_config(ATTRIBUTES_PROCESSOR_URN);
         node_config.config = cfg;
-        let proc =
-            create_attributes_processor(pipeline_ctx, node, Arc::new(node_config), rt.config())
-                .expect("create processor");
+        let proc = create_attributes_processor(
+            pipeline_ctx,
+            node,
+            resolved_node_config(node_config),
+            rt.config(),
+        )
+        .expect("create processor");
         let phase = rt.set_processor(proc);
 
         phase
@@ -2353,9 +2524,13 @@ mod tests {
         let rt: TestRuntime<OtapPdata> = TestRuntime::new();
         let mut node_config = NodeUserConfig::new_processor_config(ATTRIBUTES_PROCESSOR_URN);
         node_config.config = cfg;
-        let proc =
-            create_attributes_processor(pipeline_ctx, node, Arc::new(node_config), rt.config())
-                .expect("create processor");
+        let proc = create_attributes_processor(
+            pipeline_ctx,
+            node,
+            resolved_node_config(node_config),
+            rt.config(),
+        )
+        .expect("create processor");
         let phase = rt.set_processor(proc);
 
         phase
@@ -2440,9 +2615,13 @@ mod tests {
         let rt: TestRuntime<OtapPdata> = TestRuntime::new();
         let mut node_config = NodeUserConfig::new_processor_config(ATTRIBUTES_PROCESSOR_URN);
         node_config.config = cfg;
-        let proc =
-            create_attributes_processor(pipeline_ctx, node, Arc::new(node_config), rt.config())
-                .expect("create processor");
+        let proc = create_attributes_processor(
+            pipeline_ctx,
+            node,
+            resolved_node_config(node_config),
+            rt.config(),
+        )
+        .expect("create processor");
         let phase = rt.set_processor(proc);
 
         phase
@@ -2521,8 +2700,6 @@ mod telemetry_tests {
     /// Guarantees: The component records correct entries per action and domain in processor.attributes.modified, and transform success in processor.attributes.
     #[test]
     fn test_metrics_collect_telemetry_reports_counters() {
-        use std::sync::Arc;
-
         let rt: TestRuntime<OtapPdata> = TestRuntime::new();
         let telemetry_registry = rt.metrics_registry();
         let metrics_reporter = rt.metrics_reporter();
@@ -2543,7 +2720,10 @@ mod telemetry_tests {
         node_cfg.config = cfg;
         let proc_cfg = ProcessorConfig::new("attr_proc");
         let node = test_node(proc_cfg.name.clone());
-        let proc = create_attributes_processor(pipeline_ctx, node, Arc::new(node_cfg), &proc_cfg)
+        let node_cfg = ATTRIBUTES_PROCESSOR_FACTORY
+            .resolve_node_config(node_cfg)
+            .expect("attributes processor config must resolve");
+        let proc = create_attributes_processor(pipeline_ctx, node, node_cfg, &proc_cfg)
             .expect("create processor");
 
         // 4) Build a minimal OTLP logs request that has a signal-level attribute 'a'

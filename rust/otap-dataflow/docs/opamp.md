@@ -4,6 +4,10 @@ This document describes the mechanism through which dataflow engine can be
 configured via an embedded [OpAMP](https://opentelemetry.io/docs/specs/opamp/)
 Agent, implemented as a controller extension.
 
+For the configuration privacy and resolution contract behind OpAMP reporting
+and reconciliation, see
+[Configuration Framework Design](configuration-resolution.md).
+
 ## Problem
 
 The OpAMP protocol is used in the OpenTelemetry ecosystem for fleet management.
@@ -114,7 +118,7 @@ engine:
             # Optional (default = true)
             reports_status: true
 
-            # whether the agent should report its current effective config
+            # whether the agent should report committed configuration, including secrets
             #
             # Optional (default = true)
             reports_effective_config: true
@@ -551,6 +555,26 @@ without collisions. The agent does not calculate hashes, it only stores and
 compares them. This is
 [recommended by the OpAMP spec as well](https://opentelemetry.io/docs/specs/opamp/#calculating-hashes).
 
+When `reports_effective_config` is enabled, the agent serializes the controller's
+committed source into OpAMP's protocol-defined `effective_config` field. The
+wire field, `EffectiveConfig` message, JSON envelope, and capability names remain
+unchanged. This includes credentials, inline TLS keys, static headers,
+free-form component payloads, and `engine.custom`; no redaction or omission is
+applied. Component payloads preserve source values rather than substituting
+factory-resolved defaults. Original YAML formatting and comments are not retained.
+
+An OpAMP heartbeat reads committed source without parsing component
+configuration again or invoking factories. Failed admission and rolled-back
+candidates are not reported as committed configuration. Protect the connection
+and OpAMP server as sensitive management infrastructure, and do not log these
+payloads or forward them into events.
+
+The controller separately retains `SafeConfigSnapshot`, with factory-owned
+redaction and omission, for future configuration events. OpAMP does not use it.
+Its display markers remain invalid operational input. See
+[Configuration Framework Design](configuration-resolution.md) for the
+representation and disclosure boundaries.
+
 ### Engine Config Reconciliation
 
 When the OpAMP agent controller extension receives a `ServerToAgent` message,
@@ -560,6 +584,11 @@ last applied config hash, the new config will be applied to the engine.
 The agent will try to deserialize the remote config as an `OtelDataflowSpec`.
 If deserialization fails, it will respond to the server with an `AgentToServer`
 message with a `remote_config_status` containing a `FAILED` status.
+
+After deserialization, the controller resolves the complete candidate through
+all selected component factories. Unknown component types, invalid component
+configuration, reserved snapshot markers, and safe-snapshot failures reject the
+candidate before live rollout begins.
 
 If deserialization of the new remote_config succeeds, the agent will immediately
 reply to the server with an `AgentToServer` message with a `remote_config_status`

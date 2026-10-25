@@ -6,7 +6,7 @@ use std::num::NonZeroUsize;
 use serde::Deserialize;
 
 /// Configuration for the [`TransformProcessor`](super::TransformProcessor)
-#[derive(Debug, Deserialize)]
+#[derive(Clone, Debug, Deserialize, PartialEq)]
 pub struct Config {
     #[serde(flatten)]
     pub query: Query,
@@ -43,7 +43,7 @@ pub struct Config {
     pub filter_attribute_keys_case_sensitive: bool,
 }
 
-#[derive(Debug, Deserialize)]
+#[derive(Clone, Debug, Deserialize, PartialEq)]
 #[serde(rename_all = "snake_case")]
 #[allow(clippy::enum_variant_names)]
 pub enum Query {
@@ -52,7 +52,7 @@ pub enum Query {
     Ottl(OttlConfig),
 }
 
-#[derive(Debug, Deserialize)]
+#[derive(Clone, Debug, Deserialize, PartialEq)]
 #[serde(rename_all = "snake_case")]
 pub struct OttlConfig {
     /// OTTL Statements for transforming logs

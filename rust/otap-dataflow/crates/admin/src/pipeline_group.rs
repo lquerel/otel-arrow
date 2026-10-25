@@ -67,17 +67,13 @@ fn operation_error_response(status: StatusCode, error: crate::ControlPlaneError)
     (status, Json(error.as_operation_error())).into_response()
 }
 
-/// Returns the committed configuration for one pipeline group.
-///
-/// Credential header values are redacted from the response (see
-/// [`PipelineGroupConfig::redacted_for_snapshot`]) so secrets configured in
-/// node and extension `headers` are not exposed in cleartext.
+/// Returns committed group source configuration, including sensitive values.
 pub async fn show_group(
     Path(pipeline_group_id): Path<String>,
     State(state): State<AppState>,
 ) -> Result<Json<PipelineGroupConfig>, StatusCode> {
     match state.controller.group_details(&pipeline_group_id) {
-        Ok(Some(group)) => Ok(Json(group.redacted_for_snapshot())),
+        Ok(Some(group)) => Ok(Json(group)),
         Ok(None) | Err(crate::ControlPlaneError::GroupNotFound) => Err(StatusCode::NOT_FOUND),
         Err(_) => Err(StatusCode::INTERNAL_SERVER_ERROR),
     }
@@ -87,7 +83,7 @@ pub async fn show_group(
 pub async fn create_group(
     Path(pipeline_group_id): Path<String>,
     State(state): State<AppState>,
-    Json(group): Json<PipelineGroupConfig>,
+    crate::PrivateConfigJson(group): crate::PrivateConfigJson<PipelineGroupConfig>,
 ) -> impl IntoResponse {
     otel_info!(
         "group.create.requested",
@@ -95,7 +91,7 @@ pub async fn create_group(
     );
 
     match state.controller.create_group(&pipeline_group_id, group) {
-        Ok(group) => (StatusCode::CREATED, Json(group.redacted_for_snapshot())).into_response(),
+        Ok(group) => (StatusCode::CREATED, Json(group)).into_response(),
         Err(error @ crate::ControlPlaneError::GroupAlreadyExists)
         | Err(error @ crate::ControlPlaneError::RolloutConflict) => {
             operation_error_response(StatusCode::CONFLICT, error)
@@ -416,11 +412,10 @@ mod tests {
         assert_eq!(decoded, group);
     }
 
-    /// Scenario: a pipeline group contains a node with credential headers.
-    /// Guarantees: `show_group` redacts them so the raw credential never
-    /// appears in the response body.
+    /// Scenario: A pipeline group contains sensitive component source configuration.
+    /// Guarantees: Admin preserves source credentials without redaction or omission.
     #[tokio::test]
-    async fn show_group_redacts_credential_header_values() {
+    async fn show_group_preserves_sensitive_source_values() {
         let group: PipelineGroupConfig = serde_json::from_value(serde_json::json!({
             "pipelines": {
                 "main": {
@@ -428,9 +423,7 @@ mod tests {
                         "receiver": { "type": "urn:test:receiver:example", "config": null },
                         "exporter": {
                             "type": "urn:test:exporter:example",
-                            "config": {
-                                "headers": { "authorization": "Bearer super-secret-token" }
-                            }
+                            "config": {"password": "group-secret"}
                         }
                     },
                     "connections": [ { "from": "receiver", "to": "exporter" } ]
@@ -455,14 +448,9 @@ mod tests {
             .await
             .expect("body should collect");
         let text = String::from_utf8(body.to_vec()).expect("group body is utf-8");
-        assert!(
-            !text.contains("Bearer super-secret-token"),
-            "raw credential must not appear in the group response: {text}"
-        );
-        assert!(
-            text.contains("[REDACTED]"),
-            "redaction placeholder should appear in the group response: {text}"
-        );
+        assert!(text.contains("group-secret"));
+        assert!(!text.contains("[REDACTED]"));
+        assert!(!text.contains("[OMITTED]"));
     }
 
     /// Scenario: a caller creates an empty pipeline group.
@@ -478,7 +466,7 @@ mod tests {
                 Ok(group.clone()),
                 Ok(delete_status("succeeded")),
             ))),
-            Json(group.clone()),
+            crate::PrivateConfigJson(group.clone()),
         )
         .await
         .into_response();
@@ -492,13 +480,11 @@ mod tests {
         assert_eq!(decoded, group);
     }
 
-    /// Scenario: a created group's nodes carry credential headers.
-    /// Guarantees: `create_group` redacts them in its echoed response so the
-    /// raw credential never appears in the response body (responses are often
-    /// logged by clients/proxies).
+    /// Scenario: Group creation returns a committed source envelope from the control plane.
+    /// Guarantees: The handler preserves sensitive returned values without a late redaction pass.
     #[tokio::test]
-    async fn create_group_redacts_credential_header_values() {
-        let group: PipelineGroupConfig = serde_json::from_value(serde_json::json!({
+    async fn create_group_serializes_control_plane_source_directly() {
+        let source_group: PipelineGroupConfig = serde_json::from_value(serde_json::json!({
             "pipelines": {
                 "main": {
                     "nodes": {
@@ -513,15 +499,14 @@ mod tests {
             }
         }))
         .expect("group should deserialize");
-
         let response = create_group(
             Path("default".to_string()),
             State(test_app_state(stub(
                 Ok(None),
-                Ok(group.clone()),
+                Ok(source_group.clone()),
                 Ok(delete_status("succeeded")),
             ))),
-            Json(group.clone()),
+            crate::PrivateConfigJson(source_group),
         )
         .await
         .into_response();
@@ -531,14 +516,9 @@ mod tests {
             .await
             .expect("body should collect");
         let text = String::from_utf8(body.to_vec()).expect("group body is utf-8");
-        assert!(
-            !text.contains("Bearer super-secret-token"),
-            "raw credential must not appear in the create response: {text}"
-        );
-        assert!(
-            text.contains("[REDACTED]"),
-            "redacted placeholder should appear in the create response: {text}"
-        );
+        assert!(text.contains("Bearer super-secret-token"));
+        assert!(!text.contains("[REDACTED]"));
+        assert!(!text.contains("[OMITTED]"));
     }
 
     /// Scenario: the control plane rejects group creation as invalid.
@@ -554,7 +534,7 @@ mod tests {
                 }),
                 Ok(delete_status("succeeded")),
             ))),
-            Json(PipelineGroupConfig::new()),
+            crate::PrivateConfigJson(PipelineGroupConfig::new()),
         )
         .await
         .into_response();

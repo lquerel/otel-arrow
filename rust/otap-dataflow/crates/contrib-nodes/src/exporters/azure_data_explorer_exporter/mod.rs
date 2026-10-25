@@ -13,10 +13,12 @@ otel_arrow_dfe_telemetry::otel_component_scope!(
 );
 
 use linkme::distributed_slice;
-use otel_arrow_dfe_config::node::NodeUserConfig;
 use otel_arrow_dfe_config::{error::Error as ConfigError, validation::deserialize_typed_config};
 use otel_arrow_dfe_engine::ExporterFactory;
 use otel_arrow_dfe_engine::capability::auth::bearer_token_provider::BearerTokenProvider;
+use otel_arrow_dfe_engine::component_config::{
+    ConfigSnapshotPolicy, ResolvedComponentConfig, ResolvedNodeConfig,
+};
 use otel_arrow_dfe_engine::config::ExporterConfig;
 use otel_arrow_dfe_engine::context::PipelineContext;
 use otel_arrow_dfe_engine::exporter::ExporterWrapper;
@@ -46,14 +48,10 @@ pub static AZURE_DATA_EXPLORER_EXPORTER: ExporterFactory<OtapPdata> = ExporterFa
     name: AZURE_DATA_EXPLORER_EXPORTER_URN,
     create: |pipeline_ctx: PipelineContext,
              node: NodeId,
-             node_config: Arc<NodeUserConfig>,
+             node_config: Arc<ResolvedNodeConfig>,
              exporter_config: &ExporterConfig,
              capabilities: &otel_arrow_dfe_engine::capability::registry::Capabilities| {
-        let cfg: Config = serde_json::from_value(node_config.config.clone()).map_err(|e| {
-            otel_arrow_dfe_config::error::Error::InvalidUserConfig {
-                error: e.to_string(),
-            }
-        })?;
+        let cfg = (*node_config.component_config::<Config>()?).clone();
 
         let token_provider = capabilities
             .require_local::<BearerTokenProvider>()
@@ -70,19 +68,21 @@ pub static AZURE_DATA_EXPLORER_EXPORTER: ExporterFactory<OtapPdata> = ExporterFa
                 }
             })?,
             node,
-            node_config,
+            node_config.safe_config_snapshot(),
             exporter_config,
         ))
     },
     wiring_contract: otel_arrow_dfe_engine::wiring_contract::WiringContract::UNRESTRICTED,
-    validate_config: |raw| {
+    resolve_config: |raw| {
         let config = deserialize_typed_config::<Config>(raw)?;
         config
             .validate()
             .map_err(|error| ConfigError::InvalidUserConfig {
                 error: error.to_string(),
-            })
+            })?;
+        ResolvedComponentConfig::typed_safe(config)
     },
+    snapshot_policy: ConfigSnapshotPolicy::TypedSafe,
     context_declarations: None,
 };
 
@@ -127,7 +127,8 @@ mod tests {
             }
         });
 
-        (AZURE_DATA_EXPLORER_EXPORTER.validate_config)(&config).expect("valid ADX configuration");
+        _ = (AZURE_DATA_EXPLORER_EXPORTER.resolve_config)(&config)
+            .expect("valid ADX configuration");
     }
 
     /// Scenario: static factory validation receives settings that deserialize but violate ADX constraints.
@@ -154,7 +155,7 @@ mod tests {
                 "network_requests.max_bytes must be between",
             ),
         ] {
-            let error = (AZURE_DATA_EXPLORER_EXPORTER.validate_config)(&config)
+            let error = (AZURE_DATA_EXPLORER_EXPORTER.resolve_config)(&config)
                 .expect_err("semantic validation must reject invalid configuration");
             assert!(error.to_string().contains(expected), "{error}");
         }

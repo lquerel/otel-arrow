@@ -131,7 +131,7 @@ impl<
         let telemetry_policy = deployment.resolved.policies.telemetry.clone();
         let rate_limiter_policies = deployment.resolved.policies.rate_limiters.clone();
         let rate_limiter_scope = deployment.resolved.policies.rate_limiter_scope.clone();
-        let pipeline_config = deployment.resolved.pipeline.clone();
+        let pipeline_config = deployment.runtime_resolved.clone();
         let context_bindings = Arc::clone(&deployment.context_bindings);
         let (runtime_ctrl_msg_tx, runtime_ctrl_msg_rx) =
             runtime_ctrl_msg_channel(channel_capacity_policy.control.pipeline);

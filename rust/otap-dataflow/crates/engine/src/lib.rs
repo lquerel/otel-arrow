@@ -12,6 +12,10 @@ use crate::{
         ChannelSenderMetrics, LocalChannelQueueDepth, PdataChannelReceiverMetricSets,
         PdataChannelSenderMetricSets, SharedChannelQueueDepth,
     },
+    component_config::{
+        ConfigSnapshotPolicy, ResolveConfigFn, ResolvedExtensionConfig, ResolvedNodeConfig,
+        ResolvedPipelineConfig,
+    },
     config::{ExporterConfig, ExtensionConfig, ProcessorConfig, ReceiverConfig},
     control::{AckMsg, CallData, NackMsg},
     effect_handler::SourceTagging,
@@ -144,6 +148,19 @@ pub trait NamedFactory {
     fn name(&self) -> &'static str;
 }
 
+fn resolve_node_config(
+    source: NodeUserConfig,
+    resolver: ResolveConfigFn,
+    snapshot_policy: ConfigSnapshotPolicy,
+) -> Result<Arc<ResolvedNodeConfig>, otel_arrow_dfe_config::error::Error> {
+    let component = resolver(&source.config)?;
+    Ok(Arc::new(ResolvedNodeConfig::new(
+        &source,
+        component,
+        snapshot_policy,
+    )?))
+}
+
 /// A factory for creating receivers.
 pub struct ReceiverFactory<PData> {
     /// The name of the receiver.
@@ -156,7 +173,7 @@ pub struct ReceiverFactory<PData> {
     pub create: fn(
         pipeline_ctx: PipelineContext,
         node: NodeId,
-        node_config: Arc<NodeUserConfig>,
+        node_config: Arc<ResolvedNodeConfig>,
         receiver_config: &ReceiverConfig,
         capabilities: &capability::registry::Capabilities,
     ) -> Result<ReceiverWrapper<PData>, otel_arrow_dfe_config::error::Error>,
@@ -164,13 +181,10 @@ pub struct ReceiverFactory<PData> {
     pub context_declarations: Option<context_declaration::ContextDeclarationProvider>,
     /// Optional wiring constraints enforced during pipeline build.
     pub wiring_contract: wiring_contract::WiringContract,
-    /// Validates the node-specific config statically, without creating the component.
-    ///
-    /// Use [`otel_arrow_dfe_config::validation::validate_typed_config`] for components with a
-    /// typed `Config` struct, or [`otel_arrow_dfe_config::validation::no_config`] for components
-    /// that accept no user configuration.
-    pub validate_config:
-        fn(config: &serde_json::Value) -> Result<(), otel_arrow_dfe_config::error::Error>,
+    /// Parses, validates, defaults, and snapshots the component-specific config.
+    pub resolve_config: ResolveConfigFn,
+    /// Explicit policy for exposing the resolved config in safe config snapshots.
+    pub snapshot_policy: ConfigSnapshotPolicy,
 }
 
 // Note: We don't use `#[derive(Clone)]` here to avoid forcing the `PData` type to implement `Clone`.
@@ -181,8 +195,19 @@ impl<PData> Clone for ReceiverFactory<PData> {
             create: self.create,
             context_declarations: self.context_declarations,
             wiring_contract: self.wiring_contract,
-            validate_config: self.validate_config,
+            resolve_config: self.resolve_config,
+            snapshot_policy: self.snapshot_policy,
         }
+    }
+}
+
+impl<PData> ReceiverFactory<PData> {
+    /// Resolves a submitted node config using this factory's declared resolver and policy.
+    pub fn resolve_node_config(
+        &self,
+        source: NodeUserConfig,
+    ) -> Result<Arc<ResolvedNodeConfig>, otel_arrow_dfe_config::error::Error> {
+        resolve_node_config(source, self.resolve_config, self.snapshot_policy)
     }
 }
 
@@ -204,7 +229,7 @@ pub struct ProcessorFactory<PData> {
     pub create: fn(
         pipeline: PipelineContext,
         node: NodeId,
-        node_config: Arc<NodeUserConfig>,
+        node_config: Arc<ResolvedNodeConfig>,
         processor_config: &ProcessorConfig,
         capabilities: &capability::registry::Capabilities,
     ) -> Result<ProcessorWrapper<PData>, otel_arrow_dfe_config::error::Error>,
@@ -212,13 +237,10 @@ pub struct ProcessorFactory<PData> {
     pub context_declarations: Option<context_declaration::ContextDeclarationProvider>,
     /// Optional wiring constraints enforced during pipeline build.
     pub wiring_contract: wiring_contract::WiringContract,
-    /// Validates the node-specific config statically, without creating the component.
-    ///
-    /// Use [`otel_arrow_dfe_config::validation::validate_typed_config`] for components with a
-    /// typed `Config` struct, or [`otel_arrow_dfe_config::validation::no_config`] for components
-    /// that accept no user configuration.
-    pub validate_config:
-        fn(config: &serde_json::Value) -> Result<(), otel_arrow_dfe_config::error::Error>,
+    /// Parses, validates, defaults, and snapshots the component-specific config.
+    pub resolve_config: ResolveConfigFn,
+    /// Explicit policy for exposing the resolved config in safe config snapshots.
+    pub snapshot_policy: ConfigSnapshotPolicy,
 }
 
 // Note: We don't use `#[derive(Clone)]` here to avoid forcing the `PData` type to implement `Clone`.
@@ -229,8 +251,19 @@ impl<PData> Clone for ProcessorFactory<PData> {
             create: self.create,
             context_declarations: self.context_declarations,
             wiring_contract: self.wiring_contract,
-            validate_config: self.validate_config,
+            resolve_config: self.resolve_config,
+            snapshot_policy: self.snapshot_policy,
         }
+    }
+}
+
+impl<PData> ProcessorFactory<PData> {
+    /// Resolves a submitted node config using this factory's declared resolver and policy.
+    pub fn resolve_node_config(
+        &self,
+        source: NodeUserConfig,
+    ) -> Result<Arc<ResolvedNodeConfig>, otel_arrow_dfe_config::error::Error> {
+        resolve_node_config(source, self.resolve_config, self.snapshot_policy)
     }
 }
 
@@ -252,7 +285,7 @@ pub struct ExporterFactory<PData> {
     pub create: fn(
         pipeline: PipelineContext,
         node: NodeId,
-        node_config: Arc<NodeUserConfig>,
+        node_config: Arc<ResolvedNodeConfig>,
         exporter_config: &ExporterConfig,
         capabilities: &capability::registry::Capabilities,
     ) -> Result<ExporterWrapper<PData>, otel_arrow_dfe_config::error::Error>,
@@ -260,13 +293,10 @@ pub struct ExporterFactory<PData> {
     pub context_declarations: Option<context_declaration::ContextDeclarationProvider>,
     /// Optional wiring constraints enforced during pipeline build.
     pub wiring_contract: wiring_contract::WiringContract,
-    /// Validates the node-specific config statically, without creating the component.
-    ///
-    /// Use [`otel_arrow_dfe_config::validation::validate_typed_config`] for components with a
-    /// typed `Config` struct, or [`otel_arrow_dfe_config::validation::no_config`] for components
-    /// that accept no user configuration.
-    pub validate_config:
-        fn(config: &serde_json::Value) -> Result<(), otel_arrow_dfe_config::error::Error>,
+    /// Parses, validates, defaults, and snapshots the component-specific config.
+    pub resolve_config: ResolveConfigFn,
+    /// Explicit policy for exposing the resolved config in safe config snapshots.
+    pub snapshot_policy: ConfigSnapshotPolicy,
 }
 
 // Note: We don't use `#[derive(Clone)]` here to avoid forcing the `PData` type to implement `Clone`.
@@ -277,8 +307,19 @@ impl<PData> Clone for ExporterFactory<PData> {
             create: self.create,
             context_declarations: self.context_declarations,
             wiring_contract: self.wiring_contract,
-            validate_config: self.validate_config,
+            resolve_config: self.resolve_config,
+            snapshot_policy: self.snapshot_policy,
         }
+    }
+}
+
+impl<PData> ExporterFactory<PData> {
+    /// Resolves a submitted node config using this factory's declared resolver and policy.
+    pub fn resolve_node_config(
+        &self,
+        source: NodeUserConfig,
+    ) -> Result<Arc<ResolvedNodeConfig>, otel_arrow_dfe_config::error::Error> {
+        resolve_node_config(source, self.resolve_config, self.snapshot_policy)
     }
 }
 
@@ -311,12 +352,13 @@ pub struct ExtensionFactory {
     pub create: fn(
         ext_ctx: &ExtensionContext,
         name: otel_arrow_dfe_config::ExtensionId,
-        ext_config: Arc<otel_arrow_dfe_config::extension::ExtensionUserConfig>,
+        ext_config: Arc<ResolvedExtensionConfig>,
         extension_config: &ExtensionConfig,
     ) -> Result<ExtensionBundle, otel_arrow_dfe_config::error::Error>,
-    /// Validates the node-specific config statically, without creating the component.
-    pub validate_config:
-        fn(config: &serde_json::Value) -> Result<(), otel_arrow_dfe_config::error::Error>,
+    /// Parses, validates, defaults, and snapshots the component-specific config.
+    pub resolve_config: ResolveConfigFn,
+    /// Explicit policy for exposing the resolved config in safe config snapshots.
+    pub snapshot_policy: ConfigSnapshotPolicy,
 }
 
 impl NamedFactory for ExtensionFactory {
@@ -785,6 +827,83 @@ impl<PData: 'static + Clone + Debug> PipelineFactory<PData> {
         })
     }
 
+    /// Resolves every component config exactly once before runtime admission.
+    pub fn resolve_pipeline_config(
+        &self,
+        source: &PipelineConfig,
+    ) -> Result<ResolvedPipelineConfig, Error> {
+        let mut nodes = HashMap::with_capacity(source.nodes().len());
+        for (node_id, node) in source.node_iter() {
+            let normalized = otel_arrow_dfe_config::node_urn::validate_plugin_urn(
+                node.r#type.as_ref(),
+                node.kind(),
+            )
+            .map_err(|error| Error::ConfigError(Box::new(error)))?;
+            let (resolve, policy) = match node.kind() {
+                otel_arrow_dfe_config::node::NodeKind::Receiver => {
+                    let factory = self
+                        .get_receiver_factory_map()
+                        .get(normalized.as_str())
+                        .ok_or_else(|| Error::UnknownReceiver {
+                            plugin_urn: normalized.clone(),
+                        })?;
+                    (factory.resolve_config, factory.snapshot_policy)
+                }
+                otel_arrow_dfe_config::node::NodeKind::Processor => {
+                    let factory = self
+                        .get_processor_factory_map()
+                        .get(normalized.as_str())
+                        .ok_or_else(|| Error::UnknownProcessor {
+                            plugin_urn: normalized.clone(),
+                        })?;
+                    (factory.resolve_config, factory.snapshot_policy)
+                }
+                otel_arrow_dfe_config::node::NodeKind::Exporter => {
+                    let factory = self
+                        .get_exporter_factory_map()
+                        .get(normalized.as_str())
+                        .ok_or_else(|| Error::UnknownExporter {
+                            plugin_urn: normalized.clone(),
+                        })?;
+                    (factory.resolve_config, factory.snapshot_policy)
+                }
+            };
+            let component = resolve(&node.config).map_err(|_| {
+                Error::ConfigError(Box::new(component_config::safe_component_error(
+                    normalized.as_str(),
+                    "configuration resolution",
+                )))
+            })?;
+            let resolved = ResolvedNodeConfig::new(node, component, policy)
+                .map_err(|error| Error::ConfigError(Box::new(error)))?;
+            let _ = nodes.insert(node_id.clone(), Arc::new(resolved));
+        }
+
+        let mut extensions = HashMap::with_capacity(source.extensions().len());
+        for (extension_id, extension) in source.extension_iter() {
+            let raw_urn = extension.r#type.as_str();
+            let factory = self
+                .get_extension_factory_map()
+                .get(raw_urn)
+                .ok_or_else(|| Error::UnknownExtension {
+                    plugin_urn: raw_urn.to_owned(),
+                })?;
+            let component = (factory.resolve_config)(&extension.config).map_err(|_| {
+                Error::ConfigError(Box::new(component_config::safe_component_error(
+                    raw_urn,
+                    "configuration resolution",
+                )))
+            })?;
+            let resolved =
+                ResolvedExtensionConfig::new(extension, component, factory.snapshot_policy)
+                    .map_err(|error| Error::ConfigError(Box::new(error)))?;
+            let _ = extensions.insert(extension_id.clone(), Arc::new(resolved));
+        }
+
+        ResolvedPipelineConfig::new(source, nodes, extensions)
+            .map_err(|error| Error::ConfigError(Box::new(error)))
+    }
+
     /// Builds a runtime pipeline from the given pipeline configuration.
     ///
     /// Main phases:
@@ -802,7 +921,7 @@ impl<PData: 'static + Clone + Debug> PipelineFactory<PData> {
     pub fn build(
         self: &PipelineFactory<PData>,
         mut pipeline_ctx: PipelineContext,
-        mut config: PipelineConfig,
+        config: ResolvedPipelineConfig,
         channel_capacity_policy: ChannelCapacityPolicy,
         telemetry_policy: TelemetryPolicy,
         rate_limiter_policies: BTreeMap<String, RateLimiterPolicy>,
@@ -812,6 +931,7 @@ impl<PData: 'static + Clone + Debug> PipelineFactory<PData> {
     where
         PData: Unwindable,
     {
+        let (config, resolved_nodes, resolved_extensions, unconnected) = config.into_build_parts();
         let mut receivers = Vec::new();
         let mut processors = Vec::new();
         let mut exporters = Vec::new();
@@ -832,7 +952,6 @@ impl<PData: 'static + Clone + Debug> PipelineFactory<PData> {
         // Remove unconnected nodes before building the pipeline.
         // Nodes that have no incoming or outgoing connections are filtered out
         // with a warning instead of causing a startup failure.
-        let unconnected = config.remove_unconnected_nodes();
         for (node_id, node_kind) in &unconnected {
             let kind: Cow<'static, str> = (*node_kind).into();
             otel_info!(
@@ -928,6 +1047,9 @@ impl<PData: 'static + Clone + Debug> PipelineFactory<PData> {
             extension::wrapper::ExtensionEntityKeys,
         )> = Vec::new();
         for (ext_id, ext_user_config) in config.extension_iter() {
+            let resolved_extension = resolved_extensions
+                .get(ext_id)
+                .expect("all snapshot extensions were resolved");
             let raw_urn = ext_user_config.r#type.as_str();
             let factory = self
                 .get_extension_factory_map()
@@ -943,10 +1065,14 @@ impl<PData: 'static + Clone + Debug> PipelineFactory<PData> {
             let bundle = (factory.create)(
                 &ext_ctx,
                 ext_id.clone(),
-                ext_user_config.clone(),
+                Arc::clone(resolved_extension),
                 &runtime_config,
             )
-            .map_err(|e| Error::ConfigError(Box::new(e)))?;
+            .map_err(|_| {
+                Error::ConfigError(Box::new(component_config::safe_component_error(
+                    raw_urn, "creation",
+                )))
+            })?;
             let mut bundle = bundle;
             let entity_keys = bundle.wire_telemetry(
                 ext_id.clone(),
@@ -992,6 +1118,9 @@ impl<PData: 'static + Clone + Debug> PipelineFactory<PData> {
         let mut admission_bound_nodes = Vec::new();
         let mut admission_explicitly_opted_out_nodes = Vec::new();
         for (name, node_config) in config.node_iter() {
+            let resolved_node = resolved_nodes
+                .get(name)
+                .expect("all snapshot nodes were resolved");
             let node_kind = node_config.kind();
             let node_id = node_ids.get(name).expect("allocated in first pass").clone();
             let mut base_ctx = pipeline_ctx.with_node_context(
@@ -1053,7 +1182,7 @@ impl<PData: 'static + Clone + Debug> PipelineFactory<PData> {
                             self.create_receiver(
                                 &base_ctx,
                                 node_id.clone(),
-                                node_config.clone(),
+                                Arc::clone(resolved_node),
                                 channel_capacity_policy.control.node,
                                 channel_capacity_policy.pdata,
                                 node_capabilities,
@@ -1073,7 +1202,7 @@ impl<PData: 'static + Clone + Debug> PipelineFactory<PData> {
                             self.create_processor(
                                 &base_ctx,
                                 node_id.clone(),
-                                node_config.clone(),
+                                Arc::clone(resolved_node),
                                 channel_capacity_policy.control.node,
                                 channel_capacity_policy.pdata,
                                 node_capabilities,
@@ -1093,7 +1222,7 @@ impl<PData: 'static + Clone + Debug> PipelineFactory<PData> {
                             self.create_exporter(
                                 &base_ctx,
                                 node_id.clone(),
-                                node_config.clone(),
+                                Arc::clone(resolved_node),
                                 channel_capacity_policy.control.node,
                                 channel_capacity_policy.pdata,
                                 node_capabilities,
@@ -1932,7 +2061,7 @@ impl<PData: 'static + Clone + Debug> PipelineFactory<PData> {
         &self,
         pipeline_ctx: &PipelineContext,
         node_id: NodeId,
-        node_config: Arc<NodeUserConfig>,
+        node_config: Arc<ResolvedNodeConfig>,
         control_channel_capacity: usize,
         pdata_channel_capacity: usize,
         capabilities: &capability::registry::Capabilities,
@@ -1941,6 +2070,7 @@ impl<PData: 'static + Clone + Debug> PipelineFactory<PData> {
         let pipeline_id = pipeline_ctx.pipeline_id();
         let core_id = pipeline_ctx.core_id();
         let name = node_id.name.clone();
+        let safe_config_snapshot = node_config.safe_config_snapshot();
 
         otel_debug!(
             "receiver.create.start",
@@ -1952,7 +2082,7 @@ impl<PData: 'static + Clone + Debug> PipelineFactory<PData> {
 
         // Validate plugin URN structure during registration
         let normalized = otel_arrow_dfe_config::node_urn::validate_plugin_urn(
-            node_config.r#type.as_ref(),
+            safe_config_snapshot.r#type.as_ref(),
             otel_arrow_dfe_config::node::NodeKind::Receiver,
         )
         .map_err(|e| Error::ConfigError(Box::new(e)))?;
@@ -1986,7 +2116,12 @@ impl<PData: 'static + Clone + Debug> PipelineFactory<PData> {
             &runtime_config,
             capabilities,
         )
-        .map_err(|e| Error::ConfigError(Box::new(e)))?
+        .map_err(|_| {
+            Error::ConfigError(Box::new(component_config::safe_component_error(
+                normalized.as_str(),
+                "creation",
+            )))
+        })?
         .with_capture_policy(capture_policy)
         .with_authorized_identity_policy(authorized_identity_policy);
         pipeline_ctx
@@ -2016,7 +2151,7 @@ impl<PData: 'static + Clone + Debug> PipelineFactory<PData> {
         &self,
         pipeline_ctx: &PipelineContext,
         node_id: NodeId,
-        node_config: Arc<NodeUserConfig>,
+        node_config: Arc<ResolvedNodeConfig>,
         control_channel_capacity: usize,
         pdata_channel_capacity: usize,
         capabilities: &capability::registry::Capabilities,
@@ -2025,6 +2160,7 @@ impl<PData: 'static + Clone + Debug> PipelineFactory<PData> {
         let pipeline_id = pipeline_ctx.pipeline_id();
         let core_id = pipeline_ctx.core_id();
         let name = node_id.name.clone();
+        let safe_config_snapshot = node_config.safe_config_snapshot();
 
         otel_debug!(
             "processor.create.start",
@@ -2036,7 +2172,7 @@ impl<PData: 'static + Clone + Debug> PipelineFactory<PData> {
 
         // Validate plugin URN structure during registration
         let normalized = otel_arrow_dfe_config::node_urn::validate_plugin_urn(
-            node_config.r#type.as_ref(),
+            safe_config_snapshot.r#type.as_ref(),
             otel_arrow_dfe_config::node::NodeKind::Processor,
         )
         .map_err(|e| Error::ConfigError(Box::new(e)))?;
@@ -2061,7 +2197,12 @@ impl<PData: 'static + Clone + Debug> PipelineFactory<PData> {
             &processor_config,
             capabilities,
         )
-        .map_err(|e| Error::ConfigError(Box::new(e)))?;
+        .map_err(|_| {
+            Error::ConfigError(Box::new(component_config::safe_component_error(
+                normalized.as_str(),
+                "creation",
+            )))
+        })?;
         pipeline_ctx
             .admission()
             .validate_factory_consumption(normalized.as_str())
@@ -2091,7 +2232,7 @@ impl<PData: 'static + Clone + Debug> PipelineFactory<PData> {
         &self,
         pipeline_ctx: &PipelineContext,
         node_id: NodeId,
-        node_config: Arc<NodeUserConfig>,
+        node_config: Arc<ResolvedNodeConfig>,
         control_channel_capacity: usize,
         pdata_channel_capacity: usize,
         capabilities: &capability::registry::Capabilities,
@@ -2100,6 +2241,7 @@ impl<PData: 'static + Clone + Debug> PipelineFactory<PData> {
         let pipeline_id = pipeline_ctx.pipeline_id();
         let core_id = pipeline_ctx.core_id();
         let name = node_id.name.clone();
+        let safe_config_snapshot = node_config.safe_config_snapshot();
 
         otel_debug!(
             "exporter.create.start",
@@ -2111,7 +2253,7 @@ impl<PData: 'static + Clone + Debug> PipelineFactory<PData> {
 
         // Validate plugin URN structure during registration
         let normalized = otel_arrow_dfe_config::node_urn::validate_plugin_urn(
-            node_config.r#type.as_ref(),
+            safe_config_snapshot.r#type.as_ref(),
             otel_arrow_dfe_config::node::NodeKind::Exporter,
         )
         .map_err(|e| Error::ConfigError(Box::new(e)))?;
@@ -2141,7 +2283,12 @@ impl<PData: 'static + Clone + Debug> PipelineFactory<PData> {
             &exporter_config,
             capabilities,
         )
-        .map_err(|e| Error::ConfigError(Box::new(e)))?
+        .map_err(|_| {
+            Error::ConfigError(Box::new(component_config::safe_component_error(
+                normalized.as_str(),
+                "creation",
+            )))
+        })?
         .with_propagation_policy(propagation_policy);
         pipeline_ctx
             .admission()
@@ -2856,24 +3003,19 @@ mod test {
         fn dummy_create(
             _: &ExtensionContext,
             _: otel_arrow_dfe_config::ExtensionId,
-            _: Arc<otel_arrow_dfe_config::extension::ExtensionUserConfig>,
+            _: Arc<ResolvedExtensionConfig>,
             _: &ExtensionConfig,
         ) -> Result<ExtensionBundle, otel_arrow_dfe_config::error::Error> {
             unimplemented!()
         }
-        fn dummy_validate(
-            _: &serde_json::Value,
-        ) -> Result<(), otel_arrow_dfe_config::error::Error> {
-            Ok(())
-        }
-
         let factory = ExtensionFactory {
             name: "urn:test:example",
             description: "test extension",
             documentation_url: "",
             capabilities: None,
             create: dummy_create,
-            validate_config: dummy_validate,
+            resolve_config: component_config::resolve_no_config,
+            snapshot_policy: ConfigSnapshotPolicy::TypedSafe,
         };
 
         assert_eq!(factory.name(), "urn:test:example");
@@ -2893,39 +3035,30 @@ mod test {
         assert_eq!(err.variant_name(), "ExtensionAlreadyExists");
     }
 
+    /// Scenario: An extension factory resolves valid and invalid typed payloads.
+    /// Guarantees: The registered resolver accepts valid values and rejects malformed input.
     #[test]
-    fn test_extension_factory_validate_config() {
+    fn test_extension_factory_resolve_config() {
         fn dummy_create(
             _: &ExtensionContext,
             _: otel_arrow_dfe_config::ExtensionId,
-            _: Arc<otel_arrow_dfe_config::extension::ExtensionUserConfig>,
+            _: Arc<ResolvedExtensionConfig>,
             _: &ExtensionConfig,
         ) -> Result<ExtensionBundle, otel_arrow_dfe_config::error::Error> {
             unimplemented!()
         }
-        fn dummy_validate(
-            config: &serde_json::Value,
-        ) -> Result<(), otel_arrow_dfe_config::error::Error> {
-            if config.is_null() {
-                Ok(())
-            } else {
-                Err(otel_arrow_dfe_config::error::Error::InvalidUserConfig {
-                    error: "expected null".into(),
-                })
-            }
-        }
-
         let factory = ExtensionFactory {
             name: "urn:test:example",
             description: "test",
             documentation_url: "",
             capabilities: None,
             create: dummy_create,
-            validate_config: dummy_validate,
+            resolve_config: component_config::resolve_no_config,
+            snapshot_policy: ConfigSnapshotPolicy::TypedSafe,
         };
 
-        assert!((factory.validate_config)(&serde_json::Value::Null).is_ok());
-        assert!((factory.validate_config)(&serde_json::json!({"key": "val"})).is_err());
+        assert!((factory.resolve_config)(&serde_json::Value::Null).is_ok());
+        assert!((factory.resolve_config)(&serde_json::json!({"key": "val"})).is_err());
     }
 
     #[otel_arrow_dfe_telemetry_macros::metric_set(name = "test.extension.factory")]
@@ -2950,7 +3083,7 @@ mod test {
         fn entity_registering_create(
             ext_ctx: &ExtensionContext,
             name: otel_arrow_dfe_config::ExtensionId,
-            _: Arc<ExtensionUserConfig>,
+            _: Arc<ResolvedExtensionConfig>,
             _: &ExtensionConfig,
         ) -> Result<ExtensionBundle, otel_arrow_dfe_config::error::Error> {
             let entity = ext_ctx.register_extension_entity(name, ExtensionVariant::Local);
@@ -2959,30 +3092,30 @@ mod test {
                 error: "no-op factory".into(),
             })
         }
-        fn dummy_validate(
-            _: &serde_json::Value,
-        ) -> Result<(), otel_arrow_dfe_config::error::Error> {
-            Ok(())
-        }
-
         let factory = ExtensionFactory {
             name: "urn:otel:extension:test_ext",
             description: "test extension that registers an entity via ext_ctx",
             documentation_url: "",
             capabilities: None,
             create: entity_registering_create,
-            validate_config: dummy_validate,
+            resolve_config: component_config::resolve_no_config,
+            snapshot_policy: ConfigSnapshotPolicy::TypedSafe,
         };
 
         let (ctx, registry) = test_extension_ctx();
         let entities_before = registry.entity_count();
         let metrics_before = registry.metric_set_count();
-        let user_config = Arc::new(ExtensionUserConfig::with_type(ExtensionUrn::from(
-            "urn:otel:extension:test_ext",
-        )));
+        let user_config =
+            ExtensionUserConfig::with_type(ExtensionUrn::from("urn:otel:extension:test_ext"));
+        let resolved = ResolvedExtensionConfig::new(
+            &user_config,
+            component_config::resolve_no_config(&user_config.config).expect("config resolves"),
+            ConfigSnapshotPolicy::TypedSafe,
+        )
+        .expect("extension envelope resolves");
         let ext_config = ExtensionConfig::with_control_channel_capacity("test_ext", 16);
 
-        let result = (factory.create)(&ctx, "test_ext".into(), user_config, &ext_config);
+        let result = (factory.create)(&ctx, "test_ext".into(), Arc::new(resolved), &ext_config);
         assert!(result.is_err());
         assert_eq!(registry.entity_count(), entities_before + 1);
 

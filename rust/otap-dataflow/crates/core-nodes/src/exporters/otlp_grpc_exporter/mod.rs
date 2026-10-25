@@ -20,7 +20,6 @@ use futures::future::FutureExt;
 use http::{HeaderName, HeaderValue};
 use linkme::distributed_slice;
 use otel_arrow_dfe_config::SignalType;
-use otel_arrow_dfe_config::node::NodeUserConfig;
 use otel_arrow_dfe_config::transport_headers::ValueKind;
 use otel_arrow_dfe_engine::ConsumerEffectHandlerExtension;
 use otel_arrow_dfe_engine::ExporterFactory;
@@ -89,7 +88,7 @@ const GRPC_AUTH_EVENTS: HttpClientAuthProviderEvents = HttpClientAuthProviderEve
 };
 
 /// Configuration for the OTLP Exporter
-#[derive(Debug, Deserialize)]
+#[derive(Debug, Clone, PartialEq, serde::Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct Config {
     /// Shared gRPC client settings reused across OTLP exports.
@@ -127,19 +126,24 @@ pub static OTLP_EXPORTER: ExporterFactory<OtapPdata> = ExporterFactory {
     name: OTLP_EXPORTER_URN,
     create: |pipeline: PipelineContext,
              node: NodeId,
-             node_config: Arc<NodeUserConfig>,
+             node_config: Arc<otel_arrow_dfe_engine::component_config::ResolvedNodeConfig>,
              exporter_config: &ExporterConfig,
              capabilities: &otel_arrow_dfe_engine::capability::registry::Capabilities| {
         Ok(ExporterWrapper::local(
-            OTLPExporter::from_config(pipeline, &node_config.config, capabilities)?,
+            OTLPExporter::new(
+                pipeline,
+                (*node_config.component_config::<Config>()?).clone(),
+                capabilities,
+            )?,
             node,
-            node_config,
+            node_config.safe_config_snapshot(),
             exporter_config,
         ))
     },
     context_declarations: None,
     wiring_contract: otel_arrow_dfe_engine::wiring_contract::WiringContract::UNRESTRICTED,
-    validate_config,
+    resolve_config,
+    snapshot_policy: otel_arrow_dfe_engine::component_config::ConfigSnapshotPolicy::TypedSafe,
 };
 
 /// Validates the OTLP gRPC exporter configuration at config load time.
@@ -147,7 +151,12 @@ pub static OTLP_EXPORTER: ExporterFactory<OtapPdata> = ExporterFactory {
 /// Runs before any node is started (initial load and live reconfigure), so bad
 /// configuration is rejected fast and attributed to the offending node rather
 /// than surfacing as an opaque client error at startup.
-fn validate_config(config: &serde_json::Value) -> Result<(), otel_arrow_dfe_config::error::Error> {
+fn resolve_config(
+    config: &serde_json::Value,
+) -> Result<
+    otel_arrow_dfe_engine::component_config::ResolvedComponentConfig,
+    otel_arrow_dfe_config::error::Error,
+> {
     let cfg: Config = serde_json::from_value(config.clone()).map_err(|e| {
         otel_arrow_dfe_config::error::Error::InvalidUserConfig {
             error: e.to_string(),
@@ -158,31 +167,22 @@ fn validate_config(config: &serde_json::Value) -> Result<(), otel_arrow_dfe_conf
         .map_err(|e| otel_arrow_dfe_config::error::Error::InvalidUserConfig {
             error: e.to_string(),
         })?;
-    Ok(())
+    otel_arrow_dfe_engine::component_config::ResolvedComponentConfig::typed_safe(cfg)
 }
 
 impl OTLPExporter {
-    /// create a new instance of the `[OTLPExporter]` from json config value
-    pub(crate) fn from_config(
+    fn new(
         pipeline_ctx: PipelineContext,
-        config: &serde_json::Value,
+        config: Config,
         capabilities: &otel_arrow_dfe_engine::capability::registry::Capabilities,
     ) -> Result<Self, otel_arrow_dfe_config::error::Error> {
-        let config: Config = serde_json::from_value(config.clone()).map_err(|e| {
-            otel_arrow_dfe_config::error::Error::InvalidUserConfig {
-                error: e.to_string(),
-            }
-        })?;
-
         let auth_provider = new_http_client_auth_provider(
             capabilities,
             HttpClientAuthProviders::BEARER_TOKEN
                 | HttpClientAuthProviders::API_KEY
                 | HttpClientAuthProviders::BASIC,
         )?;
-
         let metrics = OtlpGrpcExporterMetrics::register(&pipeline_ctx, auth_provider.as_deref());
-
         Ok(Self {
             config,
             metrics,
@@ -200,7 +200,7 @@ impl Exporter<OtapPdata> for OTLPExporter {
     ) -> Result<TerminalState, Error> {
         otel_info!(
             "otlp.exporter.grpc.start",
-            grpc_endpoint = self.config.grpc.grpc_endpoint.as_str()
+            grpc_endpoint = otel_arrow_dfe_config::secret::REDACTED_VALUE
         );
 
         self.config.grpc.log_proxy_info();
@@ -242,7 +242,7 @@ impl Exporter<OtapPdata> for OTLPExporter {
         otel_info!(
             "otlp.exporter.grpc.channels",
             num_connections = num_connections,
-            endpoint = self.config.grpc.grpc_endpoint.as_str()
+            endpoint = otel_arrow_dfe_config::secret::REDACTED_VALUE
         );
 
         let compression = self.config.grpc.compression_encoding();
@@ -1444,6 +1444,28 @@ mod tests {
     use tonic::codegen::tokio_stream::wrappers::TcpListenerStream;
     use tonic::transport::Server;
 
+    /// Scenario: an OTLP gRPC exporter omits config or supplies an empty object without an endpoint.
+    /// Guarantees: factory resolution still rejects missing required settings and accepts an explicit endpoint.
+    #[test]
+    fn omitted_config_still_requires_otlp_endpoint() {
+        for yaml in [
+            "type: exporter:otlp_grpc",
+            "type: exporter:otlp_grpc\nconfig: {}",
+        ] {
+            let source = serde_yaml::from_str(yaml).unwrap();
+            let error = OTLP_EXPORTER
+                .resolve_node_config(source)
+                .unwrap_err()
+                .to_string();
+            assert!(error.contains("missing field `grpc_endpoint`"), "{error}");
+        }
+        let source = serde_yaml::from_str(
+            "type: exporter:otlp_grpc\nconfig:\n  grpc_endpoint: http://127.0.0.1:4317",
+        )
+        .unwrap();
+        assert!(OTLP_EXPORTER.resolve_node_config(source).is_ok());
+    }
+
     fn context_name(raw: &str) -> ContextEntryName {
         ContextEntryName::try_from(raw).expect("valid test context entry name")
     }
@@ -1665,7 +1687,7 @@ mod tests {
             OTLPExporter {
                 config: Config {
                     grpc: GrpcClientSettings {
-                        grpc_endpoint: grpc_endpoint.clone(),
+                        grpc_endpoint: grpc_endpoint.clone().into(),
                         ..Default::default()
                     },
                     max_in_flight: 32,
@@ -1789,7 +1811,7 @@ mod tests {
             OTLPExporter {
                 config: Config {
                     grpc: GrpcClientSettings {
-                        grpc_endpoint: grpc_endpoint.clone(),
+                        grpc_endpoint: grpc_endpoint.clone().into(),
                         headers,
                         ..Default::default()
                     },
@@ -1918,7 +1940,7 @@ mod tests {
             OTLPExporter {
                 config: Config {
                     grpc: GrpcClientSettings {
-                        grpc_endpoint: grpc_endpoint.clone(),
+                        grpc_endpoint: grpc_endpoint.clone().into(),
                         headers,
                         ..Default::default()
                     },
@@ -2077,7 +2099,7 @@ mod tests {
             OTLPExporter {
                 config: Config {
                     grpc: GrpcClientSettings {
-                        grpc_endpoint: grpc_endpoint.clone(),
+                        grpc_endpoint: grpc_endpoint.clone().into(),
                         ..Default::default()
                     },
                     max_in_flight: 32,
@@ -2192,7 +2214,7 @@ mod tests {
             OTLPExporter {
                 config: Config {
                     grpc: GrpcClientSettings {
-                        grpc_endpoint: grpc_endpoint.clone(),
+                        grpc_endpoint: grpc_endpoint.clone().into(),
                         connect_timeout: Duration::from_millis(500),
                         ..Default::default()
                     },
@@ -2786,7 +2808,7 @@ mod tests {
             OTLPExporter {
                 config: Config {
                     grpc: GrpcClientSettings {
-                        grpc_endpoint: grpc_endpoint.clone(),
+                        grpc_endpoint: grpc_endpoint.clone().into(),
                         connect_timeout: Duration::from_millis(500),
                         ..Default::default()
                     },

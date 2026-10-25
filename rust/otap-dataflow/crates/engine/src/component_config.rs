@@ -15,7 +15,7 @@ use serde::Serialize;
 use serde::de::DeserializeOwned;
 use serde_json::Value;
 use std::any::{Any, TypeId, type_name};
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::fmt;
 use std::sync::Arc;
 
@@ -40,8 +40,8 @@ pub fn safe_component_error(component: &str, phase: &str) -> ConfigError {
 /// source artifact, and it does not replace access control.
 ///
 /// Serialization retains the existing engine/group/pipeline JSON envelopes.
-/// This standalone representation is not yet selected by factory creation,
-/// controller admission, Admin HTTP, or OpAMP reporting.
+/// Admin HTTP and OpAMP use committed source instead; future event reporting
+/// can explicitly select this snapshot without exposing source values.
 #[derive(Clone, Debug, PartialEq, Serialize)]
 #[serde(transparent)]
 pub struct SafeConfigSnapshot {
@@ -616,6 +616,26 @@ impl ResolvedPipelineConfig {
         self.envelope.eq_ignoring_policies(&other.envelope)
             && self.nodes == other.nodes
             && self.extensions == other.extensions
+    }
+
+    /// Produces per-core build state without repeating component resolution.
+    pub(crate) fn into_build_parts(
+        mut self,
+    ) -> (
+        PipelineConfig,
+        HashMap<NodeId, Arc<ResolvedNodeConfig>>,
+        HashMap<ExtensionId, Arc<ResolvedExtensionConfig>>,
+        Vec<(NodeId, NodeKind)>,
+    ) {
+        let removed = self.safe_config_snapshot.remove_unconnected_nodes();
+        let removed_ids: HashSet<&NodeId> = removed.iter().map(|(id, _)| id).collect();
+        self.nodes.retain(|id, _| !removed_ids.contains(id));
+        (
+            self.safe_config_snapshot,
+            self.nodes,
+            self.extensions,
+            removed,
+        )
     }
 }
 

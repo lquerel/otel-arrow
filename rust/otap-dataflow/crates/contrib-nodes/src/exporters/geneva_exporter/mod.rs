@@ -36,8 +36,12 @@ use linkme::distributed_slice;
 use otel_arrow_dfe_config::SignalType;
 use otel_arrow_dfe_config::error::Error as ConfigError;
 use otel_arrow_dfe_config::node::NodeUserConfig;
+use otel_arrow_dfe_config::secret::RedactedString;
 use otel_arrow_dfe_engine::ConsumerEffectHandlerExtension;
 use otel_arrow_dfe_engine::ExporterFactory;
+use otel_arrow_dfe_engine::component_config::{
+    ConfigSnapshotPolicy, ResolvedComponentConfig, ResolvedNodeConfig,
+};
 use otel_arrow_dfe_engine::config::ExporterConfig;
 use otel_arrow_dfe_engine::context::PipelineContext;
 use otel_arrow_dfe_engine::control::NodeControlMsg;
@@ -88,7 +92,7 @@ use otel_arrow_dfe_engine::capability::registry::Capabilities;
 pub const GENEVA_EXPORTER_URN: &str = "urn:microsoft:exporter:geneva";
 
 /// Deserializable wrapper for LogsEventNameRoutingKey
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq)]
 pub enum LogsEventNameRoutingKeyConfig {
     /// Route by event name
     EventName,
@@ -331,7 +335,7 @@ fn collect_known_destinations(
 }
 
 /// Deserializable wrapper for LogsEventNameMapping
-#[derive(Debug, Clone, Deserialize)]
+#[derive(Debug, Clone, Deserialize, PartialEq)]
 #[serde(try_from = "LogsEventNameMappingConfigRaw")]
 pub struct LogsEventNameMappingConfig {
     /// The routing key configuration (determines which attribute to route on)
@@ -372,7 +376,7 @@ impl From<LogsEventNameMappingConfig> for LogsEventNameMapping {
 
 /// Log table configuration (wrapper for YAML deserialization)
 /// Deserializes to Geneva uploader's LogsConfig
-#[derive(Debug, Deserialize, Clone, Default)]
+#[derive(Debug, Deserialize, Clone, Default, PartialEq)]
 #[serde(deny_unknown_fields)]
 pub struct LogsConfig {
     /// Default event name (table name) for logs sent to Geneva
@@ -387,7 +391,7 @@ pub struct LogsConfig {
 }
 
 /// Span routing key configuration (custom deserializer for validation)
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq)]
 pub enum SpansEventNameRoutingKeyConfig {
     /// Use resource attribute value as routing key
     ResourceAttribute {
@@ -479,7 +483,7 @@ impl<'de> Deserialize<'de> for SpansEventNameRoutingKeyConfig {
 }
 
 /// Deserializable wrapper for SpanEventNameMapping
-#[derive(Debug, Clone, Deserialize)]
+#[derive(Debug, Clone, Deserialize, PartialEq)]
 #[serde(try_from = "SpansEventNameMappingConfigRaw")]
 pub struct SpansEventNameMappingConfig {
     /// The routing key configuration (determines which attribute to route on)
@@ -520,7 +524,7 @@ impl From<SpansEventNameMappingConfig> for SpanEventNameMapping {
 
 /// Span table configuration (wrapper for YAML deserialization)
 /// Deserializes to Geneva uploader's TracesConfig
-#[derive(Debug, Deserialize, Clone, Default)]
+#[derive(Debug, Deserialize, Clone, Default, PartialEq)]
 #[serde(deny_unknown_fields)]
 pub struct TracesConfig {
     /// Default event name (table name) for spans sent to Geneva
@@ -549,7 +553,7 @@ pub struct TracesConfig {
 /// source value. The uploader looks up OBO by the resolved destination name.
 /// For example, if `event_name_mapping` routes source `audit` to table
 /// `AuditLogs`, the OBO entry must be keyed `AuditLogs`.
-#[derive(Debug, Clone, Deserialize)]
+#[derive(Debug, Clone, Deserialize, PartialEq)]
 #[serde(try_from = "OboConfigRaw")]
 pub struct OboConfig {
     /// Map of Geneva event/table name -> per-event OBO entry. Keys are the
@@ -560,7 +564,7 @@ pub struct OboConfig {
 
 /// A single OBO entry: the resolved customer identity and an optional
 /// annotations recipe.
-#[derive(Debug, Clone, Deserialize)]
+#[derive(Debug, Clone, Deserialize, PartialEq)]
 #[serde(deny_unknown_fields)]
 pub struct OboEventEntryConfig {
     /// Resolved OBO identity (the GIG `onbehalfid`). Must be non-empty.
@@ -630,7 +634,7 @@ impl From<OboConfig> for OboEventMap {
 /// Event overrides are keyed by the destination event/table name after
 /// `event_name_mapping` has run. Events without an override use
 /// `default_group`.
-#[derive(Debug, Clone, Deserialize)]
+#[derive(Debug, Clone, Deserialize, PartialEq)]
 #[serde(try_from = "AccountRoutingConfigRaw")]
 pub struct AccountRoutingConfig {
     /// Logical account group used when no event-specific override matches.
@@ -688,7 +692,7 @@ impl From<AccountRoutingConfig> for AccountRouting {
 }
 
 /// Configuration for the Geneva Exporter
-#[derive(Debug, Deserialize, Clone)]
+#[derive(Debug, Deserialize, Clone, PartialEq)]
 #[serde(deny_unknown_fields)]
 pub struct Config {
     /// Geneva config-service endpoint URL (required except for agent-fed auth)
@@ -915,7 +919,7 @@ impl Config {
 
 /// Authentication configuration
 /// TODO - see if we directly use AuthMethod from geneva-uploader crate
-#[derive(Debug, Deserialize, Clone)]
+#[derive(Debug, Deserialize, Clone, PartialEq)]
 #[serde(tag = "type", rename_all = "lowercase")]
 pub enum AuthConfig {
     /// Certificate-based authentication (PKCS#12 format)
@@ -923,7 +927,7 @@ pub enum AuthConfig {
         /// Path to PKCS#12 (.p12) certificate file
         path: String,
         /// Password to decrypt the PKCS#12 file
-        password: String,
+        password: RedactedString,
     },
     /// System-assigned managed identity
     SystemManagedIdentity {
@@ -963,7 +967,7 @@ impl AuthConfig {
         match self {
             Self::Certificate { path, password } => AuthMethod::Certificate {
                 path: PathBuf::from(path),
-                password: password.clone(),
+                password: password.expose().to_owned(),
             },
             Self::SystemManagedIdentity { .. } => AuthMethod::SystemManagedIdentity,
             Self::UserManagedIdentity { client_id, .. } => AuthMethod::UserManagedIdentity {
@@ -1258,11 +1262,16 @@ impl GenevaExporter {
 
     fn from_node_config(
         pipeline_ctx: PipelineContext,
-        node_config: &NodeUserConfig,
+        node_config: &ResolvedNodeConfig,
         capabilities: &Capabilities,
     ) -> Result<Self, ConfigError> {
-        let config = Config::parse(&node_config.config)?;
-        Self::from_parsed_config(pipeline_ctx, config, node_config, capabilities)
+        let config = node_config.component_config::<Config>()?;
+        Self::from_parsed_config(
+            pipeline_ctx,
+            config.as_ref().clone(),
+            node_config.safe_config_snapshot().as_ref(),
+            capabilities,
+        )
     }
 
     fn from_parsed_config(
@@ -1636,14 +1645,6 @@ impl GenevaExporter {
     }
 }
 
-/// Validates the exporter configuration for the factory's config-only hook.
-///
-/// Routes through [`Config::parse`] so the hook applies exactly the validation
-/// the exporter applies at creation time.
-fn validate_geneva_config(config: &serde_json::Value) -> Result<(), ConfigError> {
-    Config::parse(config).map(|_| ())
-}
-
 /// Register Geneva exporter with the OTAP exporter factory
 ///
 /// Unsafe code is temporarily used here to allow the use of `distributed_slice` macro
@@ -1655,20 +1656,25 @@ pub static GENEVA_EXPORTER: ExporterFactory<OtapPdata> = ExporterFactory {
     name: GENEVA_EXPORTER_URN,
     create: |pipeline: PipelineContext,
              node: NodeId,
-             node_config: Arc<NodeUserConfig>,
+             node_config: Arc<ResolvedNodeConfig>,
              exporter_config: &ExporterConfig,
              capabilities: &Capabilities| {
         Ok(ExporterWrapper::local(
             GenevaExporter::from_node_config(pipeline, &node_config, capabilities)?,
             node,
-            node_config,
+            node_config.safe_config_snapshot(),
             exporter_config,
         ))
     },
     context_declarations: None,
     wiring_contract: otel_arrow_dfe_engine::wiring_contract::WiringContract::UNRESTRICTED,
-    validate_config: validate_geneva_config,
+    resolve_config: resolve_geneva_config,
+    snapshot_policy: ConfigSnapshotPolicy::Omit,
 };
+
+fn resolve_geneva_config(raw: &serde_json::Value) -> Result<ResolvedComponentConfig, ConfigError> {
+    Ok(ResolvedComponentConfig::omitted(Config::parse(raw)?))
+}
 
 #[async_trait(?Send)]
 impl Exporter<OtapPdata> for GenevaExporter {
@@ -1993,6 +1999,15 @@ mod tests {
             );
         }
         node_config
+    }
+
+    fn resolved_node_config(source: NodeUserConfig) -> Arc<ResolvedNodeConfig> {
+        let component =
+            resolve_geneva_config(&source.config).expect("Geneva exporter config should resolve");
+        Arc::new(
+            ResolvedNodeConfig::new(&source, component, GENEVA_EXPORTER.snapshot_policy)
+                .expect("resolved config should match the factory policy"),
+        )
     }
 
     #[derive(Clone)]
@@ -2601,7 +2616,7 @@ mod tests {
         match config.auth {
             AuthConfig::Certificate { path, password } => {
                 assert_eq!(path, "/path/to/cert.p12");
-                assert_eq!(password, "secret");
+                assert_eq!(password.expose(), "secret");
             }
             _ => panic!("Expected Certificate auth variant"),
         }
@@ -2802,7 +2817,7 @@ mod tests {
         let missing_bindings = (GENEVA_EXPORTER.create)(
             create_test_pipeline_context(),
             test_node("test-exporter".to_owned()),
-            Arc::new(agent_fed_node_config(None)),
+            resolved_node_config(agent_fed_node_config(None)),
             &exporter_config,
             &Capabilities::empty(),
         );
@@ -2902,7 +2917,7 @@ mod tests {
         let result = (GENEVA_EXPORTER.create)(
             create_test_pipeline_context(),
             test_node("test-exporter".to_owned()),
-            Arc::new(node_config),
+            resolved_node_config(node_config),
             &exporter_config,
             &capabilities,
         );

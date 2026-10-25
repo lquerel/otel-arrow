@@ -21,9 +21,11 @@ use async_trait::async_trait;
 use futures::future::{Either, select};
 use linkme::distributed_slice;
 use otel_arrow_dfe_config::error::Error as ConfigError;
-use otel_arrow_dfe_config::node::NodeUserConfig;
 use otel_arrow_dfe_engine::ConsumerEffectHandlerExtension;
 use otel_arrow_dfe_engine::MessageSourceLocalEffectHandlerExtension;
+use otel_arrow_dfe_engine::component_config::{
+    ConfigSnapshotPolicy, ResolvedNodeConfig, resolve_omitted_config,
+};
 use otel_arrow_dfe_engine::config::ProcessorConfig;
 use otel_arrow_dfe_engine::context::PipelineContext;
 use otel_arrow_dfe_engine::control::{AckMsg, NodeControlMsg};
@@ -139,7 +141,7 @@ otel_arrow_dfe_telemetry::otel_component_scope!(
 );
 
 /// Configuration for the WASM processor node.
-#[derive(Debug, Clone, Deserialize, Serialize)]
+#[derive(Debug, Clone, Deserialize, Serialize, PartialEq)]
 pub struct WasmProcessorConfig {
     /// Filesystem path to the `.wasm` component plugin to load at startup.
     pub wasm_path: PathBuf,
@@ -538,15 +540,10 @@ impl local::Processor<OtapPdata> for WasmProcessor {
 fn create_wasm_processor(
     pipeline_ctx: PipelineContext,
     node: NodeId,
-    node_config: Arc<NodeUserConfig>,
+    node_config: Arc<ResolvedNodeConfig>,
     processor_config: &ProcessorConfig,
 ) -> Result<ProcessorWrapper<OtapPdata>, ConfigError> {
-    let config: WasmProcessorConfig =
-        serde_json::from_value(node_config.config.clone()).map_err(|e| {
-            ConfigError::InvalidUserConfig {
-                error: format!("failed to parse WasmProcessor configuration: {e}"),
-            }
-        })?;
+    let config = node_config.component_config::<WasmProcessorConfig>()?;
 
     let metrics = WasmProcessorAllMetrics::new(&pipeline_ctx);
     let processor = WasmProcessor::from_path(
@@ -559,7 +556,7 @@ fn create_wasm_processor(
     Ok(ProcessorWrapper::local(
         processor,
         node,
-        node_config,
+        node_config.safe_config_snapshot(),
         processor_config,
     ))
 }
@@ -749,6 +746,7 @@ mod tests {
     }
 
     use otel_arrow_dfe_config::SignalType;
+    use otel_arrow_dfe_config::node::NodeUserConfig;
     use otel_arrow_dfe_engine::Interests;
     use otel_arrow_dfe_engine::ProducerEffectHandlerExtension;
     use otel_arrow_dfe_engine::config::ProcessorConfig;
@@ -830,8 +828,7 @@ mod tests {
         let pipeline_ctx =
             controller_ctx.pipeline_context_with("grp".into(), "pipeline".into(), 0, 1, 0);
 
-        let result =
-            create_wasm_processor(pipeline_ctx, node, Arc::new(node_config), &processor_config);
+        let result = resolve_omitted_config::<WasmProcessorConfig>(&node_config.config);
         assert!(
             matches!(result, Err(ConfigError::InvalidUserConfig { .. })),
             "invalid user config JSON should be rejected"
@@ -854,8 +851,15 @@ mod tests {
         let pipeline_ctx =
             controller_ctx.pipeline_context_with("grp".into(), "pipeline".into(), 0, 1, 0);
 
+        let resolved = ResolvedNodeConfig::new(
+            &node_config,
+            resolve_omitted_config::<WasmProcessorConfig>(&node_config.config)
+                .expect("well-formed config resolves"),
+            ConfigSnapshotPolicy::Omit,
+        )
+        .expect("resolved envelope is valid");
         let result =
-            create_wasm_processor(pipeline_ctx, node, Arc::new(node_config), &processor_config);
+            create_wasm_processor(pipeline_ctx, node, Arc::new(resolved), &processor_config);
         assert!(
             matches!(result, Err(ConfigError::InvalidUserConfig { .. })),
             "missing wasm component file should map to InvalidUserConfig"
@@ -1580,14 +1584,13 @@ pub static WASM_PROCESSOR_FACTORY: otel_arrow_dfe_engine::ProcessorFactory<OtapP
         create:
             |pipeline: PipelineContext,
              node: NodeId,
-             node_config: Arc<NodeUserConfig>,
+             node_config: Arc<ResolvedNodeConfig>,
              proc_cfg: &ProcessorConfig,
              _capabilities: &otel_arrow_dfe_engine::capability::registry::Capabilities| {
                 create_wasm_processor(pipeline, node, node_config, proc_cfg)
             },
         context_declarations: None,
         wiring_contract: otel_arrow_dfe_engine::wiring_contract::WiringContract::UNRESTRICTED,
-        validate_config: otel_arrow_dfe_config::validation::validate_typed_config::<
-            WasmProcessorConfig,
-        >,
+        resolve_config: resolve_omitted_config::<WasmProcessorConfig>,
+        snapshot_policy: ConfigSnapshotPolicy::Omit,
     };

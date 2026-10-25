@@ -293,8 +293,8 @@ groups:
 | `scope` | `string` | `https://monitor.azure.com/.default` | OAuth scope to request tokens for. Must be non-empty. |
 | `startup_timeout` | duration | `30s` | How long the engine holds data-path node startup waiting for the first token publish before aborting (see [Lifecycle](#lifecycle)). Accepts human-readable durations (e.g. `30s`, `1m`); must be non-zero. Larger than the engine's 5 s readiness default to accommodate Azure cold-start plus a retry. |
 
-The config struct uses `#[serde(deny_unknown_fields)]` and is validated by the
-factory's `validate_config` hook before the pipeline starts. Validation rejects
+The config struct uses `#[serde(deny_unknown_fields)]` and is parsed and validated
+by the factory resolver before the pipeline starts. Resolution rejects
 an empty/whitespace `scope`, a zero `startup_timeout`, and any per-method field
 that does not apply to the selected method (`tenant_id`/`token_file_path` are
 `workload_identity`-only; `client_id` is not valid for `development`).
@@ -508,7 +508,8 @@ pub static AZURE_IDENTITY_AUTH_EXTENSION: ExtensionFactory = ExtensionFactory {
         shared: AzureIdentityAuthExtension => [BearerTokenProvider]
     )),
     create,
-    validate_config: validate_typed_config::<Config>,
+    resolve_config,
+    snapshot_policy: ConfigSnapshotPolicy::TypedSafe,
 };
 ```
 

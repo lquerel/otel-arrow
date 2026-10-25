@@ -201,7 +201,6 @@ azure-monitor = [
 clickhouse = [
     "dep:clickhouse",
     "dep:clickhouse-ext-arrow",
-    "dep:secrecy",
     "dep:serde-transcode",
     "dep:serde_cbor",
     "dep:arrow-array",

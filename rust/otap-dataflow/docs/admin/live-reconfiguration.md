@@ -3,11 +3,30 @@
 This document describes the live reconfiguration and controller-owned
 configuration lifecycle flows exposed by the admin API.
 
-The feature lets a running OTel Dataflow Engine mutate one logical pipeline at
-a time without restarting the process or reloading the full startup file.
+The feature lets a running OTel Arrow Dataflow Engine mutate one logical
+pipeline at a time without restarting the process or reloading the full
+startup file.
 It also exposes controller-level primitives for reading the full committed
 engine config, reconciling against a desired full config, creating empty
 pipeline groups, and deleting committed pipelines or groups.
+
+Configuration reads return committed parsed source, including credentials,
+inline TLS keys, static headers, free-form component payloads, and
+`engine.custom`. Protect these management responses as sensitive data.
+OpAMP uses the same source through its `effective_config` wire field.
+The controller separately retains a precomputed `SafeConfigSnapshot` for
+future configuration events; it is not returned by these management APIs.
+
+Complete candidate resolution precedes admission. Runtime equivalence uses
+typed component values, so default- or alias-equivalent updates can be
+no-ops while secret-only changes still replace a pipeline. Successful
+rollout commits source, resolved state, and safe snapshot together for that
+pipeline; failed admission or successful rollback preserves all three.
+Full-engine reconciliation remains non-transactional across pipelines.
+Controller-extension and observability-pipeline runtime changes require a
+restart and are rejected before pipeline rollout. See
+[Configuration Framework Design](../configuration-resolution.md) for the
+architectural contracts.
 
 ## Goals
 

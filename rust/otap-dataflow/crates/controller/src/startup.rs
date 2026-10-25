@@ -15,25 +15,27 @@
 //!
 //! let mut cfg = OtelDataflowSpec::from_file(&path)?;
 //! startup::apply_cli_overrides(&mut cfg, num_cores, core_id_range, http_admin_bind);
-//! startup::validate_engine_components(&cfg, &MY_PIPELINE_FACTORY)?;
-//! startup::validate_controller_extensions(&cfg, &ControllerRunOptions::default().extensions)?;
+//! let prepared = Controller::new(&MY_PIPELINE_FACTORY)
+//!     .prepare(cfg, ControllerRunOptions::default())?;
 //! println!("{}", startup::system_info(&MY_PIPELINE_FACTORY, "system"));
-//! let result = Controller::new(&MY_PIPELINE_FACTORY).run_forever(cfg);
+//! let result = prepared.run_forever();
 //! startup::shutdown_console_and_exit(&result);
 //! ```
 
 use crate::{CONTROLLER_EXTENSION_FACTORIES, ControllerExtensionRegistry};
 use otel_arrow_dfe_config::engine::{HttpAdminSettings, OtelDataflowSpec};
-use otel_arrow_dfe_config::node::NodeKind;
 use otel_arrow_dfe_config::pipeline::PipelineConfig;
 use otel_arrow_dfe_config::policy::{CoreAllocation, ResolvedPolicies, ResourcesPolicy};
-use otel_arrow_dfe_config::{PipelineGroupId, PipelineId};
+use otel_arrow_dfe_config::{ExtensionId, PipelineGroupId, PipelineId};
 use otel_arrow_dfe_engine::PipelineFactory;
+use otel_arrow_dfe_engine::component_config::ResolvedExtensionConfig;
 use otel_arrow_dfe_telemetry::output_service::{
     OutputService, OutputServiceConfig, ShutdownOutcome,
 };
+use std::collections::HashMap;
 use std::fmt::{Debug, Display};
 use std::io::Write as _;
+use std::sync::Arc;
 use std::sync::mpsc;
 use std::time::Duration;
 use sysinfo::System;
@@ -113,94 +115,20 @@ pub fn validate_pipeline_components<PData: 'static + Clone + Debug>(
     pipeline_cfg: &PipelineConfig,
     factory: &PipelineFactory<PData>,
 ) -> Result<(), Box<dyn std::error::Error>> {
-    for (node_id, node_cfg) in pipeline_cfg.node_iter() {
-        let kind = node_cfg.kind();
-        let urn_str = node_cfg.r#type.as_str();
-
-        let validate_config_fn = match kind {
-            NodeKind::Receiver => factory
-                .get_receiver_factory_map()
-                .get(urn_str)
-                .map(|f| f.validate_config),
-            NodeKind::Processor => factory
-                .get_processor_factory_map()
-                .get(urn_str)
-                .map(|f| f.validate_config),
-            NodeKind::Exporter => factory
-                .get_exporter_factory_map()
-                .get(urn_str)
-                .map(|f| f.validate_config),
-        };
-
-        match validate_config_fn {
-            None => {
-                let kind_name = match kind {
-                    NodeKind::Receiver => "receiver",
-                    NodeKind::Processor => "processor",
-                    NodeKind::Exporter => "exporter",
-                };
-                return Err(std::io::Error::other(format!(
-                    "Unknown {} component `{}` in pipeline_group={} pipeline={} node={}",
-                    kind_name,
-                    urn_str,
-                    pipeline_group_id.as_ref(),
-                    pipeline_id.as_ref(),
-                    node_id.as_ref()
-                ))
-                .into());
-            }
-            Some(validate_fn) => {
-                validate_fn(&node_cfg.config).map_err(|e| {
-                    std::io::Error::other(format!(
-                        "Invalid config for component `{}` in pipeline_group={} pipeline={} node={}: {}",
-                        urn_str,
-                        pipeline_group_id.as_ref(),
-                        pipeline_id.as_ref(),
-                        node_id.as_ref(),
-                        e
-                    ))
-                })?;
-            }
-        }
-    }
-
-    // Mirror the per-node validation pass for extensions. Extensions are no
-    // longer `NodeKind::Extension` (they live in `pipeline_cfg.extensions`,
-    // not `pipeline_cfg.nodes`), so they would otherwise slip past static
-    // validation entirely and only fail at runtime when the engine tries to
-    // resolve them in `get_extension_factory_map()`.
-    for (ext_id, ext_cfg) in pipeline_cfg.extension_iter() {
-        let urn_str = ext_cfg.r#type.as_str();
-        match factory.get_extension_factory_map().get(urn_str) {
-            None => {
-                return Err(std::io::Error::other(format!(
-                    "Unknown extension component `{}` in pipeline_group={} pipeline={} extension={}",
-                    urn_str,
-                    pipeline_group_id.as_ref(),
-                    pipeline_id.as_ref(),
-                    ext_id.as_ref()
-                ))
-                .into());
-            }
-            Some(factory) => {
-                (factory.validate_config)(&ext_cfg.config).map_err(|e| {
-                    std::io::Error::other(format!(
-                        "Invalid config for extension `{}` in pipeline_group={} pipeline={} extension={}: {}",
-                        urn_str,
-                        pipeline_group_id.as_ref(),
-                        pipeline_id.as_ref(),
-                        ext_id.as_ref(),
-                        e
-                    ))
-                })?;
-            }
-        }
-    }
-
-    Ok(())
+    factory
+        .resolve_pipeline_config(pipeline_cfg)
+        .map(|_| ())
+        .map_err(|error| {
+            std::io::Error::other(format!(
+                "Invalid component config in pipeline_group={} pipeline={}: {error}",
+                pipeline_group_id.as_ref(),
+                pipeline_id.as_ref(),
+            ))
+            .into()
+        })
 }
 
-fn validate_rate_limiter_bindings(
+pub(crate) fn validate_rate_limiter_bindings(
     pipeline_group_id: &PipelineGroupId,
     pipeline_id: &PipelineId,
     pipeline_cfg: &PipelineConfig,
@@ -246,6 +174,10 @@ fn validate_rate_limiter_bindings(
 /// This is the top-level validation entry point that iterates over all
 /// pipeline groups, all pipelines within each group, and the observability
 /// pipeline.
+///
+/// This tooling helper discards resolved values. Hosts that subsequently start
+/// the engine should use [`crate::Controller::prepare`] and consume its result
+/// instead, so validation and runtime creation share one resolution pass.
 pub fn validate_engine_components<PData: 'static + Clone + Debug>(
     engine_cfg: &OtelDataflowSpec,
     factory: &PipelineFactory<PData>,
@@ -277,6 +209,14 @@ pub fn validate_controller_extensions(
     engine_cfg: &OtelDataflowSpec,
     registry: &ControllerExtensionRegistry,
 ) -> Result<(), Box<dyn std::error::Error>> {
+    resolve_controller_extensions(engine_cfg, registry).map(|_| ())
+}
+
+pub(crate) fn resolve_controller_extensions(
+    engine_cfg: &OtelDataflowSpec,
+    registry: &ControllerExtensionRegistry,
+) -> Result<HashMap<ExtensionId, Arc<ResolvedExtensionConfig>>, Box<dyn std::error::Error>> {
+    let mut resolved = HashMap::new();
     for (extension_id, extension) in engine_cfg.engine.controller.extensions.iter() {
         let urn_str = extension.r#type.as_str();
         match registry.get(&extension.r#type) {
@@ -289,19 +229,20 @@ pub fn validate_controller_extensions(
                 .into());
             }
             Some(factory) => {
-                (factory.validate_config)(&extension.config).map_err(|e| {
+                let component = (factory.resolve_config)(&extension.config).map_err(|_| {
                     std::io::Error::other(format!(
-                        "Invalid config for controller extension `{}` in engine.controller.extensions extension={}: {}",
+                        "Invalid config for controller extension `{}` in engine.controller.extensions extension={}; check its configuration against the component schema",
                         urn_str,
-                        extension_id.as_ref(),
-                        e
+                        extension_id.as_ref()
                     ))
                 })?;
+                let extension_config =
+                    ResolvedExtensionConfig::new(extension, component, factory.snapshot_policy)?;
+                _ = resolved.insert(extension_id.clone(), Arc::new(extension_config));
             }
         }
     }
-
-    Ok(())
+    Ok(resolved)
 }
 
 /// Returns a human-readable string with system information, all component URNs
@@ -457,7 +398,7 @@ fn write_status_bounded(status: &str, timeout: Duration) {
 mod tests {
     use super::*;
     use otel_arrow_dfe_config::policy::{CoreRange, Policies};
-    use otel_arrow_dfe_config::{PipelineGroupId, PipelineId, node::NodeUserConfig};
+    use otel_arrow_dfe_config::{PipelineGroupId, PipelineId};
     use otel_arrow_dfe_engine::config::{ExporterConfig, ProcessorConfig, ReceiverConfig};
     use otel_arrow_dfe_engine::context::PipelineContext;
     use otel_arrow_dfe_engine::exporter::ExporterWrapper;
@@ -473,7 +414,7 @@ mod tests {
     fn test_receiver_create(
         _pipeline_ctx: PipelineContext,
         _node: otel_arrow_dfe_engine::node::NodeId,
-        _node_config: Arc<NodeUserConfig>,
+        _node_config: Arc<otel_arrow_dfe_engine::component_config::ResolvedNodeConfig>,
         _receiver_config: &ReceiverConfig,
         _capabilities: &otel_arrow_dfe_engine::capability::registry::Capabilities,
     ) -> Result<ReceiverWrapper<()>, otel_arrow_dfe_config::error::Error> {
@@ -483,7 +424,7 @@ mod tests {
     fn test_exporter_create(
         _pipeline_ctx: PipelineContext,
         _node: otel_arrow_dfe_engine::node::NodeId,
-        _node_config: Arc<NodeUserConfig>,
+        _node_config: Arc<otel_arrow_dfe_engine::component_config::ResolvedNodeConfig>,
         _exporter_config: &ExporterConfig,
         _capabilities: &otel_arrow_dfe_engine::capability::registry::Capabilities,
     ) -> Result<ExporterWrapper<()>, otel_arrow_dfe_config::error::Error> {
@@ -493,7 +434,7 @@ mod tests {
     fn test_processor_create(
         _pipeline_ctx: PipelineContext,
         _node: otel_arrow_dfe_engine::node::NodeId,
-        _node_config: Arc<NodeUserConfig>,
+        _node_config: Arc<otel_arrow_dfe_engine::component_config::ResolvedNodeConfig>,
         _processor_config: &ProcessorConfig,
         _capabilities: &otel_arrow_dfe_engine::capability::registry::Capabilities,
     ) -> Result<ProcessorWrapper<()>, otel_arrow_dfe_config::error::Error> {
@@ -507,14 +448,18 @@ mod tests {
                 create: test_receiver_create,
                 context_declarations: None,
                 wiring_contract: WiringContract::UNRESTRICTED,
-                validate_config: otel_arrow_dfe_config::validation::no_config,
+                resolve_config: otel_arrow_dfe_engine::component_config::resolve_no_config,
+                snapshot_policy:
+                    otel_arrow_dfe_engine::component_config::ConfigSnapshotPolicy::TypedSafe,
             },
             ReceiverFactory {
                 name: "urn:otel:receiver:internal_telemetry",
                 create: test_receiver_create,
                 context_declarations: None,
                 wiring_contract: WiringContract::UNRESTRICTED,
-                validate_config: otel_arrow_dfe_config::validation::no_config,
+                resolve_config: otel_arrow_dfe_engine::component_config::resolve_no_config,
+                snapshot_policy:
+                    otel_arrow_dfe_engine::component_config::ConfigSnapshotPolicy::TypedSafe,
             },
         ]));
         let processor_factories = Box::leak(Box::new([ProcessorFactory {
@@ -522,7 +467,9 @@ mod tests {
             create: test_processor_create,
             context_declarations: None,
             wiring_contract: WiringContract::UNRESTRICTED,
-            validate_config: otel_arrow_dfe_config::validation::no_config,
+            resolve_config: otel_arrow_dfe_engine::component_config::resolve_no_config,
+            snapshot_policy:
+                otel_arrow_dfe_engine::component_config::ConfigSnapshotPolicy::TypedSafe,
         }]));
         let exporter_factories = Box::leak(Box::new([
             ExporterFactory {
@@ -530,21 +477,27 @@ mod tests {
                 create: test_exporter_create,
                 context_declarations: None,
                 wiring_contract: WiringContract::UNRESTRICTED,
-                validate_config: otel_arrow_dfe_config::validation::no_config,
+                resolve_config: otel_arrow_dfe_engine::component_config::resolve_no_config,
+                snapshot_policy:
+                    otel_arrow_dfe_engine::component_config::ConfigSnapshotPolicy::TypedSafe,
             },
             ExporterFactory {
                 name: "urn:otel:exporter:console",
                 create: test_exporter_create,
                 context_declarations: None,
                 wiring_contract: WiringContract::UNRESTRICTED,
-                validate_config: otel_arrow_dfe_config::validation::no_config,
+                resolve_config: otel_arrow_dfe_engine::component_config::resolve_no_config,
+                snapshot_policy:
+                    otel_arrow_dfe_engine::component_config::ConfigSnapshotPolicy::TypedSafe,
             },
             ExporterFactory {
                 name: "urn:otel:exporter:noop",
                 create: test_exporter_create,
                 context_declarations: None,
                 wiring_contract: WiringContract::UNRESTRICTED,
-                validate_config: otel_arrow_dfe_config::validation::no_config,
+                resolve_config: otel_arrow_dfe_engine::component_config::resolve_no_config,
+                snapshot_policy:
+                    otel_arrow_dfe_engine::component_config::ConfigSnapshotPolicy::TypedSafe,
             },
         ]));
         PipelineFactory::new(
@@ -677,14 +630,13 @@ extensions:
         .expect_err("unknown extension URN must be rejected");
         let msg = err.to_string();
         assert!(
-            msg.contains("Unknown extension component"),
+            msg.contains("Unknown extension plugin"),
             "unexpected error: {msg}"
         );
         assert!(
             msg.contains("urn:test:extension:does-not-exist"),
             "unexpected error: {msg}"
         );
-        assert!(msg.contains("not-registered"), "unexpected error: {msg}");
     }
 
     /// Scenario: a custom receiver is registered while a rate limiter is configured.
@@ -812,7 +764,7 @@ groups: {}
             .expect_err("missing observability components must fail validation");
         let message = error.to_string();
         assert!(
-            message.contains("Unknown ") && message.contains(" component `urn:otel:"),
+            message.contains("Unknown ") && message.contains(" plugin `urn:otel:"),
             "unexpected error: {message}"
         );
         assert!(

@@ -28,6 +28,36 @@ pub use otel_arrow_dfe_admin_types::pipelines::{
 use serde::Serialize;
 use std::collections::HashMap;
 use std::net::SocketAddr;
+
+/// JSON admission for private configuration. Axum's normal JSON rejection can
+/// echo invalid scalar values; retain only status and a value-free diagnostic.
+pub(crate) struct PrivateConfigJson<T>(pub T);
+
+impl<S: Send + Sync, T: serde::de::DeserializeOwned> axum::extract::FromRequest<S>
+    for PrivateConfigJson<T>
+{
+    type Rejection = Response;
+
+    async fn from_request(
+        request: axum::extract::Request,
+        state: &S,
+    ) -> Result<Self, Self::Rejection> {
+        use axum::response::IntoResponse;
+        match axum::Json::<T>::from_request(request, state).await {
+            Ok(axum::Json(value)) => Ok(Self(value)),
+            Err(error) => Err((
+                error.status(),
+                axum::Json(
+                    OperationError::new(OperationErrorKind::InvalidRequest).with_message(
+                        "invalid configuration request; check JSON syntax, field names, and types"
+                            .to_owned(),
+                    ),
+                ),
+            )
+                .into_response()),
+        }
+    }
+}
 use std::sync::Arc;
 use tokio::net::TcpListener;
 use tokio::sync::Semaphore;
@@ -38,6 +68,7 @@ use crate::error::Error;
 use otel_arrow_dfe_config::engine::{HttpAdminSettings, OtelDataflowSpec};
 use otel_arrow_dfe_config::pipeline::telemetry::AttributeValue as ResourceAttributeValue;
 use otel_arrow_dfe_config::pipeline_group::PipelineGroupConfig;
+pub use otel_arrow_dfe_engine::component_config::SafeConfigSnapshot;
 use otel_arrow_dfe_engine::memory_limiter::MemoryPressureState;
 use otel_arrow_dfe_state::store::ObservedStateHandle;
 use otel_arrow_dfe_telemetry::log_tap::InternalLogTapHandle;
@@ -136,7 +167,7 @@ pub trait ControlPlane: Send + Sync {
         request: ReconfigureRequest,
     ) -> Result<RolloutStatus, ControlPlaneError>;
 
-    /// Returns the live active config for a logical pipeline.
+    /// Returns the committed source config for a logical pipeline, including secrets.
     fn pipeline_details(
         &self,
         pipeline_group_id: &str,
@@ -159,7 +190,7 @@ pub trait ControlPlane: Send + Sync {
         shutdown_id: &str,
     ) -> Result<Option<ShutdownStatus>, ControlPlaneError>;
 
-    /// Returns the committed configuration for one pipeline group.
+    /// Returns the committed source configuration for one pipeline group, including secrets.
     fn group_details(
         &self,
         _pipeline_group_id: &str,
@@ -182,8 +213,18 @@ pub trait ControlPlane: Send + Sync {
         })
     }
 
-    /// Returns the full current engine configuration known to the controller.
+    /// Returns the full committed source configuration for trusted management clients.
+    /// This representation includes sensitive values and must not be used in events or logs.
     fn engine_config_snapshot(&self) -> Result<OtelDataflowSpec, ControlPlaneError> {
+        let _ = self;
+        Err(ControlPlaneError::Internal {
+            message: "engine config snapshots are not supported by this control plane".to_owned(),
+        })
+    }
+
+    /// Returns a redacted/omitted snapshot for future privacy-preserving reporting.
+    /// Admin HTTP and OpAMP deliberately use source configuration instead.
+    fn safe_config_snapshot(&self) -> Result<SafeConfigSnapshot, ControlPlaneError> {
         let _ = self;
         Err(ControlPlaneError::Internal {
             message: "engine config snapshots are not supported by this control plane".to_owned(),

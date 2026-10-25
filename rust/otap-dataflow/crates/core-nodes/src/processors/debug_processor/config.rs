@@ -6,11 +6,11 @@
 use super::filter::FilterRules;
 use super::output::OutputMode;
 use super::sampling::SamplingConfig;
-use serde::Deserialize;
+use serde::{Deserialize, Serialize};
 use std::collections::HashSet;
 
 /// Enum that allows the user to specify how much information they want displayed
-#[derive(Debug, Clone, Copy, PartialEq, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Deserialize, Serialize)]
 #[serde(rename_all = "snake_case")]
 pub enum Verbosity {
     /// displays the number of received signals + extracts all of the fields in the signal object
@@ -22,7 +22,7 @@ pub enum Verbosity {
 }
 
 /// Enum that describes how the output should be handled
-#[derive(Debug, Clone, Copy, PartialEq, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Deserialize, Serialize)]
 #[serde(rename_all = "snake_case")]
 pub enum DisplayMode {
     /// output the whole batch at once
@@ -31,7 +31,7 @@ pub enum DisplayMode {
     Signal,
 }
 /// Enum that defines which signals to debug for
-#[derive(Debug, Clone, Copy, PartialEq, Deserialize, Hash, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Deserialize, Serialize, Hash, Eq)]
 #[serde(rename_all = "snake_case")]
 pub enum SignalActive {
     Metrics,
@@ -40,7 +40,7 @@ pub enum SignalActive {
 }
 
 /// Defines the settings of the debug processor, controls the level of verbosity the processor outputs
-#[derive(Debug, Clone, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Deserialize, Serialize)]
 #[serde(deny_unknown_fields)]
 pub struct Config {
     #[serde(default = "default_verbosity")]

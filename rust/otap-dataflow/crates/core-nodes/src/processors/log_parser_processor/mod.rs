@@ -12,7 +12,12 @@ use std::sync::Arc;
 
 use async_trait::async_trait;
 use linkme::distributed_slice;
-use otel_arrow_dfe_config::{SignalType, error::Error as ConfigError, node::NodeUserConfig};
+#[cfg(test)]
+use otel_arrow_dfe_config::node::NodeUserConfig;
+use otel_arrow_dfe_config::{SignalType, error::Error as ConfigError};
+use otel_arrow_dfe_engine::component_config::{
+    ConfigSnapshotPolicy, ResolvedComponentConfig, ResolvedNodeConfig,
+};
 use otel_arrow_dfe_engine::{
     ConsumerEffectHandlerExtension, MessageSourceLocalEffectHandlerExtension, ProcessorFactory,
     config::ProcessorConfig,
@@ -52,7 +57,13 @@ pub struct LogParserProcessor {
     sanitize_results: bool,
 }
 
-fn parse_config(config: &Value) -> Result<(parse_logs::Parser, bool), ConfigError> {
+#[derive(Clone, PartialEq, Eq)]
+struct ResolvedLogParserConfig {
+    config: parse_logs::ParseConfig,
+    sanitize_results: bool,
+}
+
+fn parse_resolved_config(config: &Value) -> Result<ResolvedLogParserConfig, ConfigError> {
     let mut config = config.clone();
     let fields = config
         .as_object_mut()
@@ -71,19 +82,45 @@ fn parse_config(config: &Value) -> Result<(parse_logs::Parser, bool), ConfigErro
         serde_json::from_value(config).map_err(|error| ConfigError::InvalidUserConfig {
             error: error.to_string(),
         })?;
-    let parser = parse_logs::Parser::new(config)
+    Ok(ResolvedLogParserConfig {
+        config,
+        sanitize_results: !skip_sanitize_result,
+    })
+}
+
+#[cfg(test)]
+fn parse_config(config: &Value) -> Result<(parse_logs::Parser, bool), ConfigError> {
+    let resolved = parse_resolved_config(config)?;
+    let parser = parse_logs::Parser::new(resolved.config)
         .map_err(|error| ConfigError::InvalidUserConfig { error })?;
-    Ok((parser, !skip_sanitize_result))
+    Ok((parser, resolved.sanitize_results))
+}
+
+fn resolve_log_parser_config(config: &Value) -> Result<ResolvedComponentConfig, ConfigError> {
+    let resolved = parse_resolved_config(config)?;
+    _ = parse_logs::Parser::new(resolved.config.clone())
+        .map_err(|error| ConfigError::InvalidUserConfig { error })?;
+    Ok(ResolvedComponentConfig::omitted(resolved))
 }
 
 impl LogParserProcessor {
-    fn from_config(pipeline_ctx: &PipelineContext, config: &Value) -> Result<Self, ConfigError> {
-        let (log_parser, sanitize_results) = parse_config(config)?;
+    fn from_resolved(
+        pipeline_ctx: &PipelineContext,
+        config: &ResolvedLogParserConfig,
+    ) -> Result<Self, ConfigError> {
+        let log_parser = parse_logs::Parser::new(config.config.clone())
+            .map_err(|error| ConfigError::InvalidUserConfig { error })?;
         Ok(Self {
             log_parser,
             metrics: ParserMetrics::register(pipeline_ctx),
-            sanitize_results,
+            sanitize_results: config.sanitize_results,
         })
+    }
+
+    #[cfg(test)]
+    fn from_config(pipeline_ctx: &PipelineContext, config: &Value) -> Result<Self, ConfigError> {
+        let resolved = parse_resolved_config(config)?;
+        Self::from_resolved(pipeline_ctx, &resolved)
     }
 
     async fn process_logs(
@@ -129,21 +166,18 @@ impl LogParserProcessor {
 fn create_log_parser_processor(
     pipeline_ctx: PipelineContext,
     node_id: NodeId,
-    user_config: Arc<NodeUserConfig>,
+    user_config: Arc<ResolvedNodeConfig>,
     processor_config: &ProcessorConfig,
     _capabilities: &otel_arrow_dfe_engine::capability::registry::Capabilities,
 ) -> Result<ProcessorWrapper<OtapPdata>, ConfigError> {
-    let processor = LogParserProcessor::from_config(&pipeline_ctx, &user_config.config)?;
+    let config = user_config.component_config::<ResolvedLogParserConfig>()?;
+    let processor = LogParserProcessor::from_resolved(&pipeline_ctx, &config)?;
     Ok(ProcessorWrapper::local(
         processor,
         node_id,
-        user_config,
+        user_config.safe_config_snapshot(),
         processor_config,
     ))
-}
-
-fn validate_log_parser_config(config: &Value) -> Result<(), ConfigError> {
-    parse_config(config).map(|_| ())
 }
 
 /// Factory for the declarative log parser processor.
@@ -155,7 +189,8 @@ pub static LOG_PARSER_PROCESSOR_FACTORY: ProcessorFactory<OtapPdata> = Processor
     create: create_log_parser_processor,
     context_declarations: None,
     wiring_contract: otel_arrow_dfe_engine::wiring_contract::WiringContract::UNRESTRICTED,
-    validate_config: validate_log_parser_config,
+    resolve_config: resolve_log_parser_config,
+    snapshot_policy: ConfigSnapshotPolicy::Omit,
 };
 
 #[async_trait(?Send)]

@@ -38,7 +38,6 @@ pub enum ConfigFormat {
 
 /// The result of resolving a config URI: the original source URI, the loaded
 /// content, and the detected serialization format.
-#[derive(Debug)]
 pub struct ResolvedConfig {
     /// The original URI or path string used to load the config
     /// (e.g. "file:/etc/config.yaml", "env:MY_VAR").
@@ -47,6 +46,29 @@ pub struct ResolvedConfig {
     pub content: String,
     /// The serialization format of `content`, derived from the source URI.
     pub format: ConfigFormat,
+}
+
+/// Describes a configuration source without printing its URI, path, or contents.
+/// Even URL paths and query parameters may contain credentials.
+#[must_use]
+pub fn safe_source_description(uri: &str) -> &'static str {
+    match parse_scheme(uri) {
+        Some("yaml") => "inline YAML",
+        Some("env") => "environment variable",
+        Some("http") => "HTTP source",
+        Some("file") | None => "local file",
+        Some(_) => "unsupported source",
+    }
+}
+
+impl std::fmt::Debug for ResolvedConfig {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("ResolvedConfig")
+            .field("source", &safe_source_description(&self.source))
+            .field("content", &"[REDACTED]")
+            .field("format", &self.format)
+            .finish()
+    }
 }
 
 /// A provider that can resolve configuration content from a URI with a specific scheme.
@@ -73,7 +95,7 @@ impl ConfigProvider for FileConfigProvider {
         let path = uri.strip_prefix("file:").unwrap_or(uri);
         let content = std::fs::read_to_string(path).map_err(|e| Error::FileReadError {
             context: crate::error::Context::default(),
-            details: format!("{path}: {e}"),
+            details: format!("local configuration file: {}", e.kind()),
         })?;
         let format = if path.ends_with(".json") {
             ConfigFormat::Json
@@ -221,14 +243,14 @@ impl HttpConfigProvider {
             .get(uri)
             .send()
             .map_err(|e| Error::ConfigHttpRequestFailed {
-                uri: uri.to_string(),
-                details: e.to_string(),
+                uri: safe_source_description(uri).to_owned(),
+                details: e.without_url().to_string(),
             })?;
 
         let status = response.status();
         if !status.is_success() {
             return Err(Error::ConfigHttpRequestFailed {
-                uri: uri.to_string(),
+                uri: safe_source_description(uri).to_owned(),
                 details: format!("unexpected HTTP status {status}"),
             });
         }
@@ -243,8 +265,8 @@ impl HttpConfigProvider {
         let content = response
             .text()
             .map_err(|e| Error::ConfigHttpRequestFailed {
-                uri: uri.to_string(),
-                details: format!("read body: {e}"),
+                uri: safe_source_description(uri).to_owned(),
+                details: format!("read body: {}", e.without_url()),
             })?;
 
         Ok(ResolvedConfig {
@@ -428,6 +450,45 @@ mod tests {
         });
     }
 
+    /// Scenario: Inline configuration and credential-bearing URIs are described for CLI output.
+    /// Guarantees: Source labels contain neither input contents nor URI path/query credentials.
+    #[test]
+    fn source_descriptions_never_include_submitted_values() {
+        for (uri, expected) in [
+            ("yaml:password: private-source", "inline YAML"),
+            (
+                "http://user:private-source@example.com/private-source?token=private-source",
+                "HTTP source",
+            ),
+            ("env:PRIVATE_SOURCE", "environment variable"),
+            ("file:/private-source.yaml", "local file"),
+        ] {
+            assert_eq!(safe_source_description(uri), expected);
+            let resolved = ResolvedConfig {
+                source: uri.to_owned(),
+                content: "private-body".to_owned(),
+                format: ConfigFormat::Yaml,
+            };
+            let debug = format!("{resolved:?}");
+            assert!(!debug.contains("private-"));
+        }
+    }
+
+    /// Scenario: A remote config fetch fails for a URI containing path and query credentials.
+    /// Guarantees: Display and Debug diagnostics do not disclose the original URI or credentials.
+    #[test]
+    fn http_provider_errors_do_not_echo_sensitive_urls() {
+        ensure_crypto_provider();
+        let error = HttpConfigProvider::with_max_attempts(1)
+            .unwrap()
+            .resolve("http://127.0.0.1:1/private-path?token=private-query")
+            .unwrap_err();
+        for output in [error.to_string(), format!("{error:?}")] {
+            assert!(!output.contains("private-"), "{output}");
+            assert!(!output.contains("127.0.0.1"), "{output}");
+        }
+    }
+
     #[test]
     fn file_provider_reads_temp_file() {
         let mut tmp = tempfile::NamedTempFile::new().expect("create temp file");
@@ -455,6 +516,8 @@ mod tests {
         assert_eq!(resolved.format, ConfigFormat::Json);
     }
 
+    /// Scenario: A file source cannot be read and its path may contain private data.
+    /// Guarantees: The provider returns a read error without echoing the submitted path.
     #[test]
     fn file_provider_errors_on_missing_file() {
         let provider = FileConfigProvider;
@@ -462,7 +525,8 @@ mod tests {
         assert!(result.is_err());
         match result.unwrap_err() {
             Error::FileReadError { details, .. } => {
-                assert!(details.contains("/nonexistent/path/config.yaml"));
+                assert!(details.contains("local configuration file"));
+                assert!(!details.contains("/nonexistent/path/config.yaml"));
             }
             other => panic!("expected FileReadError, got {other:?}"),
         }

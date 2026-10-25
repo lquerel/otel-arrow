@@ -83,6 +83,9 @@ fn pipeline_shutdown_completion_deadline(drain_deadline: Instant) -> Instant {
 pub(super) struct ControllerRuntime<PData: 'static + Clone + Send + Sync + std::fmt::Debug> {
     /// Factory used to build runtime pipelines for new instances.
     pipeline_factory: &'static PipelineFactory<PData>,
+    controller_extensions: ControllerExtensionRegistry,
+    /// Factory-resolved controller extensions installed at startup.
+    resolved_controller_extensions: HashMap<ExtensionId, Arc<ResolvedExtensionConfig>>,
     /// Static controller context cloned into launched pipeline threads.
     controller_context: ControllerContext,
     /// Mutable observed-state store used for compaction and status updates.
@@ -97,6 +100,8 @@ pub(super) struct ControllerRuntime<PData: 'static + Clone + Send + Sync + std::
     declared_topics: DeclaredTopics<PData>,
     /// Immutable engine-wide requirements for transport-header representation.
     context_runtime_requirements: ContextRuntimeRequirements,
+    /// Factory-resolved configuration for the immutable system observability pipeline.
+    observability_component_config: otel_arrow_dfe_engine::component_config::ResolvedPipelineConfig,
     /// Controller-wide core ids available for policy-based allocation.
     available_core_ids: Vec<CoreId>,
     /// Controller-owned topology snapshot used for live rollout placement metadata.
@@ -169,6 +174,8 @@ impl<
     /// Builds the resident controller runtime used by live reconfiguration.
     pub(super) fn new(
         pipeline_factory: &'static PipelineFactory<PData>,
+        controller_extensions: ControllerExtensionRegistry,
+        resolved_controller_extensions: HashMap<ExtensionId, Arc<ResolvedExtensionConfig>>,
         controller_context: ControllerContext,
         observed_state_store: ObservedStateStore,
         observed_state_handle: ObservedStateHandle,
@@ -176,6 +183,11 @@ impl<
         metrics_reporter: MetricsReporter,
         declared_topics: DeclaredTopics<PData>,
         context_runtime_requirements: ContextRuntimeRequirements,
+        observability_component_config: otel_arrow_dfe_engine::component_config::ResolvedPipelineConfig,
+        resolved_pipelines: HashMap<
+            PipelineKey,
+            otel_arrow_dfe_engine::component_config::ResolvedPipelineConfig,
+        >,
         context_bindings: Arc<CompiledContextBindings>,
         available_core_ids: Vec<CoreId>,
         topology: NumaTopology,
@@ -184,10 +196,13 @@ impl<
         telemetry_reporting_interval: Duration,
         memory_pressure_tx: tokio::sync::watch::Sender<MemoryPressureChanged>,
         live_config: OtelDataflowSpec,
+        safe_config_snapshot: SafeConfigSnapshot,
     ) -> Self {
         log_filter_handle.apply(live_config.engine.telemetry.logs.level.as_ref());
         Self {
             pipeline_factory,
+            controller_extensions,
+            resolved_controller_extensions,
             controller_context,
             observed_state_store,
             observed_state_handle,
@@ -195,6 +210,7 @@ impl<
             metrics_reporter,
             declared_topics,
             context_runtime_requirements,
+            observability_component_config,
             available_core_ids,
             topology,
             engine_tracing_setup,
@@ -203,9 +219,11 @@ impl<
             memory_pressure_tx,
             state: Mutex::new(ControllerRuntimeState {
                 live_config,
+                safe_config_snapshot,
                 config_revision: 0,
                 latest_context_bindings: context_bindings,
                 logical_pipelines: HashMap::new(),
+                resolved_pipelines,
                 runtime_instances: HashMap::new(),
                 runtime_recoveries: HashMap::new(),
                 deferred_runtime_recoveries: HashMap::new(),
@@ -264,7 +282,10 @@ impl<
             .insert(pipeline_key.clone(), deployment.baseline_generation + 1);
         _ = state
             .logical_pipelines
-            .insert(pipeline_key, deployment.clone());
+            .insert(pipeline_key.clone(), deployment.clone());
+        _ = state
+            .resolved_pipelines
+            .insert(pipeline_key, deployment.runtime_resolved.clone());
     }
 
     /// Allocates the next controller-local logical thread identifier.
@@ -634,7 +655,11 @@ impl<
     }
 
     fn engine_config_snapshot(&self) -> Result<OtelDataflowSpec, ControlPlaneError> {
-        Ok(self.runtime.engine_config_snapshot())
+        Ok(self.runtime.source_config_snapshot())
+    }
+
+    fn safe_config_snapshot(&self) -> Result<SafeConfigSnapshot, ControlPlaneError> {
+        Ok(self.runtime.safe_config_snapshot())
     }
 
     fn reconcile_engine_config(

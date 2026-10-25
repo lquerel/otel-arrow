@@ -4,7 +4,6 @@
 #![allow(missing_docs)]
 
 use std::hint::black_box;
-use std::sync::Arc;
 
 use criterion::measurement::WallTime;
 use criterion::{
@@ -142,7 +141,9 @@ fn create_processor() -> ProcessorState {
         .create)(
         pipeline_ctx,
         test_node("temporal_reaggregation_bench"),
-        Arc::new(node_config),
+        TEMPORAL_REAGGREGATION_PROCESSOR_FACTORY
+            .resolve_node_config(node_config)
+            .expect("failed to resolve processor config"),
         &config,
         &otel_arrow_dfe_engine::capability::registry::Capabilities::empty(),
     )

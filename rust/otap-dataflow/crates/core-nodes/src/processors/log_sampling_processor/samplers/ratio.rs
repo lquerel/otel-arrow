@@ -15,12 +15,12 @@ use otel_arrow_dfe_engine::error::Error as EngineError;
 use otel_arrow_dfe_engine::local::processor as local;
 use otel_arrow_dfe_otap::pdata::OtapPdata;
 use otel_arrow_dfe_pdata::otap::OtapArrowRecords;
-use serde::Deserialize;
+use serde::{Deserialize, Serialize};
 
 /// Configuration for ratio sampling.
 ///
 /// Emits `emit` out of every `out_of` log records.
-#[derive(Debug, Clone, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct RatioConfig {
     /// Numerator of the sampling fraction.
     pub emit: usize,

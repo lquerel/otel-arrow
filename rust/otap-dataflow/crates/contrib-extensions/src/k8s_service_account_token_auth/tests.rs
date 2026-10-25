@@ -340,14 +340,14 @@ fn factory_is_registered_with_capability() {
     );
 }
 
-/// Scenario: run the static `validate_config` hook against a valid and an
+/// Scenario: run the static `resolve_config` hook against a valid and an
 /// invalid config value.
 /// Guarantees: it accepts a well-formed config and rejects one missing the
 /// required audiences.
 #[test]
-fn validate_config_hook_accepts_valid_and_rejects_invalid() {
-    assert!(validate_config(&serde_json::json!({ "audiences": [{ "audience": "svc" }] })).is_ok());
-    assert!(validate_config(&serde_json::json!({})).is_err());
+fn resolve_config_hook_accepts_valid_and_rejects_invalid() {
+    assert!(resolve_config(&serde_json::json!({ "audiences": [{ "audience": "svc" }] })).is_ok());
+    assert!(resolve_config(&serde_json::json!({})).is_err());
 }
 
 /// Scenario: run the factory's `create` hook with a valid config, outside any
@@ -359,16 +359,25 @@ fn validate_config_hook_accepts_valid_and_rejects_invalid() {
 #[test]
 fn factory_create_builds_both_variants_without_a_cluster() {
     let (ctx, _registry) = otel_arrow_dfe_engine::testing::test_extension_ctx();
-    let user_config = Arc::new(ExtensionUserConfig::new(
+    let config = serde_json::json!({
+        "audiences": [{ "audience": "my-service" }],
+        "cache_ttl": "1m",
+    });
+    let user_config = otel_arrow_dfe_config::extension::ExtensionUserConfig::new(
         K8S_SERVICE_ACCOUNT_TOKEN_AUTH_URN.into(),
-        serde_json::json!({
-            "audiences": [{ "audience": "my-service" }],
-            "cache_ttl": "1m",
-        }),
-    ));
+        config.clone(),
+    );
+    let resolved = Arc::new(
+        ResolvedExtensionConfig::new(
+            &user_config,
+            resolve_config(&config).expect("valid config resolves"),
+            K8S_SERVICE_ACCOUNT_TOKEN_AUTH_EXTENSION.snapshot_policy,
+        )
+        .expect("resolved config matches the factory policy"),
+    );
     let extension_config = ExtensionConfig::new("k8s-authz");
 
-    let bundle = create(&ctx, "k8s-authz".into(), user_config, &extension_config)
+    let bundle = create(&ctx, "k8s-authz".into(), resolved, &extension_config)
         .expect("a valid config must build an extension bundle");
 
     let shared = bundle.shared().expect("shared variant must be present");
@@ -386,16 +395,9 @@ fn factory_create_builds_both_variants_without_a_cluster() {
 /// runtime.
 #[test]
 fn factory_create_rejects_an_invalid_config() {
-    let (ctx, _registry) = otel_arrow_dfe_engine::testing::test_extension_ctx();
-    let user_config = Arc::new(ExtensionUserConfig::new(
-        K8S_SERVICE_ACCOUNT_TOKEN_AUTH_URN.into(),
-        serde_json::json!({}),
-    ));
-    let extension_config = ExtensionConfig::new("k8s-authz");
-
     assert!(
-        create(&ctx, "k8s-authz".into(), user_config, &extension_config).is_err(),
-        "a config without audiences must be rejected at build time"
+        resolve_config(&serde_json::json!({})).is_err(),
+        "a config without audiences must be rejected during resolution"
     );
 }
 
