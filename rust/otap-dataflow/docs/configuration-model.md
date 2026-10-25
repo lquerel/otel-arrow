@@ -308,7 +308,6 @@ Topic declaration precedence for a pipeline in a given group:
 
 At pipeline level:
 
-- `type`: pipeline data type, defaulting to `otap`
 - `policies` (optional)
 - `nodes`: map of node id -> node declaration
 - `extensions`: optional map of extension id -> extension declaration

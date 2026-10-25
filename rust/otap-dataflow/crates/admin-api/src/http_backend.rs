@@ -874,7 +874,6 @@ mod tests {
 
     fn minimal_pipeline_json() -> serde_json::Value {
         json!({
-            "type": "otap",
             "nodes": {
                 "recv": {
                     "type": "receiver:traffic_generator",

@@ -110,8 +110,7 @@ rollout, and committed reporting state. Component creation consumes checked
 typed values; it does not repeat parsing.
 
 The embedding host selects `PipelineFactory<PData>`; `df_engine` uses
-`OTAP_PIPELINE_FACTORY`. The legacy pipeline `type` discriminator remains
-accepted by the ingestion model. Node and extension `type` fields select
+`OTAP_PIPELINE_FACTORY`. Node and extension `type` fields select
 component implementations.
 
 ## Configuration Representations

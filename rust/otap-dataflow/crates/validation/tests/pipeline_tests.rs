@@ -9,9 +9,7 @@
 //! and metric sets are unregistered to avoid registry leaks.
 
 use otel_arrow_dfe_config::observed_state::{ObservedStateSettings, SendPolicy};
-use otel_arrow_dfe_config::pipeline::{
-    DispatchPolicy, PipelineConfig, PipelineConfigBuilder, PipelineType,
-};
+use otel_arrow_dfe_config::pipeline::{DispatchPolicy, PipelineConfig, PipelineConfigBuilder};
 use otel_arrow_dfe_config::policy::{ChannelCapacityPolicy, MetricLevel, TelemetryPolicy};
 use otel_arrow_dfe_config::{DeployedPipelineKey, PipelineGroupId, PipelineId};
 use otel_arrow_dfe_core_nodes::exporters::noop_exporter::NOOP_EXPORTER_URN;
@@ -246,7 +244,7 @@ fn build_test_pipeline_config(
         )
         .add_exporter("exporter", "urn:otel:exporter:noop", None)
         .one_of("receiver", ["exporter"])
-        .build(PipelineType::Otap, pipeline_group_id, pipeline_id)
+        .build(pipeline_group_id, pipeline_id)
         .expect("failed to build pipeline config")
 }
 
@@ -270,7 +268,7 @@ fn build_fan_in_pipeline_config(
         .add_exporter("exporter", "urn:otel:exporter:noop", None)
         .one_of("receiver_a", ["exporter"])
         .one_of("receiver_b", ["exporter"])
-        .build(PipelineType::Otap, pipeline_group_id, pipeline_id)
+        .build(pipeline_group_id, pipeline_id)
         .expect("failed to build pipeline config")
 }
 
@@ -295,7 +293,7 @@ fn build_mixed_receiver_pipeline_config(
         )
         .add_exporter("exporter", NOOP_EXPORTER_URN, None)
         .one_of("shared_receiver", ["exporter"])
-        .build(PipelineType::Otap, pipeline_group_id, pipeline_id)
+        .build(pipeline_group_id, pipeline_id)
         .expect("failed to build pipeline config")
 }
 

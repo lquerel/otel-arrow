@@ -92,7 +92,6 @@ groups:
         policies: {}
         pipelines:
             main:
-                type: otap
                 policies: {}
                 extensions: {}
                 nodes: {}
@@ -226,7 +225,6 @@ groups:
 
 A pipeline is an executable graph:
 
-- `type`: pipeline data type. Defaults to `otap`.
 - `nodes`: receivers, processors, and exporters in the data path.
 - `extensions`: long-lived components available to nodes through capabilities.
 - `connections`: explicit graph wiring.
@@ -727,3 +725,9 @@ in the root model, use the
 - [Processor behavior taxonomy](processors.md)
 - [Transport header policies](transport-headers.md)
 - [Memory limiter policy](memory-limiter-phase1.md)
+
+## Migration from the Pipeline Type Setting
+
+Remove legacy `type: otap` or `type: otlp` from pipeline definitions and
+from Admin full-replacement payloads. Pipeline schemas now reject that
+field. Node and extension `type` fields continue selecting components.
