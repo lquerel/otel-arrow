@@ -161,6 +161,12 @@ nodes:
         config: {}
 ```
 
+Node and extension `config` fields may be omitted when an empty object is
+appropriate. Omission is equivalent to `config: {}` at regular pipeline,
+observability pipeline, and controller-extension scopes. Required component
+settings are still validated. Explicit values, including `null`, keep their
+existing meaning.
+
 The `type` can use either the OTel shortcut form or the full URN:
 
 ```yaml

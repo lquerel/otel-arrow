@@ -13,6 +13,7 @@ use crate::PipelineGroupId;
 use crate::PipelineId;
 use crate::TopicName;
 use crate::context_policy::{ContextPolicy, ContextScope};
+use crate::error::Error;
 use crate::extension::ExtensionUserConfig;
 use crate::health::HealthPolicy;
 use crate::observed_state::ObservedStateSettings;
@@ -31,9 +32,6 @@ pub use self::resolve::{
     ResolvedOtelDataflowSpec, ResolvedPipelineConfig, ResolvedPipelineRole,
     SYSTEM_OBSERVABILITY_PIPELINE_ID, SYSTEM_PIPELINE_GROUP_ID,
 };
-
-#[cfg(test)]
-use crate::error::Error;
 
 /// Current engine configuration schema version.
 pub const ENGINE_CONFIG_VERSION_V1: &str = "otel_dataflow/v1";
@@ -318,6 +316,29 @@ impl<'de> Deserialize<'de> for ControllerExtensions {
 }
 
 impl ControllerExtensions {
+    /// Replaces every extension config with its precomputed safe config snapshot.
+    pub fn replace_config_snapshots(
+        &mut self,
+        snapshots: &HashMap<ExtensionId, Value>,
+    ) -> Result<(), Error> {
+        if snapshots.len() != self.0.len() {
+            return Err(Error::InvalidUserConfig {
+                error: "controller extension snapshot set is incomplete".to_owned(),
+            });
+        }
+        for (extension_id, extension) in &mut self.0 {
+            let snapshot = snapshots
+                .get(extension_id)
+                .ok_or_else(|| Error::InvalidUserConfig {
+                    error: format!(
+                        "missing safe config snapshot for controller extension `{extension_id}`"
+                    ),
+                })?;
+            Arc::make_mut(extension).config = snapshot.clone();
+        }
+        Ok(())
+    }
+
     /// Returns true if the extensions collection is empty.
     #[must_use]
     pub fn is_empty(&self) -> bool {
@@ -548,6 +569,66 @@ fn default_bind_address() -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// Scenario: a complete engine config omits component configs in every supported scope.
+    /// Guarantees: YAML and JSON parsing supply empty objects to regular, observability, and controller components.
+    #[test]
+    fn omitted_component_configs_default_to_objects_at_every_scope() {
+        let yaml = r#"
+version: otel_dataflow/v1
+engine:
+  controller:
+    extensions:
+      controller_ext:
+        type: urn:test:extension:example
+  observability:
+    pipeline:
+      nodes:
+        internal:
+          type: receiver:internal_telemetry
+        sink:
+          type: exporter:noop
+      extensions:
+        observability_ext:
+          type: urn:test:extension:example
+      connections:
+        - from: internal
+          to: sink
+groups:
+  default:
+    pipelines:
+      main:
+        nodes:
+          receiver:
+            type: receiver:otlp
+          exporter:
+            type: exporter:otlp_grpc
+        extensions:
+          pipeline_ext:
+            type: urn:test:extension:example
+        connections:
+          - from: receiver
+            to: exporter
+"#;
+        let source: Value = serde_yaml::from_str(yaml).unwrap();
+        let from_yaml = OtelDataflowSpec::from_yaml(yaml).unwrap();
+        let from_json = OtelDataflowSpec::from_json(&source.to_string()).unwrap();
+        assert_eq!(from_yaml, from_json);
+        let parsed = serde_json::to_value(&from_yaml).unwrap();
+        for path in [
+            "/engine/controller/extensions/controller_ext/config",
+            "/engine/observability/pipeline/nodes/internal/config",
+            "/engine/observability/pipeline/nodes/sink/config",
+            "/engine/observability/pipeline/extensions/observability_ext/config",
+            "/groups/default/pipelines/main/nodes/receiver/config",
+            "/groups/default/pipelines/main/nodes/exporter/config",
+            "/groups/default/pipelines/main/extensions/pipeline_ext/config",
+        ] {
+            assert_eq!(parsed.pointer(path), Some(&serde_json::json!({})), "{path}");
+        }
+        let explicit = OtelDataflowSpec::from_json(&parsed.to_string()).unwrap();
+        assert_eq!(from_yaml, explicit);
+    }
     use kube::{CustomResource, CustomResourceExt};
     use std::fmt::Write;
     use std::fs;

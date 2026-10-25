@@ -95,7 +95,8 @@ pub struct NodeUserConfig {
     ///
     /// Note: A pre-validation step using a JSON schema or protobuf could be added to the
     /// management plane to ensure that the configuration is valid.
-    #[serde(default)]
+    /// Omitting this field is equivalent to specifying an empty object.
+    #[serde(default = "crate::default_component_config")]
     // The serde_json::Value serializes to an invalid schema as far as the kubernetes api is concerned.
     // The preserve-unknown-fields extension allows this to be correctly interpreted as "Any JSON type"
     #[schemars(extend("x-kubernetes-preserve-unknown-fields" = true))]
@@ -281,7 +282,7 @@ impl NodeUserConfig {
             outputs: Vec::new(),
             default_output: None,
             entity: None,
-            config: Value::Null,
+            config: crate::default_component_config(),
             capabilities: HashMap::new(),
             rate_limiters: None,
             header_capture: None,
@@ -302,7 +303,7 @@ impl NodeUserConfig {
             entity: None,
             outputs: Vec::new(),
             default_output: None,
-            config: Value::Null,
+            config: crate::default_component_config(),
             capabilities: HashMap::new(),
             rate_limiters: None,
             header_capture: None,
@@ -323,7 +324,7 @@ impl NodeUserConfig {
             entity: None,
             outputs: Vec::new(),
             default_output: None,
-            config: Value::Null,
+            config: crate::default_component_config(),
             capabilities: HashMap::new(),
             rate_limiters: None,
             header_capture: None,
@@ -563,6 +564,73 @@ where
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// Scenario: receiver, processor, and exporter configs omit the config field in YAML and JSON.
+    /// Guarantees: omission matches an explicit empty object, including serialization and the schema default.
+    #[test]
+    fn omitted_node_config_is_empty_object() {
+        for node_type in ["receiver:otlp", "processor:batch", "exporter:otlp_grpc"] {
+            let omitted = serde_json::json!({"type": node_type});
+            let explicit = serde_json::json!({"type": node_type, "config": {}});
+            let expected: NodeUserConfig = serde_json::from_value(explicit).unwrap();
+            let from_json: NodeUserConfig = serde_json::from_value(omitted.clone()).unwrap();
+            let from_yaml: NodeUserConfig =
+                serde_yaml::from_str(&serde_yaml::to_string(&omitted).unwrap()).unwrap();
+            assert_eq!(from_json, expected);
+            assert_eq!(from_yaml, expected);
+            assert_eq!(
+                serde_json::to_value(from_json).unwrap()["config"],
+                serde_json::json!({})
+            );
+        }
+        let schema = serde_json::to_value(schemars::schema_for!(NodeUserConfig)).unwrap();
+        assert_eq!(
+            schema["properties"]["config"]["default"],
+            serde_json::json!({})
+        );
+    }
+
+    /// Scenario: callers construct nodes without providing a component config payload.
+    /// Guarantees: all no-payload constructors match parsing an omitted config field.
+    #[test]
+    fn node_constructors_use_empty_config_object() {
+        for config in [
+            NodeUserConfig::new_receiver_config("receiver:otlp"),
+            NodeUserConfig::new_processor_config("processor:batch"),
+            NodeUserConfig::new_exporter_config("exporter:otlp_grpc"),
+        ] {
+            let parsed: NodeUserConfig = serde_json::from_value(serde_json::json!({
+                "type": config.r#type
+            }))
+            .unwrap();
+            assert_eq!(config, parsed);
+            assert_eq!(config.config, serde_json::json!({}));
+        }
+    }
+
+    /// Scenario: a node explicitly supplies null, an object, or a non-object component payload.
+    /// Guarantees: defaulting only applies to absent fields and preserves existing supplied values.
+    #[test]
+    fn explicit_node_config_is_preserved() {
+        for payload in [
+            Value::Null,
+            serde_json::json!({}),
+            serde_json::json!({"nested": {"enabled": true}}),
+            serde_json::json!([1, 2]),
+            serde_json::json!("text"),
+            serde_json::json!(42),
+            serde_json::json!(false),
+        ] {
+            let input = serde_json::json!({"type": "processor:batch", "config": payload});
+            let from_json: NodeUserConfig = serde_json::from_value(input.clone()).unwrap();
+            let from_yaml: NodeUserConfig =
+                serde_yaml::from_str(&serde_yaml::to_string(&input).unwrap()).unwrap();
+            assert_eq!(from_json.config, payload);
+            assert_eq!(from_yaml.config, payload);
+        }
+        let blank: NodeUserConfig = serde_yaml::from_str("type: processor:batch\nconfig:").unwrap();
+        assert_eq!(blank.config, Value::Null);
+    }
     use crate::ContextEntryName;
     use std::collections::BTreeSet;
 
