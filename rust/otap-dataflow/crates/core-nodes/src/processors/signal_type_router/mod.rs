@@ -695,6 +695,7 @@ pub static SIGNAL_TYPE_ROUTER_FACTORY: ProcessorFactory<OtapPdata> = ProcessorFa
         ResolvedComponentConfig::typed_safe(config)
     },
     snapshot_policy: ConfigSnapshotPolicy::TypedSafe,
+    normalize_config_for_edit: None,
 };
 
 #[cfg(test)]

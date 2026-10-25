@@ -86,6 +86,7 @@ static COUNTING_EXPORTER: ExporterFactory<OtapPdata> = ExporterFactory {
     wiring_contract: otel_arrow_dfe_engine::wiring_contract::WiringContract::UNRESTRICTED,
     resolve_config: resolve_omitted_config::<serde_json::Value>,
     snapshot_policy: ConfigSnapshotPolicy::Omit,
+    normalize_config_for_edit: None,
 };
 
 #[async_trait(?Send)]

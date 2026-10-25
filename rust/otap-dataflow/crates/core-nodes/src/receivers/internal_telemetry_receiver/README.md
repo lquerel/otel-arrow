@@ -156,6 +156,6 @@ runtime metric sets may also be attached by the pipeline telemetry policy.
 
 ## Related Docs
 
-- [Configuration model observability pipeline](../../../../../docs/configuration-model.md#observability-pipeline)
+- [Configuration observability pipeline](../../../../../docs/configuration.md#observability-pipeline)
 - [Telemetry guide](../../../../../docs/telemetry/README.md)
 - [Core node catalog](../../../README.md)

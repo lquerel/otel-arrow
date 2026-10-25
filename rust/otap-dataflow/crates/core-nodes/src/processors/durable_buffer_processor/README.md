@@ -148,6 +148,6 @@ See [telemetry.md](telemetry.md) for maintenance notes and the expanded event in
 
 ## Related Docs
 
-- [Configuration model](../../../../../docs/configuration-model.md)
+- [Configuration guide and reference](../../../../../docs/configuration.md)
 - [Processor taxonomy](../../../../../docs/processors.md)
 - [Core node catalog](../../../README.md)

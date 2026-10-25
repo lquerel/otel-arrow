@@ -455,8 +455,8 @@ multicore pipeline:
 ```
 
 Reject `pipeline_ctx.num_cores() > 1` from the receiver factory `create`
-closure with an invalid user configuration error. No engine validation hook is
-required for v1 because `PipelineContext` already exposes the number of cores.
+closure with an invalid user configuration error. This runtime constraint is
+separate from the typed config resolver because `PipelineContext` owns the core count.
 
 ## Duplicate Lease
 

@@ -243,6 +243,6 @@ runtime metric sets may also be attached by the pipeline telemetry policy.
 
 ## Related Docs
 
-- [Configuration model](../../../../../docs/configuration-model.md)
+- [Configuration guide and reference](../../../../../docs/configuration.md)
 - [Journald receiver design](../../../../../docs/journald-receiver.md)
 - [Core node catalog](../../../README.md)

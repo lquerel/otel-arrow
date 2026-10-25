@@ -139,6 +139,7 @@ impl AppState {
         error: Option<String>,
     ) {
         self.pipelines.config_draft = Some(PipelineConfigDraft {
+            config_revision: None,
             original_yaml,
             edited_yaml,
             parsed,

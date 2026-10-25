@@ -252,6 +252,7 @@ pub static OTLP_RECEIVER: ReceiverFactory<OtapPdata> = ReceiverFactory {
         otel_arrow_dfe_engine::component_config::ResolvedComponentConfig::typed_safe(config)
     },
     snapshot_policy: otel_arrow_dfe_engine::component_config::ConfigSnapshotPolicy::TypedSafe,
+    normalize_config_for_edit: None,
 };
 
 impl OTLPReceiver {

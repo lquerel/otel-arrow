@@ -115,6 +115,7 @@ pub static PARTITION_PROCESSOR_FACTORY: ProcessorFactory<OtapPdata> = ProcessorF
         Ok(ResolvedComponentConfig::omitted(config))
     },
     snapshot_policy: ConfigSnapshotPolicy::Omit,
+    normalize_config_for_edit: None,
 };
 
 /// partition processor.

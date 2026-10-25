@@ -627,6 +627,113 @@ impl<
         self.spawn_rollout(plan)
     }
 
+    /// Applies sparse edits to a reserved pipeline's private source before normal admission.
+    pub(super) fn request_update_pipeline(
+        self: &Arc<Self>,
+        pipeline_group_id: &str,
+        pipeline_id: &str,
+        request: &otel_arrow_dfe_admin::PipelineUpdateRequest,
+    ) -> Result<RolloutStatus, ControlPlaneError> {
+        use otel_arrow_dfe_admin::PipelineConfigChange;
+        config_edit::validate_request(request)?;
+        let invalid = || {
+            ControlPlaneError::InvalidRequest {
+            message: "invalid partial update: use non-empty object paths and source values without snapshot markers"
+                .to_owned(),
+        }
+        };
+        let key = PipelineKey::new(
+            pipeline_group_id.to_owned().into(),
+            pipeline_id.to_owned().into(),
+        );
+        let _reservation =
+            self.begin_pipeline_operation_reservation(key.clone(), PipelineOperationKind::Rollout)?;
+        let mut value = {
+            let state = self
+                .state
+                .lock()
+                .unwrap_or_else(|poisoned| poisoned.into_inner());
+            if state.config_revision != request.expected_revision {
+                return Err(ControlPlaneError::RolloutConflict);
+            }
+            let group = state
+                .live_config
+                .groups
+                .get(key.pipeline_group_id())
+                .ok_or(ControlPlaneError::GroupNotFound)?;
+            let pipeline = group
+                .pipelines
+                .get(key.pipeline_id())
+                .ok_or(ControlPlaneError::PipelineNotFound)?;
+            serde_json::to_value(pipeline).map_err(|_| invalid())?
+        };
+        config_edit::validate_value(&value, 0, false)?;
+        'changes: for change in &request.changes {
+            let path = match change {
+                PipelineConfigChange::Set { path, .. } => path,
+                PipelineConfigChange::Remove { path } => path,
+            };
+            self.pipeline_factory
+                .normalize_source_for_edit(&mut value, path)
+                .map_err(|_| invalid())?;
+            // The callback can change only this component's config. Other edits
+            // were depth-checked during preflight, so do not rescan the whole
+            // pipeline for every operation in a batch.
+            if path.len() > 3
+                && let Some(config) = value
+                    .get(&path[0])
+                    .and_then(|v| v.get(&path[1]))
+                    .and_then(|v| v.get("config"))
+            {
+                config_edit::validate_value(config, 3, false)?;
+            }
+            let (field, parents) = path.split_last().ok_or_else(invalid)?;
+            let mut parent = &mut value;
+            for key in parents {
+                let object = parent.as_object_mut().ok_or_else(invalid)?;
+                if matches!(change, PipelineConfigChange::Remove { .. })
+                    && !object.contains_key(key)
+                {
+                    continue 'changes;
+                }
+                parent = object
+                    .entry(key.clone())
+                    .or_insert_with(|| serde_json::json!({}));
+            }
+            let object = parent.as_object_mut().ok_or_else(invalid)?;
+            match change {
+                PipelineConfigChange::Set { value, .. } => {
+                    _ = object.insert(field.clone(), value.clone());
+                }
+                PipelineConfigChange::Remove { .. } => {
+                    _ = object.remove(field);
+                }
+            }
+        }
+        let pipeline = serde_json::from_value(value).map_err(|_| invalid())?;
+        let full_request = ReconfigureRequest {
+            pipeline,
+            step_timeout_secs: request.step_timeout_secs,
+            drain_timeout_secs: request.drain_timeout_secs,
+        };
+        let plan = self.prepare_rollout_plan_for_engine_operation(
+            pipeline_group_id,
+            pipeline_id,
+            &full_request,
+            None,
+            None,
+            None,
+            None,
+            None,
+        )?;
+        // Another pipeline may commit while this one is resolving. A partial edit
+        // must never silently rebase onto a newer private source revision.
+        if plan.base_config_revision != request.expected_revision {
+            return Err(ControlPlaneError::RolloutConflict);
+        }
+        self.spawn_rollout(plan)
+    }
+
     /// Classifies a reconfigure request and prepares the rollout state machine inputs.
     #[cfg(test)]
     pub(super) fn prepare_rollout_plan(
@@ -1626,6 +1733,7 @@ impl<
             .and_then(|rollout_id| state.rollouts.get(rollout_id))
             .map(RolloutRecord::api_summary);
         Ok(Some(PipelineDetails {
+            config_revision: state.config_revision,
             pipeline_group_id: pipeline_key.pipeline_group_id().clone(),
             pipeline_id: pipeline_key.pipeline_id().clone(),
             active_generation: Some(record.baseline_generation),

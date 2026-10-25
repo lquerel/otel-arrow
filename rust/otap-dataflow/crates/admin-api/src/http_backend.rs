@@ -356,6 +356,25 @@ impl AdminBackend for HttpBackend {
         .await
     }
 
+    async fn pipeline_update(
+        &self,
+        pipeline_group_id: &str,
+        pipeline_id: &str,
+        request: &pipelines::PipelineUpdateRequest,
+        options: &operations::OperationOptions,
+    ) -> Result<pipelines::ReconfigureOutcome, Error> {
+        self.submit_pipeline_rollout(
+            pipeline_group_id,
+            pipeline_id,
+            Method::PATCH,
+            serde_json::to_vec(request).map_err(|_| Error::ClientConfig {
+                details: "failed to encode pipeline update".to_owned(),
+            })?,
+            options,
+        )
+        .await
+    }
+
     async fn pipeline_rollout_status(
         &self,
         pipeline_group_id: &str,
@@ -1434,6 +1453,54 @@ mod tests {
                 .unwrap(),
             pipelines::ReconfigureOutcome::Accepted(_)
         ));
+    }
+
+    /// Scenario: An SDK client sends a revision-guarded policy-only update to a secret-bearing pipeline.
+    /// Guarantees: PATCH carries only explicit fields/revision and uses the normal rollout outcome contract.
+    #[tokio::test]
+    async fn pipeline_update_encodes_sparse_request_and_decodes_rollout() {
+        let server = MockServer::start().await;
+        let request = pipelines::PipelineUpdateRequest {
+            expected_revision: 7,
+            changes: vec![pipelines::PipelineConfigChange::Set {
+                path: vec![
+                    "policies".into(),
+                    "resources".into(),
+                    "core_allocation".into(),
+                ],
+                value: json!({"type": "core_count", "count": 2}),
+            }],
+            step_timeout_secs: 45,
+            drain_timeout_secs: 30,
+        };
+        Mock::given(method("PATCH"))
+            .and(path("/api/v1/groups/default/pipelines/main"))
+            .and(body_json(serde_json::to_value(&request).unwrap()))
+            .respond_with(ResponseTemplate::new(202).set_body_json(json!({
+                "rolloutId": "rollout-3", "pipelineGroupId": "default", "pipelineId": "main",
+                "action": "resize", "state": "running", "targetGeneration": 2,
+                "previousGeneration": 2, "startedAt": "2026-01-01T00:00:00Z",
+                "updatedAt": "2026-01-01T00:00:01Z", "cores": []
+            })))
+            .expect(1)
+            .mount(&server)
+            .await;
+        let outcome = client(&server)
+            .pipelines()
+            .update(
+                "default",
+                "main",
+                &request,
+                &operations::OperationOptions {
+                    wait: false,
+                    timeout_secs: 60,
+                },
+            )
+            .await
+            .unwrap();
+        assert!(
+            matches!(outcome, pipelines::ReconfigureOutcome::Accepted(status) if status.action == "resize")
+        );
     }
 
     /// Scenario: a caller submits an asynchronous reconfigure request through

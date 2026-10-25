@@ -271,6 +271,7 @@ pub static CLICKHOUSE_EXPORTER: ExporterFactory<OtapPdata> = ExporterFactory {
         },
     resolve_config: resolve_clickhouse_config,
     snapshot_policy: ConfigSnapshotPolicy::TypedSafe,
+    normalize_config_for_edit: None,
     context_declarations: None,
     wiring_contract: otel_arrow_dfe_engine::wiring_contract::WiringContract::UNRESTRICTED,
 };

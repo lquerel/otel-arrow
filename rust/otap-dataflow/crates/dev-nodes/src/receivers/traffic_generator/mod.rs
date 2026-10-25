@@ -138,6 +138,7 @@ pub static TRAFFIC_GENERATOR_RECEIVER: ReceiverFactory<OtapPdata> = ReceiverFact
     },
     // Resource attributes and registry URLs are free-form inputs and may carry secrets.
     snapshot_policy: ConfigSnapshotPolicy::Omit,
+    normalize_config_for_edit: None,
 };
 
 fn validate_config_impl(config: &Value) -> Result<Config, otel_arrow_dfe_config::error::Error> {

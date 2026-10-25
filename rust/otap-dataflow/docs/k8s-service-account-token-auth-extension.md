@@ -338,7 +338,7 @@ extensions:
 ```
 
 A receiver binds it via its `capabilities:` map (see
-[`docs/configuration-model.md`](configuration-model.md)). The built-in OTLP
+[`docs/configuration.md`](configuration.md)). The built-in OTLP
 receiver invokes `bearer_token_authorizer` for OTLP/gRPC and OTLP/HTTP requests
 before accepting their telemetry payloads.
 

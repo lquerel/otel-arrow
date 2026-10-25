@@ -556,6 +556,20 @@ impl PipelinesClient<'_> {
             .await
     }
 
+    /// Applies revision-guarded partial edits to controller-owned source.
+    /// Unlike full replacement, unchanged secret and omitted fields are not sent.
+    pub async fn update(
+        &self,
+        pipeline_group_id: &str,
+        pipeline_id: &str,
+        request: &pipelines::PipelineUpdateRequest,
+        options: &operations::OperationOptions,
+    ) -> Result<pipelines::ReconfigureOutcome, Error> {
+        self.backend
+            .pipeline_update(pipeline_group_id, pipeline_id, request, options)
+            .await
+    }
+
     /// Returns the latest known status for one previously created rollout.
     ///
     /// Use the `rollout_id` returned from [`Self::reconfigure`] to poll an
@@ -984,6 +998,13 @@ pub(crate) trait AdminBackend: Send + Sync {
         pipeline_group_id: &str,
         pipeline_id: &str,
         request: &pipelines::ReconfigureRequest,
+        options: &operations::OperationOptions,
+    ) -> Result<pipelines::ReconfigureOutcome, Error>;
+    async fn pipeline_update(
+        &self,
+        pipeline_group_id: &str,
+        pipeline_id: &str,
+        request: &pipelines::PipelineUpdateRequest,
         options: &operations::OperationOptions,
     ) -> Result<pipelines::ReconfigureOutcome, Error>;
     async fn pipeline_rollout_status(

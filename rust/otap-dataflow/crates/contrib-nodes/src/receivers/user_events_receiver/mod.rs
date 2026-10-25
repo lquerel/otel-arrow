@@ -606,6 +606,7 @@ pub static USER_EVENTS_RECEIVER: ReceiverFactory<OtapPdata> = ReceiverFactory {
     wiring_contract: otel_arrow_dfe_engine::wiring_contract::WiringContract::UNRESTRICTED,
     resolve_config: resolve_user_events_config,
     snapshot_policy: ConfigSnapshotPolicy::Omit,
+    normalize_config_for_edit: None,
 };
 
 fn resolve_user_events_runtime_config(

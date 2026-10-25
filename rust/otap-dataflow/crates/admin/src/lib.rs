@@ -22,8 +22,9 @@ pub use otel_arrow_dfe_admin_types::engine::{
 };
 use otel_arrow_dfe_admin_types::operations::{OperationError, OperationErrorKind};
 pub use otel_arrow_dfe_admin_types::pipelines::{
-    PipelineDetails, PipelineRolloutState, PipelineRolloutSummary, PipelineShutdownInitiator,
-    ReconfigureRequest, RolloutCoreStatus, RolloutStatus, ShutdownCoreStatus, ShutdownStatus,
+    PipelineConfigChange, PipelineDetails, PipelineRolloutState, PipelineRolloutSummary,
+    PipelineShutdownInitiator, PipelineUpdateRequest, ReconfigureRequest, RolloutCoreStatus,
+    RolloutStatus, ShutdownCoreStatus, ShutdownStatus,
 };
 use serde::Serialize;
 use std::collections::HashMap;
@@ -166,6 +167,18 @@ pub trait ControlPlane: Send + Sync {
         pipeline_id: &str,
         request: ReconfigureRequest,
     ) -> Result<RolloutStatus, ControlPlaneError>;
+
+    /// Applies explicit revision-guarded edits to private source, then resolves and rolls out.
+    fn update_pipeline(
+        &self,
+        _pipeline_group_id: &str,
+        _pipeline_id: &str,
+        _request: PipelineUpdateRequest,
+    ) -> Result<RolloutStatus, ControlPlaneError> {
+        Err(ControlPlaneError::InvalidRequest {
+            message: "partial pipeline updates are not supported by this control plane".to_owned(),
+        })
+    }
 
     /// Returns the committed source config for a logical pipeline, including secrets.
     fn pipeline_details(

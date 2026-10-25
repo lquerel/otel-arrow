@@ -1,6 +1,6 @@
 # dfctl
 
-`dfctl` is the OTAP Dataflow Engine command-line client built on top of
+`dfctl` is the OTel Arrow Dataflow Engine command-line client built on top of
 the public Rust admin SDK, `otel-arrow-dfe-admin-api`.
 
 It is intended to be:
@@ -185,7 +185,8 @@ Choose the output format based on the consumer:
 - `json`: direct machine-readable command payload as one pretty-printed JSON
   document. Use it for scripts, `jq`, and CI snapshots.
 - `yaml`: direct command payload as one YAML document. Use it for saved files,
-  inspection, and hand editing.
+  inspection, and hand editing. Configuration reads contain committed source,
+  including sensitive values; protect saved files accordingly.
 - `agent-json`: direct payload wrapped in a `dfctl/v1` envelope with
   `schemaVersion`, `type`, `resource`, `generatedAt`, and `data`. Use it when
   an agent needs a uniform response shape and provenance.
@@ -195,6 +196,13 @@ Choose the output format based on the consumer:
 `agent-json` is not a different JSON encoding. It is JSON plus a stable
 `dfctl` envelope around the same command data. `ndjson` is separate because a
 long-running stream cannot be represented as one finite JSON document.
+
+The TUI scales with a policy-only partial update. Its external configuration
+editor shows committed source, including secrets, and submits only changed object
+fields against the original revision. Treat editor drafts as sensitive data.
+The separate safe snapshot is not used for management reads. If the revision has
+changed, refresh and reapply the edit. See
+[Partial Updates](live-reconfiguration.md#partial-updates).
 
 One-shot commands support:
 

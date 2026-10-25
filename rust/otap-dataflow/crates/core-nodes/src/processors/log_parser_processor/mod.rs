@@ -191,6 +191,7 @@ pub static LOG_PARSER_PROCESSOR_FACTORY: ProcessorFactory<OtapPdata> = Processor
     wiring_contract: otel_arrow_dfe_engine::wiring_contract::WiringContract::UNRESTRICTED,
     resolve_config: resolve_log_parser_config,
     snapshot_policy: ConfigSnapshotPolicy::Omit,
+    normalize_config_for_edit: None,
 };
 
 #[async_trait(?Send)]

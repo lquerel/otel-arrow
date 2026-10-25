@@ -1028,6 +1028,7 @@ pub static CONTENT_ROUTER_FACTORY: ProcessorFactory<OtapPdata> = ProcessorFactor
     wiring_contract: otel_arrow_dfe_engine::wiring_contract::WiringContract::UNRESTRICTED,
     resolve_config: resolve_typed_config::<ContentRouterConfig>,
     snapshot_policy: ConfigSnapshotPolicy::TypedSafe,
+    normalize_config_for_edit: None,
     create:
         |pipeline: PipelineContext,
          node: NodeId,

@@ -12,6 +12,39 @@ fn default_collection_interval() -> Duration {
     Duration::from_secs(10)
 }
 
+pub(super) fn normalize_config_for_edit(
+    value: &mut serde_json::Value,
+) -> Result<(), otel_arrow_dfe_config::error::Error> {
+    let invalid = || otel_arrow_dfe_config::error::Error::InvalidUserConfig {
+        error: "invalid or conflicting host root paths in edit basis".to_owned(),
+    };
+    if let Some(legacy) = value.get("root_path").filter(|v| !v.is_null()) {
+        let legacy: PathBuf = serde_json::from_value(legacy.clone()).map_err(|_| invalid())?;
+        if let Some(canonical) = value.get("host_view").and_then(|v| v.get("root_path")) {
+            let canonical: PathBuf =
+                serde_json::from_value(canonical.clone()).map_err(|_| invalid())?;
+            if canonical != Path::new("/") && canonical != legacy {
+                return Err(invalid());
+            }
+        }
+        let root = normalized_root_path(Some(&legacy))?;
+        let root = serde_json::to_value(root).map_err(|_| {
+            otel_arrow_dfe_config::error::Error::InvalidUserConfig {
+                error: "invalid host root path".to_owned(),
+            }
+        })?;
+        if let Some(object) = value.as_object_mut() {
+            _ = object.remove("root_path");
+            let host_view = object
+                .entry("host_view")
+                .or_insert_with(|| serde_json::json!({}));
+            let host_view = host_view.as_object_mut().ok_or_else(invalid)?;
+            _ = host_view.insert("root_path".to_owned(), root);
+        }
+    }
+    Ok(())
+}
+
 fn default_root_path() -> PathBuf {
     PathBuf::from("/")
 }

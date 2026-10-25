@@ -69,6 +69,7 @@ static REPLAY_TOPOLOGY_EXPORTER: ExporterFactory<OtapPdata> = ExporterFactory {
     wiring_contract: otel_arrow_dfe_engine::wiring_contract::WiringContract::UNRESTRICTED,
     resolve_config: resolve_no_config,
     snapshot_policy: ConfigSnapshotPolicy::TypedSafe,
+    normalize_config_for_edit: None,
 };
 
 #[async_trait(?Send)]

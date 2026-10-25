@@ -157,4 +157,5 @@ pub static FLAT_FILE_USER_PASS_AUTH_EXTENSION: ExtensionFactory = ExtensionFacto
     create,
     resolve_config,
     snapshot_policy: ConfigSnapshotPolicy::Omit,
+    normalize_config_for_edit: None,
 };

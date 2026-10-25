@@ -119,6 +119,16 @@ pub static OTLP_HTTP_EXPORTER: ExporterFactory<OtapPdata> = ExporterFactory {
     wiring_contract: WiringContract::UNRESTRICTED,
     resolve_config,
     snapshot_policy: otel_arrow_dfe_engine::component_config::ConfigSnapshotPolicy::TypedSafe,
+    normalize_config_for_edit: Some(|value| {
+        if let Some(http) = value.get_mut("http") {
+            otel_arrow_dfe_engine::component_config::normalize_alias(
+                http,
+                "compression_method",
+                "compression",
+            )?;
+        }
+        Ok(())
+    }),
 };
 
 /// Validates the OTLP HTTP exporter configuration at config load time.

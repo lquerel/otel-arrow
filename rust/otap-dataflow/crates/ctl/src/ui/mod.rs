@@ -65,7 +65,6 @@ use otel_arrow_dfe_admin_api::{
     AdminClient, HttpAdminClientSettings, engine, groups, operations::OperationOptions, pipelines,
     telemetry,
 };
-use otel_arrow_dfe_config::pipeline::PipelineConfig;
 use ratatui::layout::Rect;
 use serde::Serialize;
 use serde_json::json;

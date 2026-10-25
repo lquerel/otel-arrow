@@ -32,7 +32,8 @@ cargo build --bin df_engine
 ```
 
 The agent appears on <http://localhost:4321> within a heartbeat interval:
-instance `8be4df61-...`, health `Up`, and its effective config visible on the
+instance `8be4df61-...`, health `Up`, and its safe configuration snapshot visible
+on the
 agent page.
 
 ### 3. Push an engine config from the server

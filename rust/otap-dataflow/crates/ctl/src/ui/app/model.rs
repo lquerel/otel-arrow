@@ -621,6 +621,7 @@ pub(crate) struct ConfigPane {
 /// Draft pipeline configuration captured from an editor session.
 #[derive(Clone, Debug)]
 pub(crate) struct PipelineConfigDraft {
+    pub(crate) config_revision: Option<u64>,
     pub(crate) original_yaml: String,
     pub(crate) edited_yaml: String,
     pub(crate) parsed: Option<PipelineConfig>,

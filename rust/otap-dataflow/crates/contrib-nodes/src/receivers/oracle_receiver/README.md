@@ -903,7 +903,7 @@ Common engine resource and node context may still accompany them.
 
 - [Shared database scraper][scraper]
 - [Complete Oracle-to-console example][example-config]
-- [Configuration model](../../../../../docs/configuration-model.md)
+- [Configuration guide and reference](../../../../../docs/configuration.md)
 - [Contrib node catalog](../../../README.md)
 - [Oracle Instant Client downloads][instant-client]
 - [Oracle Instant Client Windows installation][instant-client-windows]

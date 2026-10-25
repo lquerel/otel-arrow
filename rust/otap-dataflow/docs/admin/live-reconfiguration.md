@@ -10,23 +10,14 @@ It also exposes controller-level primitives for reading the full committed
 engine config, reconciling against a desired full config, creating empty
 pipeline groups, and deleting committed pipelines or groups.
 
-Configuration reads return committed parsed source, including credentials,
-inline TLS keys, static headers, free-form component payloads, and
-`engine.custom`. Protect these management responses as sensitive data.
-OpAMP uses the same source through its `effective_config` wire field.
-The controller separately retains a precomputed `SafeConfigSnapshot` for
-future configuration events; it is not returned by these management APIs.
+Configuration documentation:
 
-Complete candidate resolution precedes admission. Runtime equivalence uses
-typed component values, so default- or alias-equivalent updates can be
-no-ops while secret-only changes still replace a pipeline. Successful
-rollout commits source, resolved state, and safe snapshot together for that
-pipeline; failed admission or successful rollback preserves all three.
-Full-engine reconciliation remains non-transactional across pipelines.
-Controller-extension and observability-pipeline runtime changes require a
-restart and are rejected before pipeline rollout. See
-[Configuration Framework Design](../configuration-resolution.md) for the
-architectural contracts.
+- [Configuration Guide and Reference](../configuration.md): author and validate
+  configuration.
+- [Configuration Framework Design](../configuration-resolution.md): understand
+  resolution and privacy.
+- [Live Pipeline Reconfiguration](live-reconfiguration.md): operate the running
+  engine.
 
 ## Goals
 
@@ -43,6 +34,7 @@ architectural contracts.
 
 - Create a new pipeline inside an existing pipeline group.
 - Replace an existing pipeline with a new topology or node configuration.
+- Apply revision-guarded partial edits without resending unchanged fields.
 - Resize an existing pipeline when the only effective runtime change is
   `policies.resources.core_allocation`.
 - Accept an effectively identical update as a `noop`.
@@ -74,9 +66,9 @@ runtime state.
 - Serving generation: the generation currently selected for a specific core in
   observed state. During a rolling cutover, different cores may temporarily
   serve different generations.
-- Candidate pipeline config: the pipeline config submitted by the client and
-  validated by the controller before it is committed into the live in-memory
-  engine config.
+- Candidate pipeline config: the pipeline config submitted by the client. The
+  controller uses it to build source, resolved, and safe snapshot candidate forms
+  before anything is committed into the live in-memory engine config.
 - Candidate generation: the target generation for a `create` or `replace`
   rollout while it is still being tested and has not yet been committed as the
   active generation.
@@ -128,8 +120,8 @@ traffic flip across the whole pipeline.
 - Per-pipeline reconfiguration does not mutate group-level or engine-level
   policy. Full-engine reconciliation can update those fields after all
   requested pipeline rollouts and deletions succeed.
-- There is no dedicated scale endpoint. Scale-only changes use the same `PUT`
-  endpoint as topology changes.
+- There is no dedicated scale endpoint. Source-backed scale changes can use
+  `PUT`; the TUI uses a policy-only `PATCH` on the same pipeline resource.
 
 ## Consistency Model
 
@@ -144,12 +136,11 @@ other config-mutating lifecycle operations return `409 Conflict`. This prevents
 full-config reconciliation, group creation, group deletion, and pipeline
 deletion from interleaving with each other or with per-pipeline rollouts.
 
-Rollout planning validates a candidate by patching one pipeline into the
-controller's current in-memory `OtelDataflowSpec` snapshot and running full
-engine validation on that candidate snapshot. That validation does not make the
-operation a whole-config transaction: another logical pipeline can commit before
-this rollout commits, and commit applies only the accepted pipeline back into
-the latest live config.
+Planning resolves and validates the candidate before admission. Independent
+pipelines may still commit concurrently; a pipeline commit applies to the
+latest live state, not to a stale whole-engine copy. The
+[framework design](../configuration-resolution.md#runtime-equivalence-and-live-reconciliation)
+defines typed equivalence and source/resolved/snapshot consistency.
 
 The API intentionally leaves room to adjust the consistency scope later. If
 group-level invariants become mutable outside full-engine reconciliation, the
@@ -160,18 +151,20 @@ the existing pipeline endpoint or response schema.
 ## How It Works
 
 1. The client submits a candidate pipeline config to
-   `PUT /groups/{group}/pipelines/{id}`.
+   `PUT /groups/{group}/pipelines/{id}` or explicit edits to `PATCH` on the
+   same resource.
 1. The controller patches exactly that pipeline into its live in-memory
-   `OtelDataflowSpec`.
-1. The candidate config is validated as a full engine snapshot:
+   source `OtelDataflowSpec`.
+1. The complete candidate is resolved and validated before admission:
    - pipeline structure and canonicalization;
-   - component config validation;
+   - factory-owned component parsing, validation, defaulting, and safe
+     snapshot construction;
    - whole-config validation, including topic cycle checks;
    - topic runtime profile compatibility.
 1. The controller classifies the update:
    - `create`: the logical pipeline does not exist yet;
-   - `noop`: the resolved pipeline and active serving footprint already match
-     the request;
+   - `noop`: the typed resolved pipeline and active serving footprint already
+     match the request;
    - `replace`: the runtime graph or runtime-significant node config changed;
    - `resize`: only the effective core allocation changed.
 1. The controller executes the plan:
@@ -201,7 +194,7 @@ The request body carries two timeouts:
 
 The query string also supports an overall client wait timeout:
 
-- `timeout_secs` on the `PUT` request when `wait=true`.
+- `timeout_secs` on the `PUT` or `PATCH` request when `wait=true`.
 
 ### Failure Handling
 
@@ -326,6 +319,8 @@ growth.
 
 ## API Surface
 
+Endpoint paths in this section are relative to `/api/v1`.
+
 ### Read current pipeline config
 
 `GET /groups/{group}/pipelines/{id}`
@@ -336,7 +331,57 @@ Returns:
 - `pipelineId`
 - `activeGeneration`
 - `pipeline`
+- `configRevision`: engine-wide committed source revision for partial updates
 - optional `rollout` summary
+
+The `pipeline` field contains committed source configuration, including sensitive
+values and free-form component payloads. It can be edited and sent as the
+`pipeline` field of a full `PUT` request. Prefer revision-guarded `PATCH` for
+partial edits. Treat responses and saved copies as sensitive management data.
+
+### Partial Updates
+
+`PATCH /groups/{group}/pipelines/{id}?wait=true|false&timeout_secs=<overall>`
+updates an existing pipeline.
+Read `configRevision` from its details response, then submit only explicit
+edits to the committed source, for example:
+
+```json
+{
+  "expectedRevision": 7,
+  "changes": [
+    {
+      "operation": "set",
+      "path": ["policies", "resources", "core_allocation"],
+      "value": {"type": "core_count", "count": 2}
+    }
+  ],
+  "stepTimeoutSecs": 60,
+  "drainTimeoutSecs": 60
+}
+```
+
+Paths are arrays of literal object keys, not JSON Pointer strings. Component
+subfields can use existing source paths or canonical component names;
+factory-owned normalization handles supported legacy aliases without moving an
+addressed authored field away from its edit path. `set` creates
+absent object parents; `remove` deletes a field if present. Arrays require full
+replacement. Empty paths and supplied snapshot markers are rejected. The
+pipeline root has depth zero, and each object field or array element adds one
+level. Paths plus replacement subtrees must fit within 128 levels, as must the
+candidate pipeline; excessive depth returns `422 Unprocessable Entity` before
+rollout or committed-state changes. The
+candidate goes through the same typed resolution, validation, rollout, and
+atomic per-pipeline commit as full replacement. A stale engine-wide revision
+returns `409 Conflict`; missing groups/pipelines return `404 Not Found`.
+Waiting and rollout responses have the same contract as `PUT`.
+
+Admin does not insert redaction or omission markers. If tooling uses the
+separate safe snapshot, do not turn its markers into update instructions.
+Unchanged fields should be absent from partial edits. Replacing a subtree
+requires its actual source value. See
+[Editing Without Snapshot Replay](../configuration-resolution.md#editing-without-snapshot-replay)
+for normalized defaults, authored aliases, and draft revision handling.
 
 ### Create, replace, or resize a pipeline
 
@@ -381,8 +426,8 @@ Status codes:
 - `404 Not Found`: pipeline group does not exist
 - `409 Conflict`: another incompatible live operation is active in the
   controller's current consistency scope, or a waited rollout finished in
-  failure. In the current version of the API, that scope is one logical
-  pipeline.
+  failure. Per-pipeline operations conflict on the same logical pipeline; an
+  engine-scoped lifecycle operation also prevents admission.
 - `422 Unprocessable Entity`: validation failure or unsupported runtime
   mutation
 - `504 Gateway Timeout`: `wait=true` exceeded the overall wait timeout
@@ -427,10 +472,15 @@ older ids may return `404 Not Found` after eviction.
 
 `GET /config`
 
-Returns the controller-owned `OtelDataflowSpec` snapshot currently committed in
-memory. This is the source used by the live controller for later
-reconfiguration and lifecycle operations. The startup YAML file is not read
-again and is not rewritten by this endpoint.
+Returns committed source using the existing `OtelDataflowSpec` JSON envelope.
+Component payloads retain their submitted values, including secrets and authored
+aliases; typed component defaults are not substituted. Free-form component
+config and `engine.custom` are preserved. This is the parsed source model, not
+original YAML bytes. The startup YAML file is not read again or rewritten.
+
+The response can be used as the `config` field of a reconciliation request.
+Protect it as sensitive data. The separate `SafeConfigSnapshot` is retained
+for future event reporting and is not returned by this endpoint.
 
 Status codes:
 
@@ -458,7 +508,9 @@ Request body:
 
 Behavior:
 
-- The desired full config is validated before any live work starts.
+- The desired full source config is completely resolved and validated before
+  any live work starts. This produces typed runtime state and a safe configuration
+  snapshot for every desired component.
 - Desired pipelines are created, replaced, resized, or treated as `noop` using
   the same rollout machinery as `PUT /groups/{group}/pipelines/{id}`.
 - Placement-sensitive rollouts are planned before they start. Desired
@@ -479,9 +531,15 @@ Behavior:
   reconciliation succeeds.
 - Reconciliation is not atomic across pipelines. Pipeline rollouts that
   succeeded before a later rollout failure remain applied and are reflected in
-  the committed live config.
+  the committed live config. Each committed pipeline still updates its source,
+  safe snapshot, and resolved representations together.
 - Runtime topic profile mutation is rejected with `422 Unprocessable Entity`.
 - Runtime memory limiter mutation is rejected with `422 Unprocessable Entity`.
+- Controller-extension additions, removals, or runtime-significant changes are
+  rejected with `422 Unprocessable Entity`; restart the engine to apply them.
+- Runtime-significant changes to the engine observability pipeline are rejected
+  with `422 Unprocessable Entity` and require a restart. Default- or
+  alias-equivalent inputs remain acceptable for these engine-scoped components.
 
 Response body is an `EngineConfigReconcileStatus` with:
 
@@ -511,7 +569,8 @@ Status codes:
 
 `GET /groups/{group}`
 
-Returns the committed `PipelineGroupConfig` for one group.
+Returns committed group source in the `PipelineGroupConfig` envelope, including
+sensitive component values. Protect it as sensitive management data.
 
 `POST /groups/{group}`
 
@@ -596,28 +655,30 @@ curl -s "$BASE/groups/$GROUP/pipelines/$PIPE/status" | jq .
 This example inserts a debug processor between the topic receiver and the retry
 processor.
 
-Build the request body from the live config:
+Read the current revision and submit only the new node and replacement graph.
+Unchanged component payloads stay in the committed source and need not be sent:
 
 ```bash
 curl -s "$BASE/groups/$GROUP/pipelines/$PIPE" \
   | jq '
       {
-        pipeline: (
-          .pipeline
-          | .nodes += {
-              tenant_c_debug: {
-                type: "processor:debug",
-                config: {
-                  verbosity: "basic"
-                }
-              }
-            }
-          | .connections = [
+        expectedRevision: .configRevision,
+        changes: [
+          {
+            operation: "set",
+            path: ["nodes", "tenant_c_debug"],
+            value: {type: "processor:debug", config: {verbosity: "basic"}}
+          },
+          {
+            operation: "set",
+            path: ["connections"],
+            value: [
               {from: "tenant_c_receiver", to: "tenant_c_debug"},
               {from: "tenant_c_debug", to: "tenant_c_retry"},
               {from: "tenant_c_retry", to: "tenant_c_sink"}
             ]
-        ),
+          }
+        ],
         stepTimeoutSecs: 60,
         drainTimeoutSecs: 60
       }
@@ -628,7 +689,7 @@ curl -s "$BASE/groups/$GROUP/pipelines/$PIPE" \
 Submit the update and wait for completion:
 
 ```bash
-curl -sS -X PUT \
+curl -sS -X PATCH \
   "$BASE/groups/$GROUP/pipelines/$PIPE?wait=true&timeout_secs=120" \
   -H 'content-type: application/json' \
   --data-binary @/tmp/tenant_c_pipeline-debug.json | jq .
@@ -658,14 +719,22 @@ curl -s "$BASE/groups/$GROUP/pipelines/$PIPE/status" \
 
 ### Example: Async rollout tracking
 
-Use `wait=false` to return immediately, then poll the rollout resource:
+Use `wait=false` to return immediately, then poll the rollout resource. If the
+waited example already succeeded, explicitly reapply the known edits using
+the latest revision; an already-applied topology change can return `noop`:
+
+```bash
+REVISION=$(curl -sS "$BASE/groups/$GROUP/pipelines/$PIPE" | jq .configRevision)
+jq --argjson revision "$REVISION" '.expectedRevision = $revision' \
+  /tmp/tenant_c_pipeline-debug.json > /tmp/tenant_c_pipeline-debug-async.json
+```
 
 ```bash
 ROLLOUT_ID=$(
-  curl -sS -X PUT \
+  curl -sS -X PATCH \
     "$BASE/groups/$GROUP/pipelines/$PIPE?wait=false" \
     -H 'content-type: application/json' \
-    --data-binary @/tmp/tenant_c_pipeline-debug.json \
+    --data-binary @/tmp/tenant_c_pipeline-debug-async.json \
   | jq -r '.rolloutId'
 )
 
@@ -682,17 +751,21 @@ controller detects that the runtime shape is otherwise unchanged and executes a
 curl -s "$BASE/groups/$GROUP/pipelines/$PIPE" \
   | jq '
       {
-        pipeline: .pipeline,
+        expectedRevision: .configRevision,
+        changes: [{
+          operation: "set",
+          path: ["policies", "resources", "core_allocation"],
+          value: {type: "core_count", count: 2}
+        }],
         stepTimeoutSecs: 60,
         drainTimeoutSecs: 60
       }
-      | .pipeline.policies.resources.core_allocation.count = 2
     ' \
   > /tmp/tenant_c_pipeline-scale-up.json
 ```
 
 ```bash
-curl -sS -X PUT \
+curl -sS -X PATCH \
   "$BASE/groups/$GROUP/pipelines/$PIPE?wait=true&timeout_secs=120" \
   -H 'content-type: application/json' \
   --data-binary @/tmp/tenant_c_pipeline-scale-up.json | jq .
@@ -711,8 +784,8 @@ curl -s "$BASE/groups/$GROUP/pipelines/$PIPE/status" \
   | jq '{totalCores, runningCores, activeGeneration, servingGenerations, rollout}'
 ```
 
-Scale back down by setting `core_allocation.count = 1` in the same request body
-pattern.
+Scale back down by reading the new `configRevision` and setting the change
+value to `{type: "core_count", count: 1}` in the same request pattern.
 
 ### Example: Full-config and lifecycle endpoints
 
@@ -722,45 +795,47 @@ the current runtime-topic mutation boundary.
 Create a temporary config:
 
 ```bash
-cat >/tmp/otap-admin-lifecycle.yaml <<'YAML'
-version: otel_dataflow/v1
-engine:
-  http_admin:
-    bind_address: 127.0.0.1:18085
-groups:
-  default:
-    pipelines:
-      main:
-        policies:
-          resources:
-            core_allocation:
-              type: core_count
-              count: 1
-        nodes:
-          receiver:
-            type: receiver:traffic_generator
-            config:
-              data_source: synthetic
-              generation_strategy: pre_generated
-              traffic_config:
-                signals_per_second: 100
-                max_signal_count: null
-                metric_weight: 0
-                trace_weight: 0
-                log_weight: 100
-          exporter:
-            type: exporter:noop
-            config: null
-        connections:
-          - from: receiver
-            to: exporter
-YAML
+cat >/tmp/otel-admin-lifecycle.json <<'JSON'
+{
+  "version": "otel_dataflow/v1",
+  "engine": {"http_admin": {"bind_address": "127.0.0.1:18085"}},
+  "groups": {
+    "default": {
+      "pipelines": {
+        "main": {
+          "policies": {
+            "resources": {"core_allocation": {"type": "core_count", "count": 1}}
+          },
+          "nodes": {
+            "receiver": {
+              "type": "receiver:traffic_generator",
+              "config": {
+                "data_source": "synthetic",
+                "generation_strategy": "pre_generated",
+                "traffic_config": {
+                  "signals_per_second": 100,
+                  "max_signal_count": null,
+                  "metric_weight": 0,
+                  "trace_weight": 0,
+                  "log_weight": 100
+                }
+              }
+            },
+            "exporter": {"type": "exporter:noop", "config": null}
+          },
+          "connections": [{"from": "receiver", "to": "exporter"}]
+        }
+      }
+    }
+  }
+}
+JSON
 ```
 
 Start the engine:
 
 ```bash
-cargo run --bin df_engine -- -c /tmp/otap-admin-lifecycle.yaml
+cargo run --bin df_engine -- -c /tmp/otel-admin-lifecycle.json
 ```
 
 In another terminal:
@@ -771,7 +846,8 @@ GROUP=default
 PIPE=main
 ```
 
-Snapshot the committed full config:
+Save the committed source for comparison or restoration. These files can contain
+secrets; restrict access and remove them when they are no longer needed:
 
 ```bash
 curl -sS "$BASE/config" | jq -S . > /tmp/otap-engine-before.json
@@ -810,7 +886,8 @@ curl -sS -o /tmp/otap-deleted-pipeline.json -w 'HTTP %{http_code}\n' \
 The delete response should have `state: "succeeded"`, and the follow-up `GET`
 should return `HTTP 404`.
 
-Restore the deleted pipeline from the saved full config:
+Restore the deleted pipeline from the original source file. A saved Admin engine
+config also contains complete source and can be used here:
 
 ```bash
 jq '{
@@ -820,7 +897,7 @@ jq '{
       deleteTimeoutSecs: 30,
       deleteMissing: false
     }' \
-  /tmp/otap-engine-before.json > /tmp/otap-reconcile-restore.json
+  /tmp/otel-admin-lifecycle.json > /tmp/otap-reconcile-restore.json
 
 curl -sS -X POST "$BASE/config/reconcile" \
   -H 'content-type: application/json' \
@@ -865,8 +942,8 @@ original state.
 - Full-config reconciliation, group creation, group deletion, and pipeline
   deletion use an engine-scoped lifecycle guard and return `409 Conflict` when
   another guarded operation is active.
-- `GET /groups/{group}/pipelines/{id}` always returns the committed
-  live config, not an uncommitted candidate.
+- Configuration reads return committed source, including sensitive values,
+  never an uncommitted candidate. Restrict access and avoid logging responses.
 - `GET /groups/{group}/pipelines/{id}/status` is the best endpoint
   for watching serving generations and per-instance phase changes during a
   rollout.

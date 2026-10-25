@@ -199,6 +199,6 @@ processors would be:
 
 ## Related Docs
 
-- [Configuration model](../../../../../docs/configuration-model.md)
+- [Configuration guide and reference](../../../../../docs/configuration.md)
 - [Processor taxonomy](../../../../../docs/processors.md)
 - [Core node catalog](../../../README.md)

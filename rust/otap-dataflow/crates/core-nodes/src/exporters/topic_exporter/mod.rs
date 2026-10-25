@@ -138,6 +138,7 @@ pub static TOPIC_EXPORTER: ExporterFactory<OtapPdata> = ExporterFactory {
         TopicExporterConfig,
     >,
     snapshot_policy: otel_arrow_dfe_engine::component_config::ConfigSnapshotPolicy::TypedSafe,
+    normalize_config_for_edit: None,
 };
 
 impl TopicExporter {

@@ -18,6 +18,47 @@ use ratatui::layout::Rect;
 use std::collections::BTreeMap;
 use std::time::Duration;
 
+/// Scenario: An editor draft changes a field beside source secrets or safe-snapshot markers.
+/// Guarantees: The TUI submits only changed fields with the original revision, not unchanged private data.
+#[test]
+fn editor_draft_update_preserves_private_fields_and_original_revision() {
+    let original = r#"
+nodes:
+  receiver:
+    type: urn:test:receiver:example
+    config: {token: '[REDACTED]', attempts: 3}
+  exporter:
+    type: urn:test:exporter:example
+    config: '[OMITTED]'
+connections:
+  - {from: receiver, to: exporter}
+"#;
+    let source = original
+        .replace("'[REDACTED]'", "'tui-private-token'")
+        .replace("'[OMITTED]'", "{password: 'tui-private-exporter'}");
+    for original in [original.to_owned(), source] {
+        let edited = original.replace("attempts: 3", "attempts: 4");
+        let mut draft = app::PipelineConfigDraft {
+            config_revision: Some(17),
+            original_yaml: original,
+            edited_yaml: edited.clone(),
+            parsed: Some(parse_pipeline_config_content(&edited, "g1", "p1").unwrap()),
+            diff: String::new(),
+            error: None,
+        };
+        let request = actions::draft_update_request(&draft, "g1", "p1").unwrap();
+        assert_eq!(request.expected_revision, 17);
+        assert_eq!(
+            serde_json::to_value(request.changes).unwrap(),
+            json!([{
+                "operation": "set", "path": ["nodes", "receiver", "config", "attempts"], "value": 4
+            }])
+        );
+        draft.config_revision = None;
+        assert!(actions::draft_update_request(&draft, "g1", "p1").is_err());
+    }
+}
+
 /// Scenario: a group-focused status view is derived from a fleet-wide group
 /// snapshot.
 /// Guarantees: only pipelines from the selected group remain in the

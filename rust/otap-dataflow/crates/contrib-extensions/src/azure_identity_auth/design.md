@@ -510,6 +510,7 @@ pub static AZURE_IDENTITY_AUTH_EXTENSION: ExtensionFactory = ExtensionFactory {
     create,
     resolve_config,
     snapshot_policy: ConfigSnapshotPolicy::TypedSafe,
+    normalize_config_for_edit: None,
 };
 ```
 

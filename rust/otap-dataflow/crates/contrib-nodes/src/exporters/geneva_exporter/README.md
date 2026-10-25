@@ -102,7 +102,7 @@ and should normally clone an already-published snapshot instead of performing
 network I/O.
 
 Capability bindings are checked when the exporter is created because the
-factory's earlier config-validation hook receives only the `config` object.
+factory resolver receives only the `config` object.
 Capability factories create a clone for each consumer, so the host extension's
 clones must share the same atomically swapped snapshot state. The host extension
 must register `agent_fed_credential_provider` for the shared execution model;

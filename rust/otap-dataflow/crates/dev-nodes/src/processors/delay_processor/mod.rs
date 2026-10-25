@@ -65,6 +65,7 @@ pub static DELAY_PROCESSOR_FACTORY: ProcessorFactory<OtapPdata> = ProcessorFacto
     wiring_contract: otel_arrow_dfe_engine::wiring_contract::WiringContract::UNRESTRICTED,
     resolve_config: resolve_typed_config::<DelayConfig>,
     snapshot_policy: ConfigSnapshotPolicy::TypedSafe,
+    normalize_config_for_edit: None,
 };
 
 /// Factory function to create a DelayProcessor.

@@ -361,6 +361,7 @@ pub static KAFKA_EXPORTER_FACTORY: ExporterFactory<OtapPdata> = ExporterFactory 
         },
     resolve_config: resolve_omitted_config::<KafkaExporterConfig>,
     snapshot_policy: ConfigSnapshotPolicy::Omit,
+    normalize_config_for_edit: None,
     context_declarations: Some(ContextDeclarationProvider::from_typed_config::<
         KafkaExporterConfig,
     >()),

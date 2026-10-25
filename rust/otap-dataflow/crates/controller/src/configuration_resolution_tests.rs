@@ -120,6 +120,7 @@ fn factory() -> &'static PipelineFactory<()> {
                 wiring_contract: WiringContract::UNRESTRICTED,
                 resolve_config: resolve,
                 snapshot_policy: ConfigSnapshotPolicy::TypedSafe,
+                normalize_config_for_edit: None,
             },
             ReceiverFactory {
                 name: "urn:otel:receiver:internal_telemetry",
@@ -128,6 +129,7 @@ fn factory() -> &'static PipelineFactory<()> {
                 wiring_contract: WiringContract::UNRESTRICTED,
                 resolve_config: otel_arrow_dfe_engine::component_config::resolve_no_config,
                 snapshot_policy: ConfigSnapshotPolicy::TypedSafe,
+                normalize_config_for_edit: None,
             },
         ])),
         TEST_OBSERVABILITY_PROCESSORS,
@@ -140,6 +142,7 @@ fn factory() -> &'static PipelineFactory<()> {
             create: create_extension,
             resolve_config: resolve_omitted,
             snapshot_policy: ConfigSnapshotPolicy::Omit,
+            normalize_config_for_edit: None,
         }])),
     )))
 }

@@ -123,7 +123,7 @@ Declaration placement does not determine aggregation. These are independent.
 #### Declaration and inheritance
 
 Policy declaration follows the existing
-[configuration model](../docs/configuration-model.md): top-level policies
+[configuration model](../docs/configuration.md): top-level policies
 provide defaults, group policies override them for a group, and pipeline
 policies override them for a single pipeline. Precedence applies independently
 to each member of `policies.resources`: `core_allocation`, `memory_limiter`, and

@@ -462,6 +462,7 @@ const PROBE_RECEIVER_FACTORY: ReceiverFactory<()> = ReceiverFactory {
         serde_json::Value,
     >,
     snapshot_policy: otel_arrow_dfe_engine::component_config::ConfigSnapshotPolicy::Omit,
+    normalize_config_for_edit: None,
 };
 
 // ---------------------------------------------------------------------
@@ -511,6 +512,7 @@ const NOOP_EXPORTER_FACTORY: ExporterFactory<()> = ExporterFactory {
     wiring_contract: otel_arrow_dfe_engine::wiring_contract::WiringContract::UNRESTRICTED,
     resolve_config: otel_arrow_dfe_engine::component_config::resolve_no_config,
     snapshot_policy: otel_arrow_dfe_engine::component_config::ConfigSnapshotPolicy::TypedSafe,
+    normalize_config_for_edit: None,
 };
 
 // ---------------------------------------------------------------------
@@ -610,6 +612,7 @@ const PASSIVE_EXTENSION_FACTORY: ExtensionFactory = ExtensionFactory {
     create: passive_extension_create,
     resolve_config: otel_arrow_dfe_engine::component_config::resolve_no_config,
     snapshot_policy: otel_arrow_dfe_engine::component_config::ConfigSnapshotPolicy::TypedSafe,
+    normalize_config_for_edit: None,
 };
 
 // ---------------------------------------------------------------------
@@ -644,6 +647,7 @@ const DUAL_EXTENSION_FACTORY: ExtensionFactory = ExtensionFactory {
     create: dual_extension_create,
     resolve_config: otel_arrow_dfe_engine::component_config::resolve_no_config,
     snapshot_policy: otel_arrow_dfe_engine::component_config::ConfigSnapshotPolicy::TypedSafe,
+    normalize_config_for_edit: None,
 };
 
 // ---------------------------------------------------------------------
@@ -763,6 +767,7 @@ const ACTIVE_EXTENSION_FACTORY: ExtensionFactory = ExtensionFactory {
     create: active_extension_create,
     resolve_config: resolve_test_value_config,
     snapshot_policy: otel_arrow_dfe_engine::component_config::ConfigSnapshotPolicy::Omit,
+    normalize_config_for_edit: None,
 };
 
 // ---------------------------------------------------------------------
@@ -861,6 +866,7 @@ const ACTIVE_SHARED_COUNTER_EXTENSION_FACTORY: ExtensionFactory = ExtensionFacto
     create: active_shared_counter_extension_create,
     resolve_config: resolve_test_value_config,
     snapshot_policy: otel_arrow_dfe_engine::component_config::ConfigSnapshotPolicy::Omit,
+    normalize_config_for_edit: None,
 };
 
 // ---------------------------------------------------------------------
@@ -924,6 +930,7 @@ const FAILING_EXTENSION_FACTORY: ExtensionFactory = ExtensionFactory {
     create: failing_extension_create,
     resolve_config: otel_arrow_dfe_engine::component_config::resolve_no_config,
     snapshot_policy: otel_arrow_dfe_engine::component_config::ConfigSnapshotPolicy::TypedSafe,
+    normalize_config_for_edit: None,
 };
 
 // ---------------------------------------------------------------------
@@ -987,6 +994,7 @@ const IMMEDIATE_OK_EXTENSION_FACTORY: ExtensionFactory = ExtensionFactory {
     create: immediate_ok_extension_create,
     resolve_config: otel_arrow_dfe_engine::component_config::resolve_no_config,
     snapshot_policy: otel_arrow_dfe_engine::component_config::ConfigSnapshotPolicy::TypedSafe,
+    normalize_config_for_edit: None,
 };
 
 // ---------------------------------------------------------------------
@@ -1100,6 +1108,7 @@ const SHUTDOWN_RECORDING_EXTENSION_FACTORY: ExtensionFactory = ExtensionFactory 
     create: shutdown_recording_extension_create,
     resolve_config: resolve_test_value_config,
     snapshot_policy: otel_arrow_dfe_engine::component_config::ConfigSnapshotPolicy::Omit,
+    normalize_config_for_edit: None,
 };
 
 // ---------------------------------------------------------------------
@@ -1209,6 +1218,7 @@ const DUAL_ACTIVE_EXTENSION_FACTORY: ExtensionFactory = ExtensionFactory {
     create: dual_active_extension_create,
     resolve_config: resolve_test_value_config,
     snapshot_policy: otel_arrow_dfe_engine::component_config::ConfigSnapshotPolicy::Omit,
+    normalize_config_for_edit: None,
 };
 
 // ---------------------------------------------------------------------
@@ -1311,6 +1321,7 @@ const BACKGROUND_EXTENSION_FACTORY: ExtensionFactory = ExtensionFactory {
     create: background_extension_create,
     resolve_config: resolve_test_value_config,
     snapshot_policy: otel_arrow_dfe_engine::component_config::ConfigSnapshotPolicy::Omit,
+    normalize_config_for_edit: None,
 };
 
 // ---------------------------------------------------------------------
@@ -1436,6 +1447,7 @@ const SHARED_COUNTER_EXTENSION_FACTORY: ExtensionFactory = ExtensionFactory {
     create: shared_counter_extension_create,
     resolve_config: resolve_test_value_config,
     snapshot_policy: otel_arrow_dfe_engine::component_config::ConfigSnapshotPolicy::Omit,
+    normalize_config_for_edit: None,
 };
 
 // ---------------------------------------------------------------------
@@ -1483,6 +1495,7 @@ const SHARED_COUNTER_SHARED_EXTENSION_FACTORY: ExtensionFactory = ExtensionFacto
     create: shared_counter_shared_extension_create,
     resolve_config: resolve_test_value_config,
     snapshot_policy: otel_arrow_dfe_engine::component_config::ConfigSnapshotPolicy::Omit,
+    normalize_config_for_edit: None,
 };
 
 // ---------------------------------------------------------------------
@@ -1584,6 +1597,7 @@ const CONSTRUCTED_EXTENSION_FACTORY: ExtensionFactory = ExtensionFactory {
     create: constructed_extension_create,
     resolve_config: resolve_test_value_config,
     snapshot_policy: otel_arrow_dfe_engine::component_config::ConfigSnapshotPolicy::Omit,
+    normalize_config_for_edit: None,
 };
 
 // ---------------------------------------------------------------------
@@ -1655,6 +1669,7 @@ const RC_COUNTER_EXTENSION_FACTORY: ExtensionFactory = ExtensionFactory {
     create: rc_counter_extension_create,
     resolve_config: otel_arrow_dfe_engine::component_config::resolve_no_config,
     snapshot_policy: otel_arrow_dfe_engine::component_config::ConfigSnapshotPolicy::TypedSafe,
+    normalize_config_for_edit: None,
 };
 
 // ---------------------------------------------------------------------
@@ -1783,6 +1798,7 @@ const PROBE_PROCESSOR_FACTORY: otel_arrow_dfe_engine::ProcessorFactory<()> =
             serde_json::Value,
         >,
         snapshot_policy: otel_arrow_dfe_engine::component_config::ConfigSnapshotPolicy::Omit,
+        normalize_config_for_edit: None,
     };
 
 // ---------------------------------------------------------------------
@@ -1867,6 +1883,7 @@ const PROBE_EXPORTER_FACTORY: ExporterFactory<()> = ExporterFactory {
         serde_json::Value,
     >,
     snapshot_policy: otel_arrow_dfe_engine::component_config::ConfigSnapshotPolicy::Omit,
+    normalize_config_for_edit: None,
 };
 
 // ---------------------------------------------------------------------
@@ -4324,6 +4341,7 @@ const READY_GATE_EXTENSION_FACTORY: ExtensionFactory = ExtensionFactory {
     create: ready_gate_extension_create,
     resolve_config: resolve_test_value_config,
     snapshot_policy: otel_arrow_dfe_engine::component_config::ConfigSnapshotPolicy::Omit,
+    normalize_config_for_edit: None,
 };
 
 const READY_GATE_BG_EXTENSION_URN: &str = "urn:test:extension:ready_gate_extension_bg";
@@ -4375,6 +4393,7 @@ const READY_GATE_BG_EXTENSION_FACTORY: ExtensionFactory = ExtensionFactory {
     create: ready_gate_bg_extension_create,
     resolve_config: resolve_test_value_config,
     snapshot_policy: otel_arrow_dfe_engine::component_config::ConfigSnapshotPolicy::Omit,
+    normalize_config_for_edit: None,
 };
 
 fn build_runtime_pipeline_with_ready_gate(

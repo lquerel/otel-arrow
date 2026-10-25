@@ -64,6 +64,8 @@ pub mod capability;
 #[doc(hidden)]
 pub mod clock;
 pub mod component_config;
+#[cfg(test)]
+mod configuration_edit_tests;
 pub mod context_declaration;
 pub mod error;
 pub mod exporter;
@@ -185,6 +187,8 @@ pub struct ReceiverFactory<PData> {
     pub resolve_config: ResolveConfigFn,
     /// Explicit policy for exposing the resolved config in safe config snapshots.
     pub snapshot_policy: ConfigSnapshotPolicy,
+    /// Optional component-owned canonicalization of private source before subfield edits.
+    pub normalize_config_for_edit: Option<component_config::NormalizeConfigForEditFn>,
 }
 
 // Note: We don't use `#[derive(Clone)]` here to avoid forcing the `PData` type to implement `Clone`.
@@ -197,6 +201,7 @@ impl<PData> Clone for ReceiverFactory<PData> {
             wiring_contract: self.wiring_contract,
             resolve_config: self.resolve_config,
             snapshot_policy: self.snapshot_policy,
+            normalize_config_for_edit: self.normalize_config_for_edit,
         }
     }
 }
@@ -241,6 +246,8 @@ pub struct ProcessorFactory<PData> {
     pub resolve_config: ResolveConfigFn,
     /// Explicit policy for exposing the resolved config in safe config snapshots.
     pub snapshot_policy: ConfigSnapshotPolicy,
+    /// Optional component-owned canonicalization of private source before subfield edits.
+    pub normalize_config_for_edit: Option<component_config::NormalizeConfigForEditFn>,
 }
 
 // Note: We don't use `#[derive(Clone)]` here to avoid forcing the `PData` type to implement `Clone`.
@@ -253,6 +260,7 @@ impl<PData> Clone for ProcessorFactory<PData> {
             wiring_contract: self.wiring_contract,
             resolve_config: self.resolve_config,
             snapshot_policy: self.snapshot_policy,
+            normalize_config_for_edit: self.normalize_config_for_edit,
         }
     }
 }
@@ -297,6 +305,8 @@ pub struct ExporterFactory<PData> {
     pub resolve_config: ResolveConfigFn,
     /// Explicit policy for exposing the resolved config in safe config snapshots.
     pub snapshot_policy: ConfigSnapshotPolicy,
+    /// Optional component-owned canonicalization of private source before subfield edits.
+    pub normalize_config_for_edit: Option<component_config::NormalizeConfigForEditFn>,
 }
 
 // Note: We don't use `#[derive(Clone)]` here to avoid forcing the `PData` type to implement `Clone`.
@@ -309,6 +319,7 @@ impl<PData> Clone for ExporterFactory<PData> {
             wiring_contract: self.wiring_contract,
             resolve_config: self.resolve_config,
             snapshot_policy: self.snapshot_policy,
+            normalize_config_for_edit: self.normalize_config_for_edit,
         }
     }
 }
@@ -359,6 +370,8 @@ pub struct ExtensionFactory {
     pub resolve_config: ResolveConfigFn,
     /// Explicit policy for exposing the resolved config in safe config snapshots.
     pub snapshot_policy: ConfigSnapshotPolicy,
+    /// Optional component-owned canonicalization of private source before subfield edits.
+    pub normalize_config_for_edit: Option<component_config::NormalizeConfigForEditFn>,
 }
 
 impl NamedFactory for ExtensionFactory {
@@ -825,6 +838,91 @@ impl<PData: 'static + Clone + Debug> PipelineFactory<PData> {
                 .map(|f| (f.name(), f.clone()))
                 .collect::<HashMap<&'static str, ExtensionFactory>>()
         })
+    }
+
+    /// Normalizes only a component whose config subfield is being edited.
+    /// Whole component/config replacements remain submitted source. Lookup uses
+    /// the current candidate type, including earlier edits in the same request.
+    pub fn normalize_source_for_edit(
+        &self,
+        pipeline: &mut serde_json::Value,
+        path: &[String],
+    ) -> Result<(), otel_arrow_dfe_config::error::Error> {
+        if path.len() <= 3 || path[2] != "config" {
+            return Ok(());
+        }
+        let Some(component) = pipeline.get_mut(&path[0]).and_then(|v| v.get_mut(&path[1])) else {
+            return Ok(());
+        };
+        let Some(urn) = component.get("type").and_then(serde_json::Value::as_str) else {
+            return Ok(());
+        };
+        let normalizer = match path[0].as_str() {
+            "nodes" => {
+                let node: NodeUserConfig = serde_json::from_value(serde_json::json!({"type": urn}))
+                    .map_err(|_| {
+                        component_config::safe_component_error("node", "edit normalization")
+                    })?;
+                let normalized = otel_arrow_dfe_config::node_urn::validate_plugin_urn(
+                    node.r#type.as_ref(),
+                    node.kind(),
+                )?;
+                match node.kind() {
+                    otel_arrow_dfe_config::node::NodeKind::Receiver => self
+                        .get_receiver_factory_map()
+                        .get(normalized.as_str())
+                        .and_then(|f| f.normalize_config_for_edit),
+                    otel_arrow_dfe_config::node::NodeKind::Processor => self
+                        .get_processor_factory_map()
+                        .get(normalized.as_str())
+                        .and_then(|f| f.normalize_config_for_edit),
+                    otel_arrow_dfe_config::node::NodeKind::Exporter => self
+                        .get_exporter_factory_map()
+                        .get(normalized.as_str())
+                        .and_then(|f| f.normalize_config_for_edit),
+                }
+            }
+            "extensions" => {
+                let extension: otel_arrow_dfe_config::extension::ExtensionUserConfig =
+                    serde_json::from_value(serde_json::json!({"type": urn})).map_err(|_| {
+                        component_config::safe_component_error("extension", "edit normalization")
+                    })?;
+                self.get_extension_factory_map()
+                    .get(extension.r#type.as_str())
+                    .and_then(|f| f.normalize_config_for_edit)
+            }
+            _ => None,
+        };
+        if let Some(normalize) = normalizer {
+            // Omitted config has the same empty-object ingestion default.
+            let config = component
+                .as_object_mut()
+                .ok_or_else(|| {
+                    component_config::safe_component_error("component", "edit normalization")
+                })?
+                .entry("config")
+                .or_insert_with(|| serde_json::json!({}));
+            // Management views retain source aliases. Keep an authored path if
+            // normalization would move it; canonical paths use the normalized
+            // basis. Work on a clone so neither choice loses private values.
+            let mut normalized = config.clone();
+            normalize(&mut normalized)?;
+            let mut authored = Some(&*config);
+            let mut canonical = Some(&normalized);
+            let mut keep_authored = false;
+            for key in &path[3..] {
+                authored = authored.and_then(|value| value.get(key));
+                canonical = canonical.and_then(|value| value.get(key));
+                if authored.is_some() && canonical.is_none() {
+                    keep_authored = true;
+                    break;
+                }
+            }
+            if !keep_authored {
+                *config = normalized;
+            }
+        }
+        Ok(())
     }
 
     /// Resolves every component config exactly once before runtime admission.
@@ -3016,6 +3114,7 @@ mod test {
             create: dummy_create,
             resolve_config: component_config::resolve_no_config,
             snapshot_policy: ConfigSnapshotPolicy::TypedSafe,
+            normalize_config_for_edit: None,
         };
 
         assert_eq!(factory.name(), "urn:test:example");
@@ -3055,6 +3154,7 @@ mod test {
             create: dummy_create,
             resolve_config: component_config::resolve_no_config,
             snapshot_policy: ConfigSnapshotPolicy::TypedSafe,
+            normalize_config_for_edit: None,
         };
 
         assert!((factory.resolve_config)(&serde_json::Value::Null).is_ok());
@@ -3100,6 +3200,7 @@ mod test {
             create: entity_registering_create,
             resolve_config: component_config::resolve_no_config,
             snapshot_policy: ConfigSnapshotPolicy::TypedSafe,
+            normalize_config_for_edit: None,
         };
 
         let (ctx, registry) = test_extension_ctx();

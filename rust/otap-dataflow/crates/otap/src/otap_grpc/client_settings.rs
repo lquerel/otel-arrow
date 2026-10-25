@@ -49,6 +49,17 @@ pub enum StartupCheck {
     Connect,
 }
 
+/// Canonicalizes legacy compression keys in a private edit basis.
+pub fn normalize_grpc_config_for_edit(
+    value: &mut serde_json::Value,
+) -> Result<(), otel_arrow_dfe_config::error::Error> {
+    otel_arrow_dfe_engine::component_config::normalize_alias(
+        value,
+        "compression_method",
+        "compression",
+    )
+}
+
 /// Common configuration shared across gRPC clients.
 #[derive(Debug, Serialize, Deserialize, Clone, PartialEq)]
 #[serde(deny_unknown_fields)]

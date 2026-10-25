@@ -497,7 +497,7 @@ repository-relative RFC path.
 - [Memory Limiter - Phase 1](memory-limiter-phase1.md)
 - [RFC 0002: Pressure-Aware Rate Throttling](../rfcs/0002-pressure-aware-rate-throttling.md)
 - [Observe-Only Retained-Work Accounting RFC (number pending)](../rfcs/0000-observe-only-retained-work-accounting.md)
-- [Configuration Model](configuration-model.md)
+- [Configuration guide and reference](configuration.md)
 - [Telemetry Metrics Guide](telemetry/metrics-guide.md)
 - [Engine Telemetry Inventory](../crates/engine/telemetry.md)
 - [Topic Architecture](topic-architecture.md)

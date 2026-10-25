@@ -195,6 +195,6 @@ The `reason` attribute is one of: `matched_route`, `default_route_no_match`, `de
 
 ## Related Docs
 
-- [Configuration model](../../../../../docs/configuration-model.md)
+- [Configuration guide and reference](../../../../../docs/configuration.md)
 - [Processor taxonomy](../../../../../docs/processors.md)
 - [Core node catalog](../../../README.md)

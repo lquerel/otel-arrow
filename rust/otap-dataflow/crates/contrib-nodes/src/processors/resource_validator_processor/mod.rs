@@ -198,6 +198,7 @@ pub static RESOURCE_VALIDATOR_PROCESSOR_FACTORY: otel_arrow_dfe_engine::Processo
     wiring_contract: otel_arrow_dfe_engine::wiring_contract::WiringContract::UNRESTRICTED,
     resolve_config: resolve_resource_validator_config,
     snapshot_policy: ConfigSnapshotPolicy::TypedSafe,
+    normalize_config_for_edit: None,
 };
 
 fn resolve_resource_validator_config(raw: &Value) -> Result<ResolvedComponentConfig, ConfigError> {

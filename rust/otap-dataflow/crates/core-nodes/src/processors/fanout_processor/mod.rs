@@ -1204,6 +1204,7 @@ pub static FANOUT_PROCESSOR_FACTORY: ProcessorFactory<OtapPdata> = ProcessorFact
     },
     resolve_config: resolve_typed_config::<FanoutConfig>,
     snapshot_policy: ConfigSnapshotPolicy::TypedSafe,
+    normalize_config_for_edit: None,
 };
 
 #[cfg(test)]
