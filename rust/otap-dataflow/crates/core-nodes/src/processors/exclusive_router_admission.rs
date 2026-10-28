@@ -67,7 +67,9 @@ impl SelectedRouteAdmissionPolicy {
     pub const fn runtime_requirements(&self) -> ProcessorRuntimeRequirements {
         match self.on_full {
             OnFullPolicy::RejectImmediately => ProcessorRuntimeRequirements::none(),
-            OnFullPolicy::Backpressure => ProcessorRuntimeRequirements::with_local_wakeups(1),
+            OnFullPolicy::Backpressure => {
+                ProcessorRuntimeRequirements::with_local_wakeups_during_shutdown(1)
+            }
         }
     }
 }
@@ -156,7 +158,7 @@ impl<PData, Meta> ExclusiveRouteScheduler<PData, Meta> {
         meta: Meta,
         effect_handler: &EffectHandler<PData>,
     ) -> Result<FullRouteHandling<PData>, WakeupError> {
-        let now = Instant::now();
+        let now = otel_arrow_dfe_engine::clock::now();
 
         match self.policy.on_full {
             OnFullPolicy::RejectImmediately => Ok(FullRouteHandling::ImmediateNack(data)),
@@ -311,6 +313,8 @@ mod tests {
         );
     }
 
+    /// Scenario: A backpressuring router retains pdata outside its engine inbox.
+    /// Guarantees: Runtime wiring provisions one bounded wakeup slot that stays serviceable during graceful shutdown draining.
     #[test]
     fn backpressure_requests_local_wakeup() {
         let policy = SelectedRouteAdmissionPolicy {
@@ -318,7 +322,7 @@ mod tests {
         };
         assert_eq!(
             policy.runtime_requirements(),
-            ProcessorRuntimeRequirements::with_local_wakeups(1)
+            ProcessorRuntimeRequirements::with_local_wakeups_during_shutdown(1)
         );
     }
 }

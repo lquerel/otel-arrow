@@ -116,6 +116,11 @@ The selected route can produce three admission outcomes:
 
 ## Shutdown Behavior
 
+Under `backpressure`, retry wakeups remain active while the engine gracefully
+drains buffered input. A full route can recover and reopen pdata admission
+before the drain deadline. Retries stay bounded to the router's single wakeup
+slot and stop when the processor receives its final shutdown notification.
+
 If the content router owns locally parked messages when
 `NodeControlMsg::Shutdown` starts:
 

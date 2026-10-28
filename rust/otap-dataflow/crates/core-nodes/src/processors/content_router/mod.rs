@@ -759,7 +759,7 @@ impl ContentRouter {
         when: Instant,
         revision: WakeupRevision,
     ) -> Result<(), EngineError> {
-        let now = std::cmp::max(when, Instant::now());
+        let now = std::cmp::max(when, otel_arrow_dfe_engine::clock::now());
         let due = self.admission.take_due_routes(slot, revision, now);
         if due.is_empty() {
             return Ok(());

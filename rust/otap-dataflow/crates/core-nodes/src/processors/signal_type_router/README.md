@@ -80,9 +80,10 @@ message is dropped with the historical routing-failure behavior.
 ## Selected-Route Admission
 
 Once an output route has been selected, the router never awaits the downstream
-send in the main router task. This avoids head-of-line blocking: a full or
-closed selected route cannot freeze the router and prevent unrelated signal
-types from making progress.
+send in the main router task, so control messages remain serviceable. Under
+`reject_immediately`, unrelated healthy signal routes continue to flow. Under
+`backpressure`, one locally parked full route pauses all fresh pdata admission
+until that route is resolved.
 
 The selected route can produce three admission outcomes:
 
@@ -101,6 +102,11 @@ The selected route can produce three admission outcomes:
   admission immediately. Admission reopens once the parked route forwards.
 
 ## Shutdown Behavior
+
+Under `backpressure`, retry wakeups remain active while the engine gracefully
+drains buffered input. A full route can recover and reopen pdata admission
+before the drain deadline. Retries stay bounded to the router's single wakeup
+slot and stop when the processor receives its final shutdown notification.
 
 If the signal type router owns locally parked messages when
 `NodeControlMsg::Shutdown` starts:

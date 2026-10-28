@@ -134,13 +134,20 @@ pub trait FlowMetricHook: Sized {
 pub struct LocalWakeupRequirements {
     /// Maximum number of concurrently live wakeup slots.
     pub live_slots: usize,
+    /// Retain and allow wakeups while the inbox gracefully drains buffered input.
+    /// Use this when wakeups service processor-owned pdata outside the inbox.
+    /// The final shutdown callback/deadline still stops all wakeup scheduling.
+    pub drain_on_shutdown: bool,
 }
 
 impl LocalWakeupRequirements {
     /// Create local wakeup requirements for a processor.
     #[must_use]
     pub const fn new(live_slots: usize) -> Self {
-        Self { live_slots }
+        Self {
+            live_slots,
+            drain_on_shutdown: false,
+        }
     }
 }
 
@@ -176,6 +183,22 @@ impl ProcessorRuntimeRequirements {
     pub const fn with_local_wakeups(live_slots: usize) -> Self {
         Self {
             local_wakeups: Some(LocalWakeupRequirements::new(live_slots)),
+            makes_drop_decisions: false,
+        }
+    }
+
+    /// Request bounded wakeups that remain serviceable during graceful draining.
+    ///
+    /// Processors retaining pdata outside the inbox need these wakeups to make
+    /// progress before the final shutdown callback. Delayed resumes still flush
+    /// immediately on shutdown entry; new delayed resumes remain rejected.
+    #[must_use]
+    pub const fn with_local_wakeups_during_shutdown(live_slots: usize) -> Self {
+        Self {
+            local_wakeups: Some(LocalWakeupRequirements {
+                live_slots,
+                drain_on_shutdown: true,
+            }),
             makes_drop_decisions: false,
         }
     }
@@ -512,6 +535,9 @@ impl<PData> ProcessorWrapper<PData> {
                         .local_wakeups
                         .map(|requirements| requirements.live_slots)
                         .unwrap_or(0),
+                    runtime_requirements
+                        .local_wakeups
+                        .is_some_and(|requirements| requirements.drain_on_shutdown),
                 );
                 let inbox = ProcessorInbox::new_with_local_scheduler(
                     Receiver::Local(control_receiver),
@@ -562,6 +588,9 @@ impl<PData> ProcessorWrapper<PData> {
                         .local_wakeups
                         .map(|requirements| requirements.live_slots)
                         .unwrap_or(0),
+                    runtime_requirements
+                        .local_wakeups
+                        .is_some_and(|requirements| requirements.drain_on_shutdown),
                 );
                 let inbox = ProcessorInbox::new_with_local_scheduler(
                     Receiver::Shared(control_receiver),

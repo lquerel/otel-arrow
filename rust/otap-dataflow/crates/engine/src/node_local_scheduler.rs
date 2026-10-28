@@ -41,7 +41,7 @@ use tokio::sync::Notify;
 pub enum WakeupError {
     /// Processor-local wakeups were not enabled for this processor runtime.
     Unsupported,
-    /// The processor has already latched shutdown.
+    /// Wakeup scheduling has stopped for processor shutdown.
     ShuttingDown,
     /// The bounded live wakeup slot set is full.
     Capacity,
@@ -85,7 +85,7 @@ pub(crate) struct NodeLocalWakeupSchedulerMetrics {
     /// Count of set attempts rejected because the live-slot capacity was full.
     #[metric(name = "set.error_capacity", unit = "{attempt}")]
     set_error_capacity: Counter<u64>,
-    /// Count of set attempts rejected after shutdown was latched.
+    /// Count of set attempts rejected because wakeup scheduling has stopped.
     #[metric(name = "set.error_shutdown", unit = "{attempt}")]
     set_error_shutdown: Counter<u64>,
     /// Count of cancel attempts that removed a live wakeup.
@@ -94,13 +94,13 @@ pub(crate) struct NodeLocalWakeupSchedulerMetrics {
     /// Count of cancel attempts that found no live wakeup in the slot.
     #[metric(name = "cancel.missed", unit = "{attempt}")]
     cancel_missed: Counter<u64>,
-    /// Count of cancel attempts ignored after shutdown was latched.
+    /// Count of cancel attempts ignored because wakeup scheduling has stopped.
     #[metric(name = "cancel.ignored_shutdown", unit = "{attempt}")]
     cancel_ignored_shutdown: Counter<u64>,
     /// Count of wakeups popped for delivery to the processor.
     #[metric(name = "pop.due", unit = "{wakeup}")]
     pop_due: Counter<u64>,
-    /// Count of live wakeups dropped when shutdown was latched.
+    /// Count of live wakeups cleared when their shutdown policy stops scheduling.
     #[metric(name = "shutdown.cleared", unit = "{wakeup}")]
     shutdown_cleared: Counter<u64>,
     /// Current number of live wakeups.
@@ -174,6 +174,13 @@ impl PartialOrd for WakeupPriority {
     }
 }
 
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum SchedulerPhase {
+    Running,
+    Draining,
+    Stopped,
+}
+
 /// Mutable state behind a processor's local delayed-resume and wakeup handle.
 ///
 /// The scheduler is shared between the processor `EffectHandler` and inbox via
@@ -194,8 +201,10 @@ struct NodeLocalScheduler<PData> {
     due_now: VecDeque<NodeControlMsg<PData>>,
     /// Keyed wakeup deadlines with replace/remove support by slot.
     heap: IndexedMinHeap<WakeupSlot, WakeupPriority>,
-    /// Whether shutdown has latched and new local scheduling must be rejected.
-    shutting_down: bool,
+    /// Whether wakeups service processor-owned pdata during graceful draining.
+    drain_wakeups: bool,
+    /// Delayed resumes stop on drain entry; opted-in wakeups stop at termination.
+    phase: SchedulerPhase,
     /// Optional per-node telemetry for wakeup activity.
     metrics: Option<MetricSet<NodeLocalWakeupSchedulerMetrics>>,
 }
@@ -204,7 +213,7 @@ impl<PData> NodeLocalScheduler<PData> {
     /// Creates a scheduler without metrics for tests.
     #[cfg(test)]
     fn new(delayed_resume_capacity: usize, wakeup_capacity: usize) -> Self {
-        Self::new_with_metrics(delayed_resume_capacity, wakeup_capacity, None)
+        Self::new_with_metrics(delayed_resume_capacity, wakeup_capacity, false, None)
     }
 
     /// Creates a scheduler with explicit delayed-resume/wakeup capacities and
@@ -212,6 +221,7 @@ impl<PData> NodeLocalScheduler<PData> {
     fn new_with_metrics(
         delayed_resume_capacity: usize,
         wakeup_capacity: usize,
+        drain_wakeups: bool,
         metrics: Option<MetricSet<NodeLocalWakeupSchedulerMetrics>>,
     ) -> Self {
         Self {
@@ -222,7 +232,8 @@ impl<PData> NodeLocalScheduler<PData> {
             delayed_resumes: BinaryHeap::new(),
             due_now: VecDeque::new(),
             heap: IndexedMinHeap::new(),
-            shutting_down: false,
+            drain_wakeups,
+            phase: SchedulerPhase::Running,
             metrics,
         }
     }
@@ -254,7 +265,9 @@ impl<PData> NodeLocalScheduler<PData> {
     /// Returns the original payload on capacity pressure or after shutdown is
     /// latched so callers never lose ownership on rejection.
     fn requeue_later(&mut self, when: Instant, data: Box<PData>) -> Result<(), Box<PData>> {
-        if self.shutting_down || self.delayed_resumes.len() >= self.delayed_resume_capacity {
+        if self.phase != SchedulerPhase::Running
+            || self.delayed_resumes.len() >= self.delayed_resume_capacity
+        {
             return Err(data);
         }
 
@@ -280,7 +293,7 @@ impl<PData> NodeLocalScheduler<PData> {
             return Err(WakeupError::Unsupported);
         }
 
-        if self.shutting_down {
+        if !self.wakeups_allowed() {
             if let Some(metrics) = &mut self.metrics {
                 metrics.set_error_shutdown.inc();
             }
@@ -314,9 +327,9 @@ impl<PData> NodeLocalScheduler<PData> {
         }
     }
 
-    /// Cancels one live wakeup slot if shutdown has not already latched.
+    /// Cancels one live slot while its wakeup scheduling policy is active.
     fn cancel_wakeup(&mut self, slot: WakeupSlot) -> bool {
-        if self.shutting_down {
+        if !self.wakeups_allowed() {
             if let Some(metrics) = &mut self.metrics {
                 metrics.cancel_ignored_shutdown.inc();
             }
@@ -433,24 +446,38 @@ impl<PData> NodeLocalScheduler<PData> {
         Some((slot, priority.when, priority.revision))
     }
 
-    /// Latches shutdown and converts pending delayed resumes into immediate
-    /// `ResumeData` controls while dropping pending wakeups.
-    ///
-    /// This preserves payload drain expectations for retry-like flows. Wakeups
-    /// are intentionally not retained because they carry no payload.
+    fn wakeups_allowed(&self) -> bool {
+        self.phase == SchedulerPhase::Running
+            || (self.phase == SchedulerPhase::Draining && self.drain_wakeups)
+    }
+
+    /// Starts graceful draining and returns retained delayed resumes immediately.
+    /// Wakeups serving processor-owned pdata may continue until final shutdown;
+    /// ordinary periodic wakeups retain their cancel-on-entry behavior.
     fn begin_shutdown(&mut self, now: Instant) {
-        if self.shutting_down {
+        if self.phase != SchedulerPhase::Running {
             return;
         }
-        self.shutting_down = true;
-
+        self.phase = SchedulerPhase::Draining;
         while let Some(resume) = self.delayed_resumes.pop() {
             self.due_now.push_back(NodeControlMsg::ResumeData {
                 when: now,
                 data: resume.data,
             });
         }
+        if !self.drain_wakeups {
+            self.clear_wakeups();
+        }
+    }
 
+    /// Stops every wakeup before the processor receives its final shutdown.
+    fn finish_shutdown(&mut self, now: Instant) {
+        self.begin_shutdown(now);
+        self.phase = SchedulerPhase::Stopped;
+        self.clear_wakeups();
+    }
+
+    fn clear_wakeups(&mut self) {
         let cleared = self.heap.len();
         if let Some(metrics) = &mut self.metrics {
             metrics.shutdown_cleared.add(cleared as u64);
@@ -493,7 +520,11 @@ impl<PData> Clone for NodeLocalSchedulerHandle<PData> {
 }
 
 impl<PData> NodeLocalSchedulerHandle<PData> {
-    pub(crate) fn new(delayed_resume_capacity: usize, wakeup_capacity: usize) -> Self {
+    pub(crate) fn new(
+        delayed_resume_capacity: usize,
+        wakeup_capacity: usize,
+        drain_wakeups: bool,
+    ) -> Self {
         let metrics = current_node_telemetry_handle()
             .map(|telemetry| telemetry.register_metric_set::<NodeLocalWakeupSchedulerMetrics>());
 
@@ -501,6 +532,7 @@ impl<PData> NodeLocalSchedulerHandle<PData> {
             inner: Arc::new(Mutex::new(NodeLocalScheduler::new_with_metrics(
                 delayed_resume_capacity,
                 wakeup_capacity,
+                drain_wakeups,
                 metrics,
             ))),
             notify: Arc::new(Notify::new()),
@@ -566,6 +598,11 @@ impl<PData> NodeLocalSchedulerHandle<PData> {
         self.notify.notify_waiters();
     }
 
+    pub(crate) fn finish_shutdown(&self, now: Instant) {
+        self.with_scheduler(|scheduler| scheduler.finish_shutdown(now));
+        self.notify.notify_waiters();
+    }
+
     pub(crate) fn is_drained(&self) -> bool {
         self.with_scheduler(|scheduler| scheduler.is_drained())
     }
@@ -586,6 +623,70 @@ impl<PData> NodeLocalSchedulerHandle<PData> {
 mod tests {
     use super::*;
     use std::time::Duration;
+
+    /// Scenario: Opted-in wakeups and delayed resumes coexist when graceful draining starts.
+    /// Guarantees: Retained payloads return immediately, fresh delayed resumes are rejected intact, and bounded wakeups keep their identity and support rearming, replacement, and cancellation.
+    #[test]
+    fn draining_retains_and_rearms_opted_in_wakeups() {
+        let now = Instant::now();
+        let mut scheduler = NodeLocalScheduler::new_with_metrics(1, 1, true, None);
+        scheduler
+            .requeue_later(now + Duration::from_secs(60), Box::new(7))
+            .unwrap();
+        let revision = scheduler
+            .set_wakeup(WakeupSlot(4), now + Duration::from_secs(1))
+            .unwrap()
+            .revision();
+        scheduler.begin_shutdown(now);
+        expect_resume(scheduler.pop_due(now), now, 7);
+        assert_eq!(
+            scheduler.requeue_later(now, Box::new(8)).unwrap_err(),
+            Box::new(8)
+        );
+        assert!(
+            matches!(scheduler.pop_due(now + Duration::from_secs(1)), Some(NodeControlMsg::Wakeup { slot: WakeupSlot(4), revision: actual, .. }) if actual == revision)
+        );
+        let next = scheduler
+            .set_wakeup(WakeupSlot(4), now + Duration::from_secs(2))
+            .unwrap()
+            .revision();
+        assert_ne!(next, revision);
+        assert_eq!(
+            scheduler.set_wakeup(WakeupSlot(5), now),
+            Err(WakeupError::Capacity)
+        );
+        assert!(matches!(
+            scheduler.set_wakeup(WakeupSlot(4), now),
+            Ok(WakeupSetOutcome::Replaced { .. })
+        ));
+        assert!(scheduler.cancel_wakeup(WakeupSlot(4)));
+        assert!(scheduler.is_drained());
+    }
+
+    /// Scenario: An opted-in scheduler reaches final shutdown with a live wakeup after graceful draining.
+    /// Guarantees: Final shutdown clears all timers and rejects scheduling/cancellation even for opted-in processors; repeated shutdown is idempotent.
+    #[test]
+    fn final_shutdown_stops_opted_in_wakeups() {
+        let now = Instant::now();
+        let mut scheduler = NodeLocalScheduler::<i32>::new_with_metrics(1, 1, true, None);
+        let _ = scheduler.set_wakeup(WakeupSlot(4), now).unwrap();
+        scheduler.begin_shutdown(now);
+        assert!(!scheduler.is_drained());
+        scheduler.finish_shutdown(now);
+        scheduler.finish_shutdown(now);
+        scheduler.begin_shutdown(now);
+        assert!(scheduler.is_drained());
+        assert!(scheduler.pop_due(now).is_none());
+        assert_eq!(
+            scheduler.set_wakeup(WakeupSlot(4), now),
+            Err(WakeupError::ShuttingDown)
+        );
+        assert!(!scheduler.cancel_wakeup(WakeupSlot(4)));
+        assert_eq!(
+            scheduler.requeue_later(now, Box::new(9)).unwrap_err(),
+            Box::new(9)
+        );
+    }
 
     fn assert_heap_bound<PData>(scheduler: &NodeLocalScheduler<PData>) {
         #[cfg(debug_assertions)]
@@ -791,7 +892,7 @@ mod tests {
         let registry = otel_arrow_dfe_telemetry::registry::TelemetryRegistryHandle::default();
         let metrics: MetricSet<NodeLocalWakeupSchedulerMetrics> =
             registry.register_metric_set(otel_arrow_dfe_telemetry::testing::EmptyAttributes());
-        let mut scheduler = NodeLocalScheduler::<i32>::new_with_metrics(1, 1, Some(metrics));
+        let mut scheduler = NodeLocalScheduler::<i32>::new_with_metrics(1, 1, false, Some(metrics));
         let now = Instant::now();
         let later = now + Duration::from_secs(1);
         let sooner = now + Duration::from_millis(10);

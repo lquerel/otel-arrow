@@ -315,7 +315,7 @@ impl<PData, ControlRx, PDataRx> InboxCore<PData, ControlRx, PDataRx> {
         self.shutting_down_deadline = None;
         self.consecutive_control = 0;
         if let Some(local_scheduler) = &self.local_scheduler {
-            local_scheduler.begin_shutdown(clock::now());
+            local_scheduler.finish_shutdown(clock::now());
         }
         drop(self.control_rx.take().expect("control_rx must exist"));
         drop(self.pdata_rx.take().expect("pdata_rx must exist"));
@@ -410,7 +410,10 @@ where
             // channel eagerly so we don't block forever on control-only select.
             // We only probe when the buffer is empty -- try_recv on an empty
             // channel distinguishes Closed from Empty without consuming data.
-            if !accept_pdata
+            // During graceful draining, local work must also drain before
+            // upstream closure releases the pending shutdown.
+            if self.shutting_down_deadline.is_none()
+                && !accept_pdata
                 && self
                     .pdata_rx
                     .as_ref()
@@ -427,14 +430,17 @@ where
 
             // Draining mode: Shutdown pending
             if let Some(dl) = self.shutting_down_deadline {
+                let pdata_rx = self.pdata_rx.as_ref().expect("pdata_rx must exist");
                 let drain_accepts_pdata =
-                    Self::shutdown_drain_accepts_pdata(accept_pdata, drain_policy);
+                    Self::shutdown_drain_accepts_pdata(accept_pdata, drain_policy)
+                        && !(pdata_rx.is_closed() && pdata_rx.is_empty());
 
-                // Once shutdown has been latched, the stored Shutdown is released
-                // only after the bounded pdata backlog is empty. This keeps the
-                // channel-level drain contract explicit: upstream work that was
-                // already accepted into the channel gets a chance to run first.
-                if self.shutdown_drain_complete() {
+                // Buffered input and processor-owned work get a chance to
+                // drain before the stored Shutdown is delivered. The deadline
+                // bounds this phase even if control traffic stays ready.
+                // A ready control/wakeup stream must not extend the drain
+                // beyond its deadline by bypassing the blocking select below.
+                if clock::now() >= dl || self.shutdown_drain_complete() {
                     let shutdown = self
                         .pending_shutdown
                         .take()
@@ -462,14 +468,8 @@ where
                         .try_recv()
                     {
                         Ok(pdata) => return Ok(self.pdata_message(pdata)),
-                        Err(RecvError::Closed) => {
-                            let shutdown = self
-                                .pending_shutdown
-                                .take()
-                                .expect("pending_shutdown must exist");
-                            self.shutdown();
-                            return Ok(Message::Control(shutdown));
-                        }
+                        // Recheck local work and the deadline on upstream closure.
+                        Err(RecvError::Closed) => continue,
                         Err(RecvError::Empty) => {}
                     }
                 }
@@ -513,13 +513,7 @@ where
 
                         pdata = self.pdata_rx.as_mut().expect("pdata_rx must exist").recv() => match pdata {
                             Ok(pdata) => return Ok(self.pdata_message(pdata)),
-                            Err(_) => {
-                                let shutdown = self.pending_shutdown
-                                    .take()
-                                    .expect("pending_shutdown must exist");
-                                self.shutdown();
-                                return Ok(Message::Control(shutdown));
-                            }
+                            Err(_) => continue,
                         },
 
                         ctrl = self.control_rx.as_mut().expect("control_rx must exist").recv() => match ctrl {
@@ -562,13 +556,7 @@ where
 
                         pdata = self.pdata_rx.as_mut().expect("pdata_rx must exist").recv(), if drain_accepts_pdata => match pdata {
                             Ok(pdata) => return Ok(self.pdata_message(pdata)),
-                            Err(_) => {
-                                let shutdown = self.pending_shutdown
-                                    .take()
-                                    .expect("pending_shutdown must exist");
-                                self.shutdown();
-                                return Ok(Message::Control(shutdown));
-                            }
+                            Err(_) => continue,
                         },
 
                         _ = async {
@@ -899,7 +887,7 @@ mod tests {
     ) {
         let (control_tx, control_rx) = mpsc::Channel::<NodeControlMsg<TestMsg>>::new(64);
         let (pdata_tx, pdata_rx) = mpsc::Channel::<TestMsg>::new(64);
-        let scheduler = NodeLocalSchedulerHandle::new(64, wakeup_capacity);
+        let scheduler = NodeLocalSchedulerHandle::new(64, wakeup_capacity, false);
         let inbox = ProcessorInbox::new_with_local_scheduler(
             Receiver::Local(LocalReceiver::mpsc(control_rx)),
             Receiver::Local(LocalReceiver::mpsc(pdata_rx)),
@@ -908,6 +896,66 @@ mod tests {
             Interests::empty(),
         );
         (control_tx, pdata_tx, scheduler, inbox)
+    }
+
+    /// Scenario: Upstream closes during graceful draining while an opted-in wakeup still serves processor-owned work.
+    /// Guarantees: Both open and guarded pdata admission wait for the retained wakeup, then deliver the original shutdown after all local work drains.
+    #[tokio::test(flavor = "current_thread")]
+    async fn processor_inbox_drains_opted_in_wakeups_after_upstream_closes() {
+        use crate::clock::SimClock;
+        use std::future::Future;
+        use std::task::{Context, Poll, Waker};
+
+        fn poll<F: Future>(future: F) -> Poll<F::Output> {
+            let mut future = std::pin::pin!(tokio::task::unconstrained(future));
+            future
+                .as_mut()
+                .poll(&mut Context::from_waker(Waker::noop()))
+        }
+
+        for accept_pdata in [false, true] {
+            let clock = SimClock::new();
+            let _clock_guard = clock.install();
+            let (control_tx, control_rx) = mpsc::Channel::new(2);
+            let (pdata_tx, pdata_rx) = mpsc::Channel::new(1);
+            let scheduler = NodeLocalSchedulerHandle::new(1, 1, true);
+            let mut inbox = ProcessorInbox::new_with_local_scheduler(
+                Receiver::Local(LocalReceiver::mpsc(control_rx)),
+                Receiver::Local(LocalReceiver::mpsc(pdata_rx)),
+                scheduler.clone(),
+                7,
+                Interests::empty(),
+            );
+            pdata_tx.send(TestMsg::new("buffered")).unwrap();
+            let when = clock.now() + Duration::from_secs(1);
+            let revision = scheduler
+                .set_wakeup(crate::control::WakeupSlot(0), when)
+                .unwrap()
+                .revision();
+            control_tx
+                .send(NodeControlMsg::Shutdown {
+                    deadline: clock.now() + Duration::from_secs(10),
+                    reason: "original shutdown".into(),
+                })
+                .unwrap();
+            assert!(matches!(poll(inbox.recv_when(false)), Poll::Pending));
+            drop(pdata_tx);
+            assert!(matches!(
+                poll(inbox.recv_when(true)),
+                Poll::Ready(Ok(Message::PData(_)))
+            ));
+            assert!(matches!(poll(inbox.recv_when(accept_pdata)), Poll::Pending));
+            clock.advance_to(when);
+            assert!(matches!(
+                poll(inbox.recv_when(accept_pdata)),
+                Poll::Ready(Ok(Message::Control(NodeControlMsg::Wakeup { revision: observed, .. }))) if observed == revision
+            ));
+            assert!(matches!(
+                poll(inbox.recv_when(accept_pdata)),
+                Poll::Ready(Ok(Message::Control(NodeControlMsg::Shutdown { reason, .. }))) if reason == "original shutdown"
+            ));
+            assert!(scheduler.is_drained());
+        }
     }
 
     /// Scenario: a processor-local delayed resume is scheduled for immediate
