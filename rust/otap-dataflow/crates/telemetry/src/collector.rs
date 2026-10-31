@@ -121,9 +121,7 @@ impl InternalCollector {
 
     fn collect_message(&self, message: MetricsCollectionMessage) {
         match message {
-            MetricsCollectionMessage::Snapshot(metrics) => self
-                .registry
-                .accumulate_metric_set_snapshot(metrics.key, metrics.bucket, &metrics.metrics),
+            MetricsCollectionMessage::Snapshot(metrics) => self.registry.collect_snapshot(metrics),
             MetricsCollectionMessage::Flush(ack_sender) => {
                 let _ = ack_sender.send(());
             }

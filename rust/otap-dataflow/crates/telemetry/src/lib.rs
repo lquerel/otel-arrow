@@ -54,6 +54,8 @@ pub mod log_filter;
 /// Internal log tap for admin-side log queries.
 pub mod log_tap;
 pub mod metrics;
+/// Native, bounded engine observation and observer output events.
+pub mod observer;
 pub mod output_service;
 pub mod registry;
 pub mod reporter;
@@ -273,7 +275,8 @@ impl InternalTelemetrySystem {
                     .with_drop_counter(log_tap.ingest_drop_counter())
             } else {
                 ObservedEventReporter::new(logging_send_policy.clone(), sender)
-            };
+            }
+            .with_observation(telemetry_registry.clone());
             let resource_field_bytes =
                 self_tracing::encoder::encode_config_resource_field(&config.resource)?;
             (

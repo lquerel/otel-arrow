@@ -248,6 +248,12 @@ impl EngineConfig {
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, Default, PartialEq)]
 #[serde(deny_unknown_fields)]
 pub struct EngineControllerConfig {
+    /// Process-wide limits for native observer extensions and their shared stream.
+    #[serde(
+        default,
+        skip_serializing_if = "crate::observer::EngineObserverSettings::is_default"
+    )]
+    pub observers: crate::observer::EngineObserverSettings,
     /// Controller-level extensions started by the embedding application.
     ///
     /// These extensions run with controller handles and are not exposed to
@@ -260,7 +266,7 @@ impl EngineControllerConfig {
     /// Returns true if the controller configuration is empty.
     #[must_use]
     pub fn is_empty(&self) -> bool {
-        self.extensions.is_empty()
+        self.extensions.is_empty() && self.observers.is_default()
     }
 }
 

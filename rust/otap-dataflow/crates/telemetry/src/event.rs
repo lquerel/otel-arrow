@@ -21,6 +21,7 @@ use std::time::SystemTime;
 /// [`SendPolicy`].
 #[derive(Clone)]
 pub struct ObservedEventReporter {
+    observation_registry: Option<crate::registry::TelemetryRegistryHandle>,
     policy: SendPolicy,
     sender: flume::Sender<ObservedEvent>,
     drop_counter: Option<InternalLogTapDropCounter>,
@@ -39,6 +40,7 @@ impl ObservedEventReporter {
     #[must_use]
     pub const fn new(policy: SendPolicy, sender: flume::Sender<ObservedEvent>) -> Self {
         Self {
+            observation_registry: None,
             policy,
             sender,
             drop_counter: None,
@@ -56,6 +58,7 @@ impl ObservedEventReporter {
         engine_sender: flume::Sender<EngineEvent>,
     ) -> Self {
         Self {
+            observation_registry: None,
             policy,
             sender,
             drop_counter: None,
@@ -67,6 +70,13 @@ impl ObservedEventReporter {
     #[must_use]
     pub fn with_drop_counter(mut self, drop_counter: InternalLogTapDropCounter) -> Self {
         self.drop_counter = Some(drop_counter);
+        self
+    }
+
+    /// Tap structured logs without consuming the normal reporting channel.
+    #[must_use]
+    pub fn with_observation(mut self, registry: crate::registry::TelemetryRegistryHandle) -> Self {
+        self.observation_registry = Some(registry);
         self
     }
 
@@ -99,6 +109,9 @@ impl ObservedEventReporter {
 
     /// Report a log event.
     pub fn log(&self, event: LogEvent) {
+        if let Some(registry) = &self.observation_registry {
+            registry.observe_log(&event);
+        }
         self.observe(ObservedEvent::Log(event))
     }
 

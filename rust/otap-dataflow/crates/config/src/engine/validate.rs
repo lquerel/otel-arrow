@@ -46,6 +46,9 @@ impl OtelDataflowSpec {
     /// containing all validation errors found in the pipeline groups.
     pub fn validate(&self) -> Result<(), Error> {
         let mut errors = Vec::new();
+        if let Err(error) = self.engine.controller.observers.validate() {
+            errors.push(error);
+        }
 
         if let Some(path) = &self.engine.state_dir
             && let Err(reason) = crate::engine::state_dir::validate_state_dir(path)

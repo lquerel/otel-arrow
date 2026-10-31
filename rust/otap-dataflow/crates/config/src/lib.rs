@@ -32,6 +32,8 @@ pub mod node;
 /// Node type URN value object.
 pub mod node_urn;
 pub mod observed_state;
+/// Native engine observer resource settings.
+pub mod observer;
 pub mod pipeline;
 pub mod pipeline_group;
 pub mod policy;

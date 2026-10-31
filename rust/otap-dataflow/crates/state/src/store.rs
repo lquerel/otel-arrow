@@ -151,7 +151,8 @@ impl ObservedStateStore {
     /// [`engine_reporter`](Self::engine_reporter) instead.
     #[must_use]
     pub fn reporter(&self, policy: SendPolicy) -> ObservedEventReporter {
-        let reporter = ObservedEventReporter::new(policy, self.sender.clone());
+        let reporter = ObservedEventReporter::new(policy, self.sender.clone())
+            .with_observation(self.registry.clone());
         if let Some(log_tap) = &self.log_tap {
             reporter.with_drop_counter(log_tap.ingest_drop_counter())
         } else {
@@ -393,6 +394,7 @@ impl ObservedStateStore {
 
     /// Reports a new observed event in the store.
     fn report_engine(&self, observed_event: EngineEvent) -> Result<ApplyOutcome, Error> {
+        let observation = self.registry.prepare_observed_lifecycle(&observed_event);
         match &observed_event.r#type {
             EventType::Request(req) => {
                 otel_info!("state.observed_event",
@@ -463,7 +465,14 @@ impl ObservedStateStore {
                 recent_events: ObservedEventRingBuffer::new(RECENT_EVENTS_CAPACITY),
                 ..Default::default()
             });
-        cs.apply_event(observed_event)
+        let result = cs.apply_event(observed_event);
+        drop(pipelines);
+        if result.is_ok()
+            && let Some(observation) = observation
+        {
+            self.registry.record_observed_lifecycle(observation);
+        }
+        result
     }
 
     fn drain_remaining(&self, engine_closed: &mut bool, log_closed: &mut bool) {
@@ -610,6 +619,26 @@ mod tests {
     use tracing_subscriber::layer::SubscriberExt;
     use tracing_subscriber::layer::{Context, Layer};
     use tracing_subscriber::registry::LookupSpan;
+
+    /// Scenario: lifecycle events are applied while an observer subscribes to the engine.
+    /// Guarantees: publication follows state application and the read-only snapshot remains usable.
+    #[test]
+    fn observer_lifecycle_follows_state_application() {
+        let registry = TelemetryRegistryHandle::new();
+        let mut observer = registry.observations().subscribe("state-reader").unwrap();
+        let store = ObservedStateStore::new(&ObservedStateSettings::default(), registry);
+        let key = make_key(0);
+        let _ = store
+            .report_engine(EngineEvent::admitted(key.clone(), None))
+            .unwrap();
+        let record = observer.try_recv().unwrap();
+        let otel_arrow_dfe_telemetry::observer::EngineObservation::Lifecycle(event) = &record.data
+        else {
+            panic!("expected lifecycle");
+        };
+        assert_eq!(event.key, key);
+        assert_eq!(store.handle().snapshot().len(), 1);
+    }
 
     fn make_key(core_id: usize) -> otel_arrow_dfe_config::DeployedPipelineKey {
         otel_arrow_dfe_config::DeployedPipelineKey {

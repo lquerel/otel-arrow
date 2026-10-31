@@ -277,6 +277,21 @@ pub fn validate_controller_extensions(
     engine_cfg: &OtelDataflowSpec,
     registry: &ControllerExtensionRegistry,
 ) -> Result<(), Box<dyn std::error::Error>> {
+    engine_cfg.engine.controller.observers.validate()?;
+    let observer_count = engine_cfg
+        .engine
+        .controller
+        .extensions
+        .iter()
+        .filter(|(_, extension)| {
+            registry
+                .get(&extension.r#type)
+                .is_some_and(|factory| factory.is_observer)
+        })
+        .count();
+    if observer_count > engine_cfg.engine.controller.observers.max_observers {
+        return Err(std::io::Error::other("engine observer instance limit reached").into());
+    }
     for (extension_id, extension) in engine_cfg.engine.controller.extensions.iter() {
         let urn_str = extension.r#type.as_str();
         match registry.get(&extension.r#type) {
@@ -358,6 +373,11 @@ pub fn system_info<PData: 'static + Clone + Debug>(
         .iter()
         .map(|f| f.name)
         .collect();
+    let mut observers_sorted: Vec<&str> = crate::observer::ENGINE_OBSERVER_FACTORIES
+        .iter()
+        .map(|factory| factory.name)
+        .collect();
+    observers_sorted.sort();
     receivers_sorted.sort();
     processors_sorted.sort();
     exporters_sorted.sort();
@@ -375,6 +395,7 @@ Available Component URNs:
   Processors: {}
   Exporters: {}
   Controller Extensions: {}
+  Engine Observer Extensions: {}
 
 Example configuration files can be found in the configs/ directory.{}",
         available_cores,
@@ -386,6 +407,7 @@ Example configuration files can be found in the configs/ directory.{}",
         processors_sorted.join(", "),
         exporters_sorted.join(", "),
         controller_extensions_sorted.join(", "),
+        observers_sorted.join(", "),
         debug_warning
     )
 }
@@ -823,10 +845,14 @@ groups: {}
         );
     }
 
+    /// Scenario: linked controller and observer types are listed in collector startup information.
+    /// Guarantees: both extension kinds are discoverable by users inspecting available URNs.
     #[test]
-    fn system_info_lists_controller_extensions() {
+    fn system_info_lists_controller_and_observer_extensions() {
         let factory: PipelineFactory<()> = PipelineFactory::new(&[], &[], &[], &[]);
         let info = system_info(&factory, "system");
+        assert!(info.contains("Engine Observer Extensions:"));
+        assert!(info.contains("urn:test:extension:engine_observer"));
 
         assert!(
             info.contains("Controller Extensions:"),

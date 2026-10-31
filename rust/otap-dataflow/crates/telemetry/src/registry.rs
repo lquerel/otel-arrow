@@ -41,6 +41,7 @@ new_key_type! {
 pub struct TelemetryRegistryHandle {
     pub(crate) registry: Arc<Mutex<TelemetryRegistry>>,
     metrics_flusher: Arc<Mutex<Option<MetricsFlushHandle>>>,
+    observation: crate::observer::EngineObservationHandle,
 }
 
 /// An owned metrics export that is committed only after downstream delivery.
@@ -111,10 +112,132 @@ impl TelemetryRegistryHandle {
     /// Creates a new `TelemetryRegistryHandle`.
     #[must_use]
     pub fn new() -> Self {
-        Self {
+        Self::with_observer_settings(Default::default()).expect("valid default observer settings")
+    }
+
+    /// Creates a registry with process-wide observer admission and retention limits.
+    pub fn with_observer_settings(
+        settings: otel_arrow_dfe_config::observer::EngineObserverSettings,
+    ) -> Result<Self, otel_arrow_dfe_config::error::Error> {
+        settings.validate()?;
+        Ok(Self {
             registry: Arc::new(Mutex::new(TelemetryRegistry::default())),
             metrics_flusher: Arc::new(Mutex::new(None)),
+            observation: crate::observer::EngineObservationHandle::new(settings),
+        })
+    }
+
+    /// Read-only observation capability. Subscription never drains or resets export state.
+    #[must_use]
+    pub fn observations(&self) -> crate::observer::EngineObservationHandle {
+        self.observation.clone()
+    }
+
+    /// Admit a bounded lifecycle copy for the observed-state source.
+    /// This producer capability is intentionally absent from observation handles.
+    #[must_use]
+    pub fn prepare_observed_lifecycle(
+        &self,
+        event: &crate::event::EngineEvent,
+    ) -> Option<crate::observer::PreparedLifecycleObservation> {
+        self.observation.prepare_lifecycle(event)
+    }
+
+    /// Publish a lifecycle copy after successful state handling and lock release.
+    pub fn record_observed_lifecycle(&self, event: crate::observer::PreparedLifecycleObservation) {
+        self.observation.record_lifecycle(event);
+    }
+
+    pub(crate) fn collect_snapshot(&self, snapshot: crate::metrics::MetricSetSnapshot) {
+        use crate::observer::{EngineObservation, ObservationKind, ObservedMetricSet};
+        // The normal aggregation path is always performed exactly once.
+        let meta = {
+            let mut reg = self.registry.lock();
+            reg.metrics
+                .accumulate_snapshot(snapshot.key, snapshot.bucket, &snapshot.metrics);
+            if !self.observation.active() {
+                return;
+            }
+            reg.metrics.metrics.get(snapshot.key).and_then(|entry| {
+                let entity = reg.entities.get_shared(entry.entity_key)?;
+                let mut budget = self.observation.budget();
+                if !budget.metrics(&snapshot.metrics, snapshot.metrics.capacity())
+                    || !budget.entity(&entity)
+                    || !budget.registration(&entry.registration_attributes)
+                {
+                    return None;
+                }
+                Some((
+                    entry.entity_key,
+                    entity,
+                    entry.registration_attributes.clone(),
+                ))
+            })
+        };
+        // Fanout happens after unlocking. Values are moved, not cloned once per observer.
+        if let Some((entity_key, entity, registration_attributes)) = meta {
+            self.observation
+                .publish(EngineObservation::Metrics(ObservedMetricSet {
+                    key: snapshot.key,
+                    entity_key,
+                    entity,
+                    descriptor: snapshot.descriptor,
+                    bucket: snapshot.bucket,
+                    measurement_attributes: snapshot.measurement_attributes,
+                    registration_attributes,
+                    values: snapshot.metrics,
+                }));
+        } else {
+            self.observation.reject(ObservationKind::Metrics);
         }
+    }
+
+    pub(crate) fn observe_log(&self, event: &crate::event::LogEvent) {
+        use crate::observer::{
+            EngineObservation, MAX_LOG_CONTEXT, OBSERVER_OUTPUT_TARGET, ObservationKind,
+            ObservedLog,
+        };
+        use crate::self_tracing::LOG_ARGUMENTS_ENCODE_LIMIT;
+        if !self.observation.active()
+            || event.record.callsite_id.0.metadata().target() == OBSERVER_OUTPUT_TARGET
+        {
+            return;
+        }
+        if event.record.context.len() > MAX_LOG_CONTEXT
+            || event.record.body_attrs_bytes.len() > LOG_ARGUMENTS_ENCODE_LIMIT
+        {
+            self.observation.reject(ObservationKind::Log);
+            return;
+        }
+        let mut budget = self.observation.budget();
+        if !budget.take(
+            event.record.body_attrs_bytes.len()
+                + event.record.context.len() * size_of::<EntityKey>(),
+        ) {
+            self.observation.reject(ObservationKind::Log);
+            return;
+        }
+        let entities = {
+            let reg = self.registry.lock();
+            let mut entities = Vec::with_capacity(event.record.context.len());
+            for key in &event.record.context {
+                if let Some(entity) = reg.entities.get_shared(*key) {
+                    if !budget.entity(&entity) {
+                        drop(reg);
+                        self.observation.reject(ObservationKind::Log);
+                        return;
+                    }
+                    entities.push((*key, entity));
+                }
+            }
+            entities
+        };
+        let mut event = event.clone();
+        // Normalize the body so a tiny Bytes slice cannot pin a huge producer allocation.
+        event.record.body_attrs_bytes =
+            bytes::Bytes::copy_from_slice(&event.record.body_attrs_bytes);
+        self.observation
+            .publish(EngineObservation::Log(ObservedLog { event, entities }));
     }
 
     pub(crate) fn configure_metrics_collector(&self, flusher: MetricsFlushHandle) {

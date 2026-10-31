@@ -464,6 +464,13 @@ is itself a thin wrapper over these library calls.
 For a complete runnable example, see
 [`examples/custom_collector.rs`](examples/custom_collector.rs).
 
+### Developing Engine Observer Extensions
+
+[Engine observer extensions](docs/engine-observer-extensions.md) receive native
+metric sets, structured logs and lifecycle events, can read observed state, and
+can emit named OTel events. Multiple instances share a bounded input ring.
+Their context grants no controller commands or mutable telemetry registry.
+
 ### Developing Controller Extensions
 
 Controller extensions are trusted in-process tasks started by the controller

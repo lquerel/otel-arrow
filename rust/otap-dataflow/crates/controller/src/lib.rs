@@ -119,6 +119,8 @@ pub use linkme::distributed_slice;
 pub mod controller_monitor;
 /// Error types and helpers for the controller module.
 pub mod error;
+/// Generic native engine observer extension registration and read-only context.
+pub mod observer;
 
 /// Available controller extensions.
 pub mod extension;
@@ -240,6 +242,7 @@ pub struct ControllerExtensionContext {
 struct RegisteredControllerExtensionFactory {
     start: Arc<ControllerExtensionStartFn>,
     validate_config: ControllerExtensionValidateFn,
+    is_observer: bool,
 }
 
 /// Registry of controller extension factories keyed by extension type URN.
@@ -250,7 +253,11 @@ pub struct ControllerExtensionRegistry {
 
 impl Default for ControllerExtensionRegistry {
     fn default() -> Self {
-        Self::from_factories(&CONTROLLER_EXTENSION_FACTORIES)
+        let mut registry = Self::from_factories(&CONTROLLER_EXTENSION_FACTORIES);
+        for factory in observer::ENGINE_OBSERVER_FACTORIES {
+            registry.register_observer_factory(*factory);
+        }
+        registry
     }
 }
 
@@ -278,6 +285,20 @@ impl ControllerExtensionRegistry {
         self.register(factory.name.into(), factory.start, factory.validate_config);
     }
 
+    /// Register an observer with a restricted context and isolated runtime failure policy.
+    pub fn register_observer_factory(&mut self, factory: observer::EngineObserverFactory) {
+        let name: ExtensionUrn = factory.name.into();
+        self.register(
+            name.clone(),
+            move |context| observer::prepare(factory, context),
+            factory.validate_config,
+        );
+        self.factories
+            .get_mut(&name)
+            .expect("just registered")
+            .is_observer = true;
+    }
+
     /// Registers a factory for a controller extension type.
     pub fn register<F>(
         &mut self,
@@ -297,6 +318,7 @@ impl ControllerExtensionRegistry {
             RegisteredControllerExtensionFactory {
                 start: Arc::new(factory),
                 validate_config,
+                is_observer: false,
             },
         );
         if replaced.is_some() {
@@ -1480,7 +1502,11 @@ impl<
         // Create the shared telemetry registry first - it is used by both the
         // observed state store and the internal telemetry system, and by the
         // controller context below.
-        let telemetry_registry = TelemetryRegistryHandle::new();
+        let telemetry_registry =
+            TelemetryRegistryHandle::with_observer_settings(engine.controller.observers.clone())
+                .map_err(|error| Error::InvalidConfiguration {
+                    errors: vec![error],
+                })?;
         let controller_ctx = ControllerContext::new(telemetry_registry.clone());
         let controller_ctx = match state_directory {
             Some(root) => controller_ctx.with_state_directory(root),
@@ -2091,6 +2117,23 @@ impl<
             engine_config.engine.controller.extensions.iter().collect();
         configured_extensions
             .sort_by(|(left_id, _), (right_id, _)| left_id.as_ref().cmp(right_id.as_ref()));
+
+        // Bound observer tasks as well as subscriptions, even if a factory drops its receiver.
+        let observer_count = configured_extensions
+            .iter()
+            .filter(|(_, extension)| {
+                options
+                    .extensions
+                    .get(&extension.r#type)
+                    .is_some_and(|factory| factory.is_observer)
+            })
+            .count();
+        if observer_count > engine_config.engine.controller.observers.max_observers {
+            return Err(Error::ControllerExtensionStartError {
+                extension_id: "engine.controller.observers".into(),
+                source: Box::new(otel_arrow_dfe_telemetry::observer::ObservationError::Capacity),
+            });
+        }
 
         for (extension_id, extension) in configured_extensions {
             let extension_type = extension.r#type.clone();
@@ -4261,6 +4304,32 @@ groups:
             extension_type
         ))
         .expect("controller extension config should parse")
+    }
+
+    /// Scenario: two linked observer instances run through controller startup and shutdown.
+    /// Guarantees: the existing configuration lifecycle supports multiple independent observers.
+    #[test]
+    fn multiple_observers_run_with_the_default_registry() {
+        let config = controller_extensions_engine_config("urn:test:extension:engine_observer");
+        startup::validate_controller_extensions(&config, &ControllerExtensionRegistry::default())
+            .unwrap();
+        Controller::new(test_pipeline_factory())
+            .run_till_shutdown_with_options(config, ControllerRunOptions::default())
+            .unwrap();
+    }
+
+    /// Scenario: configured observer instances exceed the controller's admission budget.
+    /// Guarantees: static validation fails before preparing tasks or starting threads.
+    #[test]
+    fn observer_count_limit_is_validated_before_startup() {
+        let mut config = controller_extensions_engine_config("urn:test:extension:engine_observer");
+        config.engine.controller.observers.max_observers = 1;
+        let error = startup::validate_controller_extensions(
+            &config,
+            &ControllerExtensionRegistry::default(),
+        )
+        .unwrap_err();
+        assert!(error.to_string().contains("observer instance limit"));
     }
 
     fn controller_extensions_engine_config(extension_type: &str) -> OtelDataflowSpec {

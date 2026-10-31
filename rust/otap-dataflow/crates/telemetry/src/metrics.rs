@@ -23,7 +23,7 @@ use slotmap::SlotMap;
 use std::collections::{HashMap, HashSet};
 use std::fmt::Debug;
 use std::ops::{Deref, DerefMut};
-use std::sync::Arc;
+use std::sync::{Arc, OnceLock};
 use std::time::{SystemTime, UNIX_EPOCH};
 
 /// The default per-set cardinality budget used by the compile-time check emitted
@@ -661,7 +661,7 @@ pub struct MetricsEntry {
 
     /// Fixed (key, value) attributes attached to every item of this set,
     /// captured at registration (empty for sets without registration attributes).
-    pub registration_attributes: Vec<(String, String)>,
+    pub registration_attributes: Arc<[(String, String)]>,
 }
 
 impl Debug for MetricsEntry {
@@ -702,7 +702,7 @@ impl MetricsEntry {
             pending_unregister: false,
             bucket_count: 1,
             measurement_attributes: &[],
-            registration_attributes: Vec::new(),
+            registration_attributes: share_registration_attributes(Vec::new()),
         }
     }
 
@@ -736,8 +736,18 @@ impl MetricsEntry {
             pending_unregister: false,
             bucket_count,
             measurement_attributes,
-            registration_attributes,
+            registration_attributes: share_registration_attributes(registration_attributes),
         }
+    }
+}
+
+// Most sets have no registration attributes. Share that empty allocation too.
+fn share_registration_attributes(attributes: Vec<(String, String)>) -> Arc<[(String, String)]> {
+    static EMPTY: OnceLock<Arc<[(String, String)]>> = OnceLock::new();
+    if attributes.is_empty() {
+        EMPTY.get_or_init(|| Arc::from([])).clone()
+    } else {
+        attributes.into()
     }
 }
 
