@@ -471,6 +471,9 @@ metric sets, structured logs and lifecycle events, can read observed state, and
 can emit named OTel events. Multiple instances share a bounded input ring.
 Their context grants no controller commands or mutable telemetry registry.
 
+The [architecture and design notes](docs/engine-observer-architecture.md)
+include the diagram, feedback-loop proposal, and risk analysis.
+
 ### Developing Controller Extensions
 
 Controller extensions are trusted in-process tasks started by the controller

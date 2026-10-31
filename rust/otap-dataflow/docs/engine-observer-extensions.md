@@ -5,6 +5,12 @@ internal telemetry and reads observed engine state. It can emit named OTel
 events through normal internal logging. Its context grants no control-plane
 commands, registry mutation, or export-draining operations.
 
+The [architecture overview](engine-observer-architecture.md) describes the
+current data paths, hosting, and retention model. See also the
+[proposed feedback loop](engine-observer-feedback.md) and
+[risk analysis](engine-observer-risks.md); those proposals do not extend the
+implemented API.
+
 ## Scope and configuration
 
 Observers use the controller extension lifecycle and configuration namespace.

@@ -1,0 +1,157 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="2560" height="1740" viewBox="0 0 2560 1740" role="img" aria-labelledby="title description">
+<title id="title">DFE observation and control architecture</title>
+<desc id="description">Application pipelines send metric snapshots to the collector and registry, logs to a bounded log queue, and lifecycle events to a separate reliable queue. Lifecycle events update observed states. A bounded observation hub receives native metric snapshots, logs tapped before enqueue, and applied lifecycle events. Observer extensions consume shared records and read state snapshots. Their named OTel events use the log queue, bypassing the observer input tap. The ITS pipeline exports registry metrics and queued logs. Controller extensions read metrics and state and manage pipelines through the control-plane API. Dashed amber paths show a proposed feedback bus carrying observer recommendations and controller outcomes.</desc>
+<defs>
+<marker id="telemetry-arrow" viewBox="0 0 12 10" refX="11" refY="5" markerWidth="18" markerHeight="16" orient="auto-start-reverse" markerUnits="userSpaceOnUse"><path d="M0 0 L12 5 L0 10 Z" fill="#3978B4"/></marker>
+<marker id="native-arrow" viewBox="0 0 12 10" refX="11" refY="5" markerWidth="18" markerHeight="16" orient="auto-start-reverse" markerUnits="userSpaceOnUse"><path d="M0 0 L12 5 L0 10 Z" fill="#137C7C"/></marker>
+<marker id="control-arrow" viewBox="0 0 12 10" refX="11" refY="5" markerWidth="18" markerHeight="16" orient="auto-start-reverse" markerUnits="userSpaceOnUse"><path d="M0 0 L12 5 L0 10 Z" fill="#7653AD"/></marker>
+<marker id="feedback-arrow" viewBox="0 0 12 10" refX="11" refY="5" markerWidth="18" markerHeight="16" orient="auto-start-reverse" markerUnits="userSpaceOnUse"><path d="M0 0 L12 5 L0 10 Z" fill="#B66A12"/></marker>
+</defs><g font-family="DejaVu Sans, Arial, sans-serif">
+<rect x="0" y="0" width="2560" height="1740" rx="0" fill="#FFFFFF" stroke="#FFFFFF" stroke-width="2"/>
+<text x="80" y="66" font-size="50" fill="#14283F" font-weight="600" text-anchor="start">DFE observation and control architecture</text>
+<text x="80" y="110" font-size="28" fill="#52657A" font-weight="400" text-anchor="start">Native self-telemetry, observer fan-out, and controller authority</text>
+<path d="M80 151 H142" fill="none" stroke="#3978B4" stroke-width="4"/>
+<text x="158" y="160" font-size="25" fill="#52657A" font-weight="400" text-anchor="start">Existing telemetry</text>
+<path d="M650 151 H712" fill="none" stroke="#137C7C" stroke-width="4"/>
+<text x="728" y="160" font-size="25" fill="#52657A" font-weight="400" text-anchor="start">Native observation</text>
+<path d="M1240 151 H1302" fill="none" stroke="#7653AD" stroke-width="4"/>
+<text x="1318" y="160" font-size="25" fill="#52657A" font-weight="400" text-anchor="start">Control / state reads</text>
+<path d="M1900 151 H1962" fill="none" stroke="#B66A12" stroke-width="4" stroke-dasharray="10 8"/>
+<text x="1978" y="160" font-size="25" fill="#52657A" font-weight="400" text-anchor="start">Proposed feedback</text>
+<rect x="40" y="185" width="2480" height="1350" rx="28" fill="#FAFCFF" stroke="#CBD8E5" stroke-width="2"/>
+<text x="80" y="220" font-size="25" fill="#62768C" font-weight="600" text-anchor="start">DFE PROCESS</text>
+<path d="M2000 315 H1870" fill="none" stroke="#FAFCFF" stroke-width="13" stroke-linejoin="round" stroke-linecap="round"/>
+<path d="M2000 315 H1870" fill="none" stroke="#7653AD" stroke-width="4" stroke-linejoin="round" stroke-linecap="round" marker-end="url(#control-arrow)"/>
+<path d="M1520 315 H1430" fill="none" stroke="#FAFCFF" stroke-width="13" stroke-linejoin="round" stroke-linecap="round"/>
+<path d="M1520 315 H1430" fill="none" stroke="#7653AD" stroke-width="4" stroke-linejoin="round" stroke-linecap="round" marker-end="url(#control-arrow)"/>
+<path d="M650 580 V465 H2070 V395" fill="none" stroke="#FAFCFF" stroke-width="13" stroke-linejoin="round" stroke-linecap="round"/>
+<path d="M650 580 V465 H2070 V395" fill="none" stroke="#7653AD" stroke-width="4" stroke-linejoin="round" stroke-linecap="round" marker-end="url(#control-arrow)"/>
+<path d="M2250 590 V395" fill="none" stroke="#FAFCFF" stroke-width="13" stroke-linejoin="round" stroke-linecap="round"/>
+<path d="M2250 590 V395" fill="none" stroke="#7653AD" stroke-width="4" stroke-linejoin="round" stroke-linecap="round" marker-end="url(#control-arrow)"/>
+<path d="M330 420 V580" fill="none" stroke="#FAFCFF" stroke-width="13" stroke-linejoin="round" stroke-linecap="round"/>
+<path d="M330 420 V580" fill="none" stroke="#3978B4" stroke-width="4" stroke-linejoin="round" stroke-linecap="round" marker-end="url(#telemetry-arrow)"/>
+<path d="M1120 420 V530" fill="none" stroke="#FAFCFF" stroke-width="13" stroke-linejoin="round" stroke-linecap="round"/>
+<path d="M1120 420 V530" fill="none" stroke="#3978B4" stroke-width="4" stroke-linejoin="round" stroke-linecap="round" marker-end="url(#telemetry-arrow)"/>
+<path d="M280 760 V1160" fill="none" stroke="#FAFCFF" stroke-width="13" stroke-linejoin="round" stroke-linecap="round"/>
+<path d="M280 760 V1160" fill="none" stroke="#3978B4" stroke-width="4" stroke-linejoin="round" stroke-linecap="round" marker-end="url(#telemetry-arrow)"/>
+<path d="M1024 632 H950 V1000 H580 V1160" fill="none" stroke="#FAFCFF" stroke-width="13" stroke-linejoin="round" stroke-linecap="round"/>
+<path d="M1024 632 H950 V1000 H580 V1160" fill="none" stroke="#3978B4" stroke-width="4" stroke-linejoin="round" stroke-linecap="round" marker-end="url(#telemetry-arrow)"/>
+<path d="M1546 735 H1900" fill="none" stroke="#FAFCFF" stroke-width="13" stroke-linejoin="round" stroke-linecap="round"/>
+<path d="M1546 735 H1900" fill="none" stroke="#3978B4" stroke-width="4" stroke-linejoin="round" stroke-linecap="round" marker-end="url(#telemetry-arrow)"/>
+<path d="M1120 510 H880 V1050" fill="none" stroke="#FAFCFF" stroke-width="13" stroke-linejoin="round" stroke-linecap="round"/>
+<path d="M1120 510 H880 V1050" fill="none" stroke="#137C7C" stroke-width="4" stroke-linejoin="round" stroke-linecap="round" marker-end="url(#native-arrow)"/>
+<path d="M600 760 V900 H880" fill="none" stroke="#FAFCFF" stroke-width="13" stroke-linejoin="round" stroke-linecap="round"/>
+<path d="M600 760 V900 H880" fill="none" stroke="#137C7C" stroke-width="4" stroke-linejoin="round" stroke-linecap="round"/>
+<path d="M1940 770 V960 H880" fill="none" stroke="#FAFCFF" stroke-width="13" stroke-linejoin="round" stroke-linecap="round"/>
+<path d="M1940 770 V960 H880" fill="none" stroke="#137C7C" stroke-width="4" stroke-linejoin="round" stroke-linecap="round"/>
+<path d="M2110 770 V805 H1800 V1050" fill="none" stroke="#FAFCFF" stroke-width="13" stroke-linejoin="round" stroke-linecap="round"/>
+<path d="M2110 770 V805 H1800 V1050" fill="none" stroke="#7653AD" stroke-width="4" stroke-linejoin="round" stroke-linecap="round" marker-end="url(#control-arrow)"/>
+<path d="M1430 1125 H1700" fill="none" stroke="#FAFCFF" stroke-width="13" stroke-linejoin="round" stroke-linecap="round"/>
+<path d="M1430 1125 H1700" fill="none" stroke="#137C7C" stroke-width="4" stroke-linejoin="round" stroke-linecap="round" marker-end="url(#native-arrow)"/>
+<path d="M1700 1210 H1620 V632 H1570" fill="none" stroke="#FAFCFF" stroke-width="13" stroke-linejoin="round" stroke-linecap="round"/>
+<path d="M1700 1210 H1620 V632 H1570" fill="none" stroke="#3978B4" stroke-width="4" stroke-linejoin="round" stroke-linecap="round" marker-end="url(#telemetry-arrow)"/>
+<path d="M2200 1050 V977" fill="none" stroke="#FAFCFF" stroke-width="13" stroke-linejoin="round" stroke-linecap="round"/>
+<path d="M2200 1050 V977" fill="none" stroke="#B66A12" stroke-width="4" stroke-linejoin="round" stroke-linecap="round" marker-end="url(#feedback-arrow)" stroke-dasharray="12 9"/>
+<path d="M2350 977 V1050" fill="none" stroke="#FAFCFF" stroke-width="13" stroke-linejoin="round" stroke-linecap="round"/>
+<path d="M2350 977 V1050" fill="none" stroke="#B66A12" stroke-width="4" stroke-linejoin="round" stroke-linecap="round" marker-end="url(#feedback-arrow)" stroke-dasharray="12 9"/>
+<path d="M2330 865 V840 H2490 V278 H2420" fill="none" stroke="#FAFCFF" stroke-width="13" stroke-linejoin="round" stroke-linecap="round"/>
+<path d="M2330 865 V840 H2490 V278 H2420" fill="none" stroke="#B66A12" stroke-width="4" stroke-linejoin="round" stroke-linecap="round" marker-end="url(#feedback-arrow)" stroke-dasharray="12 9"/>
+<path d="M2420 350 H2450 V920 H2420" fill="none" stroke="#FAFCFF" stroke-width="13" stroke-linejoin="round" stroke-linecap="round"/>
+<path d="M2420 350 H2450 V920 H2420" fill="none" stroke="#B66A12" stroke-width="4" stroke-linejoin="round" stroke-linecap="round" marker-end="url(#feedback-arrow)" stroke-dasharray="12 9"/>
+<path d="M380 1405 V1585" fill="none" stroke="#FAFCFF" stroke-width="13" stroke-linejoin="round" stroke-linecap="round"/>
+<path d="M380 1405 V1585" fill="none" stroke="#3978B4" stroke-width="4" stroke-linejoin="round" stroke-linecap="round" marker-end="url(#telemetry-arrow)"/>
+<rect x="100" y="235" width="1330" height="185" rx="20" fill="#EFF5FC" stroke="#BDD0E4" stroke-width="2"/>
+<text x="132" y="281" font-size="35" fill="#173856" font-weight="600" text-anchor="start">Application pipelines</text>
+<text x="1398" y="279" font-size="25" fill="#52657A" font-weight="400" text-anchor="end">Many instances / cores</text>
+<rect x="145" y="321" width="260" height="68" rx="12" fill="#FFFFFF" stroke="#BBCFE2" stroke-width="2"/>
+<text x="275.0" y="366" font-size="30" fill="#173856" font-weight="500" text-anchor="middle">Receivers</text>
+<rect x="560" y="321" width="330" height="68" rx="12" fill="#FFFFFF" stroke="#BBCFE2" stroke-width="2"/>
+<text x="725.0" y="366" font-size="30" fill="#173856" font-weight="500" text-anchor="middle">Processors</text>
+<rect x="1060" y="321" width="300" height="68" rx="12" fill="#FFFFFF" stroke="#BBCFE2" stroke-width="2"/>
+<text x="1210.0" y="366" font-size="30" fill="#173856" font-weight="500" text-anchor="middle">Exporters</text>
+<path d="M419 355 H546" fill="none" stroke="#FAFCFF" stroke-width="13" stroke-linejoin="round" stroke-linecap="round"/>
+<path d="M419 355 H546" fill="none" stroke="#3978B4" stroke-width="4" stroke-linejoin="round" stroke-linecap="round" marker-end="url(#telemetry-arrow)"/>
+<path d="M904 355 H1046" fill="none" stroke="#FAFCFF" stroke-width="13" stroke-linejoin="round" stroke-linecap="round"/>
+<path d="M904 355 H1046" fill="none" stroke="#3978B4" stroke-width="4" stroke-linejoin="round" stroke-linecap="round" marker-end="url(#telemetry-arrow)"/>
+<rect x="2000" y="235" width="420" height="160" rx="20" fill="#F2EDF9" stroke="#CEBDE7" stroke-width="2"/>
+<text x="2030" y="279" font-size="29" fill="#513679" font-weight="600" text-anchor="start">Controller extensions</text>
+<text x="2030" y="325" font-size="26" fill="#52657A" font-weight="400" text-anchor="start">Policy and orchestration</text>
+<text x="2030" y="363" font-size="26" fill="#52657A" font-weight="400" text-anchor="start">Control-plane authority</text>
+<rect x="1520" y="268" width="350" height="104" rx="16" fill="#F6F2FB" stroke="#D2C4E6" stroke-width="2"/>
+<text x="1695" y="310" font-size="30" fill="#513679" font-weight="600" text-anchor="middle">Control-plane API</text>
+<text x="1695" y="347" font-size="25" fill="#685880" font-weight="400" text-anchor="middle">Validated operations</text>
+<rect x="100" y="580" width="600" height="180" rx="20" fill="#FFFFFF" stroke="#CEDAE5" stroke-width="2"/>
+<text x="132" y="631" font-size="36" fill="#14283F" font-weight="600" text-anchor="start">Metrics registry</text>
+<text x="132" y="678" font-size="28" fill="#52657A" font-weight="400" text-anchor="start">Collector + native metric sets</text>
+<text x="132" y="721" font-size="27" fill="#52657A" font-weight="400" text-anchor="start">Entity IDs and shared definitions</text>
+<rect x="1000" y="530" width="570" height="270" rx="20" fill="#FFFFFF" stroke="#CEDAE5" stroke-width="2"/>
+<text x="1030" y="575" font-size="34" fill="#14283F" font-weight="600" text-anchor="start">Internal event queues</text>
+<rect x="1024" y="596" width="522" height="72" rx="12" fill="#EFF5FC" stroke="#D7E2ED" stroke-width="2"/>
+<text x="1048" y="643" font-size="30" fill="#173856" font-weight="500" text-anchor="start">Logs</text>
+<text x="1524" y="641" font-size="25" fill="#536A82" font-weight="400" text-anchor="end">bounded</text>
+<rect x="1024" y="697" width="522" height="72" rx="12" fill="#F3F5F8" stroke="#D7E2ED" stroke-width="2"/>
+<text x="1048" y="745" font-size="30" fill="#173856" font-weight="500" text-anchor="start">Lifecycle</text>
+<text x="1524" y="742" font-size="24" fill="#536A82" font-weight="400" text-anchor="end">reliable / unbounded</text>
+<rect x="1900" y="590" width="520" height="180" rx="20" fill="#FFFFFF" stroke="#CEDAE5" stroke-width="2"/>
+<text x="1930" y="640" font-size="36" fill="#14283F" font-weight="600" text-anchor="start">Observed states</text>
+<text x="1930" y="686" font-size="27" fill="#52657A" font-weight="400" text-anchor="start">Pipeline and node lifecycle</text>
+<text x="1930" y="729" font-size="27" fill="#52657A" font-weight="400" text-anchor="start">Deployment generations</text>
+<rect x="780" y="1050" width="650" height="150" rx="20" fill="#EAF6F4" stroke="#B6DAD4" stroke-width="2"/>
+<text x="812" y="1097" font-size="36" fill="#0E5E60" font-weight="600" text-anchor="start">Observation hub</text>
+<text x="812" y="1140" font-size="29" fill="#2F6565" font-weight="400" text-anchor="start">Shared bounded ring</text>
+<text x="812" y="1177" font-size="27" fill="#42696B" font-weight="400" text-anchor="start">Native values + IDs + definitions</text>
+<rect x="1700" y="1050" width="720" height="200" rx="20" fill="#EAF6F4" stroke="#B6DAD4" stroke-width="2"/>
+<text x="1730" y="1096" font-size="36" fill="#0E5E60" font-weight="600" text-anchor="start">Observer extensions</text>
+<text x="2388" y="1095" font-size="28" fill="#2F6565" font-weight="500" text-anchor="end">1 ... N</text>
+<text x="1730" y="1142" font-size="29" fill="#42696B" font-weight="400" text-anchor="start">Read-only analysis</text>
+<rect x="1730" y="1170" width="200" height="54" rx="10" fill="#FFFFFF" stroke="#C2DFDA" stroke-width="2"/>
+<text x="1830.0" y="1207" font-size="25" fill="#1A6566" font-weight="500" text-anchor="middle">Observer A</text>
+<rect x="1950" y="1170" width="200" height="54" rx="10" fill="#FFFFFF" stroke="#C2DFDA" stroke-width="2"/>
+<text x="2050.0" y="1207" font-size="25" fill="#1A6566" font-weight="500" text-anchor="middle">Observer B</text>
+<rect x="2170" y="1170" width="218" height="54" rx="10" fill="#FFFFFF" stroke="#C2DFDA" stroke-width="2"/>
+<text x="2279.0" y="1207" font-size="25" fill="#1A6566" font-weight="500" text-anchor="middle">...</text>
+<rect x="2040" y="865" width="380" height="112" rx="16" fill="#FFF7E9" stroke="#DDAA60" stroke-width="2" stroke-dasharray="11 8"/>
+<text x="2230" y="911" font-size="31" fill="#91510B" font-weight="600" text-anchor="middle">Feedback bus</text>
+<text x="2230" y="949" font-size="24" fill="#A76822" font-weight="500" text-anchor="middle">PROPOSED</text>
+<rect x="100" y="1160" width="560" height="245" rx="20" fill="#EFF5FC" stroke="#BDD0E4" stroke-width="2"/>
+<text x="132" y="1210" font-size="36" fill="#173856" font-weight="600" text-anchor="start">ITS pipeline</text>
+<text x="132" y="1256" font-size="27" fill="#52657A" font-weight="400" text-anchor="start">Internal telemetry receiver</text>
+<text x="132" y="1296" font-size="27" fill="#52657A" font-weight="400" text-anchor="start">Processors + exporters</text>
+<rect x="130" y="1325" width="500" height="54" rx="10" fill="#DDECF9" stroke="#DDECF9" stroke-width="2"/>
+<text x="380" y="1361" font-size="27" fill="#285B88" font-weight="500" text-anchor="middle">Metrics + logs to OTLP</text>
+<rect x="100" y="1585" width="560" height="95" rx="16" fill="#F3F6FA" stroke="#CEDAE5" stroke-width="2"/>
+<text x="380" y="1626" font-size="31" fill="#243E58" font-weight="600" text-anchor="middle">Observability backends</text>
+<text x="380" y="1661" font-size="24" fill="#65758A" font-weight="400" text-anchor="middle">Outside the DFE process</text>
+<rect x="780" y="1275" width="650" height="142" rx="16" fill="#F1F7F6" stroke="#D7E7E3" stroke-width="2"/>
+<text x="812" y="1314" font-size="28" fill="#235D5D" font-weight="600" text-anchor="start">Observation contract</text>
+<text x="812" y="1354" font-size="26" fill="#52657A" font-weight="400" text-anchor="start">Independent cursors; explicit input gaps</text>
+<text x="812" y="1391" font-size="26" fill="#52657A" font-weight="400" text-anchor="start">Observer outputs excluded from input</text>
+<circle cx="1120" cy="510" r="7" fill="#137C7C" stroke="#FAFCFF" stroke-width="2"/>
+<circle cx="880" cy="900" r="7" fill="#137C7C" stroke="#FAFCFF" stroke-width="2"/>
+<circle cx="880" cy="960" r="7" fill="#137C7C" stroke="#FAFCFF" stroke-width="2"/>
+<text x="145" y="505" font-size="26" fill="#28689D" font-weight="500" text-anchor="start">metric snapshots</text>
+<text x="1150" y="505" font-size="26" fill="#28689D" font-weight="500" text-anchor="start">logs + lifecycle</text>
+<text x="1515" y="447" font-size="26" fill="#6D459C" font-weight="500" text-anchor="start">read metrics</text>
+<text x="2275" y="486" font-size="26" fill="#6D459C" font-weight="500" text-anchor="start">read state</text>
+<text x="1592" y="716" font-size="26" fill="#28689D" font-weight="500" text-anchor="start">apply lifecycle</text>
+<text x="565" y="824" font-size="26" fill="#096D6D" font-weight="500" text-anchor="end">native metric</text>
+<text x="565" y="858" font-size="26" fill="#096D6D" font-weight="500" text-anchor="end">snapshots</text>
+<text x="850" y="816" font-size="26" fill="#096D6D" font-weight="500" text-anchor="end">engine logs</text>
+<text x="850" y="852" font-size="24" fill="#096D6D" font-weight="500" text-anchor="end">before enqueue</text>
+<text x="1170" y="940" font-size="26" fill="#096D6D" font-weight="500" text-anchor="start">applied lifecycle events</text>
+<text x="730" y="1034" font-size="25" fill="#28689D" font-weight="500" text-anchor="middle">logs for export</text>
+<text x="310" y="1098" font-size="26" fill="#28689D" font-weight="500" text-anchor="start">metric export</text>
+<text x="1520" y="1093" font-size="25" fill="#096D6D" font-weight="500" text-anchor="middle">native records</text>
+
+<text x="1815" y="846" font-size="24" fill="#6D459C" font-weight="500" text-anchor="start">read-only</text>
+<text x="1815" y="880" font-size="24" fill="#6D459C" font-weight="500" text-anchor="start">state</text>
+<text x="1815" y="914" font-size="24" fill="#6D459C" font-weight="500" text-anchor="start">snapshot</text>
+<text x="1595" y="845" font-size="26" fill="#28689D" font-weight="500" text-anchor="end">OTel event output</text>
+<text x="1595" y="881" font-size="24" fill="#28689D" font-weight="500" text-anchor="end">normal log path</text>
+<text x="2193" y="1029" font-size="24" fill="#985507" font-weight="500" text-anchor="end">recommendations</text>
+<text x="2359" y="1029" font-size="24" fill="#985507" font-weight="500" text-anchor="start">outcomes</text>
+<text x="405" y="1510" font-size="26" fill="#28689D" font-weight="500" text-anchor="start">OTLP</text>
+<text x="780" y="1472" font-size="25" fill="#52657A" font-weight="400" text-anchor="start">All engine components, including ITS, also emit self-telemetry.</text>
+<text x="780" y="1509" font-size="25" fill="#52657A" font-weight="400" text-anchor="start">Simplified view; log export assumes ITS logging is enabled.</text>
+<text x="2460" y="1682" font-size="25" fill="#63778B" font-weight="400" text-anchor="end">Solid paths: current foundation   |   Dashed paths: proposed</text>
+</g></svg>
