@@ -28,9 +28,10 @@ minijinja = { workspace = true }
 otel-arrow-dfe-admin-api = { workspace = true }
 otel-arrow-dfe-engine = { workspace = true }
 otel-arrow-dfe-config = { workspace = true }
-otel-arrow-dfe-core-nodes = { workspace = true }
+otel-arrow-dfe-core-nodes = { workspace = true, features = ["core-nodes"] }
 otel-arrow-dfe-dev-nodes = { workspace = true }
 otel-arrow-dfe-pdata = { workspace = true, features = ["testing"] }
+otel-arrow-dfe-pdata-codec = { workspace = true }
 otel-arrow-dfe-telemetry = { workspace = true }
 otel-arrow-dfe-telemetry-macros = { workspace = true }
 otel-arrow-dfe-otap = { workspace = true }
@@ -38,16 +39,55 @@ otel-arrow-dfe-controller = { workspace = true }
 prost = { workspace = true }
 
 [features]
+integration-tests = []
+# Offline real-factory coverage; keep Azure and database features opt-in.
+akv-database-bindings = [
+    "otel-arrow-dfe-contrib-extensions/azure-key-vault-user-pass-auth",
+    "otel-arrow-dfe-contrib-nodes/oracle",
+    "otel-arrow-dfe-contrib-nodes/postgresql",
+    "otel-arrow-dfe-contrib-nodes/sql-server",
+]
 crypto-ring = ["otel-arrow-dfe-otap/crypto-ring"]
 crypto-aws-lc = ["otel-arrow-dfe-otap/crypto-aws-lc"]
 crypto-symcrypt = ["otel-arrow-dfe-otap/crypto-symcrypt"]
 crypto-openssl = ["otel-arrow-dfe-otap/crypto-openssl"]
 
 [dev-dependencies]
+otel-arrow-dfe-engine = { workspace = true, features = ["test-utils"] }
+otel-arrow-dfe-contrib-extensions = { workspace = true }
+bytes = { workspace = true }
+otel-arrow-dfe-otap = { workspace = true, features = ["test-utils"] }
+otel-arrow-dfe-contrib-nodes = { workspace = true }
+otel-arrow-dfe-pdata-codec = { workspace = true, features = ["testing"] }
+otel-arrow-dfe-quiver = { workspace = true }
+otel-arrow-dfe-state = { workspace = true }
+parking_lot = { workspace = true }
 tempfile = { workspace = true }
+tokio-util = { workspace = true }
+tracing-subscriber = { workspace = true, features = ["fmt", "std", "env-filter"] }
 wiremock = { workspace = true }
 otel-arrow-dfe-test-tls-certs = { workspace = true }
 weaver_common = { workspace = true }
 weaver_forge = { workspace = true }
 weaver_resolver = { workspace = true }
 weaver_semconv = { workspace = true }
+
+[[test]]
+name = "akv_database_bindings"
+path = "tests/akv_database_bindings.rs"
+required-features = ["akv-database-bindings"]
+
+[[test]]
+name = "pipeline_tests"
+path = "tests/pipeline_tests.rs"
+required-features = ["integration-tests"]
+
+[[test]]
+name = "durable_buffer_processor_tests"
+path = "tests/durable_buffer_processor_tests.rs"
+required-features = ["integration-tests"]
+
+[[test]]
+name = "core_node_liveness_tests"
+path = "tests/core_node_liveness_tests.rs"
+required-features = ["integration-tests"]

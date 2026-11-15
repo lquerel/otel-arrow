@@ -5,11 +5,228 @@
 //!
 //! Note: We try as much as possible to follow the following
 //! [RFC Pipeline Component Telemetry](https://github.com/open-telemetry/opentelemetry-collector/blob/main/docs/rfcs/component-universal-telemetry.md).
+//!
+//! Receiver and exporter observations follow external-work cardinality, which
+//! is not necessarily the same as PData message cardinality. See
+//! [Shared receiver and exporter boundary metrics][boundary-metrics] before
+//! instrumenting fan-out, aggregation, many-to-many batching, or retries.
+//!
+//! [boundary-metrics]: https://github.com/open-telemetry/otel-arrow/blob/main/rust/otap-dataflow/docs/telemetry/metrics-guide.md#shared-receiver-and-exporter-boundary-metrics
 
-use otel_arrow_dfe_telemetry::common_attributes::{SignalAttributes, SignalOutcomeAttributes};
-use otel_arrow_dfe_telemetry::instrument::{Counter, HistogramNormal};
+use otel_arrow_dfe_config::SignalType;
+use otel_arrow_dfe_config::policy::DistributionTier;
+use otel_arrow_dfe_engine::Interests;
+use otel_arrow_dfe_engine::context::PipelineContext;
+use otel_arrow_dfe_telemetry::common_attributes::{
+    Outcome, OutcomeAttributes, SignalAttributes, SignalOutcomeAttributes,
+};
+use otel_arrow_dfe_telemetry::error::Error as TelemetryError;
+use otel_arrow_dfe_telemetry::instrument::{Counter, HistogramDetailed, HistogramNormal, Mmsc};
+use otel_arrow_dfe_telemetry::metrics::MetricSetRegistrar;
+use otel_arrow_dfe_telemetry::metrics::{MeasurementMetricSet, MetricSet, MetricSetSnapshot};
+use otel_arrow_dfe_telemetry::reporter::MetricsReporter;
 use otel_arrow_dfe_telemetry_macros::metric_set;
-use std::time::Duration;
+use std::cell::{Cell, RefCell};
+use std::ops::AsyncFnOnce;
+use std::rc::Rc;
+use std::time::{Duration, Instant};
+use tokio::time::Instant as TokioInstant;
+
+/// Accepted receiver-initiated collection attempts, completed before downstream handoff.
+///
+/// One scrape or bounded query page is one attempt, independent of result rows,
+/// signal classification, and emitted PData. Skipped opportunities are not attempts.
+#[metric_set(name = "receiver.pulled", measurement_attributes = OutcomeAttributes)]
+#[derive(Debug, Default, Clone)]
+pub struct ReceiverPulledMetrics {
+    /// Number of accepted collection attempts reaching a terminal local outcome.
+    #[metric(unit = "{attempt}")]
+    pub attempts: Counter<u64>,
+}
+
+/// Shared, node-interest-gated telemetry for receiver-initiated collection.
+///
+/// Start one attempt per accepted bounded collection, not per output message.
+/// Complete it before downstream handoff. Receivers own admission, partial-result
+/// policy, cancellation decisions, and worker cleanup.
+///
+/// Attempts may overlap on the same core. Each has independent completion state;
+/// no mutable metric borrow is held across source work or control handling.
+///
+/// Before final snapshots, finish, cancel, or drop every outstanding attempt,
+/// including attempts owned by pending [`ReceiverPullAttempt::run`] futures.
+#[derive(Default)]
+pub struct ReceiverPullMetrics {
+    inner: Option<Rc<RefCell<PullMetricSets>>>,
+}
+
+impl ReceiverPullMetrics {
+    /// Registers only the count and duration sets enabled by node policy.
+    #[must_use]
+    pub fn register(pipeline: &PipelineContext) -> Self {
+        let interests = pipeline.node_interests();
+        Self {
+            inner: interests
+                .intersects(Interests::NODE_OUTPUT_METRICS | Interests::NODE_LOCAL_DURATION)
+                .then(|| {
+                    Rc::new(RefCell::new(PullMetricSets {
+                        attempts: interests
+                            .contains(Interests::NODE_OUTPUT_METRICS)
+                            .then(|| ReceiverPulledMetrics::register(pipeline)),
+                        duration: interests.contains(Interests::NODE_LOCAL_DURATION).then(|| {
+                            ReceiverProcessingMetricSet::register(
+                                pipeline,
+                                pipeline.node_duration_distribution(),
+                            )
+                        }),
+                    }))
+                }),
+        }
+    }
+
+    /// Starts an accepted attempt, reading the monotonic clock only when enabled.
+    #[must_use = "retain the attempt until collection succeeds or fails"]
+    pub fn processing(&self) -> ReceiverPullAttempt {
+        ReceiverPullAttempt(self.inner.as_ref().map(|metrics| {
+            Rc::new(PullAttemptState {
+                metrics: Rc::clone(metrics),
+                started: metrics.borrow().duration.is_some().then(TokioInstant::now),
+                finished: Cell::new(false),
+            })
+        }))
+    }
+
+    /// Reports completed attempts while retaining deltas deferred by backpressure.
+    pub fn report(&mut self, reporter: &mut MetricsReporter) -> Result<(), TelemetryError> {
+        if let Some(inner) = &self.inner {
+            let mut metrics = inner.borrow_mut();
+            if let Some(attempts) = &mut metrics.attempts {
+                reporter.report_measurement(attempts)?;
+            }
+            if let Some(duration) = &mut metrics.duration {
+                duration.report(reporter)?;
+            }
+        }
+        Ok(())
+    }
+
+    /// Takes completed observations for terminal handoff; active attempts stay active.
+    ///
+    /// Finish, cancel, or drop every outstanding attempt before calling this for
+    /// the final handoff. In particular, do not take snapshots in a return
+    /// expression while an unfinished guard or owning `run()` future is still
+    /// alive: its later drop records failure after the snapshots were captured.
+    #[must_use]
+    pub fn terminal_snapshots(&mut self) -> Vec<MetricSetSnapshot> {
+        let mut snapshots = Vec::new();
+        if let Some(inner) = &self.inner {
+            let mut metrics = inner.borrow_mut();
+            if let Some(attempts) = &mut metrics.attempts {
+                snapshots.extend(attempts.terminal_snapshots());
+            }
+            if let Some(duration) = &mut metrics.duration {
+                snapshots.extend(duration.terminal_snapshots());
+            }
+        }
+        snapshots
+    }
+}
+
+struct PullMetricSets {
+    attempts: Option<MeasurementMetricSet<ReceiverPulledMetrics>>,
+    duration: Option<ReceiverProcessingMetricSet>,
+}
+
+struct PullAttemptState {
+    metrics: Rc<RefCell<PullMetricSets>>,
+    started: Option<TokioInstant>,
+    finished: Cell<bool>,
+}
+
+impl PullAttemptState {
+    fn finish(&self, outcome: Outcome) {
+        if self.finished.replace(true) {
+            return;
+        }
+        let duration = self.started.map(|started| started.elapsed());
+        let mut metrics = self.metrics.borrow_mut();
+        if let Some(attempts) = &mut metrics.attempts {
+            attempts.with(OutcomeAttributes { outcome }).attempts.inc();
+        }
+        if let (Some(elapsed), Some(duration)) = (duration, &mut metrics.duration) {
+            duration.record(elapsed);
+        }
+    }
+}
+
+/// One accepted collection attempt; dropping it unfinished records failure.
+///
+/// Keep this guard on the receiver's local core, including when source work is
+/// dispatched to a worker. Finish before handoff, or cancel before joining work.
+/// On shutdown, finish, cancel, or drop it before taking final metric snapshots.
+#[must_use = "retain the attempt until collection succeeds or fails"]
+pub struct ReceiverPullAttempt(Option<Rc<PullAttemptState>>);
+
+impl ReceiverPullAttempt {
+    /// Runs async collection, recording success on `Ok` and failure on `Err` or drop.
+    ///
+    /// The closure may obtain an attempt-specific cancellation handle to end
+    /// accounting before cleanup. It still owns suppressing abandoned output.
+    /// Use [`Self::success`] directly for externally driven collection.
+    pub async fn run<T, E>(
+        self,
+        work: impl AsyncFnOnce(&ReceiverPullAttempt) -> Result<T, E>,
+    ) -> Result<T, E> {
+        let result = work(&self).await;
+        if result.is_ok() {
+            self.success();
+        }
+        result
+    }
+
+    /// Records successful collection, including valid empty or permitted partial results.
+    ///
+    /// Does nothing if this attempt already failed through its cancellation handle.
+    pub fn success(self) {
+        if let Some(state) = &self.0 {
+            state.finish(Outcome::Success);
+        }
+    }
+
+    /// Creates an attempt-specific handle for control-driven timeout or cancellation.
+    #[must_use]
+    pub fn cancellation_handle(&self) -> ReceiverPullCancellation {
+        ReceiverPullCancellation(self.0.clone())
+    }
+}
+
+impl Drop for ReceiverPullAttempt {
+    fn drop(&mut self) {
+        if let Some(state) = &self.0 {
+            state.finish(Outcome::Failure);
+        }
+    }
+}
+
+/// A local cancellation handle that cannot terminate any other collection attempt.
+///
+/// Dropping the handle does not finish the attempt. Cancellation records failure
+/// immediately, but does not stop source work, release capacity, or join workers.
+///
+/// This is an accounting handle, not a cancellation token. Receivers must use
+/// their own cancellation state to skip preparation or suppress abandoned output.
+/// Accounting state is absent when metrics are disabled and cannot drive behavior.
+#[derive(Clone)]
+pub struct ReceiverPullCancellation(Option<Rc<PullAttemptState>>);
+
+impl ReceiverPullCancellation {
+    /// Ends accounting before cleanup; repeated cancellation and late results are ignored.
+    pub fn cancel(&self) {
+        if let Some(state) = &self.0 {
+            state.finish(Outcome::Failure);
+        }
+    }
+}
 
 /// Receiver-local handling of classified messages received at the external boundary.
 #[metric_set(
@@ -17,50 +234,455 @@ use std::time::Duration;
     measurement_attributes = SignalOutcomeAttributes
 )]
 #[derive(Debug, Default, Clone)]
-pub struct ReceiverReceivedMetrics {
+struct ReceiverReceivedMetrics {
     /// Number of classified external messages whose receiver-local handling terminated.
     #[metric(unit = "{message}")]
-    pub messages: Counter<u64>,
-    /// Encoded application payload size observed before receiver decoding.
-    #[metric(name = "payload.size", unit = "By")]
-    pub payload_size: Counter<u64>,
-    /// Receiver-local time from observing the classified message through termination.
-    /// Downstream processing and Ack/Nack completion are excluded.
-    #[metric(unit = "s")]
-    pub duration: HistogramNormal,
+    messages: Counter<u64>,
 }
 
 impl ReceiverReceivedMetrics {
     /// Records one classified external message when receiver-local handling terminates.
     #[inline]
-    pub fn record(&mut self, duration: Duration, payload_size: u64) {
+    pub fn record(&mut self) {
         self.messages.inc();
-        self.payload_size.add(payload_size);
-        self.duration.record(duration.as_secs_f64());
     }
 }
 
-/// Individual attempts to submit encoded application payloads from an exporter.
+/// Optional payload-size accounting for classified receiver messages.
+#[metric_set(
+    name = "receiver.received",
+    measurement_attributes = SignalOutcomeAttributes
+)]
+#[derive(Debug, Default, Clone)]
+struct ReceiverReceivedPayloadMetrics {
+    /// Encoded application payload size observed before receiver decoding.
+    #[metric(name = "payload.size", unit = "By")]
+    payload_size: Counter<u64>,
+}
+
+impl ReceiverReceivedPayloadMetrics {
+    /// Records the encoded application payload size for one received message.
+    #[inline]
+    pub fn record(&mut self, payload_size: u64) {
+        self.payload_size.add(payload_size);
+    }
+}
+
+/// Basic receiver-local processing duration, independent of signal and outcome.
+#[metric_set(name = "receiver.processing")]
+#[derive(Debug, Default, Clone)]
+pub struct ReceiverProcessingBasicMetrics {
+    /// Node-defined receiver-local processing time.
+    #[metric(unit = "s")]
+    duration: Mmsc,
+}
+
+/// Normal-resolution receiver-local processing duration.
+#[metric_set(name = "receiver.processing")]
+#[derive(Debug, Default, Clone)]
+pub struct ReceiverProcessingNormalMetrics {
+    /// Node-defined receiver-local processing time.
+    ///
+    /// Each receiver documents its stable start and end boundary. Downstream
+    /// processing, batching wait, handoff wait, and Ack/Nack completion are
+    /// excluded.
+    #[metric(unit = "s")]
+    duration: HistogramNormal,
+}
+
+/// Detailed-resolution receiver-local processing duration.
+#[metric_set(name = "receiver.processing")]
+#[derive(Debug, Default, Clone)]
+pub struct ReceiverProcessingDetailedMetrics {
+    /// Node-defined receiver-local processing time.
+    #[metric(unit = "s")]
+    duration: HistogramDetailed,
+}
+
+/// Receiver-local duration shared by message processing and source collection.
+///
+/// Callers gate registration and clock reads with `NODE_LOCAL_DURATION` and
+/// document their operation boundary. One operation records one duration,
+/// regardless of its signal classification or terminal outcome.
+pub enum ReceiverProcessingMetricSet {
+    /// Basic min/max/sum/count aggregation.
+    Basic(MetricSet<ReceiverProcessingBasicMetrics>),
+    /// Normal-resolution exponential histogram aggregation.
+    Normal(MetricSet<ReceiverProcessingNormalMetrics>),
+    /// Detailed-resolution exponential histogram aggregation.
+    Detailed(MetricSet<ReceiverProcessingDetailedMetrics>),
+}
+
+impl std::fmt::Debug for ReceiverProcessingMetricSet {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        let (tier, key) = match self {
+            Self::Basic(metrics) => ("basic", metrics.metrics_key()),
+            Self::Normal(metrics) => ("normal", metrics.metrics_key()),
+            Self::Detailed(metrics) => ("detailed", metrics.metrics_key()),
+        };
+        f.debug_struct("ReceiverProcessingMetricSet")
+            .field("tier", &tier)
+            .field("metrics_key", &key)
+            .finish()
+    }
+}
+
+impl ReceiverProcessingMetricSet {
+    /// Registers the receiver duration with its entity context and configured tier.
+    #[must_use]
+    pub fn register(registrar: &impl MetricSetRegistrar, tier: DistributionTier) -> Self {
+        match tier {
+            DistributionTier::Basic => {
+                Self::Basic(ReceiverProcessingBasicMetrics::register(registrar))
+            }
+            DistributionTier::Normal => {
+                Self::Normal(ReceiverProcessingNormalMetrics::register(registrar))
+            }
+            DistributionTier::Detailed => {
+                Self::Detailed(ReceiverProcessingDetailedMetrics::register(registrar))
+            }
+        }
+    }
+
+    /// Records one locally completed operation, including failure or cancellation.
+    pub fn record(&mut self, duration: Duration) {
+        let value = duration.as_secs_f64();
+        match self {
+            Self::Basic(metrics) => metrics.duration.record(value),
+            Self::Normal(metrics) => metrics.duration.record(value),
+            Self::Detailed(metrics) => metrics.duration.record(value),
+        }
+    }
+
+    /// Reports pending durations, retaining them when the reporter is full.
+    pub fn report(&mut self, reporter: &mut MetricsReporter) -> Result<(), TelemetryError> {
+        match self {
+            Self::Basic(metrics) => reporter.report(metrics),
+            Self::Normal(metrics) => reporter.report(metrics),
+            Self::Detailed(metrics) => reporter.report(metrics),
+        }
+    }
+
+    /// Takes recorded durations for terminal handoff without emitting empty intervals.
+    #[must_use]
+    pub fn terminal_snapshots(&mut self) -> Vec<MetricSetSnapshot> {
+        match self {
+            Self::Basic(metrics) if !metrics.is_empty() => metrics.terminal_snapshots(),
+            Self::Normal(metrics) if !metrics.is_empty() => metrics.terminal_snapshots(),
+            Self::Detailed(metrics) if !metrics.is_empty() => metrics.terminal_snapshots(),
+            _ => Vec::new(),
+        }
+    }
+}
+
+/// Receiver-local processing state for one external message.
+///
+/// One external message may emit zero, one, or several PData messages. This
+/// state owns the external-message observation; engine-managed `node.output`
+/// metrics own the emitted PData observations.
+#[derive(Debug)]
+pub struct ReceiverProcessing {
+    measure_duration: bool,
+    payload_size: Option<u64>,
+    accepts_payload_size: bool,
+}
+
+/// Operation error paired with the outcome and optional receiver signal it represents.
+#[derive(Debug)]
+pub struct ErrorWithOutcome<E> {
+    signal: Option<SignalType>,
+    outcome: Outcome,
+    error: E,
+}
+
+impl<E> From<E> for ErrorWithOutcome<E> {
+    fn from(error: E) -> Self {
+        Self {
+            signal: None,
+            outcome: Outcome::Failure,
+            error,
+        }
+    }
+}
+
+/// Completed receiver processing ready to be recorded.
+#[derive(Debug)]
+#[must_use = "completed receiver processing must be recorded"]
+pub struct CompletedReceiverProcessing<T, E> {
+    signal: Option<SignalType>,
+    outcome: Outcome,
+    duration: Option<Duration>,
+    payload_size: Option<u64>,
+    result: Result<T, E>,
+}
+
+/// Shared receiver metrics with node-interest-gated processing duration.
+#[derive(Debug)]
+pub struct ReceiverMetrics {
+    received: MeasurementMetricSet<ReceiverReceivedMetrics>,
+    payload: MeasurementMetricSet<ReceiverReceivedPayloadMetrics>,
+    processing: Option<ReceiverProcessingMetricSet>,
+    interests: Interests,
+}
+
+impl ReceiverMetrics {
+    /// Registers the shared receiver metric sets.
+    #[must_use]
+    pub fn register(pipeline_ctx: &PipelineContext) -> Self {
+        let interests = pipeline_ctx.node_interests();
+        Self {
+            received: ReceiverReceivedMetrics::register(pipeline_ctx),
+            payload: ReceiverReceivedPayloadMetrics::register(pipeline_ctx),
+            processing: interests.contains(Interests::NODE_LOCAL_DURATION).then(|| {
+                ReceiverProcessingMetricSet::register(
+                    pipeline_ctx,
+                    pipeline_ctx.node_duration_distribution(),
+                )
+            }),
+            interests,
+        }
+    }
+
+    /// Registers the shared receiver metric sets with an entity-bound registrar and duration tier.
+    #[must_use]
+    pub fn register_with_distribution(
+        registrar: &impl MetricSetRegistrar,
+        interests: Interests,
+        duration_distribution: DistributionTier,
+    ) -> Self {
+        Self {
+            received: ReceiverReceivedMetrics::register(registrar),
+            payload: ReceiverReceivedPayloadMetrics::register(registrar),
+            processing: interests
+                .contains(Interests::NODE_LOCAL_DURATION)
+                .then(|| ReceiverProcessingMetricSet::register(registrar, duration_distribution)),
+            interests,
+        }
+    }
+
+    /// Creates receiver-local processing instrumentation for one external message.
+    ///
+    /// Do not create one instance per emitted PData message when receiver work
+    /// fans out, and do not merge several external messages into one instance
+    /// when receiver work aggregates.
+    #[must_use]
+    pub fn processing(&self) -> ReceiverProcessing {
+        ReceiverProcessing {
+            measure_duration: self.interests.contains(Interests::NODE_LOCAL_DURATION),
+            payload_size: None,
+            accepts_payload_size: self.interests.contains(Interests::NODE_SIZE),
+        }
+    }
+
+    /// Records one completed receiver processing observation.
+    pub fn record<T, E>(&mut self, completed: CompletedReceiverProcessing<T, E>) -> Result<T, E> {
+        if let Some(duration) = completed.duration {
+            self.processing
+                .as_mut()
+                .expect("duration collection requires a registered receiver duration metric")
+                .record(duration);
+        }
+        let Some(signal) = completed.signal else {
+            return completed.result;
+        };
+        let attributes = SignalOutcomeAttributes {
+            signal,
+            outcome: completed.outcome,
+        };
+        if self.interests.contains(Interests::NODE_OUTPUT_METRICS) {
+            self.received.with(attributes).record();
+        }
+        if let Some(payload_size) = completed.payload_size {
+            self.payload.with(attributes).record(payload_size);
+        }
+        completed.result
+    }
+
+    /// Reports every touched shared receiver metric bucket.
+    pub fn report(&mut self, reporter: &mut MetricsReporter) -> Result<(), TelemetryError> {
+        reporter.report_measurement(&mut self.received)?;
+        reporter.report_measurement(&mut self.payload)?;
+        if let Some(processing) = &mut self.processing {
+            processing.report(reporter)?;
+        }
+        Ok(())
+    }
+
+    /// Takes every touched shared receiver metric bucket for terminal handoff.
+    #[must_use]
+    pub fn terminal_snapshots(&mut self) -> Vec<MetricSetSnapshot> {
+        let mut snapshots = self.received.terminal_snapshots();
+        snapshots.extend(self.payload.terminal_snapshots());
+        if let Some(processing) = &mut self.processing {
+            snapshots.extend(processing.terminal_snapshots());
+        }
+        snapshots
+    }
+}
+
+impl ReceiverProcessing {
+    /// Classifies and returns an error from the processing closure as failed.
+    pub fn failed<E>(&self, signal: SignalType, error: E) -> ErrorWithOutcome<E> {
+        ErrorWithOutcome {
+            signal: Some(signal),
+            outcome: Outcome::Failure,
+            error,
+        }
+    }
+
+    /// Classifies and returns an error from the processing closure as refused.
+    ///
+    /// Pass the returned error directly to `Err`.
+    pub fn refused<E>(&self, signal: SignalType, error: E) -> ErrorWithOutcome<E> {
+        ErrorWithOutcome {
+            signal: Some(signal),
+            outcome: Outcome::Refused,
+            error,
+        }
+    }
+
+    /// Sets the encoded application payload size without evaluating it when disabled.
+    pub fn set_payload_size_with(&mut self, payload_size: impl FnOnce() -> usize) {
+        if self.accepts_payload_size {
+            self.payload_size = Some(u64::try_from(payload_size()).unwrap_or(u64::MAX));
+        }
+    }
+
+    /// Runs receiver-local processing and captures its terminal result.
+    ///
+    /// `Ok((signal, value))` records success. Return errors through
+    /// [`Self::failed`] or [`Self::refused`] after signal classification.
+    /// An unclassified `Err(error)` still records enabled processing duration,
+    /// but emits no signal-attributed received counters.
+    #[must_use = "the completed receiver processing observation must be recorded"]
+    pub fn run<T, E>(
+        mut self,
+        work: impl FnOnce(&mut ReceiverProcessing) -> Result<(SignalType, T), ErrorWithOutcome<E>>,
+    ) -> CompletedReceiverProcessing<T, E> {
+        let started_at = self.measure_duration.then(Instant::now);
+        let result = work(&mut self);
+        let (signal, outcome, result) = match result {
+            Ok((signal, value)) => (Some(signal), Outcome::Success, Ok(value)),
+            Err(ErrorWithOutcome {
+                signal,
+                outcome,
+                error,
+            }) => (signal, outcome, Err(error)),
+        };
+        CompletedReceiverProcessing {
+            signal,
+            outcome,
+            duration: started_at.map(|started_at| started_at.elapsed()),
+            payload_size: self.payload_size,
+            result,
+        }
+    }
+}
+
+/// Individual node-local delivery attempts from an exporter.
 #[metric_set(
     name = "exporter.attempted",
     measurement_attributes = SignalOutcomeAttributes
 )]
 #[derive(Debug, Default, Clone)]
-pub struct ExporterAttemptedMetrics {
-    /// Number of PData messages submitted across export attempts.
+struct ExporterAttemptedMetrics {
+    /// Number of node-local delivery attempts.
+    ///
+    /// Retries represented as shared attempts count again. This differs from
+    /// `node.input.messages`, which counts PData messages entering the exporter.
     #[metric(unit = "{message}")]
-    pub messages: Counter<u64>,
-    /// Time spent performing export attempts.
-    #[metric(unit = "s")]
-    pub duration: HistogramNormal,
+    messages: Counter<u64>,
 }
 
 impl ExporterAttemptedMetrics {
     /// Records one export attempt.
     #[inline]
-    pub fn record(&mut self, duration: Duration) {
+    pub fn record(&mut self) {
         self.messages.inc();
-        self.duration.record(duration.as_secs_f64());
+    }
+}
+
+/// Optional duration accounting for individual exporter attempts.
+#[metric_set(
+    name = "exporter.attempted",
+    measurement_attributes = SignalOutcomeAttributes
+)]
+#[derive(Debug, Default, Clone)]
+struct ExporterAttemptedDurationBasicMetrics {
+    /// Time spent performing export attempts, including backend latency.
+    #[metric(unit = "s")]
+    duration: Mmsc,
+}
+
+/// Normal-resolution duration accounting for individual exporter attempts.
+#[metric_set(
+    name = "exporter.attempted",
+    measurement_attributes = SignalOutcomeAttributes
+)]
+#[derive(Debug, Default, Clone)]
+struct ExporterAttemptedDurationNormalMetrics {
+    /// Time spent performing export attempts, including backend latency.
+    #[metric(unit = "s")]
+    duration: HistogramNormal,
+}
+
+/// Detailed-resolution duration accounting for individual exporter attempts.
+#[metric_set(
+    name = "exporter.attempted",
+    measurement_attributes = SignalOutcomeAttributes
+)]
+#[derive(Debug, Default, Clone)]
+struct ExporterAttemptedDurationDetailedMetrics {
+    /// Time spent performing export attempts, including backend latency.
+    #[metric(unit = "s")]
+    duration: HistogramDetailed,
+}
+
+#[derive(Debug)]
+enum ExporterAttemptedDurationMetricSet {
+    Basic(MeasurementMetricSet<ExporterAttemptedDurationBasicMetrics>),
+    Normal(MeasurementMetricSet<ExporterAttemptedDurationNormalMetrics>),
+    Detailed(MeasurementMetricSet<ExporterAttemptedDurationDetailedMetrics>),
+}
+
+impl ExporterAttemptedDurationMetricSet {
+    fn register(registrar: &impl MetricSetRegistrar, tier: DistributionTier) -> Self {
+        match tier {
+            DistributionTier::Basic => {
+                Self::Basic(ExporterAttemptedDurationBasicMetrics::register(registrar))
+            }
+            DistributionTier::Normal => {
+                Self::Normal(ExporterAttemptedDurationNormalMetrics::register(registrar))
+            }
+            DistributionTier::Detailed => Self::Detailed(
+                ExporterAttemptedDurationDetailedMetrics::register(registrar),
+            ),
+        }
+    }
+
+    fn record(&mut self, attributes: SignalOutcomeAttributes, duration: Duration) {
+        let value = duration.as_secs_f64();
+        match self {
+            Self::Basic(metrics) => metrics.with(attributes).duration.record(value),
+            Self::Normal(metrics) => metrics.with(attributes).duration.record(value),
+            Self::Detailed(metrics) => metrics.with(attributes).duration.record(value),
+        }
+    }
+
+    fn report(&mut self, reporter: &mut MetricsReporter) -> Result<(), TelemetryError> {
+        match self {
+            Self::Basic(metrics) => reporter.report_measurement(metrics),
+            Self::Normal(metrics) => reporter.report_measurement(metrics),
+            Self::Detailed(metrics) => reporter.report_measurement(metrics),
+        }
+    }
+
+    fn terminal_snapshots(&mut self) -> Vec<MetricSetSnapshot> {
+        match self {
+            Self::Basic(metrics) => metrics.terminal_snapshots(),
+            Self::Normal(metrics) => metrics.terminal_snapshots(),
+            Self::Detailed(metrics) => metrics.terminal_snapshots(),
+        }
     }
 }
 
@@ -70,10 +692,10 @@ impl ExporterAttemptedMetrics {
     measurement_attributes = SignalOutcomeAttributes
 )]
 #[derive(Debug, Default, Clone)]
-pub struct ExporterAttemptedPayloadMetrics {
-    /// Encoded application payload size submitted across export attempts.
+struct ExporterAttemptedPayloadMetrics {
+    /// Encoded application payload size produced or submitted across export attempts.
     #[metric(name = "payload.size", unit = "By")]
-    pub payload_size: Counter<u64>,
+    payload_size: Counter<u64>,
 }
 
 impl ExporterAttemptedPayloadMetrics {
@@ -90,10 +712,10 @@ impl ExporterAttemptedPayloadMetrics {
     measurement_attributes = SignalOutcomeAttributes
 )]
 #[derive(Debug, Default, Clone)]
-pub struct ExporterAttemptedItemsMetrics {
-    /// Number of signal items submitted across export attempts.
+struct ExporterAttemptedItemsMetrics {
+    /// Number of signal items handled across export attempts.
     #[metric(unit = "{item}")]
-    pub items: Counter<u64>,
+    items: Counter<u64>,
 }
 
 impl ExporterAttemptedItemsMetrics {
@@ -104,10 +726,223 @@ impl ExporterAttemptedItemsMetrics {
     }
 }
 
+/// Prepared instrumentation for one node-local export attempt.
+///
+/// An attempt usually owns one external submission, but it can terminate
+/// during preparation or as a successful no-op. Fan-out creates one attempt
+/// per external submission; aggregation creates one attempt per external
+/// batch. Retries represented as shared attempts create new attempts.
+#[derive(Debug)]
+pub struct ExporterAttempt {
+    signal: SignalType,
+    started_at: Option<Instant>,
+    items: Option<u64>,
+    accepts_item_count: bool,
+    payload_size: Option<u64>,
+    accepts_payload_size: bool,
+}
+
+/// Completed exporter attempt ready to be recorded.
+#[derive(Debug)]
+#[must_use = "completed exporter attempts must be recorded"]
+pub struct CompletedExporterAttempt<T, E> {
+    signal: SignalType,
+    outcome: Outcome,
+    duration: Option<Duration>,
+    payload_size: Option<u64>,
+    items: Option<u64>,
+    result: Result<T, E>,
+}
+
+/// Shared exporter attempt metrics with node-interest-gated optional measurements.
+#[derive(Debug)]
+pub struct ExporterMetrics {
+    attempted: MeasurementMetricSet<ExporterAttemptedMetrics>,
+    duration: Option<ExporterAttemptedDurationMetricSet>,
+    payload: MeasurementMetricSet<ExporterAttemptedPayloadMetrics>,
+    items: MeasurementMetricSet<ExporterAttemptedItemsMetrics>,
+    interests: Interests,
+}
+
+impl ExporterMetrics {
+    /// Registers the shared exporter metric sets.
+    #[must_use]
+    pub fn register(pipeline_ctx: &PipelineContext) -> Self {
+        let interests = pipeline_ctx.node_interests();
+        Self::register_with_distribution(
+            pipeline_ctx,
+            interests,
+            pipeline_ctx.node_duration_distribution(),
+        )
+    }
+
+    /// Registers the shared exporter metric sets with an entity-bound registrar and duration tier.
+    #[must_use]
+    pub fn register_with_distribution(
+        registrar: &impl MetricSetRegistrar,
+        interests: Interests,
+        duration_distribution: DistributionTier,
+    ) -> Self {
+        Self {
+            attempted: ExporterAttemptedMetrics::register(registrar),
+            duration: interests.contains(Interests::NODE_LOCAL_DURATION).then(|| {
+                ExporterAttemptedDurationMetricSet::register(registrar, duration_distribution)
+            }),
+            payload: ExporterAttemptedPayloadMetrics::register(registrar),
+            items: ExporterAttemptedItemsMetrics::register(registrar),
+            interests,
+        }
+    }
+
+    /// Starts instrumentation for one node-local export attempt.
+    ///
+    /// Start before preparation owned by this attempt. Shared preparation that
+    /// precedes discovery of fan-out submissions requires separate
+    /// node-specific telemetry. A retry represented as a shared attempt starts
+    /// a new attempt with a fresh timing origin.
+    #[must_use]
+    pub fn attempt(&self, signal: SignalType) -> ExporterAttempt {
+        ExporterAttempt {
+            signal,
+            started_at: self
+                .interests
+                .contains(Interests::NODE_LOCAL_DURATION)
+                .then(Instant::now),
+            items: None,
+            accepts_item_count: self.interests.contains(Interests::NODE_ITEM_COUNTS),
+            payload_size: None,
+            accepts_payload_size: self.interests.contains(Interests::NODE_SIZE),
+        }
+    }
+
+    /// Records one completed exporter attempt.
+    pub fn record<T, E>(&mut self, completed: CompletedExporterAttempt<T, E>) -> Result<T, E> {
+        let attributes = SignalOutcomeAttributes {
+            signal: completed.signal,
+            outcome: completed.outcome,
+        };
+        if self.interests.contains(Interests::NODE_INPUT_METRICS) {
+            self.attempted.with(attributes).record();
+        }
+        if let Some(duration) = completed.duration {
+            self.duration
+                .as_mut()
+                .expect("duration collection requires a registered exporter duration metric")
+                .record(attributes, duration);
+        }
+        if let Some(payload_size) = completed.payload_size {
+            self.payload.with(attributes).record(payload_size);
+        }
+        if let Some(items) = completed.items {
+            self.items.with(attributes).record(items);
+        }
+        completed.result
+    }
+
+    /// Reports every touched shared exporter metric bucket.
+    pub fn report(&mut self, reporter: &mut MetricsReporter) -> Result<(), TelemetryError> {
+        reporter.report_measurement(&mut self.attempted)?;
+        if let Some(duration) = &mut self.duration {
+            duration.report(reporter)?;
+        }
+        reporter.report_measurement(&mut self.payload)?;
+        reporter.report_measurement(&mut self.items)
+    }
+
+    /// Takes every touched shared exporter metric bucket for terminal handoff.
+    #[must_use]
+    pub fn terminal_snapshots(&mut self) -> Vec<MetricSetSnapshot> {
+        let mut snapshots = self.attempted.terminal_snapshots();
+        if let Some(duration) = &mut self.duration {
+            snapshots.extend(duration.terminal_snapshots());
+        }
+        snapshots.extend(self.payload.terminal_snapshots());
+        snapshots.extend(self.items.terminal_snapshots());
+        snapshots
+    }
+}
+
+impl ExporterAttempt {
+    /// Classifies and returns an error from the attempt closure as failed.
+    pub fn failed<E>(&self, error: E) -> ErrorWithOutcome<E> {
+        ErrorWithOutcome {
+            signal: None,
+            outcome: Outcome::Failure,
+            error,
+        }
+    }
+
+    /// Classifies and returns an error from the attempt closure as refused.
+    ///
+    /// Pass the returned error directly to `Err`. Other errors are classified
+    /// as failures, while successful results are classified as successes.
+    pub fn refused<E>(&self, error: E) -> ErrorWithOutcome<E> {
+        ErrorWithOutcome {
+            signal: None,
+            outcome: Outcome::Refused,
+            error,
+        }
+    }
+
+    /// Sets the signal item count without evaluating it when disabled.
+    pub fn set_item_count_with(&mut self, item_count: impl FnOnce() -> u64) {
+        if self.accepts_item_count {
+            self.items = Some(item_count());
+        }
+    }
+
+    /// Sets the encoded application payload size without evaluating it when disabled.
+    pub fn set_payload_size_with(&mut self, payload_size: impl FnOnce() -> usize) {
+        if self.accepts_payload_size {
+            self.payload_size = Some(u64::try_from(payload_size()).unwrap_or(u64::MAX));
+        }
+    }
+
+    /// Runs async work and completes the attempt from its terminal result.
+    ///
+    /// `Ok(value)` records success. Return errors through [`Self::failed`] or
+    /// [`Self::refused`] to classify their terminal outcome.
+    ///
+    /// Use [`Self::complete`] instead when the operation is driven externally
+    /// and its terminal result is already available.
+    #[must_use = "the completed exporter attempt must be recorded"]
+    pub async fn run<T, E>(
+        mut self,
+        work: impl AsyncFnOnce(&mut ExporterAttempt) -> Result<T, ErrorWithOutcome<E>>,
+    ) -> CompletedExporterAttempt<T, E> {
+        let result = work(&mut self).await;
+        self.complete(result)
+    }
+
+    /// Completes an attempt from a terminal result produced by externally
+    /// managed control flow.
+    ///
+    /// This preserves timing from when the attempt was created. Prefer
+    /// [`Self::run`] when this attempt can directly own and await the operation.
+    #[must_use = "the completed exporter attempt must be recorded"]
+    pub fn complete<T, E>(
+        self,
+        result: Result<T, ErrorWithOutcome<E>>,
+    ) -> CompletedExporterAttempt<T, E> {
+        let (outcome, result) = match result {
+            Ok(value) => (Outcome::Success, Ok(value)),
+            Err(ErrorWithOutcome { outcome, error, .. }) => (outcome, Err(error)),
+        };
+        CompletedExporterAttempt {
+            signal: self.signal,
+            outcome,
+            duration: self.started_at.map(|started_at| started_at.elapsed()),
+            payload_size: self.payload_size,
+            items: self.items,
+            result,
+        }
+    }
+}
+
 /// Completed export operations.
 ///
 /// This set will be deprecated after exporters migrate to
-/// [`ExporterAttemptedMetrics`] and node-consumer terminal accounting.
+/// the shared exporter attempt metrics and node-input terminal accounting.
 #[metric_set(
     name = "exporter.exports",
     measurement_attributes = SignalOutcomeAttributes
@@ -134,7 +969,7 @@ impl ExporterExportMetrics {
 
 /// Lifecycle and wire bytes for messages admitted by a receiver.
 ///
-/// This set will be deprecated after receivers migrate to [`ReceiverReceivedMetrics`].
+/// This set will be deprecated after receivers migrate to the shared receiver metrics.
 #[metric_set(
     name = "receiver.messages",
     measurement_attributes = SignalAttributes
@@ -155,11 +990,329 @@ pub struct ReceiverMessageMetrics {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use otel_arrow_dfe_config::SignalType;
     use otel_arrow_dfe_engine::context::ControllerContext;
-    use otel_arrow_dfe_telemetry::common_attributes::Outcome;
-    use otel_arrow_dfe_telemetry::metrics::MeasurementMetricSet;
+    use otel_arrow_dfe_engine::testing::{
+        test_pipeline_ctx_with_interests,
+        test_pipeline_ctx_with_interests_and_duration_distribution,
+    };
+    use otel_arrow_dfe_telemetry::descriptor::Instrument;
+    use otel_arrow_dfe_telemetry::metrics::MetricValue;
     use otel_arrow_dfe_telemetry::registry::TelemetryRegistryHandle;
+    use std::cell::Cell;
+
+    /// Scenario: Success and guard-drop failure occur under every count/duration policy and distribution tier.
+    /// Guarantees: Only enabled sets emit, attempts count once, and duration has neither signal nor outcome.
+    #[tokio::test(start_paused = true)]
+    async fn pull_policy_controls_counts_duration_and_distribution() {
+        for tier in [
+            DistributionTier::Basic,
+            DistributionTier::Normal,
+            DistributionTier::Detailed,
+        ] {
+            for interests in [
+                Interests::empty(),
+                Interests::NODE_OUTPUT_METRICS,
+                Interests::NODE_LOCAL_DURATION,
+                Interests::NODE_OUTPUT_METRICS | Interests::NODE_LOCAL_DURATION,
+            ] {
+                let (pipeline, _registry) =
+                    test_pipeline_ctx_with_interests_and_duration_distribution(interests, tier);
+                let mut metrics = ReceiverPullMetrics::register(&pipeline);
+                let success = metrics.processing();
+                tokio::time::sleep(Duration::from_millis(20)).await;
+                success.success();
+                let failure = metrics.processing();
+                tokio::time::sleep(Duration::from_millis(30)).await;
+                drop(failure);
+                let snapshots = metrics.terminal_snapshots();
+                assert_eq!(
+                    snapshots.len(),
+                    2 * usize::from(interests.contains(Interests::NODE_OUTPUT_METRICS))
+                        + usize::from(interests.contains(Interests::NODE_LOCAL_DURATION)),
+                    "{interests:?}, {tier:?}"
+                );
+                for snapshot in snapshots {
+                    assert_eq!(snapshot.measurement_attribute_value("signal"), None);
+                    match &snapshot.get_metrics()[0] {
+                        MetricValue::U64(value) => {
+                            assert_eq!(*value, 1);
+                            assert!(matches!(
+                                snapshot.measurement_attribute_value("outcome"),
+                                Some("success" | "failure")
+                            ));
+                        }
+                        MetricValue::Distribution(value) => {
+                            assert_eq!(value.summary(), (2, 0.05, 0.02, 0.03));
+                            assert_eq!(snapshot.measurement_attribute_value("outcome"), None);
+                            let expected = match tier {
+                                DistributionTier::Basic => Instrument::Mmsc,
+                                _ => Instrument::ExponentialHistogram,
+                            };
+                            assert_eq!(snapshot.descriptor().metrics[0].instrument, expected);
+                        }
+                        _ => panic!("pull counter or duration"),
+                    }
+                }
+                assert!(metrics.terminal_snapshots().is_empty());
+            }
+        }
+    }
+
+    /// Scenario: Async collection succeeds, fails, cancels before cleanup, or is dropped while pending.
+    /// Guarantees: The closure result is preserved, every attempt records once, and cleanup time is excluded.
+    #[tokio::test(start_paused = true)]
+    async fn pull_run_records_results_cancellation_and_dropped_futures() {
+        let (pipeline, _registry) = test_pipeline_ctx_with_interests(
+            Interests::NODE_OUTPUT_METRICS | Interests::NODE_LOCAL_DURATION,
+        );
+        let mut metrics = ReceiverPullMetrics::register(&pipeline);
+        let result = metrics
+            .processing()
+            .run(async |_| {
+                tokio::time::sleep(Duration::from_secs(1)).await;
+                Ok::<_, &str>("collected")
+            })
+            .await;
+        assert_eq!(result, Ok("collected"));
+        let result = metrics
+            .processing()
+            .run(async |_| {
+                tokio::time::sleep(Duration::from_secs(2)).await;
+                Err::<(), _>("source failed")
+            })
+            .await;
+        assert_eq!(result, Err("source failed"));
+        let result = metrics
+            .processing()
+            .run(async |attempt| {
+                tokio::time::sleep(Duration::from_secs(3)).await;
+                attempt.cancellation_handle().cancel();
+                tokio::time::sleep(Duration::from_secs(10)).await;
+                Err::<(), _>("cancelled")
+            })
+            .await;
+        assert_eq!(result, Err("cancelled"));
+        let mut pending = Box::pin(
+            metrics
+                .processing()
+                .run(async |_| std::future::pending::<Result<(), &str>>().await),
+        );
+        assert!(futures::poll!(&mut pending).is_pending());
+        tokio::time::sleep(Duration::from_secs(4)).await;
+        drop(pending);
+        let snapshots = metrics.terminal_snapshots();
+        assert_eq!(snapshots.len(), 3);
+        for snapshot in snapshots {
+            match &snapshot.get_metrics()[0] {
+                MetricValue::U64(value) => {
+                    let expected = match snapshot.measurement_attribute_value("outcome") {
+                        Some("success") => 1,
+                        Some("failure") => 3,
+                        other => panic!("unexpected pull outcome: {other:?}"),
+                    };
+                    assert_eq!(*value, expected);
+                }
+                MetricValue::Distribution(value) => {
+                    assert_eq!(value.summary(), (4, 10.0, 1.0, 4.0));
+                }
+                _ => panic!("pull counter or duration"),
+            }
+        }
+        assert!(metrics.terminal_snapshots().is_empty());
+    }
+
+    /// Scenario: Two pulls overlap; one is cancelled, then its late result and stale handle outlive a newer pull.
+    /// Guarantees: Each attempt terminates once, cancellation excludes cleanup, and reports do not end active pulls.
+    #[tokio::test(start_paused = true)]
+    async fn pull_cancellation_is_attempt_scoped_and_excludes_cleanup() {
+        let (pipeline, _registry) = test_pipeline_ctx_with_interests(
+            Interests::NODE_OUTPUT_METRICS | Interests::NODE_LOCAL_DURATION,
+        );
+        let mut metrics = ReceiverPullMetrics::register(&pipeline);
+        let cancelled = metrics.processing();
+        let cancellation = cancelled.cancellation_handle();
+        tokio::time::sleep(Duration::from_millis(10)).await;
+        let overlapping = metrics.processing();
+        tokio::time::sleep(Duration::from_millis(10)).await;
+        cancellation.cancel();
+        cancellation.clone().cancel();
+        let (receiver, mut reporter) = MetricsReporter::create_new_and_receiver(4);
+        metrics
+            .report(&mut reporter)
+            .expect("report cancelled pull");
+        let snapshots: Vec<_> = receiver.try_iter().collect();
+        assert_eq!(snapshots.len(), 2);
+        assert_eq!(
+            snapshots[0].measurement_attribute_value("outcome"),
+            Some("failure")
+        );
+        assert_eq!(snapshots[0].get_metrics()[0].to_u64_lossy(), 1);
+        let MetricValue::Distribution(duration) = &snapshots[1].get_metrics()[0] else {
+            panic!("cancelled pull duration");
+        };
+        assert_eq!(duration.summary(), (1, 0.02, 0.02, 0.02));
+        tokio::time::sleep(Duration::from_secs(1)).await;
+        overlapping.success();
+        let newer = metrics.processing();
+        cancelled.success();
+        cancellation.cancel();
+        let snapshots = metrics.terminal_snapshots();
+        assert_eq!(snapshots.len(), 2, "only the overlapping success completed");
+        assert_eq!(
+            snapshots[0].measurement_attribute_value("outcome"),
+            Some("success")
+        );
+        assert_eq!(snapshots[0].get_metrics()[0].to_u64_lossy(), 1);
+        let MetricValue::Distribution(duration) = &snapshots[1].get_metrics()[0] else {
+            panic!("overlapping pull duration");
+        };
+        assert_eq!(duration.summary(), (1, 1.01, 1.01, 1.01));
+        drop(newer);
+        cancellation.cancel();
+        let snapshots = metrics.terminal_snapshots();
+        assert_eq!(snapshots.len(), 2, "new pull failed independently");
+        assert_eq!(
+            snapshots[0].measurement_attribute_value("outcome"),
+            Some("failure")
+        );
+        assert_eq!(snapshots[0].get_metrics()[0].to_u64_lossy(), 1);
+        assert!(metrics.terminal_snapshots().is_empty());
+    }
+
+    /// Scenario: Shutdown completes, cancels, or drops every outstanding attempt before capturing final snapshots.
+    /// Guarantees: The final batch contains every attempt's count and duration, and later guard cleanup cannot add unexported observations.
+    #[tokio::test(start_paused = true)]
+    async fn pull_shutdown_finishes_attempts_before_terminal_snapshots() {
+        let (pipeline, _registry) = test_pipeline_ctx_with_interests(
+            Interests::NODE_OUTPUT_METRICS | Interests::NODE_LOCAL_DURATION,
+        );
+        let mut metrics = ReceiverPullMetrics::register(&pipeline);
+        let completed = metrics.processing();
+        let cancelled = metrics.processing();
+        let cancellation = cancelled.cancellation_handle();
+        let abandoned = metrics.processing();
+        let mut pending = Box::pin(
+            metrics
+                .processing()
+                .run(async |_| std::future::pending::<Result<(), ()>>().await),
+        );
+        assert!(futures::poll!(&mut pending).is_pending());
+        tokio::time::advance(Duration::from_secs(1)).await;
+
+        let snapshots = {
+            completed.success();
+            cancellation.cancel();
+            drop(abandoned);
+            drop(pending);
+            metrics.terminal_snapshots()
+        };
+        assert_eq!(snapshots.len(), 3);
+        for snapshot in snapshots {
+            match &snapshot.get_metrics()[0] {
+                MetricValue::U64(value) => {
+                    let expected = match snapshot.measurement_attribute_value("outcome") {
+                        Some("success") => 1,
+                        Some("failure") => 3,
+                        other => panic!("unexpected pull outcome: {other:?}"),
+                    };
+                    assert_eq!(*value, expected);
+                }
+                MetricValue::Distribution(value) => {
+                    assert_eq!(value.summary(), (4, 4.0, 1.0, 1.0));
+                }
+                _ => panic!("pull counter or duration"),
+            }
+        }
+
+        tokio::time::advance(Duration::from_secs(10)).await;
+        cancelled.success();
+        cancellation.cancel();
+        assert!(
+            metrics.terminal_snapshots().is_empty(),
+            "cleanup after the final handoff must not leave new observations"
+        );
+    }
+
+    /// Scenario: A periodic report fills its channel with the attempt counter before duration can be sent.
+    /// Guarantees: Deferred duration survives until capacity is available, without repeating accepted counters.
+    #[test]
+    fn pull_reporting_retains_deferred_deltas() {
+        let (pipeline, _registry) = test_pipeline_ctx_with_interests(
+            Interests::NODE_OUTPUT_METRICS | Interests::NODE_LOCAL_DURATION,
+        );
+        let mut metrics = ReceiverPullMetrics::register(&pipeline);
+        metrics.processing().success();
+        let (receiver, mut reporter) = MetricsReporter::create_new_and_receiver(1);
+        metrics.report(&mut reporter).expect("counter accepted");
+        let counter = receiver.try_recv().expect("attempt count");
+        assert_eq!(counter.descriptor().name, "receiver.pulled");
+        metrics.report(&mut reporter).expect("duration accepted");
+        let duration = receiver.try_recv().expect("deferred duration");
+        assert_eq!(duration.descriptor().name, "receiver.processing");
+        let MetricValue::Distribution(value) = &duration.get_metrics()[0] else {
+            panic!("processing duration");
+        };
+        assert_eq!(value.summary().0, 1);
+        metrics.report(&mut reporter).expect("empty report");
+        assert!(receiver.is_empty(), "accepted deltas must not repeat");
+    }
+
+    /// Scenario: The metrics channel closes before a completed attempt is reported.
+    /// Guarantees: Reporting returns an explicit error and retains both deltas for terminal handoff.
+    #[test]
+    fn pull_reporting_preserves_deltas_on_closed_channel() {
+        let (pipeline, _registry) = test_pipeline_ctx_with_interests(
+            Interests::NODE_OUTPUT_METRICS | Interests::NODE_LOCAL_DURATION,
+        );
+        let mut metrics = ReceiverPullMetrics::register(&pipeline);
+        metrics.processing().success();
+        let (receiver, mut reporter) = MetricsReporter::create_new_and_receiver(1);
+        drop(receiver);
+        assert!(matches!(
+            metrics.report(&mut reporter),
+            Err(TelemetryError::MetricsChannelClosed)
+        ));
+        assert_eq!(metrics.terminal_snapshots().len(), 2);
+    }
+
+    /// Scenario: Collection attempts terminate with different outcomes before any signal is known.
+    /// Guarantees: Reporting preserves disjoint outcome counts without a signal dimension and drains each bucket once.
+    #[test]
+    fn receiver_pulled_attempts_report_disjoint_outcomes() {
+        let (pipeline_ctx, _registry) = test_pipeline_ctx_with_interests(Interests::empty());
+        let mut metrics = ReceiverPulledMetrics::register(&pipeline_ctx);
+        let outcomes = [
+            (Outcome::Success, "success", 2),
+            (Outcome::Failure, "failure", 3),
+        ];
+        for (outcome, _, count) in outcomes {
+            let attributes = OutcomeAttributes { outcome };
+            metrics.with(attributes).attempts.add(count);
+            metrics.with(attributes).attempts.inc();
+        }
+
+        let (rx, mut reporter) = MetricsReporter::create_new_and_receiver(4);
+        reporter
+            .report_measurement(&mut metrics)
+            .expect("report attempts");
+        let snapshots: Vec<_> = rx.try_iter().collect();
+        assert_eq!(snapshots.len(), outcomes.len());
+        for (_, wire_outcome, count) in outcomes {
+            let snapshot = snapshots
+                .iter()
+                .find(|snapshot| {
+                    snapshot.measurement_attribute_value("outcome") == Some(wire_outcome)
+                })
+                .expect("recorded outcome");
+            assert_eq!(snapshot.descriptor().name, "receiver.pulled");
+            assert_eq!(snapshot.measurement_attribute_value("signal"), None);
+            let descriptor = &snapshot.descriptor().metrics[0];
+            assert_eq!(descriptor.name, "attempts");
+            assert_eq!(descriptor.unit, "{attempt}");
+            assert_eq!(snapshot.get_metrics()[0].to_u64_lossy(), count + 1);
+        }
+        assert!(metrics.terminal_snapshots().is_empty());
+    }
 
     fn new_attempted_metrics() -> MeasurementMetricSet<ExporterAttemptedMetrics> {
         let registry = TelemetryRegistryHandle::new();
@@ -175,6 +1328,16 @@ mod tests {
         let pipeline_ctx =
             controller.pipeline_context_with("grp".into(), "pipeline".into(), 0, 1, 0);
         ExporterAttemptedItemsMetrics::register(&pipeline_ctx)
+    }
+
+    fn new_attempted_duration_metrics(
+        tier: DistributionTier,
+    ) -> ExporterAttemptedDurationMetricSet {
+        let registry = TelemetryRegistryHandle::new();
+        let controller = ControllerContext::new(registry);
+        let pipeline_ctx =
+            controller.pipeline_context_with("grp".into(), "pipeline".into(), 0, 1, 0);
+        ExporterAttemptedDurationMetricSet::register(&pipeline_ctx, tier)
     }
 
     fn new_attempted_payload_metrics() -> MeasurementMetricSet<ExporterAttemptedPayloadMetrics> {
@@ -193,6 +1356,38 @@ mod tests {
         ReceiverReceivedMetrics::register(&pipeline_ctx)
     }
 
+    fn new_received_payload_metrics() -> MeasurementMetricSet<ReceiverReceivedPayloadMetrics> {
+        let registry = TelemetryRegistryHandle::new();
+        let controller = ControllerContext::new(registry);
+        let pipeline_ctx =
+            controller.pipeline_context_with("grp".into(), "pipeline".into(), 0, 1, 0);
+        ReceiverReceivedPayloadMetrics::register(&pipeline_ctx)
+    }
+
+    fn new_processing_metrics(tier: DistributionTier) -> ReceiverProcessingMetricSet {
+        let registry = TelemetryRegistryHandle::new();
+        let controller = ControllerContext::new(registry);
+        let pipeline_ctx =
+            controller.pipeline_context_with("grp".into(), "pipeline".into(), 0, 1, 0);
+        ReceiverProcessingMetricSet::register(&pipeline_ctx, tier)
+    }
+
+    fn new_receiver_duration_metrics(tier: DistributionTier) -> ReceiverMetrics {
+        let (pipeline_ctx, _registry) = test_pipeline_ctx_with_interests_and_duration_distribution(
+            Interests::NODE_LOCAL_DURATION,
+            tier,
+        );
+        ReceiverMetrics::register(&pipeline_ctx)
+    }
+
+    fn new_exporter_duration_metrics(tier: DistributionTier) -> ExporterMetrics {
+        let (pipeline_ctx, _registry) = test_pipeline_ctx_with_interests_and_duration_distribution(
+            Interests::NODE_LOCAL_DURATION,
+            tier,
+        );
+        ExporterMetrics::register(&pipeline_ctx)
+    }
+
     fn new_export_metrics() -> MeasurementMetricSet<ExporterExportMetrics> {
         let registry = TelemetryRegistryHandle::new();
         let controller = ControllerContext::new(registry);
@@ -209,7 +1404,7 @@ mod tests {
         ReceiverMessageMetrics::register(&pipeline_ctx)
     }
 
-    /// Scenario: Shared received and attempted sets produce terminal snapshots.
+    /// Scenario: Shared receiver and exporter sets produce boundary snapshots.
     /// Guarantees: Metric namespaces, units, and bounded dimensions match the external-boundary contract.
     #[test]
     fn external_boundary_metric_descriptors_are_stable() {
@@ -219,7 +1414,7 @@ mod tests {
                 signal: SignalType::Metrics,
                 outcome: Outcome::Success,
             })
-            .record(Duration::from_millis(10), 64);
+            .record();
         let received_snapshot = received
             .terminal_snapshots()
             .into_iter()
@@ -246,10 +1441,58 @@ mod tests {
                 .descriptor()
                 .metrics
                 .iter()
-                .any(|metric| metric.name == "payload.size" && metric.unit == "By")
+                .all(|metric| metric.name != "payload.size")
         );
         assert!(
             received_snapshot
+                .descriptor()
+                .metrics
+                .iter()
+                .all(|metric| metric.name != "duration")
+        );
+
+        let mut received_payload = new_received_payload_metrics();
+        received_payload
+            .with(SignalOutcomeAttributes {
+                signal: SignalType::Metrics,
+                outcome: Outcome::Success,
+            })
+            .record(64);
+        let received_payload_snapshot = received_payload
+            .terminal_snapshots()
+            .into_iter()
+            .next()
+            .expect("received payload snapshot");
+        assert_eq!(
+            received_payload_snapshot.descriptor().name,
+            "receiver.received"
+        );
+        assert!(
+            received_payload_snapshot
+                .descriptor()
+                .metrics
+                .iter()
+                .any(|metric| metric.name == "payload.size" && metric.unit == "By")
+        );
+
+        let mut processing = new_processing_metrics(DistributionTier::Normal);
+        processing.record(Duration::from_millis(10));
+        let processing_snapshot = processing
+            .terminal_snapshots()
+            .into_iter()
+            .next()
+            .expect("processing snapshot");
+        assert_eq!(processing_snapshot.descriptor().name, "receiver.processing");
+        assert_eq!(
+            processing_snapshot.measurement_attribute_value("signal"),
+            None
+        );
+        assert_eq!(
+            processing_snapshot.measurement_attribute_value("outcome"),
+            None
+        );
+        assert!(
+            processing_snapshot
                 .descriptor()
                 .metrics
                 .iter()
@@ -262,7 +1505,7 @@ mod tests {
                 signal: SignalType::Logs,
                 outcome: Outcome::Success,
             })
-            .record(Duration::from_millis(20));
+            .record();
         let attempted_snapshot = attempted
             .terminal_snapshots()
             .into_iter()
@@ -290,6 +1533,38 @@ mod tests {
                 .metrics
                 .iter()
                 .all(|metric| metric.name != "payload.size")
+        );
+        assert!(
+            attempted_snapshot
+                .descriptor()
+                .metrics
+                .iter()
+                .all(|metric| metric.name != "duration")
+        );
+
+        let mut attempted_duration = new_attempted_duration_metrics(DistributionTier::Normal);
+        attempted_duration.record(
+            SignalOutcomeAttributes {
+                signal: SignalType::Logs,
+                outcome: Outcome::Success,
+            },
+            Duration::from_millis(20),
+        );
+        let attempted_duration_snapshot = attempted_duration
+            .terminal_snapshots()
+            .into_iter()
+            .next()
+            .expect("attempted duration snapshot");
+        assert_eq!(
+            attempted_duration_snapshot.descriptor().name,
+            "exporter.attempted"
+        );
+        assert!(
+            attempted_duration_snapshot
+                .descriptor()
+                .metrics
+                .iter()
+                .any(|metric| metric.name == "duration" && metric.unit == "s")
         );
 
         let mut attempted_payload = new_attempted_payload_metrics();
@@ -341,6 +1616,444 @@ mod tests {
         );
     }
 
+    /// Scenario: Shared receiver and exporter duration metrics use every configured distribution tier.
+    /// Guarantees: Basic emits MMSC while normal and detailed emit matching exponential-histogram values with identical summaries.
+    #[test]
+    fn boundary_duration_distribution_selects_matching_instruments() {
+        for (tier, expected_instrument, expected_tier) in [
+            (DistributionTier::Basic, Instrument::Mmsc, "basic"),
+            (
+                DistributionTier::Normal,
+                Instrument::ExponentialHistogram,
+                "normal",
+            ),
+            (
+                DistributionTier::Detailed,
+                Instrument::ExponentialHistogram,
+                "detailed",
+            ),
+        ] {
+            let mut receiver = new_receiver_duration_metrics(tier);
+            receiver
+                .processing
+                .as_mut()
+                .expect("receiver duration metric")
+                .record(Duration::from_millis(1250));
+            let processing_snapshot = receiver
+                .terminal_snapshots()
+                .into_iter()
+                .next()
+                .expect("processing duration snapshot");
+            assert_eq!(
+                processing_snapshot.descriptor().metrics[0].instrument,
+                expected_instrument,
+                "receiver tier: {tier:?}"
+            );
+            let [MetricValue::Distribution(processing_value)] = processing_snapshot.get_metrics()
+            else {
+                panic!("expected receiver distribution value");
+            };
+            assert_eq!(processing_value.tier_name(), expected_tier);
+            assert_eq!(processing_value.summary(), (1, 1.25, 1.25, 1.25));
+            assert_eq!(
+                processing_snapshot.measurement_attribute_value("signal"),
+                None
+            );
+            assert_eq!(
+                processing_snapshot.measurement_attribute_value("outcome"),
+                None
+            );
+            assert!(receiver.terminal_snapshots().is_empty());
+
+            let mut exporter = new_exporter_duration_metrics(tier);
+            exporter
+                .duration
+                .as_mut()
+                .expect("exporter duration metric")
+                .record(
+                    SignalOutcomeAttributes {
+                        signal: SignalType::Logs,
+                        outcome: Outcome::Success,
+                    },
+                    Duration::from_millis(2750),
+                );
+            let attempted_snapshot = exporter
+                .terminal_snapshots()
+                .into_iter()
+                .next()
+                .expect("attempted duration snapshot");
+            assert_eq!(
+                attempted_snapshot.descriptor().metrics[0].instrument,
+                expected_instrument,
+                "exporter tier: {tier:?}"
+            );
+            let [MetricValue::Distribution(attempted_value)] = attempted_snapshot.get_metrics()
+            else {
+                panic!("expected exporter distribution value");
+            };
+            assert_eq!(attempted_value.tier_name(), expected_tier);
+            assert_eq!(attempted_value.summary(), (1, 2.75, 2.75, 2.75));
+        }
+    }
+
+    /// Scenario: Detailed duration aggregation is selected while local duration telemetry is disabled.
+    /// Guarantees: Receiver and exporter duration metric sets are not registered or allocated.
+    #[test]
+    fn disabled_duration_does_not_allocate_selected_distribution() {
+        let (pipeline_ctx, _registry) = test_pipeline_ctx_with_interests_and_duration_distribution(
+            Interests::empty(),
+            DistributionTier::Detailed,
+        );
+
+        let receiver = ReceiverMetrics::register(&pipeline_ctx);
+        assert!(receiver.processing.is_none());
+
+        let entity_bound_receiver = ReceiverMetrics::register_with_distribution(
+            &pipeline_ctx,
+            Interests::empty(),
+            DistributionTier::Detailed,
+        );
+        assert!(entity_bound_receiver.processing.is_none());
+
+        let exporter = ExporterMetrics::register(&pipeline_ctx);
+        assert!(exporter.duration.is_none());
+    }
+
+    /// Scenario: all exporter measurements are disabled for one node.
+    /// Guarantees: item inspection, message counting, clock timing, and payload-size snapshots are skipped.
+    #[tokio::test]
+    async fn exporter_helper_skips_disabled_optional_measurements() {
+        let (pipeline_ctx, _) = test_pipeline_ctx_with_interests(Interests::empty());
+        let mut metrics = ExporterMetrics::register(&pipeline_ctx);
+        let item_count_called = Cell::new(false);
+        let payload_size_called = Cell::new(false);
+
+        let completed = metrics
+            .attempt(SignalType::Logs)
+            .run(async |attempt| {
+                attempt.set_item_count_with(|| {
+                    item_count_called.set(true);
+                    5
+                });
+                attempt.set_payload_size_with(|| {
+                    payload_size_called.set(true);
+                    128
+                });
+                Ok::<(), ErrorWithOutcome<()>>(())
+            })
+            .await;
+        metrics.record(completed).expect("attempt succeeds");
+
+        assert!(!item_count_called.get());
+        assert!(!payload_size_called.get());
+        assert!(metrics.terminal_snapshots().is_empty());
+    }
+
+    /// Scenario: All optional exporter measurements are enabled for one node.
+    /// Guarantees: One attempt records duration, encoded payload size, and lazily counted items under the same signal and outcome.
+    #[tokio::test]
+    async fn exporter_helper_records_enabled_optional_measurements() {
+        let interests = Interests::NODE_INPUT_METRICS
+            | Interests::NODE_LOCAL_DURATION
+            | Interests::NODE_ITEM_COUNTS
+            | Interests::NODE_SIZE;
+        let (pipeline_ctx, _) = test_pipeline_ctx_with_interests(interests);
+        let mut metrics = ExporterMetrics::register(&pipeline_ctx);
+        let item_count_called = Cell::new(false);
+        let payload_size_called = Cell::new(false);
+
+        let completed = metrics
+            .attempt(SignalType::Metrics)
+            .run(async |attempt| {
+                attempt.set_item_count_with(|| {
+                    item_count_called.set(true);
+                    5
+                });
+                attempt.set_payload_size_with(|| {
+                    payload_size_called.set(true);
+                    128
+                });
+                Err::<(), _>(attempt.failed("export failed"))
+            })
+            .await;
+        assert!(metrics.record(completed).is_err());
+
+        assert!(item_count_called.get());
+        assert!(payload_size_called.get());
+        let snapshots = metrics.terminal_snapshots();
+        assert_eq!(snapshots.len(), 4);
+        for metric_name in ["messages", "duration", "payload.size", "items"] {
+            assert!(snapshots.iter().any(|snapshot| {
+                snapshot.descriptor().name == "exporter.attempted"
+                    && snapshot.measurement_attribute_value("signal") == Some("metrics")
+                    && snapshot.measurement_attribute_value("outcome") == Some("failure")
+                    && snapshot
+                        .descriptor()
+                        .metrics
+                        .iter()
+                        .any(|metric| metric.name == metric_name)
+            }));
+        }
+    }
+
+    /// Scenario: all receiver measurements are disabled for one node.
+    /// Guarantees: message counting, clock timing, and payload-size snapshots are skipped.
+    #[test]
+    fn receiver_helper_skips_disabled_optional_measurements() {
+        let (pipeline_ctx, _) = test_pipeline_ctx_with_interests(Interests::empty());
+        let mut metrics = ReceiverMetrics::register(&pipeline_ctx);
+        let payload_size_called = Cell::new(false);
+
+        let completed = metrics.processing().run(|processing| {
+            processing.set_payload_size_with(|| {
+                payload_size_called.set(true);
+                128
+            });
+            Ok::<_, ErrorWithOutcome<()>>((SignalType::Logs, ()))
+        });
+        metrics.record(completed).expect("processing succeeds");
+
+        assert!(!payload_size_called.get());
+        assert!(metrics.terminal_snapshots().is_empty());
+    }
+
+    /// Scenario: Receiver duration and payload-size measurements are enabled for one node.
+    /// Guarantees: Processing and terminal received metrics remain separate and preserve their intended attributes.
+    #[test]
+    fn receiver_helper_records_enabled_optional_measurements() {
+        let interests =
+            Interests::NODE_OUTPUT_METRICS | Interests::NODE_LOCAL_DURATION | Interests::NODE_SIZE;
+        let (pipeline_ctx, _) = test_pipeline_ctx_with_interests(interests);
+        let mut metrics = ReceiverMetrics::register(&pipeline_ctx);
+        let payload_size_called = Cell::new(false);
+
+        let completed = metrics.processing().run(|processing| {
+            processing.set_payload_size_with(|| {
+                payload_size_called.set(true);
+                128
+            });
+            Err::<(SignalType, ()), _>(processing.failed(SignalType::Traces, "processing failed"))
+        });
+        assert!(metrics.record(completed).is_err());
+
+        assert!(payload_size_called.get());
+        let snapshots = metrics.terminal_snapshots();
+        assert_eq!(snapshots.len(), 3);
+        assert!(snapshots.iter().any(|snapshot| {
+            snapshot.descriptor().name == "receiver.processing"
+                && snapshot.measurement_attribute_value("signal").is_none()
+                && snapshot.measurement_attribute_value("outcome").is_none()
+        }));
+        for metric_name in ["messages", "payload.size"] {
+            assert!(snapshots.iter().any(|snapshot| {
+                snapshot.descriptor().name == "receiver.received"
+                    && snapshot.measurement_attribute_value("signal") == Some("traces")
+                    && snapshot.measurement_attribute_value("outcome") == Some("failure")
+                    && snapshot
+                        .descriptor()
+                        .metrics
+                        .iter()
+                        .any(|metric| metric.name == metric_name)
+            }));
+        }
+    }
+
+    /// Scenario: Receiver payload-size measurement is enabled but the boundary size is unavailable.
+    /// Guarantees: The received message and processing duration are recorded without a synthetic zero-byte payload observation.
+    #[test]
+    fn receiver_helper_omits_unavailable_payload_size() {
+        let interests =
+            Interests::NODE_OUTPUT_METRICS | Interests::NODE_LOCAL_DURATION | Interests::NODE_SIZE;
+        let (pipeline_ctx, _) = test_pipeline_ctx_with_interests(interests);
+        let mut metrics = ReceiverMetrics::register(&pipeline_ctx);
+
+        let completed = metrics
+            .processing()
+            .run(|_| Ok::<_, ErrorWithOutcome<()>>((SignalType::Logs, ())));
+        metrics.record(completed).expect("processing succeeds");
+
+        let snapshots = metrics.terminal_snapshots();
+        assert_eq!(snapshots.len(), 2);
+        assert!(
+            snapshots
+                .iter()
+                .any(|snapshot| { snapshot.descriptor().name == "receiver.processing" })
+        );
+        assert!(snapshots.iter().any(|snapshot| {
+            snapshot.descriptor().name == "receiver.received"
+                && snapshot
+                    .descriptor()
+                    .metrics
+                    .iter()
+                    .any(|metric| metric.name == "messages")
+        }));
+        assert!(snapshots.iter().all(|snapshot| {
+            snapshot
+                .descriptor()
+                .metrics
+                .iter()
+                .all(|metric| metric.name != "payload.size")
+        }));
+    }
+
+    /// Scenario: Receiver processing fails before the message signal can be classified.
+    /// Guarantees: The original error and an unattributed duration are preserved without inventing received counters.
+    #[test]
+    fn receiver_helper_allows_failure_before_signal_classification() {
+        let (pipeline_ctx, _) = test_pipeline_ctx_with_interests(Interests::all());
+        let mut metrics = ReceiverMetrics::register(&pipeline_ctx);
+
+        let completed = metrics
+            .processing()
+            .run(|_| Err::<(SignalType, ()), ErrorWithOutcome<_>>("invalid envelope".into()));
+        assert_eq!(metrics.record(completed), Err("invalid envelope"));
+        let snapshots = metrics.terminal_snapshots();
+        assert_eq!(snapshots.len(), 1);
+        let snapshot = &snapshots[0];
+        assert_eq!(snapshot.descriptor().name, "receiver.processing");
+        assert_eq!(snapshot.measurement_attribute_value("signal"), None);
+        assert_eq!(snapshot.measurement_attribute_value("outcome"), None);
+        let [MetricValue::Distribution(duration)] = snapshot.get_metrics() else {
+            panic!("expected unclassified processing duration");
+        };
+        assert_eq!(duration.summary().0, 1);
+        assert!(metrics.terminal_snapshots().is_empty());
+    }
+
+    /// Scenario: One receiver processes messages of two different signals with timing enabled.
+    /// Guarantees: Durations share one operation-level distribution while received counters retain separate signal buckets.
+    #[test]
+    fn receiver_processing_duration_combines_signals_without_merging_counts() {
+        let (pipeline_ctx, _) = test_pipeline_ctx_with_interests(
+            Interests::NODE_OUTPUT_METRICS | Interests::NODE_LOCAL_DURATION,
+        );
+        let mut metrics = ReceiverMetrics::register(&pipeline_ctx);
+        for signal in [SignalType::Logs, SignalType::Metrics] {
+            let completed = metrics
+                .processing()
+                .run(|_| Ok::<_, ErrorWithOutcome<()>>((signal, ())));
+            metrics.record(completed).expect("classified processing");
+        }
+
+        let (reports, mut reporter) = MetricsReporter::create_new_and_receiver(3);
+        metrics
+            .report(&mut reporter)
+            .expect("report receiver metrics");
+        let snapshots: Vec<_> = reports.try_iter().collect();
+        assert_eq!(snapshots.len(), 3);
+        for signal in ["logs", "metrics"] {
+            let received = snapshots
+                .iter()
+                .find(|snapshot| {
+                    snapshot.descriptor().name == "receiver.received"
+                        && snapshot.measurement_attribute_value("signal") == Some(signal)
+                })
+                .expect("separate received signal");
+            assert_eq!(
+                received.measurement_attribute_value("outcome"),
+                Some("success")
+            );
+            assert_eq!(received.get_metrics()[0].to_u64_lossy(), 1);
+        }
+        let processing = snapshots
+            .iter()
+            .find(|snapshot| snapshot.descriptor().name == "receiver.processing")
+            .expect("shared processing distribution");
+        assert_eq!(processing.measurement_attribute_value("signal"), None);
+        assert_eq!(processing.measurement_attribute_value("outcome"), None);
+        let [MetricValue::Distribution(duration)] = processing.get_metrics() else {
+            panic!("expected receiver processing distribution");
+        };
+        assert_eq!(duration.summary().0, 2);
+        assert!(metrics.terminal_snapshots().is_empty());
+    }
+
+    /// Scenario: A classified receiver operation is refused by local policy.
+    /// Guarantees: The error and optional measurements are recorded with the refused outcome.
+    #[test]
+    fn receiver_helper_records_explicit_refused_outcome() {
+        let interests =
+            Interests::NODE_OUTPUT_METRICS | Interests::NODE_LOCAL_DURATION | Interests::NODE_SIZE;
+        let (pipeline_ctx, _) = test_pipeline_ctx_with_interests(interests);
+        let mut metrics = ReceiverMetrics::register(&pipeline_ctx);
+
+        let completed = metrics.processing().run(|processing| {
+            processing.set_payload_size_with(|| 128);
+            Err::<(SignalType, ()), _>(processing.refused(SignalType::Logs, "capacity"))
+        });
+        assert_eq!(metrics.record(completed), Err("capacity"));
+
+        let snapshots = metrics.terminal_snapshots();
+        assert_eq!(snapshots.len(), 3);
+        assert!(snapshots.iter().all(|snapshot| {
+            (snapshot.descriptor().name == "receiver.processing"
+                || snapshot.measurement_attribute_value("signal") == Some("logs"))
+                && snapshot.measurement_attribute_value("outcome") != Some("failure")
+        }));
+        assert!(snapshots.iter().any(|snapshot| {
+            snapshot.descriptor().name == "receiver.received"
+                && snapshot.measurement_attribute_value("outcome") == Some("refused")
+        }));
+    }
+
+    /// Scenario: An exporter attempt is refused by local policy before delivery.
+    /// Guarantees: The original error is returned and the attempt is recorded as refused.
+    #[tokio::test]
+    async fn exporter_helper_records_explicit_refused_outcome() {
+        let (pipeline_ctx, _) = test_pipeline_ctx_with_interests(Interests::NODE_INPUT_METRICS);
+        let mut metrics = ExporterMetrics::register(&pipeline_ctx);
+
+        let completed = metrics
+            .attempt(SignalType::Metrics)
+            .run(async |attempt| Err::<(), _>(attempt.refused("policy")))
+            .await;
+        assert_eq!(metrics.record(completed), Err("policy"));
+        let snapshots = metrics.terminal_snapshots();
+        assert_eq!(snapshots.len(), 1);
+        let snapshot = &snapshots[0];
+        assert_eq!(snapshot.descriptor().name, "exporter.attempted");
+        assert_eq!(
+            snapshot.measurement_attribute_value("signal"),
+            Some("metrics")
+        );
+        assert_eq!(
+            snapshot.measurement_attribute_value("outcome"),
+            Some("refused")
+        );
+        let messages = snapshot
+            .descriptor()
+            .metrics
+            .iter()
+            .position(|metric| metric.name == "messages")
+            .expect("messages metric");
+        assert_eq!(snapshot.get_metrics()[messages].to_u64_lossy(), 1);
+    }
+
+    /// Scenario: An exporter handles a refused primary error before a fallback fails.
+    /// Guarantees: The discarded refusal cannot classify the returned fallback error as refused.
+    #[tokio::test]
+    async fn exporter_helper_keeps_outcome_attached_to_returned_error() {
+        let (pipeline_ctx, _) = test_pipeline_ctx_with_interests(Interests::NODE_INPUT_METRICS);
+        let mut metrics = ExporterMetrics::register(&pipeline_ctx);
+
+        let completed = metrics
+            .attempt(SignalType::Logs)
+            .run(async |attempt| {
+                let primary = Err::<(), _>(attempt.refused("primary refused"));
+                assert!(primary.is_err());
+                Err::<(), _>(attempt.failed("fallback failed"))
+            })
+            .await;
+        assert_eq!(metrics.record(completed), Err("fallback failed"));
+
+        let snapshots = metrics.terminal_snapshots();
+        assert_eq!(snapshots.len(), 1);
+        assert_eq!(
+            snapshots[0].measurement_attribute_value("outcome"),
+            Some("failure")
+        );
+    }
+
     /// Scenario: One logical export requires a failed attempt followed by a successful retry.
     /// Guarantees: Every attempt records its own message under its attempt outcome.
     #[test]
@@ -351,13 +2064,13 @@ mod tests {
                 signal: SignalType::Logs,
                 outcome: Outcome::Failure,
             })
-            .record(Duration::from_millis(10));
+            .record();
         metrics
             .with(SignalOutcomeAttributes {
                 signal: SignalType::Logs,
                 outcome: Outcome::Success,
             })
-            .record(Duration::from_millis(20));
+            .record();
 
         let failed = metrics.get(SignalOutcomeAttributes {
             signal: SignalType::Logs,

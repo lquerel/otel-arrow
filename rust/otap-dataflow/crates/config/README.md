@@ -8,6 +8,7 @@ Configuration model crate for the OTAP Dataflow Engine.
 If you are authoring runtime YAML, start with:
 
 - [`docs/configuration.md`](../../docs/configuration.md)
+- [PData codecs and decode validation](../../docs/codecs.md)
 
 Use the reference model for exact field semantics:
 
@@ -23,11 +24,13 @@ This README focuses on crate-level model and API details.
 
 Main public model types:
 
-- `engine::OtelDataflowSpec`: runtime root spec (`version`, `policies`,
+- `engine::OtelDataflowSpec`: runtime root spec (`version`, `policies`, `codecs`,
   `topics`, `engine`, `groups`)
 - `engine::EngineConfig`: engine-wide section (`engine: ...`)
 - `pipeline_group::PipelineGroupConfig`
-- `pipeline::PipelineConfig`: nodes, connections, optional policies
+- `pipeline::PipelineConfig`: nodes, connections, optional policies and codecs
+- `codecs::CodecsConfig`: optional bindings and named configurations, resolved
+  independently of policies
 - `policy::Policies`: channel-capacity/health/telemetry/resources/transport
   header policy families
 - `topic::TopicSpec`: named inter-pipeline topic specification
@@ -187,10 +190,13 @@ Engine-wide runtime settings are configured under `engine.runtime`.
 
 - `engine.runtime.local_runtime.event_interval` is optional.
 - `engine.runtime.local_runtime.max_io_events_per_tick` is optional.
+- `engine.runtime.local_runtime.max_io_events_per_busy_tick` optionally limits
+  nonblocking I/O polls separately from idle polls. When omitted, it follows
+  `max_io_events_per_tick`.
 - `engine.runtime.local_runtime.poll_time_histogram` is optional and requires a
   `tokio_unstable` build when enabled.
 - When unset, Tokio's built-in `LocalRuntime` default is used.
-- When set, it must be greater than `0`.
+- Numeric overrides must be greater than `0`.
 
 ## Topic Declarations
 
@@ -334,14 +340,61 @@ Topic declaration precedence (for a pipeline in a given group):
 - Ack/Nack tracking limits remain topic-scope only via
   `policies.ack_propagation`
 
+## Context Entries
+
+Context entries are stored with original source-type information to
+encode the origin of transport headers, authorized data fields, and
+more. Simple context entries are created using a single name entered
+in configuration of the appropriate type, for example a transport
+headers `header_capture` rule with a `store_as` clause creates a named
+context entry (of type `transport_header`). Likewise, an
+`authorized_identity` configuration `store_as` clause creates a named
+context entry (of type `authorized_identity`).
+
+Composite context entries are supported through a dedicated
+`policies.context` area listing multi-field context entries that
+support multiple dimensions. For example:
+
+```yaml
+policies:
+  context:
+    entries:
+      product_user:                      # Composite name
+        - type: authorized_identity      # Authorization claim
+          name: customer_id              # Stored name
+        - type: transport_header         # Transport header
+          name: workspace_id             # Stored name of header
+          store_as: othername_id         # (option) Entry name
+        - type: transport_header_match   # Exact value condition
+          name: environment
+          value: production
+```
+
+> [!NOTE]
+> Named transport-header propagation can refer to a composite member with
+> `product_user:othername_id`. The composite is present only when every
+> value-bearing member is present and every `transport_header_match` condition
+> has an exact byte-value match. Header names match case-insensitively, and
+> duplicate condition values use any-match semantics. Qualified propagation
+> reads the receiver-materialized composite snapshot.
+> A qualified selector cannot share its primitive source with another
+> qualified or unqualified entry. Repeated unqualified selectors, including
+> ASCII case variants, are accepted as equivalent.
+> Primitive transport-header overrides retain precedence over composite
+> conditions.
+> Other composite consumers are not yet wired at runtime.
+
 ## Engine Observability Pipeline
 
 The dedicated engine internal telemetry pipeline is configured at:
 
 - `engine.observability.pipeline.nodes`
+- `engine.observability.pipeline.extensions`
 - `engine.observability.pipeline.connections`
 
-It is represented in resolved output as a role-tagged internal pipeline.
+Extensions are scoped to the observability pipeline and may provide capabilities
+to its nodes. The pipeline is represented in resolved output as a role-tagged
+internal pipeline.
 
 ## Node Type (`NodeUrn`)
 

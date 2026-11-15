@@ -1,14 +1,18 @@
 // Copyright The OpenTelemetry Authors
 // SPDX-License-Identifier: Apache-2.0
 
-//! Implementation of the OTAP nodes (receiver, exporter, processor).
+//! Shared OTAP/OTLP runtime, transport, and protocol infrastructure.
 
 use crate::pdata::OtapPdata;
 use otel_arrow_dfe_engine::{PipelineFactory, build_factory};
 use otel_arrow_dfe_engine_macros::pipeline_factory;
 
-/// gRPC service implementation
-pub mod otap_grpc;
+pub mod grpc;
+pub mod http;
+pub mod otlp;
+pub mod receiver;
+
+mod defaults;
 
 /// Common component accessories (e.g., context-state management).
 pub mod accessory;
@@ -18,9 +22,6 @@ pub mod pdata;
 mod pdata_conversions;
 
 pub mod metrics;
-
-/// Shared OTLP receiver metric definitions used by OTLP protocol support.
-pub mod otlp_metrics;
 
 mod bearer_authorization;
 
@@ -47,21 +48,11 @@ pub mod memory_pressure_layer;
 /// Shared ingress shedding based on receiver-local rate limits.
 pub mod rate_limit_layer;
 
-/// Shared mapping from a pipeline NACK to OTLP wire status codes.
-mod nack_status;
-
-/// gRPC service implementation
-pub mod otlp_grpc;
-
-/// OTLP/HTTP receiver support.
-pub mod otlp_http;
+/// HTTP Client authentication provider.
+pub mod http_client_auth;
 
 /// Cloud specific auth utilities
 pub mod cloud_auth;
-
-/// Consumer-side adapter over a bound `bearer_token_provider` capability,
-/// shared by every node that authenticates with a bearer token.
-pub mod bearer_auth;
 
 /// Redacted string type for sensitive values.
 pub mod opaque_string;
@@ -73,13 +64,16 @@ pub mod object_store;
 /// Cryptographic provider initialization (see [`crypto::install_crypto_provider`]).
 pub mod crypto;
 
-/// Protocol-neutral transport header abstraction for end-to-end header
-/// propagation through the pipeline.
-pub mod transport_headers;
+/// Transport-header capture and propagation tests.
+#[cfg(test)]
+mod transport_headers;
 
 /// TLS utilities
 pub mod tls_utils;
 
+/// Bounded hot-reload of client TLS material for OTLP exporters.
+pub(crate) mod client_tls_reload;
+
 /// Factory for OTAP-based pipeline
-#[pipeline_factory(OTAP, OtapPdata)]
+#[pipeline_factory(OTAP, OtapPdata, pdata::materialize_context)]
 pub static OTAP_PIPELINE_FACTORY: PipelineFactory<OtapPdata> = build_factory();

@@ -36,13 +36,26 @@ queries:
       WITH filtered AS (
         SELECT
           timestamp,
-          metric_name,
+          -- The traffic generator reports produced logs as node.output items.
+          CASE
+            WHEN metric_name = 'items' THEN 'logs_produced'
+            ELSE metric_name
+          END AS metric_name,
           "metric_attributes.component_name" AS component_name,
           COALESCE("metric_attributes.otel_scope_core_id", 'N/A') AS core_id,
           value
         FROM metrics
         CROSS JOIN observation_window
-        WHERE metric_name IN ('logs_produced', 'log_rows_written', 'failed')
+        WHERE (
+            metric_name IN ('log_rows_written', 'failed')
+            OR (
+              metric_name = 'items'
+              AND "metric_attributes.otel_scope_name" = 'node.output'
+              AND "metric_attributes.signal" = 'logs'
+              AND "metric_attributes.component_name" = 'load-generator'
+              AND "metric_attributes.outcome" = 'success'
+            )
+          )
           AND timestamp BETWEEN start_ts AND stop_ts
       ),
       deltas AS (
@@ -124,8 +137,11 @@ queries:
             MAX(value) AS final_value
           FROM metrics
           CROSS JOIN metadata_row
-          WHERE metric_name = 'logs_produced'
+          WHERE metric_name = 'items'
+            AND "metric_attributes.otel_scope_name" = 'node.output'
+            AND "metric_attributes.signal" = 'logs'
             AND "metric_attributes.component_name" = 'load-generator'
+            AND "metric_attributes.outcome" = 'success'
             AND timestamp >= CAST("test.start" AS TIMESTAMP WITH TIME ZONE)
           GROUP BY core_id
         )
@@ -220,3 +236,13 @@ result_tables:
     description: Terminal generated and final post-drain ClickHouse-persisted rows.
   - name: gh_actions_benchmark
     description: Metrics formatted for github-action-benchmark.
+    finite_columns: [value]
+    required_values:
+      name:
+        - logs_produced_rate
+        - log_rows_written_rate
+        - df-engine_cpu_percentage_normalized_avg
+        - clickhouse_cpu_percentage_normalized_avg
+        - df-engine_ram_mib_max
+        - clickhouse_ram_mib_max
+        - test_duration

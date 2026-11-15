@@ -4,6 +4,7 @@
 //! Pipeline configuration specification.
 pub mod telemetry;
 
+use crate::codecs::CodecsConfig;
 use crate::error::{Context, Error, HyperEdgeSpecDetails};
 use crate::extension::ExtensionUserConfig;
 use crate::node::{NodeKind, NodeUserConfig};
@@ -41,6 +42,10 @@ pub struct PipelineConfig {
     /// Optional policy set for this pipeline.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     policies: Option<Policies>,
+
+    /// Codec bindings and definitions overriding group and root declarations.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    codecs: Option<CodecsConfig>,
 
     /// All data-path nodes in this pipeline, keyed by node ID.
     ///
@@ -542,6 +547,16 @@ impl PipelineExtensions {
     pub fn keys(&self) -> impl Iterator<Item = &ExtensionId> {
         self.0.keys()
     }
+
+    /// Returns a clone with credential header values redacted for config snapshots.
+    #[must_use]
+    pub(crate) fn redacted_for_snapshot(&self) -> Self {
+        let mut redacted = self.clone();
+        for extension in redacted.0.values_mut() {
+            *extension = Arc::new(extension.redacted_for_snapshot());
+        }
+        redacted
+    }
 }
 
 impl IntoIterator for PipelineExtensions {
@@ -566,16 +581,16 @@ impl FromIterator<(NodeId, Arc<NodeUserConfig>)> for PipelineNodes {
 }
 
 impl PipelineConfig {
-    /// Compares two pipeline configs while intentionally ignoring the optional
-    /// pipeline-level policies block.
+    /// Compares pipeline shape, excluding inherited policies and codec settings.
     ///
-    /// This keeps the "what is pipeline shape vs. what is policy" decision next
+    /// This keeps the "what is pipeline shape vs. what is inherited" decision next
     /// to the struct definition so new fields require an explicit choice.
     #[must_use]
-    pub fn eq_ignoring_policies(&self, other: &Self) -> bool {
+    pub fn eq_ignoring_inherited_settings(&self, other: &Self) -> bool {
         let Self {
             r#type: self_type,
             policies: _,
+            codecs: _,
             nodes: self_nodes,
             extensions: self_extensions,
             connections: self_connections,
@@ -583,6 +598,7 @@ impl PipelineConfig {
         let Self {
             r#type: other_type,
             policies: _,
+            codecs: _,
             nodes: other_nodes,
             extensions: other_extensions,
             connections: other_connections,
@@ -636,6 +652,12 @@ impl PipelineConfig {
         self.policies.as_ref()
     }
 
+    /// Returns codec declarations for this pipeline, before scope resolution.
+    #[must_use]
+    pub const fn codecs(&self) -> Option<&CodecsConfig> {
+        self.codecs.as_ref()
+    }
+
     /// Returns a reference to the main pipeline nodes (receivers, processors, exporters).
     #[must_use]
     pub const fn nodes(&self) -> &PipelineNodes {
@@ -654,9 +676,7 @@ impl PipelineConfig {
         for node in redacted.nodes.0.values_mut() {
             *node = Arc::new(node.redacted_for_snapshot());
         }
-        for extension in redacted.extensions.0.values_mut() {
-            *extension = Arc::new(extension.redacted_for_snapshot());
-        }
+        redacted.extensions = redacted.extensions.redacted_for_snapshot();
         redacted
     }
 
@@ -781,14 +801,17 @@ impl PipelineConfig {
     #[must_use]
     pub fn for_observability_pipeline(
         policies: Option<Policies>,
+        codecs: Option<CodecsConfig>,
         nodes: PipelineNodes,
+        extensions: PipelineExtensions,
         connections: Vec<PipelineConnection>,
     ) -> Self {
         Self {
             r#type: PipelineType::Otap,
             policies,
+            codecs,
             nodes,
-            extensions: PipelineExtensions::default(),
+            extensions,
             connections,
         }
     }
@@ -820,9 +843,8 @@ impl PipelineConfig {
     ) -> Result<(), Error> {
         let mut errors = Vec::new();
 
-        // Validate node-level transport header policy fields.
         for (node_name, node_config) in self.nodes.iter() {
-            node_config.validate_transport_header_fields(node_name, &mut errors);
+            node_config.validate_transport_header_policies(node_name, &mut errors);
         }
 
         self.validate_connections(
@@ -1449,6 +1471,7 @@ impl PipelineConfigBuilder {
                     .collect(),
                 connections: built_connections,
                 policies: None,
+                codecs: None,
                 r#type: pipeline_type,
             };
 
@@ -1474,8 +1497,10 @@ mod tests {
     use crate::pipeline::{PipelineConfigBuilder, PipelineType};
     use serde_json::json;
 
+    /// Scenario: Only inherited resource policy declarations differ between two pipelines.
+    /// Guarantees: The graph-shape comparison excludes settings compared by resolved configuration.
     #[test]
-    fn eq_ignoring_policies_ignores_policy_only_changes() {
+    fn eq_ignoring_inherited_settings_ignores_policy_only_changes() {
         let current = super::PipelineConfig::from_yaml(
             "g1".into(),
             "p1".into(),
@@ -1524,11 +1549,13 @@ connections:
         .expect("candidate pipeline should parse");
 
         assert_ne!(current, candidate);
-        assert!(current.eq_ignoring_policies(&candidate));
+        assert!(current.eq_ignoring_inherited_settings(&candidate));
     }
 
+    /// Scenario: A pipeline changes its receiver identity and connection source.
+    /// Guarantees: The graph-shape comparison still detects topology changes.
     #[test]
-    fn eq_ignoring_policies_detects_topology_change() {
+    fn eq_ignoring_inherited_settings_detects_topology_change() {
         let current = super::PipelineConfig::from_yaml(
             "g1".into(),
             "p1".into(),
@@ -1564,7 +1591,7 @@ connections:
         )
         .expect("candidate pipeline should parse");
 
-        assert!(!current.eq_ignoring_policies(&candidate));
+        assert!(!current.eq_ignoring_inherited_settings(&candidate));
     }
 
     #[test]
@@ -2004,10 +2031,17 @@ sink:
         )
         .expect("connections should parse");
 
-        let config = super::PipelineConfig::for_observability_pipeline(None, nodes, connections);
+        let config = super::PipelineConfig::for_observability_pipeline(
+            None,
+            None,
+            nodes,
+            super::PipelineExtensions::default(),
+            connections,
+        );
         assert_eq!(config.node_iter().count(), 2);
         assert_eq!(config.connection_iter().count(), 1);
         assert!(config.policies().is_none());
+        assert!(config.extensions().is_empty());
     }
 
     #[test]

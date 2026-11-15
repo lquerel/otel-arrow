@@ -41,31 +41,29 @@ use otel_arrow_dfe_engine::ExporterFactory;
 use otel_arrow_dfe_engine::config::ExporterConfig;
 use otel_arrow_dfe_engine::context::PipelineContext;
 use otel_arrow_dfe_engine::control::NodeControlMsg;
-use otel_arrow_dfe_engine::control::{AckMsg, NackMsg};
+use otel_arrow_dfe_engine::control::{AckMsg, NackCause, NackMsg};
 use otel_arrow_dfe_engine::error::Error;
 use otel_arrow_dfe_engine::exporter::ExporterWrapper;
 use otel_arrow_dfe_engine::local::exporter::{EffectHandler, Exporter};
 use otel_arrow_dfe_engine::message::{ExporterInbox, Message};
 use otel_arrow_dfe_engine::node::NodeId;
 use otel_arrow_dfe_engine::terminal_state::TerminalState;
-use otel_arrow_dfe_pdata::TryIntoWithOptions;
+
+use otel_arrow_dfe_pdata::OtapArrowRecords;
 use otel_arrow_dfe_pdata::otlp::OtlpProtoBytes;
 use otel_arrow_dfe_pdata::views::otap::OtapLogsView;
 use otel_arrow_dfe_pdata::views::otlp::bytes::logs::RawLogsData;
-use otel_arrow_dfe_pdata::{OtapArrowRecords, OtapPayload, PayloadData};
-use otel_arrow_dfe_telemetry::instrument::{Counter, Mmsc};
-use otel_arrow_dfe_telemetry::metrics::{MeasurementMetricSet, MetricSet};
-use otel_arrow_dfe_telemetry_macros::metric_set;
+use otel_arrow_dfe_pdata_codec::{EncodePolicy, EncodingPlan, OtapPayload, PdataEncoding};
 use serde::{Deserialize, Deserializer};
 use std::path::PathBuf;
 use std::sync::Arc;
-use std::time::Instant;
 
 // Geneva uploader dependencies
 use futures::StreamExt;
 use geneva_uploader::AuthMethod;
 use geneva_uploader::client::{
     AccountRouting, EncodedBatch, GenevaClient, GenevaClientConfig, OboEventConfig, OboEventMap,
+    UploadError,
 };
 use geneva_uploader::{
     LogsEventNameMapping, LogsEventNameRoutingKey, SpanEventNameMapping, SpanEventNameRoutingKey,
@@ -75,15 +73,19 @@ use prost::Message as ProstMessage;
 
 // Use crate-relative paths since we're now a module within otap
 use otel_arrow_dfe_otap::OTAP_EXPORTER_FACTORIES;
-use otel_arrow_dfe_otap::metrics::ExporterExportMetrics;
-use otel_arrow_dfe_otap::pdata::OtapPdata;
-use otel_arrow_dfe_telemetry::common_attributes::{Outcome, SignalOutcomeAttributes};
+use otel_arrow_dfe_otap::pdata::{OtapPdata, PdataEffectHandlerExtension};
+use otel_arrow_dfe_telemetry::common_attributes::Outcome;
 
 mod agent_fed_source;
+mod gcs_token_provider;
+mod metrics;
 
 use agent_fed_source::AgentFedGenevaSource;
+use gcs_token_provider::GenevaGcsTokenProvider;
+use metrics::{GenevaExporterErrorType, GenevaExporterMetrics, GenevaExporterSkipReason};
 use otel_arrow_dfe_engine::capability::ExtensionCapability;
 use otel_arrow_dfe_engine::capability::auth::agent_fed_credential_provider::AgentFedCredentialProvider as AgentFedCredentialProviderCap;
+use otel_arrow_dfe_engine::capability::auth::bearer_token_provider::BearerTokenProvider as BearerTokenProviderCap;
 use otel_arrow_dfe_engine::capability::registry::Capabilities;
 
 /// The URN for the Geneva exporter
@@ -264,12 +266,12 @@ where
     D: Deserializer<'de>,
 {
     let value: Option<String> = Option::deserialize(deserializer)?;
-    if let Some(ref name) = value {
-        if name.trim().is_empty() {
-            return Err(serde::de::Error::custom(
-                "'default_event_name' must be a non-empty table name",
-            ));
-        }
+    if let Some(ref name) = value
+        && name.trim().is_empty()
+    {
+        return Err(serde::de::Error::custom(
+            "'default_event_name' must be a non-empty table name",
+        ));
     }
     Ok(value)
 }
@@ -296,14 +298,14 @@ fn validate_events_map(
                 "{signal}.event_name_mapping.events source keys must not be blank"
             ));
         }
-        if let Some(dest) = destination {
-            if dest.trim().is_empty() {
-                return Err(format!(
-                    "{signal}.event_name_mapping.events destination for source '{source}' must \
+        if let Some(dest) = destination
+            && dest.trim().is_empty()
+        {
+            return Err(format!(
+                "{signal}.event_name_mapping.events destination for source '{source}' must \
                      not be empty or whitespace; omit the value (use null) to route to the \
                      source value unchanged"
-                ));
-            }
+            ));
         }
     }
     Ok(())
@@ -596,13 +598,13 @@ impl TryFrom<OboConfigRaw> for OboConfig {
                     "obo.events entry for '{event_name}' must have a non-empty identity"
                 ));
             }
-            if let Some(annotations) = &entry.annotations {
-                if annotations.trim().is_empty() {
-                    return Err(format!(
-                        "obo.events entry for '{event_name}' has an empty annotations value; \
+            if let Some(annotations) = &entry.annotations
+                && annotations.trim().is_empty()
+            {
+                return Err(format!(
+                    "obo.events entry for '{event_name}' has an empty annotations value; \
                          omit the field (or use null) instead of an empty string"
-                    ));
-                }
+                ));
             }
         }
         Ok(Self { events: raw.events })
@@ -774,6 +776,11 @@ impl Config {
             );
         }
         let is_agent_fed = matches!(self.auth, AuthConfig::AgentFed);
+        if let AuthConfig::ExternalToken { resource } = &self.auth
+            && resource.trim().is_empty()
+        {
+            return Err("resource is required when auth.type is externaltoken".to_owned());
+        }
         if !is_agent_fed {
             if self.endpoint.trim().is_empty() {
                 return Err("endpoint is required unless auth.type is agentfed".to_owned());
@@ -869,16 +876,17 @@ impl Config {
     }
 
     /// Build the `geneva-uploader` `GenevaClientConfig` from this exporter
-    /// configuration.
+    /// configuration and an already-resolved uploader authentication method.
     ///
     /// This is the adapter owned by this crate: it maps the local, serde-facing
-    /// config types onto the uploader's client config, including the auth
-    /// method, MSI resource, and the per-signal logs/spans default table names
-    /// and routing mappings. It is factored out of
-    /// [`GenevaExporter::from_config`] so the pure `Config` ->
+    /// config types onto the uploader's client config, including the MSI
+    /// resource and the per-signal logs/spans default table names and routing
+    /// mappings. Callers resolve `auth_method` first because capability-backed
+    /// methods cannot be derived from configuration alone. It is factored out
+    /// of [`GenevaExporter::from_config`] so the pure `Config` ->
     /// `GenevaClientConfig` conversion can be unit-tested without initializing
     /// a live `GenevaClient`.
-    fn to_geneva_client_config(&self) -> GenevaClientConfig {
+    fn to_geneva_client_config(&self, auth_method: AuthMethod) -> GenevaClientConfig {
         // Create LogsConfig and TracesConfig from the configuration
         let logs_config = self
             .logs
@@ -903,7 +911,7 @@ impl Config {
             account_routing: self.account_routing.clone().into(),
             region: self.region.clone(),
             config_major_version: self.config_major_version,
-            auth_method: self.auth.uploader_auth_method(),
+            auth_method,
             tenant: self.tenant.clone(),
             role_name: self.role_name.clone(),
             role_instance: self.role_instance.clone(),
@@ -912,6 +920,13 @@ impl Config {
             spans: traces_config,
             obo_event_map: self.obo.clone().map(Into::into),
         }
+    }
+
+    /// Build the uploader client config for agent-fed authentication.
+    fn to_agent_fed_geneva_client_config(&self) -> GenevaClientConfig {
+        // `with_agent_fed_source` ignores `auth_method`; this value only
+        // satisfies the shared uploader configuration type.
+        self.to_geneva_client_config(AuthMethod::SystemManagedIdentity)
     }
 }
 
@@ -952,6 +967,11 @@ pub enum AuthConfig {
         /// MSI resource identifier
         msi_resource: String,
     },
+    /// Entra tokens supplied through a bound `bearer_token_provider`.
+    ExternalToken {
+        /// Entra resource expected by the Geneva uploader.
+        resource: String,
+    },
     /// Agent-fed credentials: the host agent supplies one atomic GIG token and
     /// routing snapshot through `agent_fed_credential_provider`, so the
     /// uploader skips the GCS config-service handshake. Carries no config
@@ -961,27 +981,39 @@ pub enum AuthConfig {
 }
 
 impl AuthConfig {
-    fn uploader_auth_method(&self) -> AuthMethod {
+    /// Returns the uploader authentication method fully described by
+    /// configuration.
+    ///
+    /// Capability-backed methods return an error because their credentials
+    /// must be resolved from a bound capability during client construction.
+    fn configured_auth_method(&self) -> Result<AuthMethod, ConfigError> {
         match self {
-            Self::Certificate { path, password } => AuthMethod::Certificate {
+            Self::Certificate { path, password } => Ok(AuthMethod::Certificate {
                 path: PathBuf::from(path),
                 password: password.clone(),
-            },
-            Self::SystemManagedIdentity { .. } => AuthMethod::SystemManagedIdentity,
-            Self::UserManagedIdentity { client_id, .. } => AuthMethod::UserManagedIdentity {
+            }),
+            Self::SystemManagedIdentity { .. } => Ok(AuthMethod::SystemManagedIdentity),
+            Self::UserManagedIdentity { client_id, .. } => Ok(AuthMethod::UserManagedIdentity {
                 client_id: client_id.clone(),
-            },
+            }),
             Self::UserManagedIdentityByArmResourceId { resource_id, .. } => {
-                AuthMethod::UserManagedIdentityByResourceId {
+                Ok(AuthMethod::UserManagedIdentityByResourceId {
                     resource_id: resource_id.clone(),
-                }
+                })
             }
-            Self::WorkloadIdentity { msi_resource } => AuthMethod::WorkloadIdentity {
+            Self::WorkloadIdentity { msi_resource } => Ok(AuthMethod::WorkloadIdentity {
                 resource: msi_resource.clone(),
-            },
-            // `with_agent_fed_source` ignores this field. The placeholder only
-            // satisfies the shared uploader configuration type.
-            Self::AgentFed => AuthMethod::SystemManagedIdentity,
+            }),
+            Self::ExternalToken { .. } => Err(ConfigError::InvalidUserConfig {
+                error: "external-token Geneva auth requires a resolved bearer_token_provider \
+                        capability"
+                    .to_owned(),
+            }),
+            Self::AgentFed => Err(ConfigError::InvalidUserConfig {
+                error: "agent-fed Geneva auth requires a resolved \
+                        agent_fed_credential_provider capability"
+                    .to_owned(),
+            }),
         }
     }
 
@@ -991,112 +1023,15 @@ impl AuthConfig {
             | Self::UserManagedIdentity { msi_resource, .. }
             | Self::UserManagedIdentityByArmResourceId { msi_resource, .. }
             | Self::WorkloadIdentity { msi_resource } => Some(msi_resource.clone()),
-            Self::Certificate { .. } | Self::AgentFed => None,
+            Self::Certificate { .. } | Self::ExternalToken { .. } | Self::AgentFed => None,
         }
     }
-}
-
-/// Geneva exporter metrics.
-/// Grouped under `otap.exporter.geneva`.
-///
-/// Upload, failure, and latency counters are split per signal type (logs vs
-/// traces) so operators can identify which signal is failing or slow.
-#[metric_set(name = "otap.exporter.geneva")]
-#[derive(Debug, Default, Clone)]
-struct ExporterMetrics {
-    // -- Log-signal counters ------------------------------------------------
-    /// Compressed log batches produced by the encoder.
-    #[metric(unit = "{batch}")]
-    pub log_batches_encoded: Counter<u64>,
-
-    /// Log batches successfully uploaded to Geneva.
-    #[metric(unit = "{batch}")]
-    pub log_batches_uploaded: Counter<u64>,
-
-    /// Log batches that failed to upload.
-    #[metric(unit = "{batch}")]
-    pub log_batches_failed: Counter<u64>,
-
-    /// Individual log records successfully uploaded.
-    #[metric(unit = "{record}")]
-    pub log_records_uploaded: Counter<u64>,
-
-    /// Individual log records that failed to upload.
-    #[metric(unit = "{record}")]
-    pub log_records_failed: Counter<u64>,
-
-    /// Log bytes uploaded to Geneva (compressed payload size).
-    #[metric(unit = "By")]
-    pub log_bytes_uploaded: Counter<u64>,
-
-    /// Per-upload latency for successful log batches in milliseconds (min/max/sum/count).
-    #[metric(unit = "ms")]
-    pub log_upload_success_duration: Mmsc,
-
-    /// Per-upload latency for failed log batches in milliseconds (min/max/sum/count).
-    #[metric(unit = "ms")]
-    pub log_upload_failed_duration: Mmsc,
-
-    /// Encode + compress latency for logs in milliseconds (min/max/sum/count).
-    #[metric(unit = "ms")]
-    pub log_encode_duration: Mmsc,
-
-    // -- Trace-signal counters ------------------------------------------------
-    /// Compressed trace batches produced by the encoder.
-    #[metric(unit = "{batch}")]
-    pub trace_batches_encoded: Counter<u64>,
-
-    /// Trace batches successfully uploaded to Geneva.
-    #[metric(unit = "{batch}")]
-    pub trace_batches_uploaded: Counter<u64>,
-
-    /// Trace batches that failed to upload.
-    #[metric(unit = "{batch}")]
-    pub trace_batches_failed: Counter<u64>,
-
-    /// Individual trace records (spans) successfully uploaded.
-    #[metric(unit = "{record}")]
-    pub trace_records_uploaded: Counter<u64>,
-
-    /// Individual trace records (spans) that failed to upload.
-    #[metric(unit = "{record}")]
-    pub trace_records_failed: Counter<u64>,
-
-    /// Trace bytes uploaded to Geneva (compressed payload size).
-    #[metric(unit = "By")]
-    pub trace_bytes_uploaded: Counter<u64>,
-
-    /// Per-upload latency for successful trace batches in milliseconds (min/max/sum/count).
-    #[metric(unit = "ms")]
-    pub trace_upload_success_duration: Mmsc,
-
-    /// Per-upload latency for failed trace batches in milliseconds (min/max/sum/count).
-    #[metric(unit = "ms")]
-    pub trace_upload_failed_duration: Mmsc,
-
-    /// Encode + compress latency for traces in milliseconds (min/max/sum/count).
-    #[metric(unit = "ms")]
-    pub trace_encode_duration: Mmsc,
-
-    // -- Signal-agnostic counters ---------------------------------------------
-    /// Number of empty payloads skipped (no-op ack).
-    #[metric(unit = "{msg}")]
-    pub empty_payloads_skipped: Counter<u64>,
-
-    /// Number of OTAP-to-OTLP conversion errors.
-    #[metric(unit = "{error}")]
-    pub conversion_errors: Counter<u64>,
-
-    /// Number of metrics payloads dropped (unsupported signal).
-    #[metric(unit = "{msg}")]
-    pub metrics_payloads_dropped: Counter<u64>,
 }
 
 /// Geneva exporter that sends OTAP data to Geneva backend
 pub struct GenevaExporter {
     config: Config,
-    pdata_metrics: MeasurementMetricSet<ExporterExportMetrics>,
-    metrics: MetricSet<ExporterMetrics>,
+    metrics: GenevaExporterMetrics,
     geneva_client: GenevaClient,
 }
 
@@ -1112,6 +1047,21 @@ fn validate_agent_fed_capability_binding(node_config: &NodeUserConfig) -> Result
         .ok_or_else(|| ConfigError::InvalidUserConfig {
             error: format!(
                 "agent-fed Geneva auth requires an '{capability_name}' capability binding"
+            ),
+        })
+}
+
+fn validate_external_token_capability_binding(
+    node_config: &NodeUserConfig,
+) -> Result<(), ConfigError> {
+    let capability_name = BearerTokenProviderCap::NAME;
+    node_config
+        .capabilities
+        .get(capability_name)
+        .map(|_| ())
+        .ok_or_else(|| ConfigError::InvalidUserConfig {
+            error: format!(
+                "external-token Geneva auth requires a '{capability_name}' capability binding"
             ),
         })
 }
@@ -1138,6 +1088,9 @@ fn validate_geneva_client_prerequisites(
     if matches!(&config.auth, AuthConfig::AgentFed) {
         validate_agent_fed_capability_binding(node_config)?;
     }
+    if matches!(&config.auth, AuthConfig::ExternalToken { .. }) {
+        validate_external_token_capability_binding(node_config)?;
+    }
 
     // Both GCS and agent-fed uploads use the rustls-backed HTTP client.
     crypto_provider_check()
@@ -1159,31 +1112,204 @@ fn resolve_agent_fed_source(
     Ok(AgentFedGenevaSource::new(credential_provider))
 }
 
+fn resolve_gcs_token_provider(
+    capabilities: &Capabilities,
+    resource: String,
+) -> Result<GenevaGcsTokenProvider, ConfigError> {
+    let provider = capabilities
+        .require_shared::<BearerTokenProviderCap>()
+        .map_err(|error| ConfigError::InvalidUserConfig {
+            error: format!(
+                "external-token Geneva auth requires the bound bearer_token_provider \
+                 capability to provide a shared implementation; local-only registrations \
+                 are unsupported: {error}"
+            ),
+        })?;
+    Ok(GenevaGcsTokenProvider::new(provider, resource))
+}
+
 fn create_geneva_client(
     config: &Config,
     node_config: &NodeUserConfig,
     capabilities: &Capabilities,
 ) -> Result<GenevaClient, ConfigError> {
     validate_geneva_client_prerequisites(config, node_config, ensure_crypto_provider)?;
-    let client_config = config.to_geneva_client_config();
+    if matches!(&config.auth, AuthConfig::AgentFed) {
+        let client_config = config.to_agent_fed_geneva_client_config();
+        let source = resolve_agent_fed_source(capabilities)?;
+        return GenevaClient::with_agent_fed_source(client_config, Arc::new(source)).map_err(
+            |error| ConfigError::InvalidUserConfig {
+                error: format!("Failed to initialize agent-fed Geneva client: {error}"),
+            },
+        );
+    }
 
-    match &config.auth {
-        AuthConfig::AgentFed => {
-            let source = resolve_agent_fed_source(capabilities)?;
-            GenevaClient::with_agent_fed_source(client_config, Arc::new(source)).map_err(|error| {
-                ConfigError::InvalidUserConfig {
-                    error: format!("Failed to initialize agent-fed Geneva client: {error}"),
-                }
-            })
+    let (auth_method, client_kind) = match &config.auth {
+        AuthConfig::ExternalToken { resource } => {
+            let provider = resolve_gcs_token_provider(capabilities, resource.clone())?;
+            let auth_method = AuthMethod::ExternalToken {
+                resource: resource.clone(),
+                provider: Arc::new(provider),
+            };
+            (auth_method, "external-token Geneva client")
         }
-        AuthConfig::Certificate { .. }
-        | AuthConfig::SystemManagedIdentity { .. }
-        | AuthConfig::UserManagedIdentity { .. }
-        | AuthConfig::UserManagedIdentityByArmResourceId { .. }
-        | AuthConfig::WorkloadIdentity { .. } => {
-            GenevaClient::new(client_config).map_err(|error| ConfigError::InvalidUserConfig {
-                error: format!("Failed to initialize Geneva client: {error}"),
-            })
+        auth => (auth.configured_auth_method()?, "Geneva client"),
+    };
+    let client_config = config.to_geneva_client_config(auth_method);
+    GenevaClient::new(client_config).map_err(|error| ConfigError::InvalidUserConfig {
+        error: format!("Failed to initialize {client_kind}: {error}"),
+    })
+}
+
+#[derive(Debug)]
+enum GenevaExportError {
+    /// Failed before any upload attempt (decode/convert/encode/unsupported
+    /// signal). These are always caused by the payload itself, so retrying
+    /// the identical bytes can never succeed.
+    Preparation { message: String, outcome: Outcome },
+    /// Failed during upload; the outcome was already recorded against the
+    /// exporter-attempt metrics boundary.
+    AttemptAlreadyRecorded(GenevaUploadFailure),
+}
+
+#[derive(Debug)]
+struct GenevaUploadFailure {
+    message: String,
+    permanent: bool,
+    cause: NackCause,
+}
+
+impl GenevaUploadFailure {
+    fn new(error: &UploadError, signal: SignalType, agent_fed: bool) -> Self {
+        let (permanent, cause) = match error {
+            UploadError::HttpStatus {
+                status: 408 | 429, ..
+            } => (false, NackCause::Unspecified),
+            UploadError::HttpStatus {
+                status: 401 | 403, ..
+            } => (true, NackCause::Unspecified),
+            UploadError::HttpStatus { status, .. } if (400..500).contains(status) => {
+                (true, NackCause::Refused)
+            }
+            UploadError::AccountGroupNotResolved { .. } => (!agent_fed, NackCause::Unspecified),
+            _ => (false, NackCause::Unspecified),
+        };
+        Self {
+            message: format!("Failed to upload {signal:?} batch: {error}"),
+            permanent,
+            cause,
+        }
+    }
+
+    fn merge(&mut self, other: Self) {
+        self.permanent &= other.permanent;
+        // Only blame the incoming request if every failure does.
+        if other.cause != NackCause::Refused {
+            self.cause = NackCause::Unspecified;
+        }
+    }
+}
+
+impl GenevaExportError {
+    fn failed(message: String) -> Self {
+        Self::Preparation {
+            message,
+            outcome: Outcome::Failure,
+        }
+    }
+
+    fn refused(message: String) -> Self {
+        Self::Preparation {
+            message,
+            outcome: Outcome::Refused,
+        }
+    }
+
+    const fn unsubmitted_outcome(&self) -> Option<Outcome> {
+        match self {
+            Self::Preparation { outcome, .. } => Some(*outcome),
+            Self::AttemptAlreadyRecorded(_) => None,
+        }
+    }
+
+    fn message(&self) -> &str {
+        match self {
+            Self::Preparation { message, .. } => message,
+            Self::AttemptAlreadyRecorded(failure) => &failure.message,
+        }
+    }
+
+    /// Returns whether a retry processor resending the identical payload can
+    /// never succeed. `Preparation` failures are always permanent because
+    /// they stem from the payload itself, not a transient backend condition.
+    const fn is_permanent(&self) -> bool {
+        match self {
+            Self::Preparation { .. } => true,
+            Self::AttemptAlreadyRecorded(failure) => failure.permanent,
+        }
+    }
+
+    fn into_nack(self, refused: OtapPdata) -> NackMsg<OtapPdata> {
+        let (message, permanent, cause) = match self {
+            Self::Preparation { message, .. } => (message, true, NackCause::Refused),
+            Self::AttemptAlreadyRecorded(failure) => {
+                (failure.message, failure.permanent, failure.cause)
+            }
+        };
+        if permanent {
+            NackMsg::new_permanent_with_cause(message, refused, cause)
+        } else {
+            NackMsg::new_with_cause(message, refused, cause)
+        }
+    }
+}
+
+async fn upload_batch_attempt(
+    client: &GenevaClient,
+    batch: &EncodedBatch,
+    signal: SignalType,
+    attempt: otel_arrow_dfe_otap::metrics::ExporterAttempt,
+    agent_fed: bool,
+) -> otel_arrow_dfe_otap::metrics::CompletedExporterAttempt<
+    u64,
+    (GenevaExporterErrorType, GenevaUploadFailure),
+> {
+    attempt
+        .run(async |attempt| {
+            attempt.set_item_count_with(|| batch.row_count as u64);
+            attempt.set_payload_size_with(|| batch.compressed_size());
+            client
+                .upload_batch(batch)
+                .await
+                .map_err(|error| {
+                    let error_type = GenevaExporterErrorType::from_upload_error(&error);
+                    let failure = GenevaUploadFailure::new(&error, signal, agent_fed);
+                    if error_type.is_refusal() {
+                        attempt.refused((error_type, failure))
+                    } else {
+                        attempt.failed((error_type, failure))
+                    }
+                })
+                .map(|()| batch.row_count as u64)
+        })
+        .await
+}
+
+fn record_completed_upload(
+    metrics: &mut GenevaExporterMetrics,
+    signal: SignalType,
+    completed: otel_arrow_dfe_otap::metrics::CompletedExporterAttempt<
+        u64,
+        (GenevaExporterErrorType, GenevaUploadFailure),
+    >,
+    first_error: &mut Option<GenevaUploadFailure>,
+) {
+    if let Err((error_type, error)) = metrics.boundary.record(completed) {
+        metrics.record_failure(signal, error_type);
+        if let Some(first_error) = first_error {
+            first_error.merge(error);
+        } else {
+            *first_error = Some(error);
         }
     }
 }
@@ -1218,12 +1344,10 @@ impl GenevaExporter {
         capabilities: &Capabilities,
     ) -> Result<Self, ConfigError> {
         let geneva_client = create_geneva_client(&config, node_config, capabilities)?;
-        let pdata_metrics = ExporterExportMetrics::register(&pipeline_ctx);
-        let metrics = pipeline_ctx.register_metrics::<ExporterMetrics>();
+        let metrics = GenevaExporterMetrics::register(&pipeline_ctx);
 
         Ok(Self {
             config,
-            pdata_metrics,
             metrics,
             geneva_client,
         })
@@ -1235,11 +1359,38 @@ impl GenevaExporter {
         &self.config
     }
 
+    fn encode_batches<E>(
+        &mut self,
+        signal: SignalType,
+        encode: impl FnOnce(&GenevaClient) -> Result<Vec<EncodedBatch>, E>,
+    ) -> Result<Vec<EncodedBatch>, GenevaExportError>
+    where
+        E: std::fmt::Display,
+    {
+        let started_at = self.metrics.start_encoding();
+        match encode(&self.geneva_client) {
+            Ok(batches) => {
+                self.metrics
+                    .record_encoding(signal, Outcome::Success, started_at);
+                Ok(batches)
+            }
+            Err(error) => {
+                self.metrics
+                    .record_encoding(signal, Outcome::Failure, started_at);
+                self.metrics
+                    .record_failure(signal, GenevaExporterErrorType::Encoding);
+                Err(GenevaExportError::failed(format!(
+                    "Failed to encode {signal:?}: {error}"
+                )))
+            }
+        }
+    }
+
     /// Upload batches concurrently.
     ///
     /// All batches are attempted regardless of individual failures (no
-    /// short-circuit). Per-batch upload latency and per-signal success/failure
-    /// counters are recorded accurately using `batch.row_count`.
+    /// short-circuit). Each batch records one shared exporter attempt with its
+    /// row count, compressed application-payload size, duration, and outcome.
     ///
     /// # Partial-success limitation
     ///
@@ -1252,119 +1403,66 @@ impl GenevaExporter {
     /// batches with no sharing. The real fix requires engine-level support for
     /// per-batch retry tracking (partial ACK/NACK or exporter-attached retry
     /// context on `OtapPdata`).
+    ///
+    /// The first failure supplies the error message, but the payload is
+    /// permanent only if every failed batch is permanent, independent of
+    /// completion order.
     async fn upload_batches_concurrent(
         &mut self,
         batches: &[EncodedBatch],
         signal_type: SignalType,
-    ) -> Result<usize, String> {
+    ) -> Result<usize, GenevaExportError> {
         let batches_encoded = batches.len();
-        match signal_type {
-            SignalType::Logs => self.metrics.log_batches_encoded.add(batches_encoded as u64),
-            SignalType::Traces => self
-                .metrics
-                .trace_batches_encoded
-                .add(batches_encoded as u64),
-            _ => {}
-        }
-
         let max_concurrent = self.config.max_concurrent_uploads.max(1);
         let client = &self.geneva_client;
+        let agent_fed = matches!(self.config.auth, AuthConfig::AgentFed);
+        // Pre-start queued attempts only when their queueing duration is observable.
+        // Otherwise create attempts as uploads are scheduled to bound retained state.
+        let mut prestarted_attempts = self.metrics.measures_duration().then(|| {
+            (0..batches.len())
+                .map(|_| self.metrics.boundary.attempt(signal_type))
+                .collect::<Vec<_>>()
+                .into_iter()
+        });
+        let mut batches = batches.iter();
+        let mut uploads = futures::stream::FuturesUnordered::new();
 
-        // Run all uploads concurrently, processing results inline via streaming
-        // to avoid an intermediate Vec allocation.
-        let mut stream = futures::stream::iter(batches.iter())
-            .map(|batch| {
-                // TODO(https://github.com/open-telemetry/opentelemetry-rust-contrib/issues/605):
-                // restore compressed byte accounting after geneva-uploader exposes a public
-                // accessor such as EncodedBatch::compressed_len() returning the post-compression
-                // payload size uploaded to Geneva.
-                let batch_size: Option<u64> = None;
-                let row_count = batch.row_count as u64;
-                async move {
-                    let start = Instant::now();
-                    let result = client
-                        .upload_batch(batch)
-                        .await
-                        .map_err(|e| format!("Failed to upload {:?} batch: {e}", signal_type));
-                    let duration_ms = start.elapsed().as_secs_f64() * 1000.0;
-                    (result, duration_ms, batch_size, row_count)
-                }
-            })
-            .buffer_unordered(max_concurrent);
+        for batch in batches.by_ref().take(max_concurrent) {
+            let attempt = prestarted_attempts
+                .as_mut()
+                .and_then(|attempts| attempts.next())
+                .unwrap_or_else(|| self.metrics.boundary.attempt(signal_type));
+            uploads.push(upload_batch_attempt(
+                client,
+                batch,
+                signal_type,
+                attempt,
+                agent_fed,
+            ));
+        }
 
-        // Aggregate results and update per-signal metrics.
-        let mut first_error: Option<String> = None;
-        let mut succeeded: u64 = 0;
-        let mut failed: u64 = 0;
-        let mut records_ok: u64 = 0;
-        let mut records_err: u64 = 0;
-        let mut bytes_ok: Option<u64> = None;
+        let mut first_error = None;
 
-        while let Some((result, duration_ms, batch_size, row_count)) = stream.next().await {
-            match result {
-                Ok(()) => {
-                    match signal_type {
-                        SignalType::Logs => {
-                            self.metrics.log_upload_success_duration.record(duration_ms);
-                        }
-                        SignalType::Traces => {
-                            self.metrics
-                                .trace_upload_success_duration
-                                .record(duration_ms);
-                        }
-                        _ => {}
-                    }
-                    succeeded += 1;
-                    records_ok += row_count;
-                    if let Some(batch_size) = batch_size {
-                        bytes_ok = Some(bytes_ok.unwrap_or_default() + batch_size);
-                    }
-                }
-                Err(e) => {
-                    match signal_type {
-                        SignalType::Logs => {
-                            self.metrics.log_upload_failed_duration.record(duration_ms);
-                        }
-                        SignalType::Traces => {
-                            self.metrics
-                                .trace_upload_failed_duration
-                                .record(duration_ms);
-                        }
-                        _ => {}
-                    }
-                    failed += 1;
-                    records_err += row_count;
-                    if first_error.is_none() {
-                        first_error = Some(e);
-                    }
-                }
+        while let Some(completed) = uploads.next().await {
+            record_completed_upload(&mut self.metrics, signal_type, completed, &mut first_error);
+
+            if let Some(batch) = batches.next() {
+                let attempt = prestarted_attempts
+                    .as_mut()
+                    .and_then(|attempts| attempts.next())
+                    .unwrap_or_else(|| self.metrics.boundary.attempt(signal_type));
+                uploads.push(upload_batch_attempt(
+                    client,
+                    batch,
+                    signal_type,
+                    attempt,
+                    agent_fed,
+                ));
             }
         }
 
-        match signal_type {
-            SignalType::Logs => {
-                self.metrics.log_batches_uploaded.add(succeeded);
-                self.metrics.log_records_uploaded.add(records_ok);
-                if let Some(bytes_ok) = bytes_ok {
-                    self.metrics.log_bytes_uploaded.add(bytes_ok);
-                }
-                self.metrics.log_batches_failed.add(failed);
-                self.metrics.log_records_failed.add(records_err);
-            }
-            SignalType::Traces => {
-                self.metrics.trace_batches_uploaded.add(succeeded);
-                self.metrics.trace_records_uploaded.add(records_ok);
-                if let Some(bytes_ok) = bytes_ok {
-                    self.metrics.trace_bytes_uploaded.add(bytes_ok);
-                }
-                self.metrics.trace_batches_failed.add(failed);
-                self.metrics.trace_records_failed.add(records_err);
-            }
-            _ => {}
-        }
-
-        if let Some(e) = first_error {
-            Err(e)
+        if let Some(error) = first_error {
+            Err(GenevaExportError::AttemptAlreadyRecorded(error))
         } else {
             Ok(batches_encoded)
         }
@@ -1384,10 +1482,13 @@ impl GenevaExporter {
     async fn export_payload(
         &mut self,
         payload: OtapPayload,
-        _effect_handler: &EffectHandler<OtapPdata>,
-    ) -> Result<usize, String> {
+        effect_handler: &EffectHandler<OtapPdata>,
+        encoding_plan: &EncodingPlan,
+    ) -> Result<usize, GenevaExportError> {
+        let signal_type = payload.signal_type();
         if payload.is_empty() {
-            self.metrics.empty_payloads_skipped.inc();
+            self.metrics
+                .record_skip(signal_type, GenevaExporterSkipReason::EmptyPayload);
             otel_info!(
                 "geneva_exporter.skip",
                 message = "Geneva exporter skipping empty payload"
@@ -1395,178 +1496,204 @@ impl GenevaExporter {
             return Ok(0);
         }
 
-        // Handle based on payload type
-        match payload.into_data() {
-            // OTAP Arrow path: encode logs through LogsDataView without converting back to OTLP.
-            PayloadData::OtapArrowRecords(otap_records) => {
-                match otap_records {
-                    mut otap_records @ OtapArrowRecords::Logs(_) => {
-                        otel_info!(
-                            "geneva_exporter.upload",
-                            message = "Uploading log batches to Geneva using OTAP record views"
-                        );
+        if payload.encoding() != Some(&PdataEncoding::OTLP) {
+            let otap_records = effect_handler
+                .materialize_otap_payload(payload)
+                .await
+                .map_err(|error| {
+                    self.metrics
+                        .record_failure(signal_type, GenevaExporterErrorType::Conversion);
+                    GenevaExportError::failed(error.to_string())
+                })?;
+            match otap_records {
+                mut otap_records @ OtapArrowRecords::Logs(_) => {
+                    otel_info!(
+                        "geneva_exporter.upload",
+                        message = "Uploading log batches to Geneva using OTAP record views"
+                    );
 
-                        otap_records.decode_transport_optimized_ids().map_err(|e| {
-                            self.metrics.conversion_errors.inc();
-                            format!("Failed to decode OTAP transport-optimized log IDs: {}", e)
+                    otap_records.decode_transport_optimized_ids().map_err(|e| {
+                        self.metrics.record_failure(
+                            SignalType::Logs,
+                            GenevaExporterErrorType::TransportDecoding,
+                        );
+                        GenevaExportError::failed(format!(
+                            "Failed to decode OTAP transport-optimized log IDs: {}",
+                            e
+                        ))
+                    })?;
+
+                    let logs_view = OtapLogsView::try_from(&otap_records).map_err(|e| {
+                        self.metrics
+                            .record_failure(SignalType::Logs, GenevaExporterErrorType::Conversion);
+                        GenevaExportError::failed(format!("Failed to build OTAP logs view: {}", e))
+                    })?;
+
+                    let batches = self.encode_batches(SignalType::Logs, |client| {
+                        client.encode_and_compress_logs(&logs_view)
+                    })?;
+
+                    let batches_uploaded = self
+                        .upload_batches_concurrent(&batches, SignalType::Logs)
+                        .await?;
+
+                    otel_info!(
+                        "geneva_exporter.upload",
+                        count = batches_uploaded,
+                        message =
+                            "Successfully uploaded log batches to Geneva using OTAP record views"
+                    );
+
+                    Ok(batches_uploaded)
+                }
+                OtapArrowRecords::Traces(otap_records) => {
+                    // TODO: Zero-copy view path for future optimization (when TracesView is ready)
+
+                    // Fallback path: Convert OTAP Arrow -> OTLP bytes
+                    otel_info!(
+                        "geneva_exporter.convert",
+                        message = "Converting OTAP traces to OTLP bytes (fallback path)"
+                    );
+
+                    let mut trace_payload =
+                        OtapPayload::from(OtapArrowRecords::Traces(otap_records));
+                    let bytes = effect_handler
+                        .encode_owned(&mut trace_payload, encoding_plan)
+                        .await
+                        .map_err(|e| {
+                            self.metrics.record_failure(
+                                SignalType::Traces,
+                                GenevaExporterErrorType::Conversion,
+                            );
+                            GenevaExportError::failed(format!(
+                                "Failed to convert OTAP to OTLP: {e:?}"
+                            ))
                         })?;
 
-                        let logs_view = OtapLogsView::try_from(&otap_records).map_err(|e| {
-                            self.metrics.conversion_errors.inc();
-                            format!("Failed to build OTAP logs view: {}", e)
+                    // Decode OTLP bytes to ResourceSpans
+                    let traces_request =
+                        ExportTraceServiceRequest::decode(&bytes[..]).map_err(|e| {
+                            self.metrics.record_failure(
+                                SignalType::Traces,
+                                GenevaExporterErrorType::ProtobufDecoding,
+                            );
+                            GenevaExportError::failed(format!(
+                                "Failed to decode traces request: {}",
+                                e
+                            ))
                         })?;
 
-                        let encode_start = Instant::now();
-                        let batches = self
-                            .geneva_client
-                            .encode_and_compress_logs(&logs_view)
-                            .map_err(|e| format!("Failed to encode logs: {}", e))?;
-                        let encode_ms = encode_start.elapsed().as_secs_f64() * 1000.0;
-                        self.metrics.log_encode_duration.record(encode_ms);
+                    // Encode and compress using Geneva client
+                    let batches = self.encode_batches(SignalType::Traces, |client| {
+                        client.encode_and_compress_spans(&traces_request.resource_spans[..])
+                    })?;
 
-                        let batches_uploaded = self
-                            .upload_batches_concurrent(&batches, SignalType::Logs)
-                            .await?;
+                    let batches_uploaded = self
+                        .upload_batches_concurrent(&batches, SignalType::Traces)
+                        .await?;
 
-                        otel_info!(
-                            "geneva_exporter.upload",
-                            count = batches_uploaded,
-                            message = "Successfully uploaded log batches to Geneva using OTAP record views"
-                        );
+                    otel_info!(
+                        "geneva_exporter.upload",
+                        count = batches_uploaded,
+                        message = "Successfully uploaded trace batches to Geneva (OTAP fallback)"
+                    );
 
-                        Ok(batches_uploaded)
-                    }
-                    OtapArrowRecords::Traces(otap_records) => {
-                        // TODO: Zero-copy view path for future optimization (when TracesView is ready)
-
-                        // Fallback path: Convert OTAP Arrow -> OTLP bytes
-                        otel_info!(
-                            "geneva_exporter.convert",
-                            message = "Converting OTAP traces to OTLP bytes (fallback path)"
-                        );
-
-                        let otlp_bytes: OtlpProtoBytes =
-                            OtapPayload::from(OtapArrowRecords::Traces(otap_records))
-                                .try_into_with_default()
-                                .map_err(|e| {
-                                    self.metrics.conversion_errors.inc();
-                                    format!("Failed to convert OTAP to OTLP: {:?}", e)
-                                })?;
-
-                        let OtlpProtoBytes::ExportTracesRequest(bytes) = otlp_bytes else {
-                            self.metrics.conversion_errors.inc();
-                            return Err("Expected traces but got different signal type".to_string());
-                        };
-
-                        // Decode OTLP bytes to ResourceSpans
-                        let traces_request = ExportTraceServiceRequest::decode(&bytes[..])
-                            .map_err(|e| {
-                                self.metrics.conversion_errors.inc();
-                                format!("Failed to decode traces request: {}", e)
-                            })?;
-
-                        // Encode and compress using Geneva client
-                        let encode_start = Instant::now();
-                        let batches = self
-                            .geneva_client
-                            .encode_and_compress_spans(&traces_request.resource_spans[..])
-                            .map_err(|e| format!("Failed to encode spans: {}", e))?;
-                        let encode_ms = encode_start.elapsed().as_secs_f64() * 1000.0;
-                        self.metrics.trace_encode_duration.record(encode_ms);
-
-                        let batches_uploaded = self
-                            .upload_batches_concurrent(&batches, SignalType::Traces)
-                            .await?;
-
-                        otel_info!(
-                            "geneva_exporter.upload",
-                            count = batches_uploaded,
-                            message =
-                                "Successfully uploaded trace batches to Geneva (OTAP fallback)"
-                        );
-
-                        Ok(batches_uploaded)
-                    }
-                    OtapArrowRecords::Metrics(_) => {
-                        self.metrics.metrics_payloads_dropped.inc();
-                        Err("Geneva exporter does not support metrics signal".to_string())
-                    }
+                    Ok(batches_uploaded)
+                }
+                OtapArrowRecords::Metrics(_) => {
+                    self.metrics.record_failure(
+                        SignalType::Metrics,
+                        GenevaExporterErrorType::UnsupportedSignal,
+                    );
+                    Err(GenevaExportError::refused(
+                        "Geneva exporter does not support metrics signal".to_string(),
+                    ))
                 }
             }
+        } else {
+            let otlp_bytes = OtlpProtoBytes::new_from_bytes(
+                signal_type,
+                payload
+                    .into_encoded_bytes()
+                    .expect("OTLP encoding has bytes"),
+            );
+            match otlp_bytes {
+                OtlpProtoBytes::ExportLogsRequest(bytes) => {
+                    otel_info!(
+                        "geneva_exporter.upload",
+                        message = "Uploading log batches to Geneva using OTLP raw-byte view"
+                    );
 
-            // OTLP path: Direct OTLP bytes from receivers without OTAP conversion (e.g., OTLP receiver -> Geneva exporter without batch processor)
-            PayloadData::OtlpBytes(otlp_bytes) => {
-                match otlp_bytes {
-                    OtlpProtoBytes::ExportLogsRequest(bytes) => {
-                        otel_info!(
-                            "geneva_exporter.upload",
-                            message = "Uploading log batches to Geneva using OTLP raw-byte view"
+                    let logs_view = RawLogsData::try_new(bytes.as_ref()).map_err(|e| {
+                        self.metrics.record_failure(
+                            SignalType::Logs,
+                            GenevaExporterErrorType::ProtobufDecoding,
                         );
+                        GenevaExportError::failed(format!("Failed to decode logs request: {}", e))
+                    })?;
 
-                        let logs_view = RawLogsData::try_new(bytes.as_ref()).map_err(|e| {
-                            self.metrics.conversion_errors.inc();
-                            format!("Failed to decode logs request: {}", e)
+                    // Encode and compress using Geneva client
+                    let batches = self.encode_batches(SignalType::Logs, |client| {
+                        client.encode_and_compress_logs(&logs_view)
+                    })?;
+
+                    let batches_uploaded = self
+                        .upload_batches_concurrent(&batches, SignalType::Logs)
+                        .await?;
+
+                    otel_info!(
+                        "geneva_exporter.upload",
+                        count = batches_uploaded,
+                        message =
+                            "Successfully uploaded log batches to Geneva using OTLP raw-byte view"
+                    );
+
+                    Ok(batches_uploaded)
+                }
+                OtlpProtoBytes::ExportTracesRequest(bytes) => {
+                    otel_info!(
+                        "geneva_exporter.upload",
+                        message = "Uploading traces to Geneva using OTLP path"
+                    );
+
+                    // Decode OTLP bytes to ResourceSpans
+                    let traces_request =
+                        ExportTraceServiceRequest::decode(&bytes[..]).map_err(|e| {
+                            self.metrics.record_failure(
+                                SignalType::Traces,
+                                GenevaExporterErrorType::ProtobufDecoding,
+                            );
+                            GenevaExportError::failed(format!(
+                                "Failed to decode traces request: {}",
+                                e
+                            ))
                         })?;
 
-                        // Encode and compress using Geneva client
-                        let encode_start = Instant::now();
-                        let batches = self
-                            .geneva_client
-                            .encode_and_compress_logs(&logs_view)
-                            .map_err(|e| format!("Failed to encode logs: {}", e))?;
-                        let encode_ms = encode_start.elapsed().as_secs_f64() * 1000.0;
-                        self.metrics.log_encode_duration.record(encode_ms);
+                    // Encode and compress using Geneva client
+                    let batches = self.encode_batches(SignalType::Traces, |client| {
+                        client.encode_and_compress_spans(&traces_request.resource_spans[..])
+                    })?;
 
-                        let batches_uploaded = self
-                            .upload_batches_concurrent(&batches, SignalType::Logs)
-                            .await?;
+                    let batches_uploaded = self
+                        .upload_batches_concurrent(&batches, SignalType::Traces)
+                        .await?;
 
-                        otel_info!(
-                            "geneva_exporter.upload",
-                            count = batches_uploaded,
-                            message = "Successfully uploaded log batches to Geneva using OTLP raw-byte view"
-                        );
+                    otel_info!(
+                        "geneva_exporter.upload",
+                        count = batches_uploaded,
+                        message = "Successfully uploaded trace batches to Geneva (OTLP path)"
+                    );
 
-                        Ok(batches_uploaded)
-                    }
-                    OtlpProtoBytes::ExportTracesRequest(bytes) => {
-                        otel_info!(
-                            "geneva_exporter.upload",
-                            message = "Uploading traces to Geneva using OTLP path"
-                        );
-
-                        // Decode OTLP bytes to ResourceSpans
-                        let traces_request = ExportTraceServiceRequest::decode(&bytes[..])
-                            .map_err(|e| {
-                                self.metrics.conversion_errors.inc();
-                                format!("Failed to decode traces request: {}", e)
-                            })?;
-
-                        // Encode and compress using Geneva client
-                        let encode_start = Instant::now();
-                        let batches = self
-                            .geneva_client
-                            .encode_and_compress_spans(&traces_request.resource_spans[..])
-                            .map_err(|e| format!("Failed to encode spans: {}", e))?;
-                        let encode_ms = encode_start.elapsed().as_secs_f64() * 1000.0;
-                        self.metrics.trace_encode_duration.record(encode_ms);
-
-                        let batches_uploaded = self
-                            .upload_batches_concurrent(&batches, SignalType::Traces)
-                            .await?;
-
-                        otel_info!(
-                            "geneva_exporter.upload",
-                            count = batches_uploaded,
-                            message = "Successfully uploaded trace batches to Geneva (OTLP path)"
-                        );
-
-                        Ok(batches_uploaded)
-                    }
-                    OtlpProtoBytes::ExportMetricsRequest(_) => {
-                        self.metrics.metrics_payloads_dropped.inc();
-                        Err("Geneva exporter does not support metrics signal".to_string())
-                    }
+                    Ok(batches_uploaded)
+                }
+                OtlpProtoBytes::ExportMetricsRequest(_) => {
+                    self.metrics.record_failure(
+                        SignalType::Metrics,
+                        GenevaExporterErrorType::UnsupportedSignal,
+                    );
+                    Err(GenevaExportError::refused(
+                        "Geneva exporter does not support metrics signal".to_string(),
+                    ))
                 }
             }
         }
@@ -1602,6 +1729,7 @@ pub static GENEVA_EXPORTER: ExporterFactory<OtapPdata> = ExporterFactory {
             exporter_config,
         ))
     },
+    context_declarations: None,
     wiring_contract: otel_arrow_dfe_engine::wiring_contract::WiringContract::UNRESTRICTED,
     validate_config: validate_geneva_config,
 };
@@ -1613,6 +1741,8 @@ impl Exporter<OtapPdata> for GenevaExporter {
         mut msg_chan: ExporterInbox<OtapPdata>,
         effect_handler: EffectHandler<OtapPdata>,
     ) -> Result<TerminalState, Error> {
+        let encoding_plan =
+            effect_handler.resolve_encoding_plan(&PdataEncoding::OTLP, EncodePolicy::default())?;
         match &self.config.auth {
             AuthConfig::AgentFed => {
                 otel_info!(
@@ -1647,59 +1777,52 @@ impl Exporter<OtapPdata> for GenevaExporter {
                         message = "Geneva exporter shutting down"
                     );
 
-                    return Ok(TerminalState::new(deadline, {
-                        let mut snapshots = self.pdata_metrics.terminal_snapshots();
-                        snapshots.push(self.metrics.snapshot());
-                        snapshots
-                    }));
+                    return Ok(TerminalState::new(
+                        deadline,
+                        self.metrics.terminal_snapshots(),
+                    ));
                 }
                 Message::Control(NodeControlMsg::CollectTelemetry {
                     mut metrics_reporter,
                 }) => {
-                    _ = metrics_reporter.report_measurement(&mut self.pdata_metrics);
-                    _ = metrics_reporter.report(&mut self.metrics);
+                    _ = self.metrics.report(&mut metrics_reporter);
                 }
                 Message::PData(pdata) => {
-                    let export_start = Instant::now();
-                    let (context, payload) = pdata.into_parts();
-                    let signal_type = payload.signal_type();
+                    let signal_type = pdata.signal_type();
+                    let unsubmitted_attempt = self.metrics.boundary.attempt(signal_type);
+                    let (delivery, payload) = pdata.into_work();
 
-                    let saved_payload = if context.may_return_payload() {
-                        payload.clone()
-                    } else {
-                        OtapPayload::empty(signal_type)
-                    };
-
-                    match self.export_payload(payload, &effect_handler).await {
-                        Ok(_batches_uploaded) => {
-                            self.pdata_metrics
-                                .with(SignalOutcomeAttributes {
-                                    signal: signal_type,
-                                    outcome: Outcome::Success,
-                                })
-                                .record(export_start.elapsed());
+                    match self
+                        .export_payload(payload, &effect_handler, &encoding_plan)
+                        .await
+                    {
+                        Ok(batches_uploaded) => {
+                            if batches_uploaded == 0 {
+                                self.metrics
+                                    .record_unsubmitted_attempt(
+                                        unsubmitted_attempt,
+                                        Outcome::Success,
+                                    )
+                                    .await;
+                            }
                             effect_handler
-                                .notify_ack(AckMsg::new(OtapPdata::new(context, saved_payload)))
+                                .notify_ack(AckMsg::new(delivery.into_pdata()))
                                 .await?;
                         }
-                        Err(e) => {
-                            self.pdata_metrics
-                                .with(SignalOutcomeAttributes {
-                                    signal: signal_type,
-                                    outcome: Outcome::Failure,
-                                })
-                                .record(export_start.elapsed());
+                        Err(error) => {
+                            if let Some(outcome) = error.unsubmitted_outcome() {
+                                self.metrics
+                                    .record_unsubmitted_attempt(unsubmitted_attempt, outcome)
+                                    .await;
+                            }
                             otel_info!(
                                 "geneva_exporter.error",
-                                error = e,
+                                error = error.message(),
+                                permanent = error.is_permanent(),
                                 message = "Failed to export to Geneva"
                             );
-                            effect_handler
-                                .notify_nack(NackMsg::new(
-                                    &e,
-                                    OtapPdata::new(context, saved_payload),
-                                ))
-                                .await?;
+                            let refused = delivery.into_pdata();
+                            effect_handler.notify_nack(error.into_nack(refused)).await?;
                         }
                     }
                 }
@@ -1722,13 +1845,19 @@ mod tests {
         UInt8Array, UInt16Array, UInt32Array,
     };
     use arrow::datatypes::{DataType, Field, Schema, TimeUnit};
+    use std::sync::atomic::{AtomicUsize, Ordering};
     use std::sync::{Arc, RwLock};
 
     use bytes::Bytes;
-    use geneva_uploader::client::AgentFedCredentialSource;
+    use geneva_uploader::client::{
+        AgentFedCredential, AgentFedCredentialFuture, AgentFedCredentialSource,
+    };
     use otel_arrow_dfe_engine::Interests;
     use otel_arrow_dfe_engine::capability::auth::BearerToken;
-    use otel_arrow_dfe_engine::capability::auth::agent_fed_credential_provider::AgentFedCredentialSnapshot;
+    use otel_arrow_dfe_engine::capability::auth::agent_fed_credential_provider::{
+        AgentFedCredentialSnapshot, AgentFedCredentialSnapshotStream,
+    };
+    use otel_arrow_dfe_engine::capability::auth::bearer_token_provider::TokenStream;
     use otel_arrow_dfe_engine::capability::registry::CapabilityRegistry;
     use otel_arrow_dfe_engine::capability::{
         CapabilityError, ExtensionCapability, LocalInstanceFactory, SharedInstanceFactory,
@@ -1736,12 +1865,14 @@ mod tests {
     use otel_arrow_dfe_engine::control::PipelineCompletionMsg;
     use otel_arrow_dfe_engine::extension_capabilities;
     use otel_arrow_dfe_engine::local::capability::auth::agent_fed_credential_provider::AgentFedCredentialProvider as LocalAgentFedCredentialProvider;
+    use otel_arrow_dfe_engine::local::capability::auth::bearer_token_provider::BearerTokenProvider as LocalBearerTokenProvider;
     use otel_arrow_dfe_engine::shared::capability::auth::agent_fed_credential_provider::AgentFedCredentialProvider as SharedAgentFedCredentialProvider;
+    use otel_arrow_dfe_engine::shared::capability::auth::bearer_token_provider::BearerTokenProvider as SharedBearerTokenProvider;
     use otel_arrow_dfe_engine::testing::capability::resolve_bindings_for_test;
     use otel_arrow_dfe_engine::testing::exporter::{
         TestRuntime, create_exporter_from_factory, create_test_pipeline_context,
     };
-    use otel_arrow_dfe_engine::testing::test_node;
+    use otel_arrow_dfe_engine::testing::{test_node, test_pipeline_ctx_with_interests};
     use otel_arrow_dfe_otap::testing::{TestCallData, next_ack, next_nack};
     use otel_arrow_dfe_pdata::otap::OtapArrowRecords;
     use otel_arrow_dfe_pdata::proto::opentelemetry::arrow::v1::ArrowPayloadType;
@@ -1931,6 +2062,27 @@ mod tests {
         node_config
     }
 
+    fn external_token_test_config() -> serde_json::Value {
+        let mut config = test_config();
+        config["auth"] = serde_json::json!({
+            "type": "externaltoken",
+            "resource": "https://monitor.azure.com"
+        });
+        config
+    }
+
+    fn external_token_node_config(extension: Option<&str>) -> NodeUserConfig {
+        let mut node_config = NodeUserConfig::new_exporter_config(GENEVA_EXPORTER_URN);
+        node_config.config = external_token_test_config();
+        if let Some(extension) = extension {
+            let _ = node_config.capabilities.insert(
+                BearerTokenProviderCap::NAME.into(),
+                extension.to_owned().into(),
+            );
+        }
+        node_config
+    }
+
     #[derive(Clone)]
     struct MockAgentExtension {
         snapshot: Arc<RwLock<MockAgentSnapshot>>,
@@ -1950,6 +2102,10 @@ mod tests {
                 Arc::clone(&snapshot.attributes),
             )))
         }
+
+        fn credential_stream(&self) -> AgentFedCredentialSnapshotStream {
+            unreachable!()
+        }
     }
 
     #[derive(Clone)]
@@ -1962,6 +2118,41 @@ mod tests {
                 BearerToken::without_expiry("unused-token".to_owned()),
                 Arc::new(serde_json::Map::new()),
             )))
+        }
+
+        fn credential_stream(&self) -> AgentFedCredentialSnapshotStream {
+            unreachable!()
+        }
+    }
+
+    #[derive(Clone)]
+    struct MockBearerTokenExtension {
+        calls: Arc<AtomicUsize>,
+    }
+
+    #[async_trait]
+    impl SharedBearerTokenProvider for MockBearerTokenExtension {
+        async fn get_token(&self) -> Result<BearerToken, CapabilityError> {
+            let _ = self.calls.fetch_add(1, Ordering::Relaxed);
+            Ok(BearerToken::without_expiry("test-entra-token".to_string()))
+        }
+
+        fn token_stream(&self) -> TokenStream {
+            Box::pin(futures::stream::empty())
+        }
+    }
+
+    #[derive(Clone)]
+    struct MockLocalBearerTokenExtension;
+
+    #[async_trait(?Send)]
+    impl LocalBearerTokenProvider for MockLocalBearerTokenExtension {
+        async fn get_token(&self) -> Result<BearerToken, CapabilityError> {
+            Ok(BearerToken::without_expiry("test-entra-token".to_string()))
+        }
+
+        fn token_stream(&self) -> TokenStream {
+            Box::pin(futures::stream::empty())
         }
     }
 
@@ -2013,6 +2204,373 @@ mod tests {
             .expect("resolve local-only capabilities")
     }
 
+    fn resolved_external_token_capabilities(
+        node_config: &NodeUserConfig,
+    ) -> (Capabilities, Arc<AtomicUsize>) {
+        let calls = Arc::new(AtomicUsize::new(0));
+        let extension = MockBearerTokenExtension {
+            calls: Arc::clone(&calls),
+        };
+        let extension_capabilities = extension_capabilities!(
+            shared: MockBearerTokenExtension => [BearerTokenProviderCap]
+        );
+        let mut registry = CapabilityRegistry::new();
+        let instance_factory =
+            SharedInstanceFactory::new(move || Box::new(extension.clone()) as Box<dyn Any + Send>);
+        (extension_capabilities.register_shared)(
+            "azure-identity".into(),
+            instance_factory,
+            &mut registry,
+        )
+        .expect("register capabilities");
+        let known_extensions =
+            HashSet::from([otel_arrow_dfe_config::ExtensionId::from("azure-identity")]);
+        (
+            resolve_bindings_for_test(&node_config.capabilities, &registry, &known_extensions)
+                .expect("resolve capabilities"),
+            calls,
+        )
+    }
+
+    fn resolved_local_only_external_token_capabilities(
+        node_config: &NodeUserConfig,
+    ) -> Capabilities {
+        let extension_capabilities = extension_capabilities!(
+            local: MockLocalBearerTokenExtension => [BearerTokenProviderCap]
+        );
+        let mut registry = CapabilityRegistry::new();
+        let instance_factory =
+            LocalInstanceFactory::new(|| Box::new(MockLocalBearerTokenExtension) as Box<dyn Any>);
+        (extension_capabilities.register_local)(
+            "azure-identity".into(),
+            instance_factory,
+            &mut registry,
+        )
+        .expect("register capabilities");
+        let known_extensions =
+            HashSet::from([otel_arrow_dfe_config::ExtensionId::from("azure-identity")]);
+        resolve_bindings_for_test(&node_config.capabilities, &registry, &known_extensions)
+            .expect("resolve capabilities")
+    }
+
+    #[derive(Debug)]
+    struct TestUploadCredentialSource {
+        credential: RwLock<AgentFedCredential>,
+    }
+
+    impl AgentFedCredentialSource for TestUploadCredentialSource {
+        fn current(&self) -> AgentFedCredentialFuture<'_> {
+            Box::pin(async {
+                Some(
+                    self.credential
+                        .read()
+                        .expect("credential read lock")
+                        .clone(),
+                )
+            })
+        }
+    }
+
+    fn test_upload_exporter(
+        endpoint: String,
+    ) -> (
+        GenevaExporter,
+        Vec<EncodedBatch>,
+        Arc<TestUploadCredentialSource>,
+    ) {
+        otel_arrow_dfe_otap::crypto::ensure_crypto_provider();
+        let config = Config::parse(&agent_fed_test_config()).expect("agent-fed config");
+        let source = Arc::new(TestUploadCredentialSource {
+            credential: RwLock::new(AgentFedCredential::new(
+                "test-token",
+                endpoint,
+                std::collections::HashMap::from([(
+                    "test-group".to_owned(),
+                    "test-moniker".to_owned(),
+                )]),
+            )),
+        });
+        let client = GenevaClient::with_agent_fed_source(
+            config.to_agent_fed_geneva_client_config(),
+            source.clone(),
+        )
+        .expect("test client");
+        let mut records = OtapArrowRecords::Logs(Default::default());
+        records
+            .set(ArrowPayloadType::Logs, create_test_logs_batch())
+            .expect("logs batch");
+        let view = OtapLogsView::try_from(&records).expect("logs view");
+        let batches = client
+            .encode_and_compress_logs(&view)
+            .expect("encoded logs");
+        assert!(!batches.is_empty());
+        let exporter = GenevaExporter {
+            config,
+            metrics: GenevaExporterMetrics::register(&create_test_pipeline_context()),
+            geneva_client: client,
+        };
+        (exporter, batches, source)
+    }
+
+    /// Scenario: Geneva returns client, timeout, throttle, and server errors during real uploads.
+    /// Guarantees: NACK permanence preserves retries, while exporter credentials are not blamed on incoming telemetry.
+    #[tokio::test]
+    async fn upload_statuses_preserve_nack_permanence_and_cause() {
+        use wiremock::{Mock, MockServer, ResponseTemplate, matchers::method};
+
+        let server = MockServer::start().await;
+        let (mut exporter, batches, _) = test_upload_exporter(server.uri());
+        for (status, permanent, cause) in [
+            (400, true, NackCause::Refused),
+            (401, true, NackCause::Unspecified),
+            (403, true, NackCause::Unspecified),
+            (408, false, NackCause::Unspecified),
+            (429, false, NackCause::Unspecified),
+            (503, false, NackCause::Unspecified),
+        ] {
+            server.reset().await;
+            Mock::given(method("POST"))
+                .respond_with(ResponseTemplate::new(status))
+                .expect(batches.len() as u64)
+                .mount(&server)
+                .await;
+            let error = exporter
+                .upload_batches_concurrent(&batches, SignalType::Logs)
+                .await
+                .expect_err("upload must fail");
+            let nack =
+                error.into_nack(OtapPdata::new_default(OtapPayload::empty(SignalType::Logs)));
+            assert_eq!(nack.permanent, permanent, "HTTP {status}");
+            assert_eq!(nack.cause, cause, "HTTP {status}");
+            assert!(nack.reason.contains(&status.to_string()), "{}", nack.reason);
+            server.verify().await;
+        }
+    }
+
+    /// Scenario: The host adds a missing agent-fed account group after the first upload fails.
+    /// Guarantees: The first NACK remains retryable and the identical encoded batches succeed after rotation.
+    #[tokio::test]
+    async fn agent_fed_missing_account_group_recovers_after_rotation() {
+        use wiremock::{
+            Mock, MockServer, ResponseTemplate,
+            matchers::{method, query_param},
+        };
+
+        let server = MockServer::start().await;
+        let (mut exporter, batches, source) = test_upload_exporter(server.uri());
+        source
+            .credential
+            .write()
+            .expect("credential write lock")
+            .primary_monikers
+            .clear();
+        Mock::given(method("POST"))
+            .and(query_param("moniker", "rotated-moniker"))
+            .respond_with(
+                ResponseTemplate::new(202).set_body_json(serde_json::json!({"ticket": "accepted"})),
+            )
+            .expect(batches.len() as u64)
+            .mount(&server)
+            .await;
+        let error = exporter
+            .upload_batches_concurrent(&batches, SignalType::Logs)
+            .await
+            .expect_err("missing account group");
+        let nack = error.into_nack(OtapPdata::new_default(OtapPayload::empty(SignalType::Logs)));
+        assert!(!nack.permanent);
+        assert_eq!(nack.cause, NackCause::Unspecified);
+        assert!(nack.reason.contains("was not resolved"), "{}", nack.reason);
+        assert!(
+            server
+                .received_requests()
+                .await
+                .expect("requests")
+                .is_empty()
+        );
+
+        let _ = source
+            .credential
+            .write()
+            .expect("credential write lock")
+            .primary_monikers
+            .insert("test-group".to_owned(), "rotated-moniker".to_owned());
+        assert_eq!(
+            exporter
+                .upload_batches_concurrent(&batches, SignalType::Logs)
+                .await
+                .expect("retry succeeds"),
+            batches.len()
+        );
+        server.verify().await;
+    }
+
+    /// Scenario: Routing errors use either static or agent-fed authentication and other uploader errors occur.
+    /// Guarantees: Static routing remains permanent but not client-caused, and transport/fallback errors remain retryable.
+    #[test]
+    fn upload_failure_classification_preserves_non_http_semantics() {
+        for agent_fed in [false, true] {
+            for (error, permanent) in [
+                (
+                    UploadError::AccountGroupNotResolved {
+                        requested: "missing".to_owned(),
+                        available: vec!["known".to_owned()],
+                    },
+                    !agent_fed,
+                ),
+                (UploadError::Transport("network".to_owned()), false),
+                (UploadError::Other("internal".to_owned()), false),
+                (
+                    UploadError::HttpStatus {
+                        status: 302,
+                        retry_after: None,
+                        message: "redirect".to_owned(),
+                    },
+                    false,
+                ),
+            ] {
+                let error = GenevaExportError::AttemptAlreadyRecorded(GenevaUploadFailure::new(
+                    &error,
+                    SignalType::Logs,
+                    agent_fed,
+                ));
+                assert_eq!(error.is_permanent(), permanent);
+                assert_eq!(error.unsubmitted_outcome(), None);
+                let nack =
+                    error.into_nack(OtapPdata::new_default(OtapPayload::empty(SignalType::Logs)));
+                assert_eq!(nack.permanent, permanent);
+                assert_eq!(nack.cause, NackCause::Unspecified);
+            }
+        }
+    }
+
+    /// Scenario: Permanent and transient batch failures complete in either order.
+    /// Guarantees: Any transient failure preserves retries, all failures contribute to cause, and the first message is retained.
+    #[tokio::test]
+    async fn completed_batch_failures_aggregate_independently_of_order() {
+        for (statuses, permanent, cause) in [
+            ([400, 408], false, NackCause::Unspecified),
+            ([408, 400], false, NackCause::Unspecified),
+            ([400, 403], true, NackCause::Unspecified),
+            ([403, 400], true, NackCause::Unspecified),
+            ([400, 400], true, NackCause::Refused),
+        ] {
+            let mut metrics = GenevaExporterMetrics::register(&create_test_pipeline_context());
+            let mut first_error = None;
+            for status in statuses {
+                let error = UploadError::HttpStatus {
+                    status,
+                    retry_after: None,
+                    message: status.to_string(),
+                };
+                let completed = metrics
+                    .boundary
+                    .attempt(SignalType::Logs)
+                    .run(async |attempt| {
+                        Err::<u64, _>(attempt.refused((
+                            GenevaExporterErrorType::from_upload_error(&error),
+                            GenevaUploadFailure::new(&error, SignalType::Logs, false),
+                        )))
+                    })
+                    .await;
+                record_completed_upload(
+                    &mut metrics,
+                    SignalType::Logs,
+                    completed,
+                    &mut first_error,
+                );
+            }
+            let nack = GenevaExportError::AttemptAlreadyRecorded(first_error.expect("failure"))
+                .into_nack(OtapPdata::new_default(OtapPayload::empty(SignalType::Logs)));
+            assert_eq!(nack.permanent, permanent, "{statuses:?}");
+            assert_eq!(nack.cause, cause, "{statuses:?}");
+            assert!(nack.reason.contains(&statuses[0].to_string()));
+        }
+    }
+
+    /// Scenario: Concurrent Geneva batch submissions complete with mixed terminal outcomes.
+    /// Guarantees: Every completed batch is recorded once and the first error remains the outer NACK reason.
+    #[tokio::test]
+    async fn completed_batch_attempts_record_mixed_outcomes() {
+        let (pipeline_ctx, _) = test_pipeline_ctx_with_interests(Interests::NODE_INPUT_METRICS);
+        let mut metrics = GenevaExporterMetrics::register(&pipeline_ctx);
+        let completed = [
+            metrics
+                .boundary
+                .attempt(SignalType::Logs)
+                .run(async |_| Ok::<_, otel_arrow_dfe_otap::metrics::ErrorWithOutcome<_>>(1))
+                .await,
+            metrics
+                .boundary
+                .attempt(SignalType::Logs)
+                .run(async |attempt| {
+                    Err(attempt.refused((
+                        GenevaExporterErrorType::Throttled,
+                        GenevaUploadFailure::new(
+                            &UploadError::HttpStatus {
+                                status: 429,
+                                retry_after: None,
+                                message: "throttled".to_owned(),
+                            },
+                            SignalType::Logs,
+                            false,
+                        ),
+                    )))
+                })
+                .await,
+            metrics
+                .boundary
+                .attempt(SignalType::Logs)
+                .run(async |attempt| {
+                    Err(attempt.failed((
+                        GenevaExporterErrorType::Transport,
+                        GenevaUploadFailure::new(
+                            &UploadError::Transport("transport".to_owned()),
+                            SignalType::Logs,
+                            false,
+                        ),
+                    )))
+                })
+                .await,
+        ];
+        let mut first_error = None;
+
+        for completed in completed {
+            record_completed_upload(&mut metrics, SignalType::Logs, completed, &mut first_error);
+        }
+
+        let first_error = first_error.expect("upload failure");
+        assert!(first_error.message.contains("throttled"));
+        assert!(!first_error.permanent);
+        assert_eq!(first_error.cause, NackCause::Unspecified);
+        let snapshots = metrics.terminal_snapshots();
+        for outcome in ["success", "refused", "failure"] {
+            assert!(snapshots.iter().any(|snapshot| {
+                snapshot.descriptor().name == "exporter.attempted"
+                    && snapshot.measurement_attribute_value("signal") == Some("logs")
+                    && snapshot.measurement_attribute_value("outcome") == Some(outcome)
+                    && snapshot
+                        .descriptor()
+                        .metrics
+                        .iter()
+                        .position(|metric| metric.name == "messages")
+                        .is_some_and(|index| snapshot.get_metrics()[index].to_u64_lossy() == 1)
+            }));
+        }
+        for error_type in ["throttled", "transport"] {
+            assert!(snapshots.iter().any(|snapshot| {
+                snapshot.descriptor().name == "exporter.geneva.failures"
+                    && snapshot.measurement_attribute_value("signal") == Some("logs")
+                    && snapshot.measurement_attribute_value("error.type") == Some(error_type)
+                    && snapshot
+                        .descriptor()
+                        .metrics
+                        .iter()
+                        .position(|metric| metric.name == "messages")
+                        .is_some_and(|index| snapshot.get_metrics()[index].to_u64_lossy() == 1)
+            }));
+        }
+    }
+
     /// Scenario: The exporter receives an empty OTLP log payload with an ACK subscriber.
     /// Guarantees: The exporter skips upload and returns an empty successful ACK.
     #[test]
@@ -2058,8 +2616,9 @@ mod tests {
             });
     }
 
-    /// Scenario: The exporter receives malformed non-empty OTLP log bytes.
-    /// Guarantees: Decode failure returns a NACK with the original subscriber route.
+    /// Scenario: A decode failure precedes any upload attempt (invalid protobuf bytes).
+    /// Guarantees: The resulting NACK is marked permanent with `NackCause::Refused` so a
+    /// retry processor does not retry a payload that can never decode successfully.
     #[test]
     fn geneva_exporter_emits_nack_for_decode_failure() {
         // The Geneva uploader uses rustls (tls-rustls); reqwest needs a
@@ -2101,6 +2660,11 @@ mod tests {
                                 "unexpected nack reason: {}",
                                 nack.reason
                             );
+                            assert!(
+                                nack.permanent,
+                                "decode failures can never succeed on retry and must be permanent"
+                            );
+                            assert_eq!(nack.cause, NackCause::Refused);
                             assert_eq!(nack.refused.num_items(), 0);
                             break;
                         }
@@ -2304,7 +2868,7 @@ mod tests {
         let parsed = Config::parse(&config).expect("valid combined agent-fed config");
         assert!(matches!(parsed.auth, AuthConfig::AgentFed));
 
-        let client_config = parsed.to_geneva_client_config();
+        let client_config = parsed.to_agent_fed_geneva_client_config();
         assert!(client_config.endpoint.is_empty());
         assert!(client_config.region.is_empty());
         assert!(client_config.msi_resource.is_none());
@@ -2357,6 +2921,188 @@ mod tests {
             .remove("region");
         let error = Config::parse(&missing_region).expect_err("region must be required");
         assert!(error.to_string().contains("region is required"));
+    }
+
+    /// Scenario: External-token authentication is configured with a resource and GCS endpoint.
+    /// Guarantees: The new mode parses while retaining the normal endpoint and region requirements.
+    #[test]
+    fn external_token_config_requires_resource_endpoint_and_region() {
+        let config = Config::parse(&external_token_test_config())
+            .expect("external-token config should parse");
+        assert!(matches!(
+            config.auth,
+            AuthConfig::ExternalToken { ref resource }
+                if resource == "https://monitor.azure.com"
+        ));
+
+        let mut empty_resource = external_token_test_config();
+        empty_resource["auth"]["resource"] = serde_json::Value::String("  ".to_string());
+        assert!(
+            Config::parse(&empty_resource)
+                .expect_err("empty resource must fail")
+                .to_string()
+                .contains("resource is required")
+        );
+
+        let mut missing_endpoint = external_token_test_config();
+        let _ = missing_endpoint
+            .as_object_mut()
+            .expect("object")
+            .remove("endpoint");
+        assert!(
+            Config::parse(&missing_endpoint)
+                .expect_err("endpoint must remain required")
+                .to_string()
+                .contains("endpoint is required")
+        );
+    }
+
+    /// Scenario: External-token authentication has no bearer-token capability binding.
+    /// Guarantees: Exporter prerequisites fail before attempting client construction.
+    #[test]
+    fn external_token_provider_binding_is_required() {
+        let node_config = external_token_node_config(None);
+        let error = validate_external_token_capability_binding(&node_config)
+            .expect_err("bearer-token binding must be required");
+        assert!(error.to_string().contains("bearer_token_provider"));
+
+        let node_config = external_token_node_config(Some("azure-identity"));
+        validate_external_token_capability_binding(&node_config)
+            .expect("configured bearer-token binding should pass");
+    }
+
+    /// Scenario: External-token authentication binds a local-only token capability.
+    /// Guarantees: Adapter construction rejects a provider that cannot satisfy Send + Sync.
+    #[test]
+    fn external_token_provider_requires_shared_capability() {
+        let node_config = external_token_node_config(Some("azure-identity"));
+        let capabilities = resolved_local_only_external_token_capabilities(&node_config);
+        let error =
+            resolve_gcs_token_provider(&capabilities, "https://monitor.azure.com".to_string())
+                .expect_err("local-only provider must fail");
+
+        assert!(
+            error
+                .to_string()
+                .contains("local-only registrations are unsupported")
+        );
+    }
+
+    /// Scenario: External-token authentication binds a shared bearer-token capability.
+    /// Guarantees: The exporter constructs a normal GCS-backed Geneva client.
+    #[test]
+    fn external_token_provider_builds_geneva_client() {
+        otel_arrow_dfe_otap::crypto::ensure_crypto_provider();
+        let node_config = external_token_node_config(Some("azure-identity"));
+        let (capabilities, _) = resolved_external_token_capabilities(&node_config);
+        let config = Config::parse(&node_config.config).expect("valid external-token config");
+
+        let _ = create_geneva_client(&config, &node_config, &capabilities)
+            .expect("shared bearer-token provider should construct the client");
+    }
+
+    /// Scenario: Capability-backed auth methods are mapped without resolving their capability.
+    /// Guarantees: External-token and agent-fed auth fail explicitly instead of being represented
+    /// as system-managed identity.
+    #[test]
+    fn capability_backed_auth_methods_require_resolution() {
+        let external_token =
+            Config::parse(&external_token_test_config()).expect("external-token config");
+        let error = external_token
+            .auth
+            .configured_auth_method()
+            .expect_err("external-token auth must not map without its capability");
+        assert!(error.to_string().contains("bearer_token_provider"));
+
+        let agent_fed = Config::parse(&agent_fed_test_config()).expect("agent-fed config");
+        let error = agent_fed
+            .auth
+            .configured_auth_method()
+            .expect_err("agent-fed auth must not map without its capability");
+        assert!(error.to_string().contains("agent_fed_credential_provider"));
+    }
+
+    /// Scenario: A shared bearer-token capability authenticates a GCS request and two uploads.
+    /// Guarantees: The Entra token is used only for GCS, while the returned Geneva credential
+    /// and account routing are cached and reused for ingestion.
+    #[tokio::test]
+    async fn external_token_capability_drives_gcs_and_cached_uploads() {
+        use wiremock::{
+            Mock, MockServer, ResponseTemplate,
+            matchers::{header, method, path, query_param},
+        };
+
+        otel_arrow_dfe_otap::crypto::ensure_crypto_provider();
+        let server = MockServer::start().await;
+        let mut node_config = external_token_node_config(Some("azure-identity"));
+        node_config.config["endpoint"] = serde_json::Value::String(server.uri());
+        let (capabilities, provider_calls) = resolved_external_token_capabilities(&node_config);
+        let config = Config::parse(&node_config.config).expect("valid external-token config");
+
+        Mock::given(method("GET"))
+            .and(path(
+                "/userapi/agent/v3/test/test-account/MonitoringStorageKeys/",
+            ))
+            .and(header("Authorization", "Bearer test-entra-token"))
+            .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({
+                "IngestionGatewayInfo": {
+                    "Endpoint": server.uri(),
+                    "AuthToken": "test-geneva-ingestion-token",
+                    "AuthTokenExpiryTime": "2030-01-01T00:00:00Z"
+                },
+                "StorageAccountKeys": [{
+                    "AccountMonikerName": "test-moniker",
+                    "AccountGroupName": "test-group",
+                    "IsPrimaryMoniker": true
+                }],
+                "TagId": "test-tag"
+            })))
+            .expect(1)
+            .mount(&server)
+            .await;
+
+        let client = create_geneva_client(&config, &node_config, &capabilities)
+            .expect("external-token client");
+        let mut records = OtapArrowRecords::Logs(Default::default());
+        records
+            .set(ArrowPayloadType::Logs, create_test_logs_batch())
+            .expect("logs batch");
+        let view = OtapLogsView::try_from(&records).expect("logs view");
+        let batches = client
+            .encode_and_compress_logs(&view)
+            .expect("encoded logs");
+        assert!(!batches.is_empty());
+
+        Mock::given(method("POST"))
+            .and(header(
+                "Authorization",
+                "Bearer test-geneva-ingestion-token",
+            ))
+            .and(query_param("moniker", "test-moniker"))
+            .respond_with(
+                ResponseTemplate::new(202).set_body_json(serde_json::json!({"ticket": "accepted"})),
+            )
+            .expect((batches.len() * 2) as u64)
+            .mount(&server)
+            .await;
+
+        let mut exporter = GenevaExporter {
+            config,
+            metrics: GenevaExporterMetrics::register(&create_test_pipeline_context()),
+            geneva_client: client,
+        };
+        for _ in 0..2 {
+            assert_eq!(
+                exporter
+                    .upload_batches_concurrent(&batches, SignalType::Logs)
+                    .await
+                    .expect("upload succeeds"),
+                batches.len()
+            );
+        }
+
+        assert_eq!(provider_calls.load(Ordering::Relaxed), 1);
+        server.verify().await;
     }
 
     /// Scenario: A configuration carries a field the exporter does not define.
@@ -3913,7 +4659,7 @@ mod tests {
                 .map(String::as_str),
             Some("audit-group")
         );
-        let client_config = parsed.to_geneva_client_config();
+        let client_config = configured_client_config(&parsed);
 
         // Scalar fields propagate unchanged.
         assert_eq!(client_config.endpoint, "https://geneva.example");
@@ -4060,7 +4806,7 @@ mod tests {
         });
 
         let parsed: Config = serde_json::from_value(config).expect("config should parse");
-        let client_config = parsed.to_geneva_client_config();
+        let client_config = configured_client_config(&parsed);
 
         let obo = client_config
             .obo_event_map
@@ -4086,8 +4832,17 @@ mod tests {
     #[test]
     fn test_config_to_geneva_client_config_without_obo_is_none() {
         let parsed: Config = serde_json::from_value(test_config()).expect("config should parse");
-        let client_config = parsed.to_geneva_client_config();
+        let client_config = configured_client_config(&parsed);
         assert!(client_config.obo_event_map.is_none());
+    }
+
+    fn configured_client_config(config: &Config) -> GenevaClientConfig {
+        config.to_geneva_client_config(
+            config
+                .auth
+                .configured_auth_method()
+                .expect("configured auth method"),
+        )
     }
 
     /// Scenario: An `obo` entry supplies an empty (whitespace-only) identity.

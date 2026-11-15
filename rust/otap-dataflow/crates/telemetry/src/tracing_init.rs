@@ -41,7 +41,7 @@ impl TracingSetup {
     /// the internal telemetry system.
     #[must_use]
     pub fn new(provider: ProviderSetup, log_level: LogLevel, context_fn: LogContextFn) -> Self {
-        let (log_filter, _handle) = RuntimeLogFilter::new(&log_level);
+        let (log_filter, _handle) = RuntimeLogFilter::new_configured(&log_level);
         Self::from_log_filter(provider, log_filter, context_fn)
     }
 
@@ -84,7 +84,7 @@ impl TracingSetup {
     where
         F: FnOnce() -> R,
     {
-        let log_level = self.log_filter.configured_level();
+        let log_level = self.log_filter.effective_level();
         self.provider
             .with_subscriber_ignoring_env(&log_level, self.context_fn, f)
     }
@@ -280,7 +280,7 @@ mod tests {
     fn internal_async_provider_applies_runtime_level_updates() {
         crate::with_cleared_rust_log(|| {
             let (reporter, receiver) = test_reporter();
-            let (filter, handle) = RuntimeLogFilter::new(&level("warn"));
+            let (filter, handle) = RuntimeLogFilter::new(Some(&level("warn")));
             let setup = test_setup(internal_async_provider(reporter), level("warn"))
                 .with_log_filter(filter);
 
@@ -290,11 +290,11 @@ mod tests {
                 emit_info();
                 assert!(receiver.try_recv().is_err());
 
-                handle.apply(&level("info"));
+                handle.apply(Some(&level("info")));
                 emit_info();
                 assert!(matches!(receiver.try_recv(), Ok(ObservedEvent::Log(_))));
 
-                handle.apply(&level("warn"));
+                handle.apply(Some(&level("warn")));
                 emit_info();
                 assert!(receiver.try_recv().is_err());
             });
@@ -512,6 +512,42 @@ mod tests {
         });
     }
 
+    /// Scenario: a log body exceeds 256 bytes but remains below the 2 KiB encoding limit.
+    /// Guarantees: the encoding buffer grows and preserves the complete body without drops.
+    #[test]
+    fn log_body_grows_beyond_initial_capacity() {
+        crate::with_cleared_rust_log(|| {
+            use crate::self_tracing::{LOG_ARGUMENTS_ENCODE_INITIAL, LOG_ARGUMENTS_ENCODE_LIMIT};
+
+            let (reporter, receiver) = test_reporter();
+            let setup = test_setup(internal_async_provider(reporter), level("info"));
+            let body = "x".repeat(LOG_ARGUMENTS_ENCODE_INITIAL * 2);
+
+            setup.with_subscriber_ignoring_env(|| {
+                otel_info!("growth.test", message = body.as_str());
+            });
+
+            let event = receiver.try_recv().expect("should receive log");
+            let log_event = match &event {
+                ObservedEvent::Log(log_event) => log_event,
+                _ => panic!("expected log"),
+            };
+            assert!(
+                log_event.record.body_attrs_bytes.len() > LOG_ARGUMENTS_ENCODE_INITIAL,
+                "encoded record should exceed its initial capacity"
+            );
+            assert!(
+                log_event.record.body_attrs_bytes.len() < LOG_ARGUMENTS_ENCODE_LIMIT,
+                "encoded record should remain below its limit"
+            );
+            assert_eq!(log_event.record.dropped_attributes_count, 0);
+            assert!(
+                event.to_string().contains(&body),
+                "formatted event should preserve the complete body"
+            );
+        });
+    }
+
     /// Scenario: oversized structured attributes overflow the inline log encoding buffer.
     /// Guarantees: the dropped-attribute count survives ITS encoding and OTLP parsing.
     #[test]
@@ -525,24 +561,31 @@ mod tests {
         // Historically, a partial body write left an unpatched length
         // placeholder + trailing garbage bytes in the inline buffer, which
         // corrupted subsequent fields appended by encode_log_record (notably
-        // dropped_attributes_count itself). encode_body_string is now wrapped
+        // dropped_attributes_count itself). The body encoding is now wrapped
         // in try_encode to roll back partial bytes on overflow.
         crate::with_cleared_rust_log(|| {
             let (reporter, receiver) = test_reporter();
             let setup = test_setup(internal_async_provider(reporter), level("info"));
 
-            // Use enough long-string attributes to overflow any reasonable
-            // LOG_ARGUMENTS_ENCODE_INLINE (well above 256 bytes worth of payload).
+            // Use enough long-string attributes to overflow
+            // LOG_ARGUMENTS_ENCODE_LIMIT (well above 2048 bytes of payload).
+            let long_a = "a".repeat(300);
+            let long_b = "b".repeat(300);
+            let long_c = "c".repeat(300);
+            let long_d = "d".repeat(300);
+            let long_e = "e".repeat(300);
+            let long_f = "f".repeat(300);
+            let long_g = "g".repeat(300);
             setup.with_subscriber_ignoring_env(|| {
                 otel_info!(
                     "overflow.test",
-                    a = "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
-                    b = "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
-                    c = "cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc",
-                    d = "dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd",
-                    e = "eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee",
-                    f = "ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff",
-                    g = "gggggggggggggggggggggggggggggggggggggggggggggggggggggggggggggggg",
+                    a = long_a.as_str(),
+                    b = long_b.as_str(),
+                    c = long_c.as_str(),
+                    d = long_d.as_str(),
+                    e = long_e.as_str(),
+                    f = long_f.as_str(),
+                    g = long_g.as_str(),
                     message = "Body that itself is fairly long and may not fit alongside the attributes above"
                 );
             });
@@ -573,7 +616,13 @@ mod tests {
             let registry = crate::registry::TelemetryRegistryHandle::new();
             let mut scope_cache = ScopeToBytesMap::new(registry);
             let mut buf = ProtoBuffer::default();
-            encode_export_logs_request(&mut buf, &log_event, &resource_bytes, &mut scope_cache);
+            encode_export_logs_request(
+                &mut buf,
+                &mut [log_event],
+                &resource_bytes,
+                &mut scope_cache,
+            )
+            .unwrap();
             let bytes_vec = buf.into_bytes();
 
             let raw = RawLogsData::new(bytes_vec.as_ref());

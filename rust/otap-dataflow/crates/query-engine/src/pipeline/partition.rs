@@ -24,6 +24,7 @@ use datafusion::execution::context::SessionContext;
 use datafusion::logical_expr::ColumnarValue;
 use datafusion::scalar::ScalarValue;
 use otel_arrow_contrib_data_engine_expressions::{PipelineFunction, ScalarExpression};
+use otel_arrow_dfe_engine::pdata_context::NodeBindings;
 use otel_arrow_dfe_pdata::OtapArrowRecords;
 use otel_arrow_dfe_pdata::otap::filter::{IdBitmapPool, filter_otap_batch};
 use otel_arrow_dfe_pdata::otlp::attributes::AttributeValueType;
@@ -31,10 +32,12 @@ use otel_arrow_dfe_pdata::schema::consts;
 
 use crate::error::{Error, Result};
 use crate::pipeline::Pipeline;
-use crate::pipeline::expr::ScopedExpr;
-use crate::pipeline::expr::eval::align_value_to_root;
+use crate::pipeline::expr::eval::{EvalContext, align_value_to_record};
 use crate::pipeline::expr::planner::ExprPlanner;
+use crate::pipeline::expr::{RecordScope, ScopedExpr};
+use crate::pipeline::planner::{RecordType, SignalContext};
 use crate::pipeline::project::anyval::is_any_value_data_type;
+use crate::pipeline::state::ExecutionState;
 
 /// Produces partitioned record batches by the results of some evaluated expression.
 ///
@@ -82,8 +85,11 @@ impl Partitioner {
     pub fn try_new(
         scalar_expr: ScalarExpression,
         functions: Vec<PipelineFunction>,
+        signal_context: SignalContext,
+        node_bindings: &NodeBindings,
     ) -> Result<Self> {
-        let expr_planner = ExprPlanner::new();
+        let expr_planner =
+            ExprPlanner::new(true, RecordType::Signal(signal_context), node_bindings);
         let planned_expr = expr_planner.plan_scalar(&scalar_expr, &functions)?;
 
         Ok(Self {
@@ -101,13 +107,25 @@ impl Partitioner {
         &mut self,
         otap_batch: OtapArrowRecords,
     ) -> Result<impl ExactSizeIterator<Item = Partition> + '_> {
+        let mut exec_state = ExecutionState::default();
+        self.partition_with_state(otap_batch, &mut exec_state)
+    }
+
+    /// Evaluates the partition expression against the batch and returns an iterator of partitions.
+    pub fn partition_with_state(
+        &mut self,
+        otap_batch: OtapArrowRecords,
+        exec_state: &mut ExecutionState,
+    ) -> Result<impl ExactSizeIterator<Item = Partition> + use<'_>> {
+        let eval_ctx = EvalContext::new(&self.session_ctx, exec_state);
+
         // reset state
         self.partitions.clear();
         self.range_coalescer.clear();
 
         partition(
             otap_batch,
-            &self.session_ctx,
+            &eval_ctx,
             &mut self.expr,
             &mut self.partitions,
             &mut self.range_coalescer,
@@ -268,6 +286,8 @@ impl PartitionValue {
             | ScalarValue::FixedSizeList(_)
             | ScalarValue::List(_)
             | ScalarValue::LargeList(_)
+            | ScalarValue::ListView(_)
+            | ScalarValue::LargeListView(_)
             | ScalarValue::Map(_)
             | ScalarValue::Union(_, _, _) => {
                 return Err(Error::ExecutionError {
@@ -356,22 +376,27 @@ impl PartitionValue {
 ///
 fn partition(
     otap_batch: OtapArrowRecords,
-    session_ctx: &SessionContext,
+    eval_ctx: &EvalContext<'_>,
     expr: &mut ScopedExpr,
     result_partitions: &mut Vec<Partition>,
     range_coalescer: &mut PartitionRangeCoalescer,
     id_bitmap_pool: &mut IdBitmapPool,
     group_id_pool: &mut GroupIdPool,
 ) -> Result<()> {
-    // nothing to evaluate
     if otap_batch.num_items() == 0 {
+        // nothing to evaluate
         return Ok(());
     }
 
-    let eval_result = match expr.execute_as_value(&otap_batch, session_ctx)? {
+    let Some(root_rb) = otap_batch.root_record_batch() else {
+        // nothing to evaluate
+        return Ok(());
+    };
+
+    let eval_result = match expr.execute_as_value(&otap_batch, eval_ctx)? {
         Some(result) => {
             // align value to root so we can calculate partitions for the root record batch
-            align_value_to_root(result, &otap_batch)?
+            align_value_to_record(result, RecordScope::Signal, root_rb, &otap_batch)?
         }
         None => {
             // the result evaluated to `null` for all rows, which means there is only one
@@ -1056,6 +1081,7 @@ mod test {
     };
     use arrow::buffer::{BooleanBuffer, NullBuffer};
     use arrow::datatypes::{DataType, Field, Fields, UInt8Type, UInt16Type};
+    use otel_arrow_dfe_engine::pdata_context::NodeBindings;
     use otel_arrow_dfe_pdata::otlp::attributes::AttributeValueType;
     use otel_arrow_dfe_pdata::proto::OtlpProtoMessage;
     use otel_arrow_dfe_pdata::proto::opentelemetry::common::v1::{
@@ -1073,6 +1099,7 @@ mod test {
     use crate::pipeline::partition::{
         AnyValueStructComparator, ArrayComparator, GroupIdPool, PartitionValue, Partitioner,
     };
+    use crate::pipeline::{SignalContext, SignalKind};
 
     #[test]
     fn test_partition_logs_by_severity_number() {
@@ -1106,7 +1133,13 @@ mod test {
         let (scalar_expr, functions) =
             OplParser::parse_expr_with_options("severity_number", default_parser_options())
                 .unwrap();
-        let mut partitioner = Partitioner::try_new(scalar_expr, functions).unwrap();
+        let mut partitioner = Partitioner::try_new(
+            scalar_expr,
+            functions,
+            SignalContext::Single(SignalKind::Logs),
+            &NodeBindings::default(),
+        )
+        .unwrap();
         let partitions = partitioner.partition(otap).unwrap().collect::<Vec<_>>();
 
         assert_eq!(partitions.len(), 2, "expected 2 partitions");
@@ -1199,7 +1232,13 @@ mod test {
 
         let (scalar_expr, functions) =
             OplParser::parse_expr_with_options("name", default_parser_options()).unwrap();
-        let mut partitioner = Partitioner::try_new(scalar_expr, functions).unwrap();
+        let mut partitioner = Partitioner::try_new(
+            scalar_expr,
+            functions,
+            SignalContext::Single(SignalKind::Traces),
+            &NodeBindings::default(),
+        )
+        .unwrap();
         let partitions = partitioner.partition(otap).unwrap().collect::<Vec<_>>();
 
         assert_eq!(partitions.len(), 2, "expected 2 partitions");
@@ -1295,7 +1334,13 @@ mod test {
             default_parser_options(),
         )
         .unwrap();
-        let mut partitioner = Partitioner::try_new(scalar_expr, functions).unwrap();
+        let mut partitioner = Partitioner::try_new(
+            scalar_expr,
+            functions,
+            SignalContext::Single(SignalKind::Logs),
+            &NodeBindings::default(),
+        )
+        .unwrap();
         let partitions = partitioner.partition(input).unwrap().collect::<Vec<_>>();
         assert_eq!(partitions.len(), 2);
 
@@ -1380,7 +1425,13 @@ mod test {
             default_parser_options(),
         )
         .unwrap();
-        let mut partitioner = Partitioner::try_new(scalar_expr, functions).unwrap();
+        let mut partitioner = Partitioner::try_new(
+            scalar_expr,
+            functions,
+            SignalContext::All,
+            &NodeBindings::default(),
+        )
+        .unwrap();
         let partitions = partitioner.partition(otap).unwrap().collect::<Vec<_>>();
         assert_eq!(partitions.len(), 1);
         assert_eq!(partitions[0].value, PartitionValue::Null);
@@ -1454,7 +1505,13 @@ mod test {
         let (scalar_expr, functions) =
             OplParser::parse_expr_with_options("attributes[\"x\"]", default_parser_options())
                 .unwrap();
-        let mut partitioner = Partitioner::try_new(scalar_expr, functions).unwrap();
+        let mut partitioner = Partitioner::try_new(
+            scalar_expr,
+            functions,
+            SignalContext::All,
+            &NodeBindings::default(),
+        )
+        .unwrap();
         let partitions = partitioner.partition(otap).unwrap().collect::<Vec<_>>();
         assert_eq!(partitions.len(), 3);
 

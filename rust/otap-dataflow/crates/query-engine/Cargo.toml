@@ -23,6 +23,7 @@ datafusion = { workspace = true, features = [
 ] }
 futures-core = { workspace = true }
 memchr = { workspace = true }
+regex = { workspace = true }
 sha1 = { workspace = true, optional = true }
 xxhash-rust = { workspace = true }
 parking_lot = { workspace = true }
@@ -33,9 +34,11 @@ otel-arrow-contrib-data-engine-parser-abstractions = { workspace = true }
 uuid = { workspace = true }
 
 otel-arrow-dfe-config = { workspace = true }
-otel-arrow-dfe-pdata = { workspace = true, features = ["testing"] }
+otel-arrow-dfe-engine = { workspace = true }
+otel-arrow-dfe-pdata = { workspace = true }
 
 [features]
+bench = []
 sha1-hash = ["dep:sha1"]
 
 [dev-dependencies]
@@ -46,8 +49,10 @@ pretty_assertions = { workspace = true }
 prost = { workspace = true }
 tokio = { workspace = true }
 
+otel-arrow-dfe-engine = { workspace = true, features = ["test-utils"] }
 otel-arrow-dfe-query-engine-languages = { workspace = true }
 otel-arrow-dfe-pdata = { workspace = true, features = ["testing"] }
+otel-arrow-dfe-pdata-codec = { workspace = true, features = ["testing"] }
 
 [target.'cfg(not(windows))'.dev-dependencies]
 tikv-jemallocator.workspace = true
@@ -58,6 +63,27 @@ harness = false
 
 [[bench]]
 name = "assign_attributes"
+harness = false
+
+[[bench]]
+name = "join"
+harness = false
+required-features = ["bench"]
+
+[[bench]]
+name = "scale_metric"
+harness = false
+
+[[bench]]
+name = "conditional"
+harness = false
+
+[[bench]]
+name = "data_point_parent_attrs"
+harness = false
+
+[[bench]]
+name = "regex_match"
 harness = false
 
 [lints]

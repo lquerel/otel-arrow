@@ -40,17 +40,28 @@ use crate::effect_handler::{
 use crate::error::{Error, TypedError};
 use crate::node::NodeId;
 use crate::output_router::OutputRouter;
+#[cfg(any(test, feature = "test-utils"))]
+use crate::pdata_context::ContextMaterializationPlan;
+use crate::pdata_context::{Arrival, ContextError, Metadata, NodeBindings};
+use crate::readiness::ReadinessSignaller;
+use crate::receiver::ReceiverContextMaterialization;
+#[cfg(any(test, feature = "test-utils"))]
+use crate::receiver::legacy_bindings_mut;
+use crate::runtime_services::{CodecEffectHandler, PipelineRuntimeServices};
 use crate::shared::message::{SharedReceiver, SharedSender};
 use crate::terminal_state::TerminalState;
 use async_trait::async_trait;
 use otel_arrow_dfe_channel::error::RecvError;
 use otel_arrow_dfe_config::PortName;
-use otel_arrow_dfe_config::transport_headers_policy::HeaderCapturePolicy;
+use otel_arrow_dfe_config::context::authorized_identity::AuthorizedIdentityPolicy;
+use otel_arrow_dfe_config::context::transport_policy::{CaptureStats, CompiledHeaderCapturePolicy};
+use otel_arrow_dfe_pdata_codec::CodecService;
 use otel_arrow_dfe_telemetry::error::Error as TelemetryError;
 use otel_arrow_dfe_telemetry::metrics::{MetricSet, MetricSetHandler};
 use otel_arrow_dfe_telemetry::reporter::MetricsReporter;
 use std::collections::HashMap;
 use std::net::SocketAddr;
+use std::sync::Arc;
 use std::time::Duration;
 use tokio::net::TcpListener;
 
@@ -103,17 +114,18 @@ pub struct EffectHandler<PData> {
     pub(crate) core: EffectHandlerCore<PData>,
     /// Output-port router.
     pub router: OutputRouter<SharedSender<PData>>,
-    /// Capture policy for extracting transport headers from inbound metadata.
-    /// `None` when no capture policy is configured (zero overhead).
-    capture_policy: Option<HeaderCapturePolicy>,
+    /// Runtime bindings: compiler-owned and shared with the node's pipeline
+    /// context, or handler-local when created by the legacy policy setters.
+    node_bindings: Option<Arc<NodeBindings>>,
+    /// Data-type-specific context materialization shared by request handlers.
+    context_materialization_plan: Option<ReceiverContextMaterialization<PData>>,
+    /// Optional signal used to gate pipeline startup on receiver initialization.
+    readiness: Option<ReadinessSignaller>,
 }
 
 /// Implementation for the `Send` effect handler.
 impl<PData> EffectHandler<PData> {
-    /// Creates a new sendable effect handler with the given receiver name.
-    ///
-    /// Use this constructor when your receiver do need to be sent across threads or
-    /// when it uses components that are `Send`.
+    /// Creates a sendable receiver effect handler.
     #[must_use]
     pub fn new(
         node_id: NodeId,
@@ -121,14 +133,17 @@ impl<PData> EffectHandler<PData> {
         default_port: Option<PortName>,
         runtime_ctrl_msg_sender: RuntimeCtrlMsgSender<PData>,
         metrics_reporter: MetricsReporter,
+        runtime_services: PipelineRuntimeServices,
     ) -> Self {
-        let mut core = EffectHandlerCore::new(node_id.clone(), metrics_reporter);
+        let mut core = EffectHandlerCore::new(node_id.clone(), metrics_reporter, runtime_services);
         core.set_runtime_ctrl_msg_sender(runtime_ctrl_msg_sender);
         let router = OutputRouter::new(node_id, msg_senders, default_port);
         EffectHandler {
             core,
             router,
-            capture_policy: None,
+            node_bindings: None,
+            context_materialization_plan: None,
+            readiness: None,
         }
     }
 
@@ -162,17 +177,122 @@ impl<PData> EffectHandler<PData> {
         self.core.node_interests()
     }
 
-    /// Returns the capture policy if a header capture policy is configured.
+    /// Returns the capture policy.
     ///
-    /// Returns `None` when no capture policy is active (zero overhead).
+    /// `None` disables capture.
     #[must_use]
-    pub fn capture_policy(&self) -> Option<&HeaderCapturePolicy> {
-        self.capture_policy.as_ref()
+    pub fn capture_policy(&self) -> Option<&CompiledHeaderCapturePolicy> {
+        self.node_bindings.as_deref()?.header_capture_policy()
     }
 
     /// Sets the capture policy for transport header extraction.
-    pub fn set_capture_policy(&mut self, policy: Option<HeaderCapturePolicy>) {
-        self.capture_policy = policy;
+    #[cfg(any(test, feature = "test-utils"))]
+    pub fn set_capture_policy(&mut self, policy: Option<CompiledHeaderCapturePolicy>) {
+        self.legacy_bindings_mut().set_header_capture_policy(policy);
+    }
+
+    /// Returns the authorized identity claim projection policy.
+    #[must_use]
+    pub fn authorized_identity_policy(&self) -> Option<&AuthorizedIdentityPolicy> {
+        self.node_bindings.as_deref()?.authorized_identity_policy()
+    }
+
+    /// Sets the authorized identity claim projection policy.
+    #[cfg(any(test, feature = "test-utils"))]
+    pub fn set_authorized_identity_policy(&mut self, policy: Option<AuthorizedIdentityPolicy>) {
+        self.legacy_bindings_mut()
+            .set_authorized_identity_policy(policy);
+    }
+
+    /// Returns bindings for the legacy policy setters.
+    #[cfg(any(test, feature = "test-utils"))]
+    fn legacy_bindings_mut(&mut self) -> &mut NodeBindings {
+        legacy_bindings_mut(
+            &mut self.node_bindings,
+            self.context_materialization_plan.as_ref(),
+        )
+    }
+
+    /// Returns this receiver's immutable runtime bindings.
+    #[must_use]
+    pub fn node_bindings(&self) -> Option<&Arc<NodeBindings>> {
+        self.node_bindings.as_ref()
+    }
+
+    pub(crate) fn set_node_bindings(&mut self, bindings: Arc<NodeBindings>) {
+        self.node_bindings = Some(bindings);
+    }
+
+    /// Forms complete request metadata without removing the legacy send hook.
+    ///
+    /// A receiver rejects the request when this fails.
+    /// Requires an installed arrival binding, even when no capture is configured.
+    pub fn form_context(
+        &self,
+        arrival: &Arrival<'_>,
+    ) -> Result<(Metadata, Option<CaptureStats>), ContextError> {
+        self.node_bindings
+            .as_deref()
+            .and_then(NodeBindings::arrival)
+            .ok_or(ContextError::MissingArrivalBinding)?
+            .form(arrival)
+    }
+
+    /// Materializes configured context entries before receiver output.
+    pub fn materialize_context(&self, data: &mut PData) {
+        if let Some(materialization) = &self.context_materialization_plan {
+            materialization.apply(data);
+        }
+    }
+
+    /// Sets the pipeline's data-type-specific context materialization.
+    pub(crate) fn set_context_materialization(
+        &mut self,
+        materialization: Option<ReceiverContextMaterialization<PData>>,
+    ) {
+        if let Some(bindings) = &mut self.node_bindings {
+            Arc::make_mut(bindings).set_materialization_plan(
+                materialization
+                    .as_ref()
+                    .map(|materialization| materialization.plan.clone())
+                    .unwrap_or_default(),
+            );
+        }
+        self.context_materialization_plan = materialization;
+    }
+
+    /// Installs a data-type-specific context materializer.
+    #[cfg(any(test, feature = "test-utils"))]
+    pub fn set_context_materializer(
+        &mut self,
+        plan: ContextMaterializationPlan,
+        materialize: fn(&mut PData, &ContextMaterializationPlan),
+    ) {
+        self.set_context_materialization(Some(ReceiverContextMaterialization::new(
+            plan,
+            materialize,
+        )));
+    }
+
+    pub(crate) fn set_readiness_signaller(&mut self, readiness: Option<ReadinessSignaller>) {
+        self.readiness = readiness;
+    }
+
+    /// Attaches an observable readiness signal to a receiver effect handler in tests.
+    #[cfg(any(test, feature = "test-utils"))]
+    #[must_use]
+    pub fn with_readiness_signaller_for_test(mut self, readiness: ReadinessSignaller) -> Self {
+        self.readiness = Some(readiness);
+        self
+    }
+
+    /// Signals that fallible receiver startup has completed.
+    ///
+    /// This is a no-op for receivers that did not opt into startup readiness.
+    pub fn signal_ready(&self) {
+        if let Some(readiness) = &self.readiness {
+            readiness.ready();
+        }
     }
 
     /// Sends a message to the next node(s) in the pipeline.
@@ -181,7 +301,8 @@ impl<PData> EffectHandler<PData> {
     ///
     /// Returns an [`Error::ReceiverError`] if the message could not be routed to a port.
     #[inline]
-    pub async fn send_message(&self, data: PData) -> Result<(), TypedError<PData>> {
+    pub async fn send_message(&self, mut data: PData) -> Result<(), TypedError<PData>> {
+        self.materialize_context(&mut data);
         self.router.send_default(data).await
     }
 
@@ -195,17 +316,26 @@ impl<PData> EffectHandler<PData> {
     /// Returns a [`TypedError::ChannelSendError`] containing [`SendError::Full`] if the
     /// channel is full, or [`SendError::Closed`] if the channel is closed.
     /// Returns a [`TypedError::Error`] if no default port is configured.
+    ///
+    /// [`SendError::Full`]: otel_arrow_dfe_channel::error::SendError::Full
+    /// [`SendError::Closed`]: otel_arrow_dfe_channel::error::SendError::Closed
     #[inline]
-    pub fn try_send_message(&self, data: PData) -> Result<(), TypedError<PData>> {
+    pub fn try_send_message(&self, mut data: PData) -> Result<(), TypedError<PData>> {
+        self.materialize_context(&mut data);
         self.router.try_send_default(data)
     }
 
     /// Sends a message to a specific named output port.
     #[inline]
-    pub async fn send_message_to<P>(&self, port: P, data: PData) -> Result<(), TypedError<PData>>
+    pub async fn send_message_to<P>(
+        &self,
+        port: P,
+        mut data: PData,
+    ) -> Result<(), TypedError<PData>>
     where
         P: Into<PortName>,
     {
+        self.materialize_context(&mut data);
         self.router.send_to(port, data).await
     }
 
@@ -219,11 +349,15 @@ impl<PData> EffectHandler<PData> {
     /// Returns a [`TypedError::ChannelSendError`] containing [`SendError::Full`] if the
     /// channel is full, or [`SendError::Closed`] if the channel is closed.
     /// Returns a [`TypedError::Error`] if the port does not exist.
+    ///
+    /// [`SendError::Full`]: otel_arrow_dfe_channel::error::SendError::Full
+    /// [`SendError::Closed`]: otel_arrow_dfe_channel::error::SendError::Closed
     #[inline]
-    pub fn try_send_message_to<P>(&self, port: P, data: PData) -> Result<(), TypedError<PData>>
+    pub fn try_send_message_to<P>(&self, port: P, mut data: PData) -> Result<(), TypedError<PData>>
     where
         P: Into<PortName>,
     {
+        self.materialize_context(&mut data);
         self.router.try_send_to(port, data)
     }
 
@@ -238,10 +372,11 @@ impl<PData> EffectHandler<PData> {
         self.core.tcp_listener(addr, self.receiver_id())
     }
 
-    /// Print an info message to stdout.
+    /// Print an info message to the engine's diagnostic stream (stderr).
     ///
     /// This method provides a standardized way for receivers to output
-    /// informational messages without blocking the async runtime.
+    /// informational messages. It never waits for the console: a full
+    /// diagnostic queue drops the message.
     pub async fn info(&self, message: &str) {
         self.core.info(message).await;
     }
@@ -282,6 +417,12 @@ impl<PData> EffectHandler<PData> {
     // More methods will be added in the future as needed.
 }
 
+impl<PData> CodecEffectHandler for EffectHandler<PData> {
+    fn codec_service(&self) -> &CodecService {
+        self.core.runtime_services.codecs()
+    }
+}
+
 #[cfg(test)]
 mod tests {
     #![allow(missing_docs)]
@@ -307,6 +448,7 @@ mod tests {
             Some("out".into()),
             ctrl_tx,
             metrics_reporter,
+            crate::testing::test_pipeline_runtime_services(),
         );
 
         // Should succeed when channel has capacity
@@ -328,6 +470,7 @@ mod tests {
             Some("out".into()),
             ctrl_tx,
             metrics_reporter,
+            crate::testing::test_pipeline_runtime_services(),
         );
 
         // First send should succeed
@@ -351,7 +494,14 @@ mod tests {
 
         let (ctrl_tx, _ctrl_rx) = runtime_ctrl_msg_channel(4);
         let (_metrics_rx, metrics_reporter) = MetricsReporter::create_new_and_receiver(1);
-        let eh = EffectHandler::new(test_node("recv"), senders, None, ctrl_tx, metrics_reporter);
+        let eh = EffectHandler::new(
+            test_node("recv"),
+            senders,
+            None,
+            ctrl_tx,
+            metrics_reporter,
+            crate::testing::test_pipeline_runtime_services(),
+        );
 
         // Should return configuration error when no default sender
         let result = eh.try_send_message(99);
@@ -369,7 +519,14 @@ mod tests {
 
         let (ctrl_tx, _ctrl_rx) = runtime_ctrl_msg_channel(4);
         let (_metrics_rx, metrics_reporter) = MetricsReporter::create_new_and_receiver(1);
-        let eh = EffectHandler::new(test_node("recv"), senders, None, ctrl_tx, metrics_reporter);
+        let eh = EffectHandler::new(
+            test_node("recv"),
+            senders,
+            None,
+            ctrl_tx,
+            metrics_reporter,
+            crate::testing::test_pipeline_runtime_services(),
+        );
 
         // Should succeed when sending to a specific port
         assert!(eh.try_send_message_to("b", 42).is_ok());
@@ -386,7 +543,14 @@ mod tests {
 
         let (ctrl_tx, _ctrl_rx) = runtime_ctrl_msg_channel(4);
         let (_metrics_rx, metrics_reporter) = MetricsReporter::create_new_and_receiver(1);
-        let eh = EffectHandler::new(test_node("recv"), senders, None, ctrl_tx, metrics_reporter);
+        let eh = EffectHandler::new(
+            test_node("recv"),
+            senders,
+            None,
+            ctrl_tx,
+            metrics_reporter,
+            crate::testing::test_pipeline_runtime_services(),
+        );
 
         // First send should succeed
         assert!(eh.try_send_message_to("out", 1).is_ok());
@@ -406,7 +570,14 @@ mod tests {
 
         let (ctrl_tx, _ctrl_rx) = runtime_ctrl_msg_channel(4);
         let (_metrics_rx, metrics_reporter) = MetricsReporter::create_new_and_receiver(1);
-        let eh = EffectHandler::new(test_node("recv"), senders, None, ctrl_tx, metrics_reporter);
+        let eh = EffectHandler::new(
+            test_node("recv"),
+            senders,
+            None,
+            ctrl_tx,
+            metrics_reporter,
+            crate::testing::test_pipeline_runtime_services(),
+        );
 
         // Should return error for unknown port
         let result = eh.try_send_message_to("unknown", 99);

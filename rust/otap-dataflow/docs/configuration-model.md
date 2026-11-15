@@ -27,6 +27,7 @@ details plus custom node config guidance, see:
 - Processor behavior taxonomy: [docs/processors.md](processors.md).
 - Runnable configuration examples: [configs/README.md](../configs/README.md).
 - Transport header policies: [docs/transport-headers.md](transport-headers.md).
+- Codec configuration and validation boundaries: [docs/codecs.md](codecs.md).
 - Memory limiter policy: [docs/memory-limiter-phase1.md](memory-limiter-phase1.md).
 - Admin live pipeline reconfiguration:
   [docs/admin/live-reconfiguration.md](admin/live-reconfiguration.md).
@@ -160,6 +161,7 @@ At startup, the engine runtime accepts a single root configuration file format
 
 - `version`: required schema version (`otel_dataflow/v1`)
 - `policies`: optional top-level defaults
+- `codecs`: optional codec bindings and named configurations inherited by pipelines
 - `topics`: optional top-level topic declarations
 - `engine`: optional engine-wide settings
 - `groups`: pipeline groups map
@@ -250,6 +252,7 @@ A **pipeline group** is a logical container for related pipelines.
 
 - It scopes a set of pipelines under one group id.
 - It can define group-level `policies` applied to pipelines in that group.
+- It can define codec bindings and named configurations inherited by that group.
 - It can define group-local `topics` that override top-level topics with the
   same local name for pipelines in that group.
 - It is the intermediate level between root defaults and
@@ -306,6 +309,7 @@ At pipeline level:
 
 - `type`: pipeline data type, defaulting to `otap`
 - `policies` (optional)
+- `codecs` (optional inherited codec settings)
 - `nodes`: map of node id -> node declaration
 - `extensions`: optional map of extension id -> extension declaration
 - `connections`: explicit graph wiring
@@ -343,6 +347,7 @@ Important behavior:
 
 `engine` is the home for engine-wide settings:
 
+- `state_dir`
 - `topics`
 - `http_admin`
 - `telemetry`
@@ -351,6 +356,14 @@ Important behavior:
 - `observability`
 - `controller/extensions`
 - `custom`
+
+### Engine State Directory
+
+`engine.state_dir` is an optional explicit absolute path, provisioned before
+pipelines start on Linux. It has no default and cannot be added, removed, or
+changed during live reconfiguration. Existing journald and scraper checkpoints
+are not automatically migrated. See [Engine state directory](state-directory.md)
+for permission, durability, platform, and consumer-adoption requirements.
 
 ### Engine Topic Settings
 
@@ -373,6 +386,10 @@ Engine-wide runtime tuning is declared at `engine.runtime`.
 - `engine.runtime.local_runtime.max_io_events_per_tick` (optional): maximum
   number of I/O readiness events processed by Tokio per scheduler tick. When
   omitted, Tokio's built-in default is used.
+- `engine.runtime.local_runtime.max_io_events_per_busy_tick` (optional): maximum
+  number of I/O readiness events processed by a nonblocking driver poll,
+  normally while runnable tasks remain. When omitted, Tokio uses
+  `max_io_events_per_tick` for both busy and idle polls.
 - `engine.runtime.local_runtime.poll_time_histogram` (optional, default
   `false`): enables Tokio task poll-time histograms for diagnostics. This
   requires a binary built with `RUSTFLAGS="--cfg tokio_unstable"`.
@@ -385,6 +402,7 @@ engine:
     local_runtime:
       event_interval: 127
       max_io_events_per_tick: 512
+      max_io_events_per_busy_tick: 32
 ```
 
 Use this only after workload-specific validation. Higher values can reduce
@@ -393,11 +411,29 @@ I/O readiness latency under sustained ready-task load. Larger
 `max_io_events_per_tick` values can improve I/O burst draining, but may also
 increase time spent in the I/O driver before ready tasks are polled.
 
+The busy limit allows smaller batches while tasks are runnable without reducing
+idle-poll batching. Smaller values leave excess events in the kernel and may
+improve task responsiveness during I/O bursts, but may also increase driver
+polls and reduce throughput. Unlike `event_interval`, which controls how often
+busy driver polls occur, this limit controls how much I/O each poll processes.
+Every numeric override must be greater than zero.
+
+For a representative pipeline experiment, first compare the old and new Tokio
+versions with all overrides omitted. Then keep `event_interval` and
+`max_io_events_per_tick` unchanged and compare busy limits of `8`, `32`, and
+`128` against the unset baseline. Use the same offered traffic, CPU placement,
+and topology for every run; measure delivered throughput and loss, CPU, memory,
+context switches, epoll activity, and tail latency. Do not assume a smaller
+batch improves throughput or reduces context switching.
+
 ### Engine Telemetry
 
 Internal telemetry settings are declared at `engine.telemetry`. The
 `reporting_interval` controls the metric-set snapshot cadence and supplies the
 internal telemetry receiver's default registry drain and export interval.
+`metric_unregister_grace_period` (default `0s`) keeps the metric sets of
+components that shut down visible to metric readers, such as the admin metrics
+endpoint, for that long, so a scraper can observe their final values.
 
 The internal telemetry receiver's `signals` field defaults to `[logs,
 metrics]`. A custom receiver may select either `[logs]` or `[metrics]`; logs
@@ -521,10 +557,30 @@ engine:
       token_endpoint: "https://auth.example.com/token"
 ```
 
+## Codec Configuration
+
+The optional `codecs` section defines `bindings` keyed by encoding and reusable
+named `configurations`. Omitted bindings use discovered distribution defaults;
+this is not an allowlist. A binding contains inline settings or a configuration
+reference, never both. Exactly one configuration applies per encoding per pipeline.
+
+Map entries inherit from pipeline, group, then root, with whole-entry replacement
+rather than deep option merging. Observability inherits its own declaration and
+root only. Empty sections inherit; an empty binding resets that encoding to its
+distribution default. Named definitions require an implementation ID. Missing
+names, incompatible implementations, and invalid options fail startup.
+
+`codecs.bindings.otlp-bytes.decode.validation` selects `best_effort` or `strict`
+for OTLP decoding; built-in defaults remain best effort. Strict decoding does not
+validate pass-through or borrowed encoded views. Selected settings participate
+in redeployment equality, independent of their scope or reference names. See the
+[codec guide](codecs.md) for examples and extension boundaries.
+
 ## Policy Hierarchy
 
 Policies include channel capacity, health, runtime telemetry, resources
-controls, runtime recovery, and transport headers:
+controls, runtime recovery, transport headers, and authorized identity claim
+capture:
 
 ```yaml
 policies:
@@ -574,10 +630,35 @@ policies:
       default:
         selector:
           type: all_captured
+  authorized_identity:
+    - claim: sub
+      store_as: customer_id
+    - claim: groups
+      store_as: access_groups
 ```
 
 For full transport header policy documentation, see
 [transport-headers.md](transport-headers.md).
+
+`authorized_identity` selects verified authorization claims for storage in
+pdata context. It can be configured at top-level, group, or pipeline policy
+scope. The nearest configured scope replaces the complete broader policy list;
+entries are not merged across scopes. An empty list at a narrower scope
+disables inherited identity capture.
+
+Only OTLP HTTP and gRPC receivers currently produce authorized identity
+entries, and only when the receiver binds a `bearer_token_authorizer`
+capability. Configuring the policy on another receiver, or on an OTLP receiver
+without an authorizer, captures no entries. Missing claims are omitted without
+rejecting the request. Single- and multi-valued claims retain their original
+cardinality.
+
+Authorized identity entries remain distinct from transport headers. The
+current policy does not propagate claims as outbound headers or provide
+routing, predicates, composites, required-entry enforcement, or generic
+context consumers. See the
+[OTLP receiver documentation](../crates/core-nodes/src/receivers/otlp_receiver/README.md)
+for the supported authorization path.
 
 Resolution order:
 
@@ -604,6 +685,7 @@ Defaults at top-level:
 - `runtime_recovery.startup_timeout = 30s`
 - `runtime_recovery.reset_after = 60s`
 - `transport_headers = not set` (opt-in; no headers captured or propagated)
+- `authorized_identity = not set` (opt-in; no verified claims captured)
 
 ### Core Allocation
 
@@ -643,11 +725,14 @@ core_allocation:
       end: 5
 ```
 
-| Type | Required fields | Placement and reservation semantics |
-| --- | --- | --- |
-| `all_cores` | Neither `count` nor `set` | Uses every process-visible core and does not reserve cores from other pipelines. |
-| `core_count` | `count` in YAML | Selects the requested number of unreserved process-visible cores and reserves them against other `core_count` allocations. Explicit `core_set` cores are also excluded. |
-| `core_set` | Non-empty `set` | Uses the exact inclusive ranges. Explicit sets may overlap one another and reserve their cores against `core_count` allocations. |
+- `all_cores`: requires neither `count` nor `set`. Uses every process-visible
+  core and does not reserve cores from other pipelines.
+- `core_count`: requires `count` in YAML. Selects the requested number of
+  unreserved process-visible cores and reserves them against other `core_count`
+  allocations. Explicit `core_set` cores are also excluded.
+- `core_set`: requires a non-empty `set`. Uses the exact inclusive ranges.
+  Explicit sets may overlap one another and reserve their cores against
+  `core_count` allocations.
 
 `core_count` uses strict exhaustion behavior. A positive count fails if there
 are too few unreserved visible cores, and a count greater than the number of
@@ -738,6 +823,10 @@ Telemetry policy notes:
 - `normal` adds message and phase counters
 - `detailed` adds latency/duration summaries and completion unwind-depth
   distribution
+- node-local `telemetry.duration_distribution` accepts `basic`, `normal`, or
+  `detailed` and defaults to `normal`
+- shared receiver and exporter local duration instruments use the selected
+  node-local distribution tier when `duration: true`
 - See [Node and Flow Metrics](node-and-flow-metrics.md) to configure and
   interpret node item metrics and processor flow metrics.
 

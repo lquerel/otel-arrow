@@ -1,5 +1,7 @@
 version: otel_dataflow/v1
 policies:
+  telemetry:
+    runtime_metrics: normal
   channel_capacity:
     control:
       pipeline: {{ default_pipeline_ctrl_msg_channel_size | default(100) }}
@@ -12,7 +14,11 @@ policies:
         - start: {{core_start}}
           end: {{core_end}}
 
-engine: {}
+engine:
+  telemetry:
+    # Keep metric sets of stopped pipelines scrapeable so the final counts
+    # survive the drain that precedes the last scrape (see #2731).
+    metric_unregister_grace_period: {{ metric_unregister_grace_period | default("5s") }}
 
 groups:
   default:
@@ -21,9 +27,16 @@ groups:
         nodes:
           receiver:
             type: "urn:otel:receiver:traffic_generator"
+            policies:
+              telemetry:
+                item_counts: true
+                size: true
             config:
               data_source: {{ data_source | default("semantic_conventions") }}
               generation_strategy: {{ generation_strategy | default("pre_generated") }}
+              # Vendored registry bind-mounted into the load generator container,
+              # see rust/otap-dataflow/vendor/semconv/README.md.
+              registry_path: "{{ registry_path | default("/home/nonroot/semconv/model") }}"
               traffic_config:
                 production_mode: {{ production_mode | default("smooth") }}
                 max_batch_size: {{ loadgen_max_batch_size | default(1000) }}

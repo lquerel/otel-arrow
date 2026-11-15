@@ -2,6 +2,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 pub(crate) const ATTRIBUTES_FIELD_NAME: &str = "attributes";
+pub(crate) const DATA_POINTS_FIELD_NAME: &str = "data_points";
 pub(crate) const BODY_FIELD_NAME: &str = "body";
 pub(crate) const RESOURCES_FIELD_NAME: &str = "resource";
 pub(crate) const SCOPE_FIELD_NAME: &str = "instrumentation_scope";
@@ -10,6 +11,7 @@ pub(crate) const VALUE_FIELD_NAME: &str = "value";
 pub(crate) const ENCODE_FUNC_NAME: &str = "encode";
 pub(crate) const ENDS_WITH_FUNC_NAME: &str = "ends_with";
 pub(crate) const FORMAT_DATETIME_FUNC_NAME: &str = "format_datetime";
+pub(crate) const HAS_TRANSPORT_HEADER_FUNC_NAME: &str = "has_transport_header";
 pub(crate) const LOG_FUNC_NAME: &str = "log10";
 pub(crate) const LTRIM_FUNC_NAME: &str = "ltrim";
 pub(crate) const NOW_FUNC_NAME: &str = "now";

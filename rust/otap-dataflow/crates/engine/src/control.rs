@@ -96,6 +96,23 @@ pub struct WakeupSlot(pub u128);
 /// current wakeup from a stale delivery for the same slot.
 pub type WakeupRevision = u64;
 
+/// Correlation id assigned to one processor-local delayed resume.
+///
+/// IDs are unique within one node-local scheduler instance. They are returned
+/// by `requeue_later` and carried back on [`NodeControlMsg::ResumeData`] so a
+/// processor can correlate a resumed payload with local state kept outside the
+/// payload.
+#[repr(transparent)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, PartialOrd, Ord)]
+pub struct LocalResumeId(u64);
+
+impl LocalResumeId {
+    /// Creates an id from a node-local scheduler sequence.
+    pub(crate) const fn new(sequence: u64) -> Self {
+        Self(sequence)
+    }
+}
+
 /// Engine-managed call data envelope. Wraps the CallData with an envelope
 /// containing timestamp. Lives on the forward path (in context stack frames).
 #[derive(Clone, Debug, Default, PartialEq)]
@@ -143,19 +160,19 @@ pub struct Frame {
     /// The caller's node_id for routing.
     pub node_id: usize,
     /// Number of signal items produced (emitted) by the node at send time.
-    /// Stamped only when the node has `PRODUCER_METRICS` interest. Saturates
+    /// Stamped only when the node has `NODE_ITEM_COUNTS` interest. Saturates
     /// at `u32::MAX`.
-    pub produced_items: u32,
+    pub output_items: u32,
     /// Number of signal items consumed (received) by the node at receive time.
-    /// Stamped only when the node has `CONSUMER_METRICS` interest. Saturates
+    /// Stamped only when the node has `NODE_ITEM_COUNTS` interest. Saturates
     /// at `u32::MAX`.
-    pub consumed_items: u32,
+    pub input_items: u32,
     /// Logical payload size produced by the node at send time, in bytes.
     /// Zero means the measurement was disabled, unavailable, or empty.
-    pub produced_size: u64,
+    pub output_size: u64,
     /// Logical payload size consumed by the node at receive time, in bytes.
     /// Zero means the measurement was disabled, unavailable, or empty.
-    pub consumed_size: u64,
+    pub input_size: u64,
 }
 
 /// The ACK message.
@@ -320,11 +337,15 @@ pub enum NodeControlMsg<PData> {
 
     /// Processor-local delayed resume returning to the node that requeued it.
     ResumeData {
-        /// Original scheduled resume instant.
+        /// Effective resume instant. Shutdown can move this earlier than the
+        /// originally scheduled instant.
         when: Instant,
 
         /// The retained data payload.
         data: Box<PData>,
+
+        /// Scheduler-assigned identity for this delayed resume.
+        resume_id: LocalResumeId,
     },
 
     /// Announces a process-wide memory pressure transition to receiver-local admission state.
@@ -714,10 +735,10 @@ impl<PData> ControlSenders<PData> {
 
         for typed_sender in self.senders.values() {
             // Apply filter if specified
-            if let Some(filter_type) = node_type_filter {
-                if typed_sender.node_type != filter_type {
-                    continue;
-                }
+            if let Some(filter_type) = node_type_filter
+                && typed_sender.node_type != filter_type
+            {
+                continue;
             }
 
             let shutdown_msg = NodeControlMsg::Shutdown {

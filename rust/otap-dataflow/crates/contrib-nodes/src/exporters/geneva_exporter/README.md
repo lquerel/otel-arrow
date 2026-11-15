@@ -3,7 +3,7 @@
 ## Metadata
 
 - Type: `urn:microsoft:exporter:geneva`
-- Feature gate: `geneva-exporter`
+- Feature gate: `geneva`
 - Optional certificate authentication: `geneva-certificate-auth` (disabled by default)
 - Stability: Alpha; supports logs and traces
 
@@ -37,6 +37,63 @@ config:
     msi_resource: "https://monitor.azure.com/"
   max_concurrent_uploads: 4
 ```
+
+### Azure Identity Auth extension
+
+To keep Entra identity acquisition outside the exporter, bind the existing
+Azure Identity Auth extension and select `externaltoken` authentication:
+
+```yaml
+extensions:
+  geneva_identity:
+    type: "urn:microsoft:extension:azure_identity_auth"
+    config:
+      method: managed_identity
+      scope: "https://monitor.azure.com/.default"
+      startup_timeout: 30s
+
+nodes:
+  geneva-exporter:
+    type: "urn:microsoft:exporter:geneva"
+    capabilities:
+      bearer_token_provider: geneva_identity
+    config:
+      endpoint: "https://geneva.example.com"
+      environment: production
+      account: "my-account"
+      namespace: "my-namespace"
+      account_routing:
+        default_group: "my-account-group"
+      region: westus2
+      config_major_version: 1
+      tenant: "my-tenant"
+      role_name: "df-engine"
+      role_instance: "instance-001"
+      auth:
+        type: externaltoken
+        resource: "https://monitor.azure.com"
+```
+
+The resource and scope above are examples. Configure both for the Entra audience
+required by the target Geneva environment. One Azure Identity Auth extension
+instance serves one identity and one scope. The bearer-token capability does
+not expose its configured scope, so the exporter cannot validate that it
+matches `auth.resource`; GCS rejects an audience or authorization mismatch.
+
+The extension owns Entra token acquisition, caching, refresh, readiness, and
+authentication telemetry. The uploader uses that Entra token only to request
+Geneva ingestion credentials from GCS, then keeps its existing ingestion-token
+and routing cache. A valid cached Geneva credential allows uploads to continue
+without consulting the Entra provider.
+
+Each Entra token lookup is limited to five seconds. A timeout fails the lookup
+instead of indefinitely blocking uploads or shutdown. The exporter does not
+serialize concurrent token lookups; acquisition coalescing remains the identity
+extension's responsibility. Provider futures must be cancellation-safe.
+
+Azure Arc uses the same `managed_identity` method. Arc detection and the HIMDS
+challenge-response remain in the Azure Identity SDK; the Geneva exporter does
+not contain Arc-specific identity logic.
 
 ### Agent-fed credentials
 
@@ -114,7 +171,7 @@ source.
 From the `otap-dataflow` directory:
 
 ```bash
-cargo build --release --features geneva-exporter
+cargo build --release --features geneva
 ```
 
 Password-protected PKCS#12 certificate authentication is excluded by default.
@@ -144,6 +201,41 @@ You should see `urn:microsoft:exporter:geneva` in the Exporters list.
 - `max_buffer_size` is currently reserved for a future buffering/flush implementation.
   It is accepted by config parsing but does not change runtime behavior yet.
 
+## Internal telemetry
+
+Input PData message volume is reported by the engine through
+`channel.receiver.messages` and is not duplicated by the exporter.
+
+The exporter uses the shared `exporter.attempted` contract for each encoded
+Geneva batch submitted to the uploader. A message that terminates during
+preparation, or produces no uploadable batch, records one attempt instead.
+
+| Metric | Unit | Attributes | Description |
+| --- | --- | --- | --- |
+| `exporter.attempted.messages` | `{message}` | `signal`, `outcome` | Number of Geneva delivery attempts, including preparation-only outcomes. |
+| `exporter.attempted.duration` | `s` | `signal`, `outcome` | Time from identifying an encoded batch through its terminal backend result, including concurrency queueing. Emitted when component duration is enabled. |
+| `exporter.attempted.payload.size` | `By` | `signal`, `outcome` | LZ4 chunk-compressed Geneva application-payload bytes submitted to the uploader. Emitted when size measurement is enabled. |
+| `exporter.attempted.items` | `{item}` | `signal`, `outcome` | Log records or spans carried by the attempted batch. Emitted when item counting is enabled. |
+
+All fields use `signal` and `outcome`. Duration, payload size, and item counts
+are emitted only when their corresponding component telemetry is enabled.
+The default `runtime_metrics: basic` omits these metrics. Set
+`runtime_metrics: normal` for attempted messages or `detailed` for all
+measurements. To opt in only this exporter, set the corresponding
+`policies.telemetry` fields: `messages`, `duration`, `item_counts`, and `size`.
+
+Geneva LZ4 chunking is part of the backend's application payload format, so
+`payload.size` measures the encoded batch after LZ4 encoding. It excludes HTTP
+headers, framing, TLS overhead, and any other transport-layer amplification.
+
+Geneva-specific metrics retain details that are outside the shared contract:
+
+| Metric | Attributes | Description |
+| --- | --- | --- |
+| `exporter.geneva.encoding.duration` | `signal`, `outcome` | Geneva encoding duration in seconds. |
+| `exporter.geneva.failures.messages` | `signal`, `error.type` | Bounded conversion, decoding, encoding, upload, and unsupported-signal failures. |
+| `exporter.geneva.skipped.messages` | `signal`, `reason` | Messages skipped because the payload is empty. |
+
 ## Configuration
 
 ```yaml
@@ -165,7 +257,7 @@ config:
 
   # Authentication method. Other default-build values are
   # "usermanagedidentity", "usermanagedidentitybyarmresourceid",
-  # "workloadidentity", and "agentfed". "certificate" requires the
+  # "workloadidentity", "externaltoken", and "agentfed". "certificate" requires the
   # opt-in "geneva-certificate-auth" build feature.
   auth:
     type: systemmanagedidentity
@@ -258,20 +350,6 @@ Gotcha: because OBO keys on the destination, keying an entry on the source value
 silently disables OBO. If you wrote `obo.events.audit` instead of
 `obo.events.AuditLogs`, the post-routing lookup (`AuditLogs`) would miss and the
 `audit` records would upload without OBO -- no error, just silently omitted.
-
-## Telemetry
-
-Input PData message volume is reported by the engine through
-`channel.receiver.messages` and is not duplicated by the exporter.
-
-<!-- markdownlint-disable MD013 -->
-
-| Metric | Unit | Attributes | Description |
-| --- | --- | --- | --- |
-| `exporter.exports.messages` | `{message}` | `signal`, `outcome` | Number of PData messages whose Geneva export reached a terminal outcome. |
-| `exporter.exports.duration` | `s` | `signal`, `outcome` | Time from dequeuing PData through the terminal Geneva upload result, including conversion and upload preparation but excluding Ack/Nack notification. |
-
-<!-- markdownlint-enable MD013 -->
 
 ## Test Configuration
 

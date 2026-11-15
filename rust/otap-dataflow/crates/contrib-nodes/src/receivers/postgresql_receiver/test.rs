@@ -1,0 +1,1320 @@
+// Copyright The OpenTelemetry Authors
+// SPDX-License-Identifier: Apache-2.0
+
+// Private adapter tests remain colocated logically without exposing implementation internals.
+macro_rules! postgresql_module_tests {
+    (framing) => {
+        mod framing_tests {
+            use super::*;
+            use tokio::io::AsyncReadExt;
+
+            fn frame_limits() -> FrameLimits {
+                FrameLimits::new(10 * 1024 * 1024).expect("configured receive budget")
+            }
+
+            struct Fragmented {
+                bytes: Vec<u8>,
+                consumed: Rc<Cell<usize>>,
+                fragment: usize,
+                pending: bool,
+            }
+
+            impl AsyncRead for Fragmented {
+                fn poll_read(
+                    self: Pin<&mut Self>,
+                    cx: &mut Context<'_>,
+                    output: &mut ReadBuf<'_>,
+                ) -> Poll<io::Result<()>> {
+                    let this = self.get_mut();
+                    if this.pending {
+                        this.pending = false;
+                        cx.waker().wake_by_ref();
+                        return Poll::Pending;
+                    }
+                    this.pending = true;
+                    let start = this.consumed.get();
+                    let count = output
+                        .remaining()
+                        .min(this.fragment)
+                        .min(this.bytes.len() - start);
+                    output.put_slice(&this.bytes[start..start + count]);
+                    this.consumed.set(start + count);
+                    Poll::Ready(Ok(()))
+                }
+            }
+
+            fn fragmented_limited(
+                bytes: Vec<u8>,
+                fragment: usize,
+                limits: FrameLimits,
+            ) -> BoundedBackend<Fragmented> {
+                BoundedBackend::new(
+                    Fragmented {
+                        bytes,
+                        consumed: Rc::default(),
+                        fragment,
+                        pending: true,
+                    },
+                    ReceiveFailure::default(),
+                    limits,
+                )
+            }
+
+            fn fragmented(bytes: Vec<u8>, fragment: usize) -> BoundedBackend<Fragmented> {
+                fragmented_limited(bytes, fragment, frame_limits())
+            }
+
+            /// Builds one backend frame: tag, big-endian length including the
+            /// length field itself, then the body.
+            pub(super) fn frame(tag: u8, body: &[u8]) -> Vec<u8> {
+                let mut bytes = vec![tag];
+                bytes.extend_from_slice(&((body.len() + 4) as i32).to_be_bytes());
+                bytes.extend_from_slice(body);
+                bytes
+            }
+
+            /// Drains the stream, recording the bytes returned by each
+            /// individual read so frame boundaries stay observable.
+            async fn read_chunks(
+                stream: &mut BoundedBackend<Fragmented>,
+                capacity: usize,
+            ) -> io::Result<Vec<Vec<u8>>> {
+                let mut chunks = Vec::new();
+                loop {
+                    let mut buffer = vec![0; capacity];
+                    let read = stream.read(&mut buffer).await?;
+                    if read == 0 {
+                        return Ok(chunks);
+                    }
+                    buffer.truncate(read);
+                    chunks.push(buffer);
+                }
+            }
+
+            /// Scenario: An oversized backend length arrives one byte at a time.
+            /// Guarantees: Only five header bytes are read; no body or header reaches the driver.
+            #[tokio::test]
+            async fn oversized_header_rejected_before_body() {
+                let mut bytes = vec![b'D'];
+                bytes.extend_from_slice(&(frame_limits().data_row as i32).to_be_bytes());
+                bytes.extend_from_slice(b"unread private row");
+                let mut stream = fragmented(bytes, 1);
+                let mut output = [0; 64];
+                let error = stream.read(&mut output).await.expect_err("oversized frame");
+                assert_eq!(error.kind(), io::ErrorKind::InvalidData);
+                assert_eq!(stream.failure.get(), Some(Error::Limit));
+                assert_eq!(stream.inner.consumed.get(), 5);
+                assert_eq!(output, [0; 64]);
+                assert!(!error.to_string().contains("private"));
+                assert!(stream.read(&mut output).await.is_err());
+                assert_eq!(stream.inner.consumed.get(), 5);
+            }
+
+            /// Scenario: Two complete backend frames reach a destination with room for both, delivered one byte at a time, in uneven pieces, and all at once.
+            /// Guarantees: Every byte is forwarded verbatim and no single read ever spans a frame boundary, whatever the socket hands over.
+            #[tokio::test]
+            async fn frames_never_coalesce_across_boundaries() {
+                let first = frame(b'D', b"first-row-payload");
+                let second = frame(b'D', b"second-row-payload-longer");
+                let mut bytes = first.clone();
+                bytes.extend_from_slice(&second);
+                let boundaries = [0, first.len(), bytes.len()];
+
+                // A large fragment lets the socket offer both frames in one
+                // read; only the frame bound can stop them from coalescing.
+                for fragment in [1, 7, bytes.len()] {
+                    let mut stream = fragmented(bytes.clone(), fragment);
+                    let chunks = read_chunks(&mut stream, 4096)
+                        .await
+                        .expect("both frames delivered");
+
+                    assert_eq!(chunks.concat(), bytes, "fragment {fragment}");
+                    let mut offset = 0;
+                    for chunk in &chunks {
+                        assert!(!chunk.is_empty());
+                        let end = offset + chunk.len();
+                        let frame_index = boundaries
+                            .iter()
+                            .rposition(|start| *start <= offset)
+                            .expect("enclosing frame");
+                        assert!(
+                            end <= boundaries[frame_index + 1],
+                            "fragment {fragment}: read {offset}..{end} crossed a frame boundary"
+                        );
+                        offset = end;
+                    }
+                    assert_eq!(offset, bytes.len(), "fragment {fragment}");
+                    assert_eq!(stream.failure.get(), None);
+                }
+            }
+
+            /// Scenario: A zero-body control frame precedes a normal data frame.
+            /// Guarantees: The empty frame completes on its own, resets framing state, and the next frame still arrives intact.
+            #[tokio::test]
+            async fn zero_body_frame_completes_and_resets_state() {
+                let empty = frame(b'C', b"");
+                let next = frame(b'D', b"payload");
+                let mut bytes = empty.clone();
+                bytes.extend_from_slice(&next);
+
+                for fragment in [1, bytes.len()] {
+                    let mut stream = fragmented(bytes.clone(), fragment);
+                    let chunks = read_chunks(&mut stream, 4096)
+                        .await
+                        .expect("both frames delivered");
+
+                    assert_eq!(chunks.concat(), bytes, "fragment {fragment}");
+                    // The empty frame is delivered alone, so the next frame's
+                    // header is never merged into the same read.
+                    assert_eq!(chunks[0], empty, "fragment {fragment}");
+                    assert_eq!(stream.failure.get(), None);
+                }
+            }
+
+            /// Scenario: The backend stops sending at a frame boundary, part-way through a header, and part-way through a body.
+            /// Guarantees: Only a boundary EOF is clean; both truncations fail closed as unavailable transport.
+            #[tokio::test]
+            async fn truncated_frames_fail_closed_but_boundary_eof_is_clean() {
+                let complete = frame(b'D', b"payload");
+
+                let mut stream = fragmented(complete.clone(), 1);
+                let chunks = read_chunks(&mut stream, 4096)
+                    .await
+                    .expect("complete frame");
+                assert_eq!(chunks.concat(), complete);
+                assert_eq!(stream.failure.get(), None);
+
+                let mut stream = fragmented(complete[..3].to_vec(), 1);
+                let mut output = [0; 64];
+                let error = stream
+                    .read(&mut output)
+                    .await
+                    .expect_err("truncated header");
+                assert_eq!(error.kind(), io::ErrorKind::UnexpectedEof);
+                assert_eq!(stream.failure.get(), Some(Error::Unavailable));
+
+                let mut stream = fragmented(complete[..complete.len() - 1].to_vec(), 1);
+                let error = read_chunks(&mut stream, 4096)
+                    .await
+                    .expect_err("truncated body");
+                assert_eq!(error.kind(), io::ErrorKind::UnexpectedEof);
+                assert_eq!(stream.failure.get(), Some(Error::Unavailable));
+            }
+
+            /// Scenario: Declared frame lengths sit exactly at the receive ceiling, one byte below it, and below the minimum legal length.
+            /// Guarantees: The ceiling itself is rejected, the largest legal frame is admitted verbatim, and malformed lengths fail closed.
+            #[tokio::test]
+            async fn frame_length_bounds_are_enforced_exactly() {
+                let limits = FrameLimits::new(1024).expect("configured receive budget");
+                let ceiling = limits.for_tag(b'D');
+                let mut output = [0; 64];
+
+                let mut at_ceiling = vec![b'D'];
+                at_ceiling.extend_from_slice(&(ceiling as i32).to_be_bytes());
+                let mut stream = fragmented_limited(at_ceiling, 1, limits);
+                assert!(stream.read(&mut output).await.is_err());
+                assert_eq!(stream.failure.get(), Some(Error::Limit));
+
+                let largest = frame(b'D', &vec![7; ceiling - 1 - 4]);
+                let mut stream = fragmented_limited(largest.clone(), 4096, limits);
+                let chunks = read_chunks(&mut stream, 8192)
+                    .await
+                    .expect("largest legal frame");
+                assert_eq!(chunks.concat(), largest);
+                assert_eq!(stream.failure.get(), None);
+
+                let mut malformed = vec![b'D'];
+                malformed.extend_from_slice(&3i32.to_be_bytes());
+                let mut stream = fragmented_limited(malformed, 1, limits);
+                assert!(stream.read(&mut output).await.is_err());
+                assert_eq!(stream.failure.get(), Some(Error::Database));
+            }
+        }
+    };
+    (worker) => {
+        mod tests {
+            use super::*;
+
+            /// Scenario: A PostgreSQL TLS connection adds a PEM-encoded private CA file.
+            /// Guarantees: The bounded file loader and certificate parser build a verified Rustls connector.
+            #[tokio::test]
+            async fn tls_connector_loads_custom_ca_file() {
+                otel_arrow_dfe_otap::crypto::ensure_crypto_provider();
+                let directory = tempfile::tempdir().expect("temporary CA directory");
+                let path = directory.path().join("postgresql-ca.pem");
+                let ca = otel_arrow_dfe_test_tls_certs::generate_ca("PostgreSQL test CA");
+                std::fs::write(&path, ca.cert_pem).expect("write CA file");
+                let validated = super::super::tests::test_validated_with_ca(&path);
+
+                assert!(
+                    tls_connector(&validated.config.connection)
+                        .await
+                        .expect("custom CA connector")
+                        .is_some()
+                );
+            }
+
+            /// Scenario: A PostgreSQL TLS CA file is missing or does not contain certificates.
+            /// Guarantees: Connection setup fails as configuration instead of ignoring invalid trust material.
+            #[tokio::test]
+            async fn tls_connector_rejects_invalid_ca_file() {
+                otel_arrow_dfe_otap::crypto::ensure_crypto_provider();
+                let directory = tempfile::tempdir().expect("temporary CA directory");
+                let missing = directory.path().join("missing.pem");
+                let validated = super::super::tests::test_validated_with_ca(&missing);
+                assert_eq!(
+                    tls_connector(&validated.config.connection).await.err(),
+                    Some(Error::TlsCaRead(io::ErrorKind::NotFound))
+                );
+
+                let invalid = directory.path().join("invalid.pem");
+                std::fs::write(&invalid, "not a certificate").expect("write invalid CA file");
+                let validated = super::super::tests::test_validated_with_ca(&invalid);
+                assert_eq!(
+                    tls_connector(&validated.config.connection).await.err(),
+                    Some(Error::TlsCaParse)
+                );
+            }
+
+            /// Scenario: A PostgreSQL peer accepts SSLRequest, reads ClientHello, and never finishes TLS.
+            /// Guarantees: The connection deadline closes the socket and reports retryable unavailability without publishing a session.
+            #[tokio::test]
+            async fn stalled_tls_handshake_obeys_connection_deadline() {
+                use serde_json::json;
+                use tokio::{
+                    io::{AsyncReadExt, AsyncWriteExt},
+                    net::TcpListener,
+                };
+
+                otel_arrow_dfe_otap::crypto::ensure_crypto_provider();
+                let directory = tempfile::tempdir().expect("CA directory");
+                let ca_file = directory.path().join("ca.pem");
+                let ca = otel_arrow_dfe_test_tls_certs::generate_ca("PostgreSQL timeout CA");
+                std::fs::write(&ca_file, ca.cert_pem).expect("CA file");
+                let listener = TcpListener::bind("127.0.0.1:0")
+                    .await
+                    .expect("loopback listener");
+                let address = listener.local_addr().expect("listener address");
+                let validated = super::super::tests::test_validated_with_connection(json!({
+                    "host": "127.0.0.1",
+                    "port": address.port(),
+                    "database": "fixture",
+                    "tls": {"ca_file": ca_file},
+                }));
+                let mut adapter = PostgreSqlAdapter::new(
+                    validated,
+                    super::super::tests::test_provider(),
+                )
+                .expect("adapter");
+
+                tokio::task::LocalSet::new()
+                    .run_until(async {
+                        let server = async {
+                            let (mut socket, _) = listener.accept().await.expect("connection");
+                            let mut request = [0; 8];
+                            let _ = socket.read_exact(&mut request).await.expect("SSLRequest");
+                            assert_eq!(request, [0, 0, 0, 8, 4, 210, 22, 47]);
+                            socket.write_all(b"S").await.expect("TLS supported");
+                            let mut buffer = [0; 4096];
+                            assert!(socket.read(&mut buffer).await.expect("ClientHello") > 0);
+                            tokio::time::pause();
+                            tokio::time::advance(CONNECTION_TIMEOUT).await;
+                            while socket.read(&mut buffer).await.expect("client closes") != 0 {}
+                        };
+                        let client = async {
+                            assert_eq!(
+                                adapter
+                                    .connect(
+                                        &Operation::default(),
+                                        &super::super::tests::fixed_credential()
+                                    )
+                                    .await,
+                                Err(Error::Unavailable)
+                            );
+                            assert!(adapter.session.is_none());
+                            assert!(adapter.cancel.borrow().is_none());
+                        };
+                        tokio::time::timeout(Duration::from_secs(30), async {
+                            tokio::join!(server, client);
+                        })
+                        .await
+                        .expect("timeout scenario completed");
+                    })
+                    .await;
+            }
+
+            /// Scenario: One large row is followed by ten thousand small rows.
+            /// Guarantees: The outlier ages out after the bounded window, target returns to 300, and estimated native requests stay bounded.
+            #[test]
+            fn fetch_size_recovers_after_recent_small_rows() {
+                let mut size = FetchSize::default();
+                size.observe(1024 * 1024);
+                assert_eq!(size.target(300, 300 * 1024), 0);
+                for _ in 0..FETCH_SIZE_WINDOW - 1 {
+                    size.observe(1024);
+                }
+                assert_eq!(size.target(300, 300 * 1024), 0);
+                size.observe(1024);
+                assert_eq!(size.target(300, 300 * 1024), 300);
+
+                let mut size = FetchSize::default();
+                size.observe(1024 * 1024);
+                let mut remaining = 10_000;
+                let mut adaptive_requests = 0;
+                while remaining > 0 {
+                    let fetched = size.target(remaining.min(300), 300 * 1024).max(1);
+                    for _ in 0..fetched {
+                        size.observe(1024);
+                    }
+                    remaining -= fetched;
+                    adaptive_requests += 1;
+                }
+                let lifetime_requests = 10_000;
+                assert_eq!(adaptive_requests, 66);
+                assert_eq!(lifetime_requests / adaptive_requests, 151);
+            }
+
+            /// Scenario: Equivalent result metadata is rediscovered without table or index provenance.
+            /// Guarantees: Stable schemas reuse the plan, while changed result types fail closed.
+            #[test]
+            fn equivalent_rebuilt_index_preserves_cached_schema() {
+                use tokio_postgres::types::Type;
+
+                let validated = super::super::tests::test_validated();
+                let mut schema = super::super::tests::mock_schema(
+                    &[("ts", Type::TIMESTAMPTZ, 6, true), ("id", Type::INT8, -1, true)],
+                );
+                let mut cache = None;
+                _ = resolve_schema(&mut cache, &validated, schema.clone())
+                    .expect("initial schema");
+                _ = resolve_schema(&mut cache, &validated, schema.clone())
+                    .expect("equivalent result schema");
+                schema.native_types[0] = Type::TEXT;
+                assert!(resolve_schema(&mut cache, &validated, schema).is_err());
+            }
+
+            /// Scenario: Untyped preparation infers int4 for COALESCE($1, 0), while the selected cursor is bigint.
+            /// Guarantees: Discovery retries with bigint, caches the typed output, avoids unnecessary retries, and still rejects real schema drift.
+            #[tokio::test]
+            async fn discovery_uses_cursor_types_and_final_output_schema() {
+                use super::framing_tests::frame;
+                use otel_arrow_dfe_scraper::database::DriverAdapter;
+                use serde_json::json;
+                use tokio::{
+                    io::{AsyncReadExt, AsyncWriteExt},
+                    net::TcpListener,
+                };
+
+                tokio::task::LocalSet::new()
+                    .run_until(async {
+                        for inferred in [Type::INT4, Type::INT8] {
+                            let listener = TcpListener::bind("127.0.0.1:0")
+                                .await
+                                .expect("reserved loopback listener");
+                            let port = listener.local_addr().unwrap().port();
+                            let state = tempfile::tempdir().unwrap();
+                            let raw = json!({
+                                "source_id":"typed-discovery",
+                                "connection":{"host":"127.0.0.1","port":port,"database":"fixture","tls":{"enabled":false}},
+                                "query":{
+                                    "statement":"SELECT e.id, COALESCE(:last_id, 0) AS previous_id FROM events e WHERE e.id > :last_id ORDER BY e.id",
+                                    "fetch_size_rows":1,"max_rows_per_poll":2,"max_batch_bytes":"1 MiB"
+                                },
+                                "watermark":{"mode":"scalar","column":"id","bind":"last_id","initial":{"type":"int64","value":0}},
+                                "checkpoint":{"directory":state.path()}
+                            });
+                            let validated = super::super::config::PostgreSqlReceiverConfig::parse(&raw)
+                                .and_then(super::super::config::PostgreSqlReceiverConfig::validate)
+                                .expect("receiver config");
+                            let query = validated.common.clone();
+                            let mut adapter = PostgreSqlAdapter::new(
+                                validated,
+                                super::super::tests::test_provider(),
+                            )
+                            .unwrap();
+                            let server = async {
+                                let (mut socket, _) = listener.accept().await.unwrap();
+                                let startup_len = socket.read_u32().await.unwrap();
+                                assert!((8..8192).contains(&startup_len));
+                                let mut startup = vec![0; startup_len as usize - 4];
+                                let _ = socket.read_exact(&mut startup).await.unwrap();
+                                assert_eq!(&startup[..4], &196608u32.to_be_bytes());
+                                let mut response = frame(b'R', &0u32.to_be_bytes());
+                                response.extend(frame(b'K', &[0; 8]));
+                                response.extend(frame(b'Z', b"I"));
+                                socket.write_all(&response).await.unwrap();
+
+                                let mut transaction = 0;
+                                let mut status = b'I';
+                                let mut parsed = None;
+                                let mut prepares = Vec::new();
+                                let mut terminated = false;
+                                for _ in 0..64 {
+                                    let tag = socket.read_u8().await.unwrap();
+                                    let length = socket.read_u32().await.unwrap();
+                                    assert!((4..65536).contains(&length));
+                                    let mut body = vec![0; length as usize - 4];
+                                    let _ = socket.read_exact(&mut body).await.unwrap();
+                                    let response = match tag {
+                                        b'Q' => {
+                                            let sql = std::str::from_utf8(&body[..body.len() - 1]).unwrap();
+                                            let command = if sql == "ROLLBACK" {
+                                                status = b'I';
+                                                b"ROLLBACK\0".as_slice()
+                                            } else {
+                                                assert!(sql.contains("READ ONLY"), "{sql}");
+                                                transaction += 1;
+                                                status = b'T';
+                                                b"BEGIN\0".as_slice()
+                                            };
+                                            let mut response = frame(b'C', command);
+                                            response.extend(frame(b'Z', &[status]));
+                                            response
+                                        }
+                                        b'P' => {
+                                            let mut parts = body.splitn(3, |byte| *byte == 0);
+                                            let name = parts.next().unwrap().to_vec();
+                                            let sql = std::str::from_utf8(parts.next().unwrap()).unwrap().to_owned();
+                                            let parameters = parts.next().unwrap();
+                                            let count = u16::from_be_bytes(parameters[..2].try_into().unwrap());
+                                            assert_eq!(parameters.len(), 2 + usize::from(count) * 4);
+                                            let types: Vec<_> = parameters[2..]
+                                                .chunks_exact(4)
+                                                .map(|bytes| u32::from_be_bytes(bytes.try_into().unwrap()))
+                                                .collect();
+                                            assert!(types.is_empty() || types == [Type::INT8.oid()]);
+                                            assert!(sql.contains("COALESCE($1, 0)"), "{sql}");
+                                            prepares.push((sql, types.clone()));
+                                            parsed = Some((name, types));
+                                            frame(b'1', &[])
+                                        }
+                                        b'D' => {
+                                            let (name, declared) = parsed.as_ref().unwrap();
+                                            assert_eq!(body[0], b'S');
+                                            assert_eq!(&body[1..body.len() - 1], name);
+                                            let parameter = if declared.is_empty() {
+                                                inferred.clone()
+                                            } else {
+                                                Type::INT8
+                                            };
+                                            let previous = if transaction == 3 && parameter == Type::INT8 {
+                                                Type::TEXT
+                                            } else {
+                                                parameter.clone()
+                                            };
+                                            let mut parameters = 1u16.to_be_bytes().to_vec();
+                                            parameters.extend(parameter.oid().to_be_bytes());
+                                            let mut response = frame(b't', &parameters);
+                                            let mut columns = 2u16.to_be_bytes().to_vec();
+                                            for (name, native) in [("id", Type::INT8), ("previous_id", previous)] {
+                                                columns.extend(name.as_bytes());
+                                                columns.push(0);
+                                                columns.extend(0u32.to_be_bytes());
+                                                columns.extend(0i16.to_be_bytes());
+                                                columns.extend(native.oid().to_be_bytes());
+                                                let size: i16 = match native {
+                                                    Type::INT4 => 4,
+                                                    Type::INT8 => 8,
+                                                    _ => -1,
+                                                };
+                                                columns.extend(size.to_be_bytes());
+                                                columns.extend((-1i32).to_be_bytes());
+                                                columns.extend(0i16.to_be_bytes());
+                                            }
+                                            response.extend(frame(b'T', &columns));
+                                            response
+                                        }
+                                        b'C' => frame(b'3', &[]),
+                                        b'S' => frame(b'Z', &[status]),
+                                        b'X' => {
+                                            terminated = true;
+                                            break;
+                                        }
+                                        _ => panic!("unexpected frontend message {tag}"),
+                                    };
+                                    socket.write_all(&response).await.unwrap();
+                                }
+                                assert!(terminated, "connection must close within the bounded exchange");
+                                assert_eq!(transaction, 3);
+                                prepares
+                            };
+                            let client = async {
+                                for _ in 0..2 {
+                                    _ = adapter.begin_operation().unwrap();
+                                    let columns = adapter.validate_query(&query).await.unwrap();
+                                    assert_eq!(
+                                        columns.iter().map(|column| (column.name.as_str(), column.source_type.as_str())).collect::<Vec<_>>(),
+                                        vec![("id", "int8"), ("previous_id", "int8")]
+                                    );
+                                }
+                                _ = adapter.begin_operation().unwrap();
+                                assert_eq!(adapter.validate_query(&query).await.err(), Some(Error::Metadata));
+                                adapter.shutdown().await.unwrap();
+                                assert!(adapter.session.is_none());
+                            };
+                            let (prepares, ()) = tokio::time::timeout(Duration::from_secs(30), async {
+                                tokio::join!(server, client)
+                            })
+                            .await
+                            .expect("bounded native-protocol discovery scenario");
+                            let typed_source = prepares.iter()
+                                .filter(|(sql, types)| !sql.contains("\nLIMIT") && !types.is_empty())
+                                .count();
+                            assert_eq!(typed_source, if inferred == Type::INT4 { 3 } else { 0 });
+                            assert_eq!(prepares.iter().filter(|(sql, _)| sql.ends_with("\nLIMIT 3")).count(), 1);
+                        }
+                    })
+                    .await;
+            }
+
+            /// Scenario: A source uses database-managed row policies.
+            /// Guarantees: The session preserves read-only time-bounded execution without disabling native RLS.
+            #[test]
+            fn session_options_disable_filtered_rls_results() {
+                let options = session_options(Duration::from_secs(30));
+                assert!(!options.contains("-c row_security=off"));
+                assert!(options.contains("-c default_transaction_read_only=on"));
+                assert!(options.contains("-c statement_timeout=30000"));
+                assert!(options.contains("-c idle_in_transaction_session_timeout=30000"));
+            }
+
+            /// Scenario: A fetch and its local connection driver both remain silent after timeout and cancellation.
+            /// Guarantees: The pending driver is aborted and observably joined, then retry waits for the full server statement-timeout fence.
+            #[tokio::test(start_paused = true)]
+            async fn silent_fetch_recovers_after_server_query_fence() {
+                use futures::future;
+
+                tokio::task::LocalSet::new()
+                    .run_until(async {
+                        let mut adapter = PostgreSqlAdapter::new(
+                            super::super::tests::test_validated(),
+                            super::super::tests::test_provider(),
+                        )
+                        .expect("adapter");
+                        adapter.session = Some(Session {
+                            client: None,
+                            driver: tokio::task::spawn_local(future::pending()),
+                            statement: None,
+                            receive_failure: ReceiveFailure::default(),
+                        });
+                        let operation = Operation::default();
+                        let cancel = adapter.cancel.clone();
+                        let completion = {
+                            let completion = await_operation(
+                                future::pending::<Result<Reply>>(),
+                                &operation,
+                                &cancel,
+                                Duration::from_secs(30),
+                            );
+                            tokio::pin!(completion);
+                            assert!(futures::poll!(&mut completion).is_pending());
+                            tokio::time::advance(Duration::from_secs(30)).await;
+                            assert!(futures::poll!(&mut completion).is_pending());
+                            tokio::time::advance(CANCEL_COMPLETION_TIMEOUT).await;
+                            completion.await
+                        };
+                        assert!(matches!(
+                            completion,
+                            OperationCompletion::Incomplete(Error::Timeout)
+                        ));
+
+                        let error = {
+                            let recovery = adapter.recover_incomplete_operation(Error::Timeout);
+                            tokio::pin!(recovery);
+                            assert!(futures::poll!(&mut recovery).is_pending());
+                            tokio::time::advance(CONNECTION_SHUTDOWN_TIMEOUT).await;
+                            recovery.await
+                        };
+                        assert_eq!(error, Error::Timeout);
+                        assert!(!adapter.poisoned);
+                        assert!(adapter.session.is_none());
+
+                        let reconnect_operation = Operation::default();
+                        {
+                            let reconnect = adapter.await_reconnect_fence(&reconnect_operation);
+                            tokio::pin!(reconnect);
+                            assert!(futures::poll!(&mut reconnect).is_pending());
+                            tokio::time::advance(Duration::from_secs(29)).await;
+                            assert!(futures::poll!(&mut reconnect).is_pending());
+                            tokio::time::advance(Duration::from_secs(1)).await;
+                            reconnect.await.expect("server query fenced");
+                        }
+                        assert!(adapter.reconnect_not_before.is_none());
+                    })
+                    .await;
+            }
+
+            fn test_adapter() -> PostgreSqlAdapter {
+                PostgreSqlAdapter::new(
+                    super::super::tests::test_validated(),
+                    super::super::tests::test_provider(),
+                )
+                .expect("adapter")
+            }
+
+            /// Installs a session whose driver task has already finished with `result`.
+            async fn finished_session(adapter: &mut PostgreSqlAdapter, result: Result<()>) {
+                adapter.session = Some(Session {
+                    client: None,
+                    driver: tokio::task::spawn_local(async move { result }),
+                    statement: None,
+                    receive_failure: ReceiveFailure::default(),
+                });
+                // Let the driver task reach completion so the close path joins a
+                // finished task rather than racing its shutdown timeout.
+                tokio::task::yield_now().await;
+            }
+
+            /// Scenario: An in-flight operation is dropped without completing, then shutdown joins a driver that finished cleanly.
+            /// Guarantees: Shutdown reports unconfirmed cleanup, so the controller cannot clear abandonment and release source ownership.
+            #[tokio::test(start_paused = true)]
+            async fn shutdown_after_abandoned_operation_reports_unconfirmed_cleanup() {
+                use otel_arrow_dfe_scraper::database::DriverAdapter;
+
+                tokio::task::LocalSet::new()
+                    .run_until(async {
+                        let mut adapter = test_adapter();
+                        let guard =
+                            super::super::adapter::OperationGuard::start(adapter.operation.clone())
+                                .expect("operation started");
+                        // Dropping an active guard is exactly what happens when the
+                        // controller abandons a request whose join deadline expired.
+                        drop(guard);
+                        finished_session(&mut adapter, Ok(())).await;
+
+                        assert_eq!(adapter.shutdown().await, Err(Error::Cleanup));
+                        assert!(adapter.poisoned);
+                        // The terminal result is cached and ownership stays quarantined.
+                        assert_eq!(adapter.shutdown().await, Err(Error::Cleanup));
+                        assert!(adapter.begin_operation().is_err());
+                    })
+                    .await;
+            }
+
+            /// Scenario: A receiver with no abandoned operation shuts down while its driver finishes cleanly.
+            /// Guarantees: Confirmed cleanup still reports success, so ordinary stops release source ownership instead of quarantining it.
+            #[tokio::test(start_paused = true)]
+            async fn shutdown_without_abandonment_confirms_cleanup() {
+                use otel_arrow_dfe_scraper::database::DriverAdapter;
+
+                tokio::task::LocalSet::new()
+                    .run_until(async {
+                        let mut adapter = test_adapter();
+                        finished_session(&mut adapter, Ok(())).await;
+
+                        assert_eq!(adapter.shutdown().await, Ok(()));
+                        assert!(!adapter.poisoned);
+                        assert!(adapter.session.is_none());
+                    })
+                    .await;
+            }
+
+            /// Scenario: A connection driver fails with a transport error while a statement is in flight.
+            /// Guarantees: The failed driver closes as aborted and fences reconnect for the full statement timeout instead of looking graceful.
+            #[tokio::test(start_paused = true)]
+            async fn failed_driver_during_operation_installs_server_query_fence() {
+                tokio::task::LocalSet::new()
+                    .run_until(async {
+                        let mut adapter = test_adapter();
+                        finished_session(&mut adapter, Err(Error::Unavailable)).await;
+
+                        let close = adapter
+                            .close_session(CloseReason::OperationInFlight)
+                            .await
+                            .expect("session closed");
+                        assert_eq!(close, SessionClose::Aborted);
+                        assert!(!adapter.poisoned);
+                        assert!(adapter.reconnect_not_before.is_some());
+
+                        // A replacement session waits out the server statement timeout.
+                        let operation = Operation::default();
+                        {
+                            let fence = adapter.await_reconnect_fence(&operation);
+                            tokio::pin!(fence);
+                            assert!(futures::poll!(&mut fence).is_pending());
+                            tokio::time::advance(Duration::from_secs(29)).await;
+                            assert!(futures::poll!(&mut fence).is_pending());
+                            tokio::time::advance(Duration::from_secs(1)).await;
+                            fence.await.expect("server query fenced");
+                        }
+                        assert!(adapter.reconnect_not_before.is_none());
+                    })
+                    .await;
+            }
+
+            /// Scenario: A stop arrives while a server-query fence from an interrupted statement is still outstanding.
+            /// Guarantees: Shutdown reports unconfirmed cleanup, so source ownership is quarantined rather than released while an orphaned backend statement may still run.
+            #[tokio::test(start_paused = true)]
+            async fn shutdown_during_server_query_fence_reports_unconfirmed_cleanup() {
+                use otel_arrow_dfe_scraper::database::DriverAdapter;
+
+                tokio::task::LocalSet::new()
+                    .run_until(async {
+                        let mut adapter = test_adapter();
+                        finished_session(&mut adapter, Err(Error::Unavailable)).await;
+                        let close = adapter
+                            .close_session(CloseReason::OperationInFlight)
+                            .await
+                            .expect("session closed");
+                        assert_eq!(close, SessionClose::Aborted);
+                        assert!(adapter.reconnect_not_before.is_some());
+
+                        // Stopping inside the fence window cannot prove the server
+                        // statement ended, so cleanup stays unconfirmed.
+                        assert_eq!(adapter.shutdown().await, Err(Error::Cleanup));
+                        assert!(adapter.poisoned);
+                    })
+                    .await;
+            }
+
+            /// Scenario: A stop arrives after an earlier server-query fence has already elapsed.
+            /// Guarantees: An expired fence does not quarantine source ownership, so a later stop still reports confirmed cleanup.
+            #[tokio::test(start_paused = true)]
+            async fn shutdown_after_server_query_fence_elapses_confirms_cleanup() {
+                use otel_arrow_dfe_scraper::database::DriverAdapter;
+
+                tokio::task::LocalSet::new()
+                    .run_until(async {
+                        let mut adapter = test_adapter();
+                        finished_session(&mut adapter, Err(Error::Unavailable)).await;
+                        _ = adapter
+                            .close_session(CloseReason::OperationInFlight)
+                            .await
+                            .expect("session closed");
+                        assert!(adapter.reconnect_not_before.is_some());
+
+                        tokio::time::advance(Duration::from_secs(30)).await;
+                        assert_eq!(adapter.shutdown().await, Ok(()));
+                        assert!(!adapter.poisoned);
+                    })
+                    .await;
+            }
+
+            /// Scenario: An idle session's driver reports a transport failure during teardown.
+            /// Guarantees: No statement can outlive an idle driver, so reconnect is not delayed by an unnecessary fence.
+            #[tokio::test(start_paused = true)]
+            async fn failed_driver_while_idle_does_not_fence() {
+                tokio::task::LocalSet::new()
+                    .run_until(async {
+                        let mut adapter = test_adapter();
+                        finished_session(&mut adapter, Err(Error::Unavailable)).await;
+
+                        let close = adapter
+                            .close_session(CloseReason::Idle)
+                            .await
+                            .expect("session closed");
+                        assert_eq!(close, SessionClose::Graceful);
+                        assert!(!adapter.poisoned);
+                        assert!(adapter.reconnect_not_before.is_none());
+                    })
+                    .await;
+            }
+
+            /// Scenario: A driver ends without error while closing an in-flight operation's session.
+            /// Guarantees: A clean driver exit stays graceful and installs no fence, keeping routine retries prompt.
+            #[tokio::test(start_paused = true)]
+            async fn clean_driver_exit_stays_graceful_during_operation() {
+                tokio::task::LocalSet::new()
+                    .run_until(async {
+                        let mut adapter = test_adapter();
+                        finished_session(&mut adapter, Ok(())).await;
+
+                        let close = adapter
+                            .close_session(CloseReason::OperationInFlight)
+                            .await
+                            .expect("session closed");
+                        assert_eq!(close, SessionClose::Graceful);
+                        assert!(adapter.reconnect_not_before.is_none());
+                    })
+                    .await;
+            }
+        }
+    };
+    () => {
+        mod tests {
+            use super::*;
+
+            /// Scenario: PostgreSQL reports overload, transaction conflicts, timeout, or permanent failures.
+            /// Guarantees: Transient SQLSTATEs and timeouts retry through the shared policy; auth/schema errors stay terminal.
+            #[test]
+            fn sqlstate_retry_policy() {
+                for code in [
+                    "53300", "08006", "55P03", "57P01", "57P02", "57P03", "57P05", "40001", "40P01",
+                ] {
+                    let error = sqlstate(code);
+                    assert_eq!(error, Error::Unavailable);
+                    assert!(PostgreSqlAdapter::is_retryable(&error));
+                }
+                let timeout = sqlstate("57014");
+                assert_eq!(timeout, Error::Timeout);
+                assert!(PostgreSqlAdapter::is_retryable(&timeout));
+                for code in ["28P01", "28000"] {
+                    let error = sqlstate(code);
+                    assert_eq!(error, Error::Credential);
+                    assert!(!PostgreSqlAdapter::is_retryable(&error));
+                }
+                for code in ["42501", "42P01", "23505", "53200", "XX000"] {
+                    let error = sqlstate(code);
+                    assert_eq!(error, Error::Database);
+                    assert!(!PostgreSqlAdapter::is_retryable(&error));
+                }
+                for error in [
+                    Error::Limit,
+                    Error::Value,
+                    Error::Credential,
+                    Error::Cleanup,
+                ] {
+                    assert!(!PostgreSqlAdapter::is_retryable(&error));
+                }
+            }
+
+            /// Scenario: Reading a PostgreSQL TLS CA file fails with either a transient or permanent filesystem error.
+            /// Guarantees: Transient I/O follows transport retry policy while configuration failures remain terminal and retain their error kind.
+            #[test]
+            fn tls_ca_read_retry_policy() {
+                for kind in [
+                    std::io::ErrorKind::Interrupted,
+                    std::io::ErrorKind::WouldBlock,
+                    std::io::ErrorKind::TimedOut,
+                    std::io::ErrorKind::ConnectionReset,
+                    std::io::ErrorKind::ConnectionAborted,
+                    std::io::ErrorKind::NotConnected,
+                    std::io::ErrorKind::UnexpectedEof,
+                    std::io::ErrorKind::BrokenPipe,
+                ] {
+                    let error = tls_ca_read(std::io::Error::from(kind));
+                    assert_eq!(error, Error::Unavailable);
+                    assert!(PostgreSqlAdapter::is_retryable(&error));
+                }
+                for kind in [
+                    std::io::ErrorKind::NotFound,
+                    std::io::ErrorKind::PermissionDenied,
+                    std::io::ErrorKind::InvalidData,
+                ] {
+                    let error = tls_ca_read(std::io::Error::from(kind));
+                    assert_eq!(error, Error::TlsCaRead(kind));
+                    assert!(!PostgreSqlAdapter::is_retryable(&error));
+                }
+            }
+        }
+    };
+}
+
+use super::{
+    config::PostgreSqlReceiverConfig as Config,
+    query::{ResolvedSchema, ResultColumn},
+    value as convert,
+};
+use otel_arrow_dfe_engine::capability::{
+    CapabilityError,
+    auth::{BasicAuthCredential, basic_auth_provider::BasicAuthCredentialStream},
+};
+use otel_arrow_dfe_engine::local::capability::auth::basic_auth_provider::BasicAuthProvider;
+use serde_json::{Value, json};
+use tokio_postgres::types::Type;
+
+struct TestCredentials;
+
+pub(super) fn fixed_credential() -> BasicAuthCredential {
+    BasicAuthCredential::new("reader", "password").expect("fixture")
+}
+
+#[async_trait::async_trait(?Send)]
+impl BasicAuthProvider for TestCredentials {
+    async fn get_credential(&self) -> Result<BasicAuthCredential, CapabilityError> {
+        Ok(fixed_credential())
+    }
+
+    fn credential_stream(&self) -> BasicAuthCredentialStream {
+        Box::pin(futures::stream::iter([fixed_credential()]))
+    }
+}
+
+pub(super) fn test_provider() -> Box<dyn BasicAuthProvider> {
+    Box::new(TestCredentials)
+}
+
+const KEY: &str =
+    "((e.ts > :last_timestamp) OR (e.ts = :last_timestamp AND e.id > :last_tie_breaker))";
+
+fn config(sql: &str) -> Value {
+    let root = std::env::current_dir().expect("working directory");
+    json!({
+        "source_id": "test",
+        "connection": {"host": "LOCALHOST", "database": "fixture"},
+        "watermark": {
+            "mode":"composite",
+            "timestamp":{"column":"ts","initial":"2026-10-05T00:00:00.000000Z","timezone":"UTC"},
+            "tie_breaker":{"column":"id","initial":0}
+        },
+        "query": {
+            "statement": sql, "interval": "60s",
+            "max_rows_per_poll": 1000, "max_batch_bytes": "8 MiB"
+        },
+        "checkpoint":{"directory":root.join("checkpoint"),"on_permanent_nack":"pause"}
+    })
+}
+fn sql(predicate: &str) -> String {
+    format!("SELECT e.ts, e.id FROM public.events AS e WHERE {predicate} ORDER BY e.ts, e.id")
+}
+fn validate(value: &Value) -> super::adapter::Result<super::config::Validated> {
+    Config::parse(value)?.validate()
+}
+
+/// Scenario: PostgreSQL connection TLS settings are omitted or explicitly disabled.
+/// Guarantees: TLS defaults on, plaintext requires an explicit opt-out, and a CA file cannot be ignored in plaintext mode.
+#[test]
+fn validates_tls_enablement_and_ca_file_contract() {
+    let base = config(&sql(KEY));
+    let validated = validate(&base).expect("TLS defaults");
+    assert!(validated.config.connection.tls_enabled());
+    assert!(validated.config.connection.ca_file().is_none());
+
+    let mut plaintext = base.clone();
+    plaintext["connection"]["tls"] = json!({"enabled": false});
+    assert!(
+        !validate(&plaintext)
+            .expect("explicit plaintext")
+            .config
+            .connection
+            .tls_enabled()
+    );
+
+    plaintext["connection"]["tls"]["ca_file"] = json!("ca.pem");
+    assert!(validate(&plaintext).is_err());
+
+    let mut empty = base;
+    empty["connection"]["tls"] = json!({"ca_file": ""});
+    assert!(validate(&empty).is_err());
+}
+
+/// Scenario: TLS fields are null, misspelled, incorrectly typed, or contain an invalid CA path.
+/// Guarantees: Invalid security configuration is rejected instead of silently disabling TLS or ignoring fields.
+#[test]
+fn rejects_invalid_tls_configuration() {
+    for tls in [
+        json!(null),
+        json!({"enabled": null}),
+        json!({"ca_file": null}),
+        json!({"enabled": "false"}),
+        json!({"enabled": false, "ca_file": "ca.pem"}),
+        json!({"ca_file": "  "}),
+        json!({"ca_file": "ca\u{0}.pem"}),
+        json!({"enable": false}),
+        json!({"trust_server_certificate": true}),
+    ] {
+        let mut raw = config(&sql(KEY));
+        raw["connection"]["tls"] = tls;
+        assert_eq!(validate(&raw).err(), Some(super::adapter::Error::Config));
+    }
+}
+
+/// Scenario: TLS trust configuration changes while the logical PostgreSQL source remains unchanged.
+/// Guarantees: Transport trust settings do not invalidate the durable source cursor fingerprint.
+#[test]
+fn tls_settings_do_not_change_source_fingerprint() {
+    let base = config(&sql(KEY));
+    let expected = validate(&base).expect("default TLS").fingerprint;
+    assert_eq!(
+        expected,
+        "1a9e23808ba11ad37b24545510b5373a59d3140cbaa3571490c2c62cd6ff2068"
+    );
+
+    let mut custom_ca = base.clone();
+    custom_ca["connection"]["tls"] = json!({"ca_file": "private-ca.pem"});
+    assert_eq!(
+        validate(&custom_ca).expect("custom CA").fingerprint,
+        expected
+    );
+
+    let mut plaintext = base;
+    plaintext["connection"]["tls"] = json!({"enabled": false});
+    assert_eq!(
+        validate(&plaintext)
+            .expect("explicit plaintext")
+            .fingerprint,
+        expected
+    );
+}
+
+/// Scenario: One logical PostgreSQL source is configured with each watermark mode.
+/// Guarantees: Source-query modes have distinct identities and cannot reinterpret each other's checkpoints.
+#[test]
+fn watermark_modes_have_distinct_source_fingerprints() {
+    let composite = config(&sql(KEY));
+
+    let mut scalar = composite.clone();
+    scalar["query"]["statement"] =
+        json!("SELECT e.id, e.ts FROM public.events AS e WHERE e.id > :last_value ORDER BY e.id");
+    scalar["watermark"] = json!({
+        "mode": "scalar",
+        "column": "id",
+        "bind": "last_value",
+        "initial": {"type": "int64", "value": 0}
+    });
+
+    let mut snapshot = composite.clone();
+    snapshot["query"]["statement"] =
+        json!("SELECT e.ts, e.id FROM public.events AS e ORDER BY e.ts, e.id");
+    snapshot["watermark"] = json!({"mode": "snapshot"});
+
+    let fingerprints = [
+        validate(&composite).expect("composite").fingerprint,
+        validate(&scalar).expect("scalar").fingerprint,
+        validate(&snapshot).expect("snapshot").fingerprint,
+    ];
+    assert_ne!(fingerprints[0], fingerprints[1]);
+    assert_ne!(fingerprints[0], fingerprints[2]);
+    assert_ne!(fingerprints[1], fingerprints[2]);
+}
+
+/// Scenario: The original PostgreSQL v5 configurations and native parameter styles are reused.
+/// Guarantees: Frozen raw-SQL fingerprints reopen existing checkpoints for all collection modes.
+#[test]
+fn original_identity_payloads_reopen_checkpoints() {
+    use otel_arrow_dfe_scraper::database::{Cursor, ScalarValue};
+    use otel_arrow_dfe_scraper::{CheckpointStore, SourceLease};
+    const COMPOSITE: &str = r#"["postgresql/v5-watermark-time","postgresql","localhost",5432,"fixture","SELECT e.ts, e.id FROM public.events AS e WHERE ((e.ts > :last_timestamp) OR (e.ts = :last_timestamp AND e.id > :last_tie_breaker)) ORDER BY e.ts, e.id","named-parameters/v2",{"mode":"composite","timestamp":{"column":"ts","bind":"last_timestamp","initial":"2026-10-05T00:00:00.000000Z","timezone":"UTC"},"tie_breaker":{"column":"id","bind":"last_tie_breaker","initial":0}},"UTC/microseconds/native-v2"]"#;
+    const SCALAR: &str = r#"["postgresql/v5-watermark-time","postgresql","localhost",5432,"fixture","SELECT e.id FROM public.events AS e WHERE e.id > $1 ORDER BY e.id","named-parameters/v2",{"mode":"scalar","column":"id","bind":"last_value","initial":{"type":"int64","value":0}},"UTC/microseconds/native-v2"]"#;
+    const SNAPSHOT: &str = r#"["postgresql/v5-watermark-time","postgresql","localhost",5432,"fixture","SELECT e.ts, e.id FROM public.events AS e ORDER BY e.ts, e.id","named-parameters/v2",{"mode":"snapshot"},"UTC/microseconds/native-v2"]"#;
+    let mut scalar = config("SELECT e.id FROM public.events AS e WHERE e.id > $1 ORDER BY e.id");
+    scalar["watermark"] = json!({"mode":"scalar","column":"id","bind":"last_value","initial":{"type":"int64","value":0}});
+    let mut snapshot = config("SELECT e.ts, e.id FROM public.events AS e ORDER BY e.ts, e.id");
+    snapshot["watermark"] = json!({"mode":"snapshot"});
+    for (raw, legacy) in [
+        (config(&sql(KEY)), COMPOSITE),
+        (scalar, SCALAR),
+        (snapshot, SNAPSHOT),
+    ] {
+        let validated = validate(&raw).unwrap();
+        let expected = blake3::hash(legacy.as_bytes()).to_hex().to_string();
+        assert_eq!(validated.fingerprint, expected);
+        let dir = tempfile::tempdir().unwrap();
+        let old = CheckpointStore::new(dir.path(), "group", "pipeline", "pg", "source", expected);
+        let lease = SourceLease::acquire(old.lease_key()).unwrap();
+        let progress = match validated.common.watermark().initial() {
+            Cursor::Composite(mut cursor) => {
+                cursor.tie_breaker = 17;
+                Cursor::Composite(cursor)
+            }
+            Cursor::Scalar(_) => ScalarValue::Int64(17).into(),
+            Cursor::Snapshot => Cursor::Snapshot,
+        };
+        let (saved, _) = old.write(0, &progress).unwrap();
+        drop(lease);
+        let current = CheckpointStore::new(
+            dir.path(),
+            "group",
+            "pipeline",
+            "pg",
+            "source",
+            validated.fingerprint,
+        );
+        assert_eq!(current.read().unwrap(), Some(saved));
+    }
+}
+pub(super) fn test_validated() -> super::config::Validated {
+    validate(&config(&sql(KEY))).expect("worker fixture")
+}
+
+pub(super) fn test_validated_with_ca(path: &std::path::Path) -> super::config::Validated {
+    let mut raw = config(&sql(KEY));
+    raw["connection"]["tls"] = json!({"ca_file": path});
+    validate(&raw).expect("TLS worker fixture")
+}
+
+pub(super) fn test_validated_with_connection(connection: Value) -> super::config::Validated {
+    let mut raw = config(&sql(KEY));
+    raw["connection"] = connection;
+    validate(&raw).expect("transport fixture")
+}
+
+pub(super) fn mock_schema(columns: &[(&str, Type, i32, bool)]) -> ResolvedSchema {
+    ResolvedSchema {
+        columns: columns
+            .iter()
+            .map(|(name, native, modifier, nullable)| ResultColumn {
+                name: (*name).into(),
+                source_type: native.name().into(),
+                nullable: *nullable,
+                type_modifier: *modifier,
+            })
+            .collect(),
+        native_types: columns
+            .iter()
+            .map(|(_, native, _, _)| native.clone())
+            .collect(),
+    }
+}
+
+/// Scenario: Source SQL attempts mutation, manual cursor binding, or conflicting pagination.
+/// Guarantees: The common contract rejects these operations before native preparation.
+#[test]
+fn unsafe_and_unsupported_sql_rejected() {
+    let base = sql(KEY);
+    for text in [
+        sql("e.id > :last_tie_breaker"),
+        sql("e.ts >= :last_timestamp OR (e.ts = :last_timestamp AND e.id > :last_tie_breaker)"),
+        sql("e.ts > :last_timestamp OR (e.ts = :last_timestamp AND e.id >= :last_tie_breaker)"),
+        sql("e.ts > :last_timestamp OR (e.id > :last_tie_breaker AND e.ts = :last_timestamp)"),
+        sql("e.ts > :last_timestamp AND e.id > :last_tie_breaker"),
+        base.replace(" FROM", " INTO public.copy FROM"),
+        base.replace("ORDER BY e.ts, e.id", "ORDER BY e.id, e.ts"),
+        base.replace("ORDER BY e.ts, e.id", "ORDER BY e.ts DESC, e.id"),
+        format!("{base} LIMIT 1"),
+        format!(
+            "{base} LIMIT {}",
+            validate(&config(&base)).expect("valid").common.max_rows()
+        ),
+        format!("{base} OFFSET 1"),
+        format!("{base} FETCH FIRST 1 ROW ONLY"),
+        format!("{base} FOR UPDATE"),
+        format!("{base}; SELECT 1"),
+        format!("WITH x AS (DELETE FROM public.events) {base}"),
+    ] {
+        assert!(validate(&config(&text)).is_err(), "{text}");
+    }
+}
+
+/// Scenario: Native filters use date literals, casts, relative expressions, and OR conditions.
+/// Guarantees: Query logic is delegated to PostgreSQL rather than a receiver expression allowlist.
+#[test]
+fn native_temporal_expressions_are_accepted() {
+    for predicate in [
+        "e.ts >= TIMESTAMPTZ '2026-10-05T00:00:00Z'",
+        "e.ts >= '2026-10-05T00:00:00Z'::timestamptz AND e.id BETWEEN 1 AND 10",
+        "e.ts >= now() - INTERVAL '1 day' OR e.id IN (1, 2)",
+        "e.ts >= 'today'",
+    ] {
+        assert!(
+            validate(&config(&sql(&format!("{KEY} AND ({predicate})")))).is_ok(),
+            "{predicate}"
+        );
+    }
+}
+
+/// Scenario: Temporal cursors and native integer ties approach their precision/range boundaries.
+/// Guarantees: Native binding cannot silently truncate submicroseconds, typmod digits, leap seconds, or integers.
+#[test]
+fn cursor_precision_and_range() {
+    for (text, precision, valid) in [
+        ("2026-10-05T00:00:00.123000Z", 3, true),
+        ("2026-10-05T00:00:00.123001Z", 3, false),
+        ("2026-10-05T00:00:00.123456789Z", 6, false),
+        ("2026-10-05T00:00:00.123456000Z", 6, false),
+        ("2026-02-30T00:00:00Z", 6, false),
+        ("2026-10-05T00:00:60Z", 6, false),
+        ("infinity", 6, false),
+    ] {
+        assert_eq!(convert::cursor_time(text, precision).is_ok(), valid);
+    }
+    assert!(convert::check_tie(32767, "int2").is_ok());
+    assert!(convert::check_tie(32768, "int2").is_err());
+    assert!(convert::check_tie(i32::MIN as i64, "int4").is_ok());
+    assert!(convert::check_tie(i32::MIN as i64 - 1, "int4").is_err());
+    assert!(convert::check_tie(i64::MAX, "int8").is_ok());
+}
+
+/// Scenario: Equivalent UTC instants use RFC 3339 offsets, canonical Z text, or timezone-less UTC text.
+/// Guarantees: Configuration, compiled cursors, and fingerprints use one exact six-digit UTC representation.
+#[test]
+fn canonicalizes_exact_postgresql_timestamp_values() {
+    let mut baseline = None;
+    for value in [
+        "2026-01-01T00:00:00.123456Z",
+        "2026-01-01T00:00:00.123456000Z",
+        "2026-01-01T02:00:00.123456000+02:00",
+        "2026-01-01 00:00:00.123456",
+        "2026-01-01 00:00:00.123456000",
+    ] {
+        let mut raw = config(&sql(KEY));
+        raw["watermark"]["timestamp"]["initial"] = json!(value);
+        raw["watermark"]["timestamp"]["timezone"] = json!("utc");
+        let validated = validate(&raw).expect("exact PostgreSQL timestamp");
+        let watermark = validated
+            .common
+            .watermark()
+            .as_composite()
+            .expect("composite watermark");
+        assert_eq!(watermark.initial.timestamp, "2026-01-01T00:00:00.123456Z");
+        let super::config::Watermark::Composite { timestamp, .. } = &validated.config.watermark
+        else {
+            panic!("composite watermark")
+        };
+        assert_eq!(timestamp.initial, "2026-01-01T00:00:00.123456Z");
+        assert_eq!(timestamp.timezone, "UTC");
+        if let Some(fingerprint) = &baseline {
+            assert_eq!(&validated.fingerprint, fingerprint);
+        } else {
+            baseline = Some(validated.fingerprint);
+        }
+    }
+}
+
+/// Scenario: PostgreSQL initial timestamps would round, overflow supported years, or encode invalid time.
+/// Guarantees: Customer timestamp input is rejected rather than rounded or interpreted in a host timezone.
+#[test]
+fn rejects_lossy_or_invalid_postgresql_timestamp_values() {
+    for value in [
+        "2026-01-01T00:00:00.1234567Z",
+        "2026-01-01T00:00:00.123456789Z",
+        "2026-01-01T00:00:00.1234560001Z",
+        "2026-01-01T02:00:00.123456700+02:00",
+        "2026-01-01 00:00:00.1234567",
+        "0000-01-01T00:00:00Z",
+        "+10000-01-01T00:00:00Z",
+        "0001-01-01T00:00:00+01:00",
+        "2016-12-31T23:59:60Z",
+        "2026-01-01T00:00:00+99:99",
+        "not-a-timestamp",
+    ] {
+        let mut raw = config(&sql(KEY));
+        raw["watermark"]["timestamp"]["initial"] = json!(value);
+        assert!(validate(&raw).is_err(), "{value}");
+    }
+}
+
+fn number(weight: i16, sign: u16, scale: u16, digits: &[u16]) -> Vec<u8> {
+    let mut bytes = (digits.len() as i16).to_be_bytes().to_vec();
+    bytes.extend_from_slice(&weight.to_be_bytes());
+    bytes.extend_from_slice(&sign.to_be_bytes());
+    bytes.extend_from_slice(&scale.to_be_bytes());
+    for digit in digits {
+        bytes.extend_from_slice(&digit.to_be_bytes());
+    }
+    bytes
+}
+
+/// Scenario: NUMERIC contains signed integers, fractions, scale, malformed groups, or extreme weights.
+/// Guarantees: Base-10000 decoding stays exact and bounded without float conversion or scale loss.
+#[test]
+fn exact_numeric() {
+    for (bytes, expected) in [
+        (
+            number(3, 0, 0, &[9007, 1992, 5474, 993]),
+            "9007199254740993",
+        ),
+        (number(0, 0x4000, 4, &[12, 3400]), "-12.3400"),
+        (number(-2, 0, 8, &[1]), "0.00000001"),
+        (number(0, 0, 3, &[]), "0.000"),
+        (number(1, 0, 0, &[1]), "10000"),
+    ] {
+        assert_eq!(convert::numeric(&bytes).expect("numeric"), expected);
+    }
+    for bytes in [
+        number(0, 0xC000, 0, &[]),
+        number(0, 0, 0, &[10000]),
+        number(-1, 0, 2, &[1234]),
+        number(32767, 0, 0, &[1]),
+        vec![0; 7],
+    ] {
+        assert!(convert::numeric(&bytes).is_err());
+    }
+    assert_eq!(
+        convert::numeric(&number(4095, 0, 0, &[1000]))
+            .expect("boundary")
+            .len(),
+        16384
+    );
+    assert!(convert::numeric(&number(4096, 0, 0, &[1])).is_err());
+}

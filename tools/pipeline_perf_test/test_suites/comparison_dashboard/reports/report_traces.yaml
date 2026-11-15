@@ -1,5 +1,5 @@
 queries:
-  - name: Filter superflous metadata
+  - name: Filter superfluous metadata
     sql: |
       CREATE VIEW metadata_filtered AS
       SELECT *
@@ -82,14 +82,14 @@ queries:
           ON wr.timestamp BETWEEN ow.start_ts AND ow.stop_ts
         GROUP BY component_name, metric_name
 
-  - name: Send/Receive Per-Timestamp Rates
+  - name: Scraped send / receive series
     sql: |
-      CREATE TABLE send_receive_with_rate AS WITH
-        metrics_filtered AS (
+      CREATE VIEW scraped_send_receive AS
             SELECT
               * REPLACE (
               CASE
-                WHEN metric_name = 'items' THEN 'spans'
+                WHEN metric_name = 'items' AND "metric_attributes.otel_scope_name" = 'node.input' THEN 'spans'
+                WHEN metric_name = 'items' AND "metric_attributes.otel_scope_name" = 'node.output' THEN 'spans_produced'
                 ELSE metric_name
               END AS metric_name
             ),
@@ -111,11 +111,23 @@ queries:
                 AND "metric_attributes.signal" = 'traces'
                 AND "metric_attributes.outcome" = 'success'
               )
+              OR (
+                "metric_attributes.otel_scope_name" = 'node.output'
+                AND "metric_attributes.signal" = 'traces'
+                AND "metric_attributes.component_name" = 'load-generator'
+                AND "metric_attributes.outcome" = 'success'
+              )
             ) AND timestamp > (
                 SELECT CAST("test.start" AS TIMESTAMP WITH TIME ZONE)
                 FROM metadata_row
                 LIMIT 1
-              )
+              );
+
+  - name: Send/Receive Per-Timestamp Rates
+    sql: |
+      CREATE TABLE send_receive_with_rate AS WITH
+        metrics_filtered AS (
+            SELECT * FROM scraped_send_receive
         ),
         with_lag AS (
             SELECT *,
@@ -230,21 +242,50 @@ queries:
         ORDER BY
           component_name DESC;
 
+  - name: Whole-run scraped totals
+    sql: |
+      -- Scraped counters are cumulative since process start, so the largest
+      -- value seen per series is its whole-run total. The final scrapes happen
+      -- after the components drain and shut down; they only see the final
+      -- counts while engine.telemetry.metric_unregister_grace_period keeps the
+      -- stopped pipelines' metric sets registered.
+      CREATE TABLE scraped_totals AS
+      WITH per_series AS (
+        SELECT
+          metric_name,
+          component_name,
+          core_id,
+          MAX(value) AS total,
+          MAX(timestamp) AS last_scrape
+        FROM scraped_send_receive
+        GROUP BY metric_name, component_name, core_id
+      )
+      SELECT
+        metric_name,
+        component_name,
+        SUM(total) AS total,
+        MAX(last_scrape) AS last_scrape
+      FROM per_series
+      GROUP BY metric_name, component_name
+      ORDER BY metric_name, component_name;
+
   - name: Calculate loss
     sql: |
+      -- Loss uses whole-run totals (not the observation window) so the
+      -- post-drain final counts are included and sent/received cover the same
+      -- set of batches.
       CREATE TABLE span_loss AS
+      WITH t AS (
+        SELECT
+          COALESCE((SELECT SUM(total) FROM scraped_totals WHERE metric_name = 'spans_produced'), 0) AS produced,
+          COALESCE((SELECT SUM(total) FROM scraped_totals WHERE metric_name = 'spans'), 0) AS received
+      )
       SELECT
-          (COALESCE(spans_produced.total, 0) + COALESCE(failed.total, 0) - COALESCE(spans.total, 0)) AS spans_lost,
-          CASE
-              WHEN (COALESCE(spans_produced.total, 0) + COALESCE(failed.total, 0)) > 0 THEN
-                  (COALESCE(spans_produced.total, 0) + COALESCE(failed.total, 0) - COALESCE(spans.total, 0)) * 1.0 /
-                  (COALESCE(spans_produced.total, 0) + COALESCE(failed.total, 0))
-              ELSE NULL
-          END AS spans_lost_pct
-      FROM
-          (SELECT SUM(total_increase) AS total FROM aggregate_send_receive_rates WHERE metric_name = 'spans_produced') AS spans_produced,
-          (SELECT SUM(total_increase) AS total FROM aggregate_send_receive_rates WHERE metric_name = 'failed') AS failed,
-          (SELECT SUM(total_increase) AS total FROM aggregate_send_receive_rates WHERE metric_name = 'spans') AS spans;
+        produced AS spans_produced,
+        received AS spans_received,
+        produced - received AS spans_lost,
+        CASE WHEN produced > 0 THEN (produced - received) * 1.0 / produced ELSE NULL END AS spans_lost_pct
+      FROM t;
 
   - name: Calculate log throughput rates
     sql: |
@@ -321,11 +362,16 @@ queries:
 
           UNION ALL
 
-          SELECT 'spans_received_rate' AS name, 'spans/sec' AS unit, spans_per_second AS value,
+          -- If we run into a scenario where 0 signals make it to the backend
+          -- because the SUT is misbehaving, then it's possible for the engine
+          -- to omit certain metrics that never had a value. In that case
+          -- we still want to record a 0 for this metric instead of a null or
+          -- the report breaks.
+          SELECT 'spans_received_rate' AS name, 'spans/sec' AS unit,
+                COALESCE(str.spans_per_second, 0) AS value,
                 metadata_row."test.suite" || '/' || metadata_row."test.name" || ' - Span Throughput' AS extra
-          FROM span_throughput_rates
-          CROSS JOIN metadata_row
-          WHERE metric_name = 'spans'
+          FROM metadata_row
+          LEFT JOIN span_throughput_rates str ON str.metric_name = 'spans'
 
           UNION ALL
 
@@ -448,12 +494,27 @@ result_tables:
     description: Cumulative increase and average rate of various send / receive metrics
   - name: component_resource_metrics
     description: CPU and Memory metrics for the components in the Test Suite during the test.
+  - name: scraped_totals
+    description: Whole-run totals of scraped send/receive counters (final cumulative value, including post-drain counts).
   - name: span_loss
-    description: Lost spans (failed or sent but not received) total and as a percentage
+    description: Lost spans computed from whole-run scraped totals (produced - received).
   - name: span_throughput_rates
     description: Span throughput rates (spans/sec) calculated from total counts and observation window duration
   - name: gh_actions_benchmark
     description: The final metrics used with gh_actions_benchmark.
+    finite_columns: [value]
+    required_values:
+      name:
+        - dropped_spans_percentage
+        - cpu_percentage_normalized_avg
+        - cpu_percentage_normalized_max
+        - ram_mib_avg
+        - ram_mib_max
+        - spans_produced_rate
+        - spans_received_rate
+        - test_duration
+        - network_tx_bytes_rate_avg
+        - network_rx_bytes_rate_avg
     #display: False
   - name: dashboard_timeseries
     description: Per-metric time-series data points within the observation window for dashboard charts.

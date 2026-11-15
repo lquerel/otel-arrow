@@ -111,6 +111,66 @@ otel_info!(
 );
 ```
 
+### Logging suppression and sampling
+
+The `otel_arrow_dfe_telemetry::Sampler` and `Logger` traits
+support custom logs sampling and delivery. `Sampler::should_sample` decides
+from metadata whether to build the event; `Logger::emit` controls how a
+selected event is delivered. Both have defaults (keep, forward to the active
+subscriber), so a sampling-only policy implements `Sampler` and an empty
+`impl Logger`. After standard `tracing` filters, the macro mutably borrows the
+object supplied as `logger:` once and calls both methods in turn, enabling
+stateful observation of the event before its body and attributes are
+evaluated.
+
+Filtering skips the logger expression and fields; sampling rejection skips
+the fields. Logger expressions, sampling decisions, and field-producing
+expressions can emit their own logs, just as field expressions can in ordinary
+`otel_*` calls. Emission and field encoding still run under tracing's recursion
+guard.
+
+The `logger:` argument is supported by `otel_debug!`, `otel_info!`,
+`otel_warn!`, and `otel_error!`, either inside an `otel_component_scope!` or
+with an explicit `target:`:
+
+```rust
+// Inside otel_component_scope!, the target is supplied by the scope.
+otel_warn!(logger: sampler, "export.failed", error = %error);
+
+// Elsewhere, pass the target explicitly before `logger:`.
+otel_warn!(target: "my.target", logger: sampler, "export.failed", error = %error);
+```
+
+```rust
+struct O11y {
+   /// Export request preparation errors (e.g., parse errors)
+   /// are emitted periodically after the first occurrence.
+   preparation: SignalSuppression,
+}
+
+...
+
+   // Pass the self.o11y.preparation sampler for these failures.
+   otel_warn!(
+       logger: self.o11y.preparation,
+       "otlp.exporter.http.parse_error",
+       ...
+   );
+```
+
+The expression may return a temporary, for example the following
+calls `outcome(&result)` to determine the logger that makes the
+decision:
+
+```rust
+   // Pass the self.o11y.preparation sampler for these failures.
+   otel_warn!(
+       logger: self.o11y.delivery_episodes.outcome(&result),
+       "otlp.exporter.http.parse_error",
+       ...
+   );
+```
+
 ## Internal telemetry collection
 
 The dataflow engine supports multiple ways to configure internal logs and
@@ -118,11 +178,13 @@ metrics. Log provider modes determine how logging is configured in different
 parts of the code.
 
 All modes use a [`tracing_subscriber::EnvFilter`](https://docs.rs/tracing-subscriber/latest/tracing_subscriber/filter/struct.EnvFilter.html).
-The `engine.telemetry.logs.level` field accepts either a severity such as
-`warn` or a complete target directive string. Successful full-engine
-reconciliation applies changes to this field to existing tracing subscribers,
-so an OpAMP or admin control plane can temporarily increase verbosity without
-restarting the engine. Failed reconciliation preserves the active filter.
+The optional `engine.telemetry.logs.level` field accepts either a severity such
+as `warn` or a complete target directive string. When specified, it takes
+precedence over `RUST_LOG` from the first tracing subscriber onward. Successful
+full-engine reconciliation applies changes to this field to existing tracing
+subscribers, so an OpAMP or admin control plane can temporarily increase
+verbosity without restarting the engine. Failed reconciliation preserves the
+active filter.
 
 `EnvFilter` target directives use prefix matching. A directive for
 `<namespace>.<kind>.<name>` also matches another component whose target begins
@@ -137,19 +199,21 @@ by `otel-arrow-dfe-otap`:
 warn,otel.receiver.otlp=debug,otel-arrow-dfe-otap=debug
 ```
 
-At startup, a valid `RUST_LOG` environment variable takes precedence over
-`logs.level`. After startup, a successful full-engine reconciliation makes the
-reconciled `logs.level` authoritative and replaces the environment-derived
-filter. This lets an OpAMP or admin control plane reliably change verbosity
-even when the process was launched with `RUST_LOG`.
+When `logs.level` is omitted, a valid `RUST_LOG` value captured at startup
+remains authoritative. If both are absent, the effective default is
+`info,h2=off,hyper=off`. A later reconciliation can install an explicit
+`logs.level`; removing it restores the captured `RUST_LOG` value or the
+built-in default. This preserves `RUST_LOG` as a restart-time operator override
+without allowing it to supersede explicit engine configuration.
 
 ### Limitation: active span state is not reconstructed
 
 `EnvFilter` supports span-scoped directives such as
 `warn,[pipeline_thread]=debug`, which raise verbosity only while a matching
-span is entered. Those directives work when supplied at startup through
-`logs.level` or `RUST_LOG`, but reconciliation cannot apply them to spans that
-are already entered.
+span is entered. Those directives work when supplied before the span is
+created, through an explicit initial `logs.level` or through `RUST_LOG` when
+the field is omitted. Reconciliation cannot apply them to spans that are
+already entered.
 
 Reconciliation installs a newly built `EnvFilter` into each live dispatcher.
 `EnvFilter` tracks span scopes through `on_new_span` and `on_enter`, so a

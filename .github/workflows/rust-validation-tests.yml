@@ -39,6 +39,7 @@ jobs:
           ref: refs/pull/${{ inputs.pr_number }}/merge
           submodules: true
           fetch-depth: 0
+          persist-credentials: false
       - uses: dtolnay/rust-toolchain@3c5f7ea28cd621ae0bf5283f0e981fb97b8a7af9
         with:
           toolchain: stable
@@ -63,7 +64,7 @@ jobs:
           df -h
 
       - name: Install nextest
-        uses: taiki-e/install-action@e67fa11c4b9316fa714ddf0abed07a0c3143b95b # v2.87.4
+        uses: taiki-e/install-action@1919c4a95903d2c33e4a221102edca87309fc14b # v2.89.0
         with:
           tool: cargo-nextest
 

@@ -1,5 +1,11 @@
 [
   {
+    "id": "urn:microsoft:exporter:azure_data_explorer",
+    "category": "Exporter",
+    "description": null,
+    "attributes": {}
+  },
+  {
     "id": "urn:microsoft:exporter:azure_monitor",
     "category": "Exporter",
     "description": null,
@@ -22,6 +28,15 @@
     "category": "Processor",
     "description": null,
     "attributes": {}
+  },
+  {
+    "id": "urn:microsoft:receiver:json",
+    "category": "Receiver",
+    "description": "Browser-focused HTTP receiver for unauthenticated Microsoft Common Schema JSON telemetry",
+    "attributes": {
+      "auth": "NONE",
+      "protocol": "HTTP"
+    }
   },
   {
     "id": "urn:otel:controller:main",
@@ -102,13 +117,49 @@
     "attributes": {}
   },
   {
-    "id": "urn:otel:extension:oauth2_client_auth",
+    "id": "urn:otel:extension:azure_key_vault_sasl_auth",
+    "category": "Extension",
+    "description": null,
+    "attributes": {}
+  },
+  {
+    "id": "urn:otel:extension:azure_key_vault_user_pass_auth",
+    "category": "Extension",
+    "description": null,
+    "attributes": {}
+  },
+  {
+    "id": "urn:otel:extension:flat_file_api_key_auth",
+    "category": "Extension",
+    "description": null,
+    "attributes": {}
+  },
+  {
+    "id": "urn:otel:extension:flat_file_sasl_auth",
+    "category": "Extension",
+    "description": null,
+    "attributes": {}
+  },
+  {
+    "id": "urn:otel:extension:flat_file_user_pass_auth",
+    "category": "Extension",
+    "description": null,
+    "attributes": {}
+  },
+  {
+    "id": "urn:otel:extension:gcp_auth",
     "category": "Extension",
     "description": null,
     "attributes": {}
   },
   {
     "id": "urn:otel:extension:k8s_service_account_token_auth",
+    "category": "Extension",
+    "description": null,
+    "attributes": {}
+  },
+  {
+    "id": "urn:otel:extension:oauth2_client_auth",
     "category": "Extension",
     "description": null,
     "attributes": {}
@@ -163,6 +214,12 @@
   },
   {
     "id": "urn:otel:processor:filter",
+    "category": "Processor",
+    "description": null,
+    "attributes": {}
+  },
+  {
+    "id": "urn:otel:processor:log_parser",
     "category": "Processor",
     "description": null,
     "attributes": {}
@@ -246,6 +303,12 @@
     "attributes": {}
   },
   {
+    "id": "urn:otel:receiver:oracle",
+    "category": "Receiver",
+    "description": null,
+    "attributes": {}
+  },
+  {
     "id": "urn:otel:receiver:otap",
     "category": "Receiver",
     "description": null,
@@ -253,6 +316,24 @@
   },
   {
     "id": "urn:otel:receiver:otlp",
+    "category": "Receiver",
+    "description": null,
+    "attributes": {}
+  },
+  {
+    "id": "urn:otel:receiver:postgresql",
+    "category": "Receiver",
+    "description": null,
+    "attributes": {}
+  },
+  {
+    "id": "urn:otel:receiver:prometheus",
+    "category": "Receiver",
+    "description": null,
+    "attributes": {}
+  },
+  {
+    "id": "urn:otel:receiver:sql_server",
     "category": "Receiver",
     "description": null,
     "attributes": {}
@@ -277,6 +358,12 @@
   },
   {
     "id": "urn:otel:receiver:user_events",
+    "category": "Receiver",
+    "description": null,
+    "attributes": {}
+  },
+  {
+    "id": "urn:otel:receiver:windows_perf_counters",
     "category": "Receiver",
     "description": null,
     "attributes": {}

@@ -62,7 +62,7 @@ use otel_arrow_dfe_engine::context::ControllerContext;
 use otel_arrow_dfe_engine::control::{
     Controllable, NodeControlMsg, pipeline_completion_msg_channel, runtime_ctrl_msg_channel,
 };
-use otel_arrow_dfe_otap::otlp_grpc::OTLPData;
+use otel_arrow_dfe_otap::grpc::otlp::typed::OTLPData;
 use otel_arrow_dfe_telemetry::InternalTelemetrySystem;
 use serde_json::json;
 use std::pin::Pin;
@@ -469,6 +469,8 @@ fn bench_exporter(c: &mut Criterion) {
                                     pipeline_completion_tx,
                                     metrics_reporter,
                                     Interests::empty(),
+                                    otel_arrow_dfe_engine::testing::test_pipeline_runtime_services(
+                                    ),
                                 )
                                 .await
                                 .expect("Exporter event loop failed")
@@ -546,6 +548,8 @@ fn bench_exporter(c: &mut Criterion) {
                                     pipeline_completion_tx,
                                     metrics_reporter,
                                     Interests::empty(),
+                                    otel_arrow_dfe_engine::testing::test_pipeline_runtime_services(
+                                    ),
                                 )
                                 .await
                                 .expect("Exporter event loop failed")
@@ -628,6 +632,8 @@ fn bench_exporter(c: &mut Criterion) {
                                     pipeline_completion_tx,
                                     metrics_reporter,
                                     Interests::empty(),
+                                    otel_arrow_dfe_engine::testing::test_pipeline_runtime_services(
+                                    ),
                                 )
                                 .await
                                 .expect("Exporter event loop failed")

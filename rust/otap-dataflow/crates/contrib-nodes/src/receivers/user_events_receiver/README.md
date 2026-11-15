@@ -5,7 +5,7 @@
 ## Metadata
 
 - Type: `receiver:user_events` (`urn:otel:receiver:user_events`)
-- Feature gate: `user_events-receiver`; `event_header` decoding requires `user_events-eventheader`
+- Feature gate: `user-events`
 - Stability: Experimental
 
 ## Overview
@@ -222,8 +222,7 @@ Current implementation supports:
 - one or more tracepoint subscriptions per receiver
 - `tracefs`, which decodes standard Linux tracefs fields into typed log
   attributes
-- optional `event_header` decoding when the `user_events-eventheader` feature is
-  enabled
+- `event_header`, which decodes self-describing EventHeader payloads
 
 ## Configuration
 
@@ -292,10 +291,11 @@ The receiver bounds the in-process pending queue between one_collect perf
 callbacks and the drain loop with `session.limits.max_pending_events` and
 `session.limits.max_pending_bytes`. When parse rate exceeds drain rate and
 either cap is reached, new events are dropped before the adapter copies their
-payload into the pending queue and counted as `dropped_pending_overflow`. This
-cap covers only the adapter pending queue; kernel perf ring memory is governed by
-`session.per_cpu_buffer_size`, Arrow batch memory by `batching.*`, and
-downstream channel pressure by the engine's bounded local channel.
+payload into the pending queue and counted under
+`receiver.user_events.drops.samples` with `reason="pending_overflow"`. This
+cap covers only the adapter pending queue; kernel perf ring memory is
+governed by `session.per_cpu_buffer_size`, Arrow batch memory by `batching.*`,
+and downstream channel pressure by the engine's bounded local channel.
 
 Each subscription may also set `subscriptions[].limits.max_pending_events` and
 `subscriptions[].limits.max_pending_bytes`. When any subscription has limits,
@@ -310,11 +310,10 @@ under the shared global ceiling, set limits on the high-volume tracepoints;
 round-robin drain only equalizes drain order. Per-subscription caps may
 intentionally overcommit the session-wide caps because `session.limits.*`
 remains the hard aggregate ceiling; these caps do not reserve minimum capacity
-for a subscription. Phase 1 keeps
-`dropped_pending_overflow` aggregate-only, so per-tracepoint and per-cap drop
-attribution is not yet reported by metrics. If `subscriptions[].limits` is
-present, at least one pending cap must be set and all configured cap values must
-be greater than zero.
+for a subscription. Phase 1 keeps the `pending_overflow` drop reason
+aggregate-only, so per-tracepoint and per-cap drop attribution is not yet
+reported by metrics. If `subscriptions[].limits` is present, at least one
+pending cap must be set and all configured cap values must be greater than zero.
 
 Late registration is also currently all-or-nothing for multiple subscriptions:
 if any configured tracepoint is missing, the receiver retries opening the
@@ -323,8 +322,8 @@ Supporting partial startup and later subscription registration is a future
 improvement.
 
 `subscriptions` must contain at least one entry. `tracefs` is the default
-`subscriptions[].format.type`. `event_header` requires the
-`user_events-eventheader` feature.
+`subscriptions[].format.type`. Both `tracefs` and `event_header` are included
+with the `user-events` feature.
 
 `session.wakeup_watermark` exists as a reserved configuration field for future
 one_collect wakeup support, but is currently ignored.
@@ -347,8 +346,7 @@ config:
   subscriptions:
     - tracepoint: "myprovider_L2K1"
       format:
-        # Decode format. "tracefs" is always supported; "event_header" requires
-        # the user_events-eventheader feature.
+        # Decode format. "tracefs" and "event_header" are supported.
         type: tracefs
       limits:
         # Optional per-subscription pending event cap. When "limits" is present,
@@ -447,7 +445,7 @@ EventHeader structs are flattened with dot-separated attribute names. If an
 EventHeader payload cannot be decoded, the raw user payload is preserved in the
 `linux.user_events.payload_base64` attribute.
 
-This decoder is optional and requires the `user_events-eventheader` feature.
+This decoder is included with the `user-events` feature.
 
 Only scalar EventHeader values that map to the receiver's current attribute
 types are surfaced: strings, signed integers, booleans, and floating point
@@ -526,7 +524,7 @@ bounded by a specific config field. This diagram shows where the `drain.*`,
   | downstream channel  |      full    -> receiver task waits for capacity
   |                     |      waiting -> downstream_send_blocked_ns += elapsed
   +---------------------+      memory pressure (should_shed_ingress):
-                                     records    -> dropped_memory_pressure++
+                                     records    -> drops.samples (reason: memory_pressure)++
                                      buffered batch on ctrl event -> drop_batch
 ```
 
@@ -536,9 +534,9 @@ Notes:
   the receiver's pending queue; `drain.max_drain_ns` must be non-zero or config
   validation rejects it.
 - Memory pressure takes effect at two points: per-record during the pop loop
-  (records are counted toward `dropped_memory_pressure` instead of being
-  appended to the batch) and on ctrl events where any already-buffered batch is
-  dropped rather than flushed.
+  (records are counted toward `receiver.user_events.drops.samples` with
+  `reason="memory_pressure"` instead of being appended to the batch) and on
+  ctrl events where any already-buffered batch is dropped rather than flushed.
 - When the downstream channel is full, the receiver awaits channel capacity.
   While it is waiting, the perf ring is the intentional overflow point.
 
@@ -590,21 +588,31 @@ extra drain/flush; use graceful drain when minimizing buffered data loss matters
 
 ## Metrics
 
-The receiver reports these counters under `receiver.user_events`:
+The following tables list the telemetry emitted by this receiver.
 
-| Metric | Meaning |
-| --- | --- |
-| `received_samples` | Perf samples drained from the kernel/perf path. |
-| `forwarded_samples` | Log records successfully forwarded downstream. |
-| `downstream_send_blocked_ns` | Time spent waiting for downstream channel capacity. |
-| `dropped_memory_pressure` | Records or batches dropped because process memory pressure requested ingress shedding. |
-| `dropped_no_subscription` | Samples that did not map to a configured subscription index. This should normally stay zero. |
-| `dropped_pending_overflow` | Samples dropped before allocation because the adapter pending queue reached its configured event or byte cap. |
-| `dropped_send_error` | Records dropped because a downstream send failed. |
-| `lost_perf_samples` | Lost sample count reported by the perf ring. |
-| `late_registration_retries` | Late-registration retry attempts while waiting for tracepoints. |
-| `sessions_started` | Receiver perf sessions successfully opened. |
-| `flushed_batches` | Arrow log batches flushed downstream. |
+### Operational Metrics
+
+| Scope | Instrument | Unit | Attributes | Meaning |
+| --- | --- | --- | --- | --- |
+| `receiver.user_events` | `received.samples` | `{item}` | None | Perf samples drained from kernel/perf and dequeued from the adapter pending queue. |
+| `receiver.user_events` | `forwarded.samples` | `{item}` | None | Log records successfully forwarded downstream. |
+| `receiver.user_events` | `downstream.send.blocked.ns` | `ns` | None | Time spent waiting for downstream channel capacity. |
+| `receiver.user_events` | `lost.perf.samples` | `{item}` | None | Lost sample count reported by the perf ring. |
+| `receiver.user_events` | `late.registration.retries` | `{event}` | None | Late-registration retry attempts while waiting for tracepoints. |
+| `receiver.user_events` | `sessions.started` | `{event}` | None | Receiver perf sessions successfully opened. |
+| `receiver.user_events` | `flushed.batches` | `{event}` | None | Arrow log batches flushed downstream. |
+
+### Drop Metrics
+
+| Scope | Instrument | Unit | Attributes | Meaning |
+| --- | --- | --- | --- | --- |
+| `receiver.user_events.drops` | `samples` | `{item}` | `reason` | Records dropped by the receiver, partitioned by drop reason. Values: `memory_pressure` (dropped due to memory limiter shedding), `no_subscription` (unmatched tracepoint subscription index), `pending_overflow` (adapter queue capacity overflow before queue admission), `send_error` (downstream channel send failure). |
+
+> **Note on drop rates:** `received.samples` counts events dequeued from the
+> adapter pending queue, while `pending_overflow` counts events rejected
+> before queue admission. Summing drop reasons reflects total drops, but
+> dividing that total by `received.samples` can exceed 1 and should not be
+> presented as a drop percentage.
 
 TODO: Add metrics for corrupt perf events and corrupt perf buffers once the
 underlying collection layer exposes those counters.
@@ -662,8 +670,7 @@ For reliable testing, prefer:
 
 Recommended test layers:
 
-- unit tests for tracefs structural decoding, plus EventHeader payload handling
-  when `user_events-eventheader` is enabled
+- unit tests for tracefs structural decoding and EventHeader payload handling
 - Linux-only receiver integration tests using a real kernel tracepoint
 - pipeline-level schema mapping tests in the processor that owns that schema
 
@@ -673,9 +680,9 @@ The tracefs debug pipeline exercises a real Linux `user_events` producer, this
 receiver, the debug processor, and the noop exporter:
 
 ```bash
-cargo build --features user_events-receiver
+cargo build --features user-events
 cargo build -p otel-arrow-dfe-contrib-nodes \
-  --features user_events-receiver \
+  --features user-events \
   --example user_events_tracefs_producer
 
 sudo ./target/debug/df_engine \
@@ -695,14 +702,13 @@ Expected debug output includes `EventName: user_events:otel_arrow_dfe_tracefs_de
 
 ### Manual EventHeader E2E
 
-The EventHeader debug pipeline uses the optional `user_events-eventheader`
-feature and validates EventHeader payload decoding through the same receiver
-and debug processor path:
+The EventHeader debug pipeline validates EventHeader payload decoding through
+the same receiver and debug processor path:
 
 ```bash
-cargo build --features user_events-eventheader
+cargo build --features user-events
 cargo build -p otel-arrow-dfe-contrib-nodes \
-  --features user_events-eventheader \
+  --features user-events \
   --example user_events_eventheader_producer
 
 sudo ./target/debug/df_engine \

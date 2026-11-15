@@ -182,7 +182,7 @@ impl<PData> TestContext<PData> {
     /// This reflects whether the processor would accept new pdata in production,
     /// where the engine checks this before delivering messages.
     ///
-    /// [`accept_pdata`]: crate::local::Processor::accept_pdata
+    /// [`accept_pdata`]: crate::local::processor::Processor::accept_pdata
     #[must_use]
     pub fn accept_pdata(&self) -> bool {
         match &self.runtime {
@@ -396,7 +396,11 @@ impl<PData: Debug + 'static> TestPhase<PData> {
         self.rt.block_on(async move {
             let mut runtime = self
                 .processor
-                .prepare_runtime(metrics_reporter, Interests::empty())
+                .prepare_runtime(
+                    metrics_reporter,
+                    Interests::empty(),
+                    super::create_test_pipeline_runtime_services(),
+                )
                 .await
                 .expect("Failed to prepare runtime");
 

@@ -36,6 +36,17 @@ struct LocalRuntimeSchedulerConfig {
     /// default and tune only for measured burst-drain or task-latency issues.
     max_io_events_per_tick: Option<usize>,
 
+    /// Maximum I/O readiness events processed during a nonblocking driver poll.
+    ///
+    /// Unlike `max_io_events_per_tick`, this only limits polls that do not wait,
+    /// normally while runnable tasks remain. A smaller batch leaves excess I/O
+    /// events in the kernel and returns to task polling sooner, while idle
+    /// polls can still drain larger batches. This may improve responsiveness
+    /// under bursts, but can increase driver passes or reduce throughput.
+    /// `event_interval` controls when busy polls occur; this controls their
+    /// batch size. Leave unset to reuse Tokio's `max_io_events_per_tick` limit.
+    max_io_events_per_busy_tick: Option<usize>,
+
     /// Whether Tokio records the distribution of time spent in task polls.
     ///
     /// Enable this temporarily to identify long-running polls and tasks that
@@ -64,6 +75,10 @@ impl LocalRuntimeSchedulerConfig {
                 "engine.runtime.local_runtime.max_io_events_per_tick",
                 settings.max_io_events_per_tick,
             )?,
+            max_io_events_per_busy_tick: validate_positive_count(
+                "engine.runtime.local_runtime.max_io_events_per_busy_tick",
+                settings.max_io_events_per_busy_tick,
+            )?,
             poll_time_histogram: settings.poll_time_histogram,
         })
     }
@@ -74,6 +89,9 @@ impl LocalRuntimeSchedulerConfig {
         }
         if let Some(value) = self.max_io_events_per_tick {
             let _ = builder.max_io_events_per_tick(value);
+        }
+        if let Some(value) = self.max_io_events_per_busy_tick {
+            let _ = builder.max_io_events_per_busy_tick(value);
         }
         #[cfg(tokio_unstable)]
         if self.poll_time_histogram {
@@ -130,6 +148,7 @@ mod tests {
             event_interval,
             max_io_events_per_tick,
             poll_time_histogram,
+            ..Default::default()
         }
     }
 
@@ -153,6 +172,7 @@ mod tests {
             LocalRuntimeSchedulerConfig {
                 event_interval: Some(127),
                 max_io_events_per_tick: Some(512),
+                max_io_events_per_busy_tick: None,
                 poll_time_histogram: false,
             }
         );
@@ -176,6 +196,39 @@ mod tests {
             .unwrap_err();
         assert_eq!(err.kind(), io::ErrorKind::InvalidInput);
         assert!(err.to_string().contains("must be greater than 0"));
+    }
+
+    /// Scenario: a busy I/O batch limit is configured without other scheduler overrides.
+    /// Guarantees: validation preserves the independent override and builds a working local runtime.
+    #[test]
+    fn build_local_runtime_accepts_busy_io_limit() {
+        let settings = LocalRuntimeSettings {
+            max_io_events_per_busy_tick: Some(8),
+            ..Default::default()
+        };
+        let config = LocalRuntimeSchedulerConfig::from_settings(&settings).unwrap();
+        assert_eq!(config.max_io_events_per_busy_tick, Some(8));
+        assert_eq!(config.max_io_events_per_tick, None);
+        assert_eq!(config.event_interval, None);
+        let rt = build_local_runtime("busy-io-test", &settings).unwrap();
+        let value = std::rc::Rc::new(42);
+        let task = rt.spawn_local(async move { *value });
+        assert_eq!(rt.block_on(task).unwrap(), 42);
+    }
+
+    /// Scenario: the busy I/O batch limit is zero in programmatically constructed settings.
+    /// Guarantees: runtime construction returns InvalidInput naming the setting instead of panicking.
+    #[test]
+    fn build_local_runtime_rejects_zero_busy_io_limit() {
+        let settings = LocalRuntimeSettings {
+            max_io_events_per_busy_tick: Some(0),
+            ..Default::default()
+        };
+        let err = build_local_runtime("invalid-busy-io-test", &settings).unwrap_err();
+        assert_eq!(err.kind(), io::ErrorKind::InvalidInput);
+        assert!(err.to_string().contains(
+            "engine.runtime.local_runtime.max_io_events_per_busy_tick must be greater than 0"
+        ));
     }
 
     /// Scenario: poll-time histograms are enabled in a `tokio_unstable` build.

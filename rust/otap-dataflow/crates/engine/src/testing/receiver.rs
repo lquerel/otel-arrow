@@ -20,7 +20,10 @@ use crate::receiver::ReceiverWrapper;
 use crate::shared::message::{SharedReceiver, SharedSender};
 use crate::testing::{CtrlMsgCounters, setup_test_runtime};
 use otel_arrow_dfe_channel::error::RecvError;
-use otel_arrow_dfe_config::transport_headers_policy::HeaderCapturePolicy;
+#[cfg(any(test, feature = "test-utils"))]
+use otel_arrow_dfe_config::context::authorized_identity::AuthorizedIdentityPolicy;
+#[cfg(any(test, feature = "test-utils"))]
+use otel_arrow_dfe_config::context::transport_policy::HeaderCapturePolicy;
 use otel_arrow_dfe_telemetry::reporter::MetricsReporter;
 use serde_json::Value;
 use std::fmt::Debug;
@@ -145,6 +148,8 @@ pub struct TestRuntime<PData> {
     /// Message counter for tracking processed messages
     counter: CtrlMsgCounters,
 
+    metrics_reporter: Option<MetricsReporter>,
+
     _pd: PhantomData<PData>,
 }
 
@@ -156,6 +161,8 @@ pub struct TestPhase<PData> {
     control_sender: Sender<NodeControlMsg<PData>>,
     receiver: ReceiverWrapper<PData>,
     counters: CtrlMsgCounters,
+
+    metrics_reporter: Option<MetricsReporter>,
 }
 
 /// Data and operations for the validation phase of a receiver.
@@ -193,6 +200,7 @@ impl<PData: Clone + Debug + 'static> TestRuntime<PData> {
             config,
             rt,
             counter: CtrlMsgCounters::new(),
+            metrics_reporter: None,
             _pd: PhantomData,
         }
     }
@@ -207,6 +215,13 @@ impl<PData: Clone + Debug + 'static> TestRuntime<PData> {
         self.counter.clone()
     }
 
+    /// Uses an observable reporter for periodic and terminal receiver metrics.
+    #[must_use]
+    pub fn with_metrics_reporter(mut self, reporter: MetricsReporter) -> Self {
+        self.metrics_reporter = Some(reporter);
+        self
+    }
+
     /// Sets the receiver for the test runtime and returns a test phase.
     pub fn set_receiver(self, receiver: ReceiverWrapper<PData>) -> TestPhase<PData> {
         let control_sender = receiver.control_sender();
@@ -215,6 +230,7 @@ impl<PData: Clone + Debug + 'static> TestRuntime<PData> {
             receiver,
             control_sender,
             counters: self.counter,
+            metrics_reporter: self.metrics_reporter,
         }
     }
 }
@@ -227,9 +243,23 @@ impl<PData: Clone + Debug + 'static> Default for TestRuntime<PData> {
 
 impl<PData: Debug + 'static> TestPhase<PData> {
     /// Sets a capture policy on the receiver wrapper for transport header testing.
+    #[cfg(any(test, feature = "test-utils"))]
     #[must_use]
     pub fn with_capture_policy(mut self, policy: Option<HeaderCapturePolicy>) -> Self {
-        self.receiver = self.receiver.with_capture_policy(policy);
+        self.receiver = self
+            .receiver
+            .with_capture_policy(policy.map(|policy| policy.compile(|_| true)));
+        self
+    }
+
+    /// Sets an authorized identity policy on the receiver wrapper for testing.
+    #[cfg(any(test, feature = "test-utils"))]
+    #[must_use]
+    pub fn with_authorized_identity_policy(
+        mut self,
+        policy: Option<AuthorizedIdentityPolicy>,
+    ) -> Self {
+        self.receiver = self.receiver.with_authorized_identity_policy(policy);
         self
     }
 
@@ -278,7 +308,8 @@ impl<PData: Debug + 'static> TestPhase<PData> {
 
         let control_sender_for_validation = self.control_sender.clone();
 
-        let (_metrics_rx, metrics_reporter) = MetricsReporter::create_new_and_receiver(1);
+        let (_metrics_rx, fallback_reporter) = MetricsReporter::create_new_and_receiver(1);
+        let metrics_reporter = self.metrics_reporter.unwrap_or(fallback_reporter);
         let final_metrics_reporter = metrics_reporter.clone();
 
         let run_receiver_handle = self.rt.spawn_local(async move {
@@ -289,6 +320,7 @@ impl<PData: Debug + 'static> TestPhase<PData> {
                     pipeline_completion_msg_tx,
                     metrics_reporter,
                     Interests::empty(),
+                    super::create_test_pipeline_runtime_services(),
                 )
                 .await
                 .expect("Receiver event loop failed");

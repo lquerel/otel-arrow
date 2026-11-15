@@ -57,7 +57,8 @@ cargo run -- --config configs/otlp-otlp.yaml --validate-and-exit
 
 Validation parses YAML or JSON, validates the root model, checks graph
 references, checks that every node type is registered in the binary, and runs
-node-specific config validation when the component provides it.
+node-specific config validation when the component provides it. It also compiles
+context bindings, including qualified propagation selectors.
 
 After loading, the CLI can override selected engine-level settings:
 
@@ -80,16 +81,19 @@ Every runtime file is a single root document that describes the engine process:
 ```yaml
 version: otel_dataflow/v1
 policies: {}
+codecs: {}
 topics: {}
 engine: {}
 groups:
     default:
         topics: {}
         policies: {}
+        codecs: {}
         pipelines:
             main:
                 type: otap
                 policies: {}
+                codecs: {}
                 extensions: {}
                 nodes: {}
                 connections: []
@@ -104,6 +108,7 @@ Required root fields:
 Optional root fields:
 
 - `policies`: top-level policy defaults.
+- `codecs`: optional codec bindings and named configurations inherited by pipelines.
 - `topics`: global topic declarations.
 - `engine`: engine-wide settings.
 
@@ -140,6 +145,18 @@ groups:
                     - from: batch
                       to: otlp/export
 ```
+
+## Codec Defaults
+
+Codecs convert encoded telemetry to and from native OTAP records on demand.
+Use `codecs.bindings.otlp-bytes.decode.validation: strict` to validate complete
+OTLP batches when decoding. Without codec declarations, all registered encodings
+use their distribution defaults. Bindings can select inline settings or reusable
+named configurations. The section can appear at root, group, pipeline, or
+observability-pipeline scope, alongside `policies`.
+
+Matching forwarding and borrowed encoded views do not run a decoder. See
+[PData codecs](codecs.md) for names, inheritance, validation costs, and examples.
 
 ## Receivers, Processors, and Exporters
 
@@ -240,6 +257,58 @@ Policies are scoped by hierarchy. For regular pipelines, precedence is:
 Policy overrides apply by policy family rather than by deep-merging every
 nested field. The process-wide memory limiter is only supported at top-level
 `policies.resources.memory_limiter`.
+
+### Conditional Transport Header Propagation
+
+Composite context entries can conditionally select a captured transport header
+for exporter propagation:
+
+```yaml
+policies:
+    context:
+        entries:
+            tenant:
+                - type: transport_header
+                  name: workspace
+                  store_as: workspace_id
+                - type: transport_header_match
+                  name: environment
+                  value: production
+    transport_headers:
+        header_capture:
+            headers:
+                - match_names: [x-workspace]
+                  store_as: workspace
+                - match_names: [x-environment]
+                  store_as: environment
+        header_propagation:
+            default:
+                selector:
+                    type: named
+                    named: [tenant:workspace_id]
+                name: stored_name
+```
+
+The selected `workspace` header is emitted as `workspace_id` only when the
+whole composite is present at the receiver boundary. Every value-bearing
+member must be available and every configured match condition must pass.
+Header names are ASCII case-insensitive; values are exact byte matches. The
+selected source and every condition header must be captured; the example
+stores `x-workspace` as `workspace` and `x-environment` as `environment`.
+
+Qualified selectors can also propagate configured `constant` and `randomness`
+members. These members have no original wire name, so `name: preserve` uses
+their configured member name. Authorized-identity members cannot be propagated
+as transport headers.
+
+Qualified composite selectors cannot share a primitive source with another
+qualified or unqualified entry. Repeated unqualified entries, including ASCII
+case variants, are accepted as equivalent. Unknown composites, unknown members,
+authorized-identity members, and conflicting source bindings are rejected
+during startup. Exporter overrides retain precedence and can independently
+select the primitive header. See
+[Transport header policies](transport-headers.md#composite-members)
+for complete matching, naming, and override semantics.
 
 ### Pipeline Core Allocation
 
@@ -462,6 +531,12 @@ engine:
                     config: {}
                 otlp:
                     type: exporter:otlp_grpc
+                    capabilities:
+                        bearer_token_provider: auth
+                    config: {}
+            extensions:
+                auth:
+                    type: extension:oauth2_client_auth
                     config: {}
             connections:
                 - from: internal
@@ -469,11 +544,13 @@ engine:
 ```
 
 Observability pipelines use the same node and connection model as regular
-pipelines. They support `channel_capacity`, `health`, and `telemetry` policies,
-but resource policies are intentionally not supported there. The pipeline is
-mandatory and must contain exactly one connected internal telemetry receiver.
-The receiver defaults to `signals: [logs, metrics]`, while either signal can be
-selected independently. Logs must remain enabled
+pipelines. Pipeline-scoped extensions can provide capabilities to observability
+nodes and are declared in the pipeline's `extensions` section. They support
+`channel_capacity`, `health`, and `telemetry` policies, but resource policies
+are intentionally not supported there. The pipeline is mandatory and must
+contain exactly one connected internal telemetry receiver. The receiver
+defaults to `signals: [logs, metrics]`, while either signal can be selected
+independently. Logs must remain enabled
 when a log provider uses `its`. Optional `metrics.interval` and `metrics.views`
 fields customize periodic export when metrics are selected. A logs-only
 receiver drains the private ITS metric accumulator without converting or
@@ -550,6 +627,10 @@ engine:
                   to: otlp
 ```
 
+On Windows, the engine also reports `memory.commit` for private committed memory,
+including paged-out private memory. Select it separately from `memory.rss`, which
+continues to report resident memory on every platform.
+
 Apply these mappings when migrating:
 
 - Remove `metrics.provider`; ITS is now the only internal metrics path.
@@ -588,12 +669,17 @@ no migration is required: the built-in observability pipeline consumes metrics
 with a noop exporter.
 
 For exact engine-level fields, see
-[Engine Section](configuration-model.md#engine-section).
+[Engine Section](configuration-model.md#engine-section). For the embedded
+debugging UI, admin telemetry endpoints, Prometheus mapping rules, and the
+engine and runtime metrics reference, see
+[Self-observability](self-observability.md).
 
 ## Other Information
 
 Useful adjacent docs:
 
+- [Self-observability](self-observability.md): embedded debugging UI, admin
+  telemetry endpoints, and engine and runtime metrics reference.
 - [Core-node catalog](../crates/core-nodes/README.md): node list and links to
   per-node configuration docs beside the implementation.
 - [Contrib-node catalog](../crates/contrib-nodes/README.md): optional
@@ -641,6 +727,10 @@ Use `--validate-and-exit` while editing:
 cargo run -- --config path/to/config.yaml --validate-and-exit
 ```
 
+`--validate-and-exit` compiles context bindings and rejects qualified
+propagation selectors that reference unknown composites, unknown or unsupported
+members, or conflicting primitive transport-header sources.
+
 If validation fails inside a node config, open that node's README from the
 [core-node catalog](../crates/core-nodes/README.md) or
 [contrib-node catalog](../crates/contrib-nodes/README.md). If validation fails
@@ -650,6 +740,7 @@ in the root model, use the
 ## Reference
 
 - [Runnable examples](../configs/README.md)
+- [Self-observability](self-observability.md)
 - [Core-node catalog](../crates/core-nodes/README.md)
 - [Contrib-node catalog](../crates/contrib-nodes/README.md)
 - [Configuration model reference](configuration-model.md)

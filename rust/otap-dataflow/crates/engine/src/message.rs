@@ -416,15 +416,13 @@ where
                     .as_ref()
                     .expect("pdata_rx must exist")
                     .is_empty()
-            {
-                if let Err(RecvError::Closed) = self
+                && let Err(RecvError::Closed) = self
                     .pdata_rx
                     .as_mut()
                     .expect("pdata_rx must exist")
                     .try_recv()
-                {
-                    return Ok(self.closed_pdata_shutdown());
-                }
+            {
+                return Ok(self.closed_pdata_shutdown());
             }
 
             // Draining mode: Shutdown pending
@@ -915,12 +913,13 @@ mod tests {
     /// Scenario: a processor-local delayed resume is scheduled for immediate
     /// delivery while the processor inbox is otherwise idle.
     /// Guarantees: the inbox surfaces the due retained payload as
-    /// `NodeControlMsg::ResumeData` with the original deadline and payload.
+    /// `NodeControlMsg::ResumeData` with the original deadline, payload, and
+    /// scheduler-assigned resume id.
     #[tokio::test]
     async fn processor_inbox_emits_due_delayed_resume_as_control_message() {
         let (_control_tx, _pdata_tx, scheduler, mut inbox) = local_processor_inbox(4);
         let when = Instant::now();
-        scheduler
+        let resume_id = scheduler
             .requeue_later(when, Box::new(TestMsg::new("delayed")))
             .expect("delayed resume should schedule");
 
@@ -930,8 +929,13 @@ mod tests {
             .expect("message should arrive");
         assert!(matches!(
             message,
-            Message::Control(NodeControlMsg::ResumeData { when: observed, data })
-                if observed == when && *data == TestMsg::new("delayed")
+            Message::Control(NodeControlMsg::ResumeData {
+                when: observed,
+                data,
+                resume_id: observed_id,
+            }) if observed == when
+                && *data == TestMsg::new("delayed")
+                && observed_id == resume_id
         ));
     }
 
@@ -976,7 +980,7 @@ mod tests {
             .expect("pdata should enqueue");
         let when = Instant::now();
         for idx in 0..40 {
-            scheduler
+            let _resume_id = scheduler
                 .requeue_later(when, Box::new(TestMsg::new(format!("delayed-{idx}"))))
                 .expect("delayed resume should schedule");
         }
@@ -1165,12 +1169,13 @@ mod tests {
     /// Scenario: shutdown is latched while the processor-local scheduler still
     /// holds a future delayed resume.
     /// Guarantees: pending delayed resumes become immediately available as
-    /// `ResumeData` control traffic before the latched shutdown is delivered.
+    /// `ResumeData` control traffic with their original resume ids before the
+    /// latched shutdown is delivered.
     #[tokio::test]
     async fn processor_inbox_returns_pending_delayed_resumes_on_shutdown_latch() {
         let (control_tx, _pdata_tx, scheduler, mut inbox) = local_processor_inbox(4);
         let original_when = Instant::now() + Duration::from_secs(60);
-        scheduler
+        let resume_id = scheduler
             .requeue_later(original_when, Box::new(TestMsg::new("delayed")))
             .expect("delayed resume should schedule");
         control_tx
@@ -1202,8 +1207,13 @@ mod tests {
             .expect("delayed resume should return immediately during shutdown");
         assert!(matches!(
             resumed,
-            Message::Control(NodeControlMsg::ResumeData { when, data })
-                if when < original_when && *data == TestMsg::new("delayed")
+            Message::Control(NodeControlMsg::ResumeData {
+                when,
+                data,
+                resume_id: observed_id,
+            }) if when < original_when
+                && *data == TestMsg::new("delayed")
+                && observed_id == resume_id
         ));
 
         let shutdown = inbox

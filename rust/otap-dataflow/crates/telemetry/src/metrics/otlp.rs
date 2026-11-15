@@ -116,6 +116,8 @@
 //! support, or if an interoperable extension can be defined. Keeping the
 //! projection isolated in this module makes either future path replaceable
 //! without changing the hot-path metric-set API or registry aggregation model.
+//!
+//! [`Metric`]: otel_arrow_dfe_pdata::proto::opentelemetry::metrics::v1::Metric
 
 use crate::attributes::{AttributeSetHandler, AttributeValue};
 use crate::descriptor::{Instrument, MetricsField, Temporality};
@@ -126,7 +128,7 @@ use bytes::Bytes;
 use otel_arrow_dfe_config::pipeline::telemetry::AttributeValue as ConfigAttributeValue;
 use otel_arrow_dfe_expohisto::HistogramView;
 use otel_arrow_dfe_pdata::OtlpProtoBytes;
-use otel_arrow_dfe_pdata::otlp::common::{BoundedBuf, Dropped, MAX_OTLP_SIZE_LIMIT, ProtoBuffer};
+use otel_arrow_dfe_pdata::otlp::{BoundedBuf, EncodeFailure, MAX_OTLP_SIZE_LIMIT, ProtoBuffer};
 use otel_arrow_dfe_pdata::proto::consts::field_num::common::{
     ANY_VALUE_BOOL_VALUE, ANY_VALUE_DOUBLE_VALUE, ANY_VALUE_INT_VALUE, ANY_VALUE_KVLIST_VALUE,
     ANY_VALUE_STRING_VALUE, INSTRUMENTATION_SCOPE_ATTRIBUTES, INSTRUMENTATION_SCOPE_NAME,
@@ -212,8 +214,8 @@ pub enum Error {
     },
 }
 
-impl From<Dropped> for Error {
-    fn from(_: Dropped) -> Self {
+impl From<EncodeFailure> for Error {
+    fn from(_: EncodeFailure) -> Self {
         Self::RequestTooLarge {
             limit: MAX_OTLP_SIZE_LIMIT,
         }
@@ -1243,6 +1245,7 @@ mod tests {
         MetricsDescriptor,
     };
     use crate::entity::{EntityAttributeSet, EntityRegistry};
+    use otel_arrow_dfe_pdata::OtapArrowRecords;
     use otel_arrow_dfe_pdata::proto::opentelemetry::collector::metrics::v1::ExportMetricsServiceRequest;
     use otel_arrow_dfe_pdata::proto::opentelemetry::common::v1::{
         AnyValue, KeyValue, KeyValueList, any_value,
@@ -1254,7 +1257,7 @@ mod tests {
     };
     use otel_arrow_dfe_pdata::proto::opentelemetry::resource::v1::Resource;
     use otel_arrow_dfe_pdata::views::otap::OtapMetricsView;
-    use otel_arrow_dfe_pdata::{OtapArrowRecords, OtapPayload, TryIntoWithOptions};
+    use otel_arrow_dfe_pdata_codec::{CodecService, OtapPayload};
     use otel_arrow_dfe_pdata_views::views::common::{
         AnyValueView, AttributeView, InstrumentationScopeView,
     };
@@ -1276,7 +1279,7 @@ mod tests {
     #[test]
     fn request_too_large_error_reports_the_buffer_limit() {
         assert_eq!(
-            Error::from(Dropped).to_string(),
+            Error::from(EncodeFailure::Dropped).to_string(),
             format!(
                 "internal telemetry metrics request exceeded the OTLP size limit of \
                  {MAX_OTLP_SIZE_LIMIT} bytes"
@@ -2998,8 +3001,8 @@ mod tests {
             .expect("batch is non-empty");
         let payload: OtapPayload = encoded.into();
 
-        let records: OtapArrowRecords = payload
-            .try_into_with_default()
+        let records = payload
+            .try_into_otap(&CodecService::new().expect("valid codec registry"))
             .expect("OTAP exporter can convert bridge output to Arrow records");
         assert!(matches!(records, OtapArrowRecords::Metrics(_)));
 

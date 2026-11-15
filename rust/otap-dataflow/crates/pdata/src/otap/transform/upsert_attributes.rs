@@ -135,6 +135,12 @@ pub fn upsert_attributes<T: ArrowPrimitiveType>(
         });
     }
 
+    // Callers legitimately resolve to zero upserts, e.g. when every source attribute an
+    // assignment reads is absent from the batch. There is then nothing to merge.
+    if upserts.is_empty() {
+        return Ok(existing_attrs.clone());
+    }
+
     let num_existing = existing_attrs.num_rows();
 
     // Resolve each upsert: determine type, target column, extract values, compute counts, and
@@ -467,12 +473,16 @@ fn merge_parent_id_column<T: ArrowPrimitiveType>(
     let mut mutable = MutableArrayData::new(sources, false, total_output_rows);
 
     // Bulk copy existing rows.
-    mutable.extend(0, 0, num_existing);
+    mutable
+        .try_extend(0, 0, num_existing)
+        .map_err(|source| Error::Batching { source })?;
 
     // Append insert portions from each upsert.
     for (i, r) in resolved.iter().enumerate() {
         if r.num_inserts > 0 {
-            mutable.extend(i + 1, r.num_updates, r.num_updates + r.num_inserts);
+            mutable
+                .try_extend(i + 1, r.num_updates, r.num_updates + r.num_inserts)
+                .map_err(|source| Error::Batching { source })?;
         }
     }
 
@@ -691,33 +701,33 @@ fn merge_type_column<T: ArrowPrimitiveType>(
                 let count = run.end - run.start;
                 let attr_type = resolved_upsert.attr_value_type as u8;
 
-                if let Some(arr) = &resolved_upsert.new_values_array {
-                    if let Some(nulls) = arr.nulls() {
-                        // Array with nulls: write Empty for null values, attr_type for
-                        // non-null.
-                        let counter = &mut update_counters[idx];
-                        let validity_iter =
-                            BitSliceIterator::new(nulls.buffer().as_slice(), *counter, count);
-                        let mut last_valid_range_end = 0;
-                        for (start, end) in validity_iter {
-                            if start != last_valid_range_end {
-                                output.extend(std::iter::repeat_n(
-                                    AttributeValueType::Empty as u8,
-                                    start - last_valid_range_end,
-                                ));
-                            }
-                            output.extend(std::iter::repeat_n(attr_type, end - start));
-                            last_valid_range_end = end;
-                        }
-                        if last_valid_range_end != count {
+                if let Some(arr) = &resolved_upsert.new_values_array
+                    && let Some(nulls) = arr.nulls()
+                {
+                    // Array with nulls: write Empty for null values, attr_type for
+                    // non-null.
+                    let counter = &mut update_counters[idx];
+                    let validity_iter =
+                        BitSliceIterator::new(nulls.buffer().as_slice(), *counter, count);
+                    let mut last_valid_range_end = 0;
+                    for (start, end) in validity_iter {
+                        if start != last_valid_range_end {
                             output.extend(std::iter::repeat_n(
                                 AttributeValueType::Empty as u8,
-                                count - last_valid_range_end,
+                                start - last_valid_range_end,
                             ));
                         }
-                        *counter += count;
-                        continue;
+                        output.extend(std::iter::repeat_n(attr_type, end - start));
+                        last_valid_range_end = end;
                     }
+                    if last_valid_range_end != count {
+                        output.extend(std::iter::repeat_n(
+                            AttributeValueType::Empty as u8,
+                            count - last_valid_range_end,
+                        ));
+                    }
+                    *counter += count;
+                    continue;
                 }
 
                 // No nulls (or scalar): fill with this upsert's type discriminant.
@@ -729,37 +739,36 @@ fn merge_type_column<T: ArrowPrimitiveType>(
     // Insert rows: each upsert's type discriminant
     for resolved_upsert in resolved {
         let attr_type = resolved_upsert.attr_value_type as u8;
-        if let Some(arr) = &resolved_upsert.new_values_array {
-            if let Some(nulls) = arr.nulls() {
-                let validity_slice_iter = BitSliceIterator::new(
-                    nulls.buffer().as_slice(),
-                    resolved_upsert.num_updates,
-                    resolved_upsert.num_inserts,
-                );
-                let mut last_valid_range_end = 0;
-                for (start, end) in validity_slice_iter {
-                    // put the null range that came before the last valid range
-                    if start != last_valid_range_end {
-                        output.extend(std::iter::repeat_n(
-                            AttributeValueType::Empty as u8,
-                            start - last_valid_range_end,
-                        ));
-                    }
-                    output.extend(std::iter::repeat_n(attr_type, end - start));
-
-                    last_valid_range_end = end;
-                }
-
-                // put the remaining nulls
-                if last_valid_range_end != resolved_upsert.num_inserts {
+        if let Some(arr) = &resolved_upsert.new_values_array
+            && let Some(nulls) = arr.nulls()
+        {
+            let validity_slice_iter = BitSliceIterator::new(
+                nulls.buffer().as_slice(),
+                resolved_upsert.num_updates,
+                resolved_upsert.num_inserts,
+            );
+            let mut last_valid_range_end = 0;
+            for (start, end) in validity_slice_iter {
+                // put the null range that came before the last valid range
+                if start != last_valid_range_end {
                     output.extend(std::iter::repeat_n(
                         AttributeValueType::Empty as u8,
-                        resolved_upsert.num_inserts - last_valid_range_end,
+                        start - last_valid_range_end,
                     ));
                 }
+                output.extend(std::iter::repeat_n(attr_type, end - start));
 
-                continue;
+                last_valid_range_end = end;
             }
+
+            // put the remaining nulls
+            if last_valid_range_end != resolved_upsert.num_inserts {
+                output.extend(std::iter::repeat_n(
+                    AttributeValueType::Empty as u8,
+                    resolved_upsert.num_inserts - last_valid_range_end,
+                ));
+            }
+            continue;
         }
 
         output.extend(std::iter::repeat_n(attr_type, resolved_upsert.num_inserts));
@@ -1198,21 +1207,29 @@ fn merge_value_column<T: ArrowPrimitiveType>(
         let count = run.end - run.start;
         match run.owner {
             None => {
-                mutable.extend(0, run.start, run.end);
+                mutable
+                    .try_extend(0, run.start, run.end)
+                    .map_err(|source| Error::Batching { source })?;
             }
             Some(owner_idx) => {
                 if let Some(active) = &active_sources[owner_idx] {
                     if active.is_scalar {
                         for _ in 0..count {
-                            mutable.extend(active.source_idx, 0, 1);
+                            mutable
+                                .try_extend(active.source_idx, 0, 1)
+                                .map_err(|source| Error::Batching { source })?;
                         }
                     } else {
                         let counter = &mut update_counters[owner_idx];
-                        mutable.extend(active.source_idx, *counter, *counter + count);
+                        mutable
+                            .try_extend(active.source_idx, *counter, *counter + count)
+                            .map_err(|source| Error::Batching { source })?;
                         *counter += count;
                     }
                 } else {
-                    mutable.extend_nulls(count);
+                    mutable
+                        .try_extend_nulls(count)
+                        .map_err(|source| Error::Batching { source })?;
                 }
             }
         }
@@ -1226,17 +1243,23 @@ fn merge_value_column<T: ArrowPrimitiveType>(
         if let Some(active) = &active_sources[upsert_idx] {
             if active.is_scalar {
                 for _ in 0..r.num_inserts {
-                    mutable.extend(active.source_idx, 0, 1);
+                    mutable
+                        .try_extend(active.source_idx, 0, 1)
+                        .map_err(|source| Error::Batching { source })?;
                 }
             } else {
-                mutable.extend(
-                    active.source_idx,
-                    active.num_updates,
-                    active.num_updates + active.num_inserts,
-                );
+                mutable
+                    .try_extend(
+                        active.source_idx,
+                        active.num_updates,
+                        active.num_updates + active.num_inserts,
+                    )
+                    .map_err(|source| Error::Batching { source })?;
             }
         } else {
-            mutable.extend_nulls(r.num_inserts);
+            mutable
+                .try_extend_nulls(r.num_inserts)
+                .map_err(|source| Error::Batching { source })?;
         }
     }
 
@@ -1495,7 +1518,9 @@ fn try_build_unified_dict_multi<T: ArrowPrimitiveType>(
                     let key = array_value_as_bytes(existing_values_arr, i)?;
                     let idx = num_distinct as u16;
                     let _ = value_to_idx.insert(key, idx);
-                    unified_builder.extend(0, i, i + 1);
+                    unified_builder
+                        .try_extend(0, i, i + 1)
+                        .map_err(|source| Error::Batching { source })?;
                     old_to_new[i] = idx;
                     num_distinct += 1;
                 }
@@ -1525,7 +1550,9 @@ fn try_build_unified_dict_multi<T: ArrowPrimitiveType>(
                         }
                         let idx = num_distinct as u16;
                         let _ = value_to_idx.insert(key, idx);
-                        unified_builder.extend(0, row, row + 1);
+                        unified_builder
+                            .try_extend(0, row, row + 1)
+                            .map_err(|source| Error::Batching { source })?;
                         num_distinct += 1;
                         remap[row] = idx;
                     }
@@ -1560,7 +1587,9 @@ fn try_build_unified_dict_multi<T: ArrowPrimitiveType>(
                 }
                 let idx = num_distinct as u16;
                 let _ = value_to_idx.insert(key_byte, idx);
-                unified_builder.extend(mutable_source_idx, 0, 1);
+                unified_builder
+                    .try_extend(mutable_source_idx, 0, 1)
+                    .map_err(|source| Error::Batching { source })?;
                 num_distinct += 1;
                 idx
             };
@@ -1651,7 +1680,9 @@ fn build_values_remap<'a>(
         }
         let idx = *num_distinct as u16;
         let _ = value_to_idx.insert(key, idx);
-        unified_builder.extend(source_idx, i, i + 1);
+        unified_builder
+            .try_extend(source_idx, i, i + 1)
+            .map_err(|source| Error::Batching { source })?;
         *num_distinct += 1;
         remap.push(idx);
     }
@@ -1891,18 +1922,26 @@ fn merge_passthrough_column(
     let mut pos = 0;
     for (start, end) in SlicesIterator::new(mask) {
         if pos < start {
-            mutable.extend(0, pos, start);
+            mutable
+                .try_extend(0, pos, start)
+                .map_err(|source| Error::Batching { source })?;
         }
-        mutable.extend_nulls(end - start);
+        mutable
+            .try_extend_nulls(end - start)
+            .map_err(|source| Error::Batching { source })?;
         pos = end;
     }
     if pos < existing_col.len() {
-        mutable.extend(0, pos, existing_col.len());
+        mutable
+            .try_extend(0, pos, existing_col.len())
+            .map_err(|source| Error::Batching { source })?;
     }
 
     // append nulls for inserts
     if num_inserts > 0 {
-        mutable.extend_nulls(num_inserts);
+        mutable
+            .try_extend_nulls(num_inserts)
+            .map_err(|source| Error::Batching { source })?;
     }
 
     let result = make_array(mutable.freeze());
@@ -1929,7 +1968,8 @@ fn values_column_supports_dictionary_encoding(col_name: &str) -> bool {
 ///
 /// Strategy: if dictionary encoding is supported for the column, try to build a unified
 /// dictionary first. If that succeeds (cardinality fits in u16), use the dict path. If it
-/// fails (overflow) or dict encoding is not supported, fall back to primitive merge.
+/// exceeds the supported cardinality or dict encoding is not supported, fall back to primitive
+/// merge. Arrow offset overflow is returned as an error.
 fn create_new_value_column_batched<T: ArrowPrimitiveType>(
     target_col_name: &str,
     resolved: &[ResolvedUpsert<'_, T>],
@@ -1939,24 +1979,24 @@ fn create_new_value_column_batched<T: ArrowPrimitiveType>(
     let supports_dict_encoding = values_column_supports_dictionary_encoding(target_col_name);
 
     // Try dict encoding path first if supported.
-    if supports_dict_encoding {
-        if let Some(unified) = try_build_unified_dict_multi(None, resolved, target_col_name)? {
-            let field = Field::new(
-                target_col_name,
-                DataType::Dictionary(
-                    Box::new(DataType::UInt16),
-                    Box::new(unified.values.data_type().clone()),
-                ),
-                true,
-            );
-            return merge_values_with_unified_dict(
-                &field,
-                row_owners,
-                &unified,
-                resolved,
-                total_output_rows,
-            );
-        }
+    if supports_dict_encoding
+        && let Some(unified) = try_build_unified_dict_multi(None, resolved, target_col_name)?
+    {
+        let field = Field::new(
+            target_col_name,
+            DataType::Dictionary(
+                Box::new(DataType::UInt16),
+                Box::new(unified.values.data_type().clone()),
+            ),
+            true,
+        );
+        return merge_values_with_unified_dict(
+            &field,
+            row_owners,
+            &unified,
+            resolved,
+            total_output_rows,
+        );
     }
 
     // Fallback: primitive merge with decoded-to-plain sources.
@@ -2008,22 +2048,30 @@ fn create_new_value_column_batched<T: ArrowPrimitiveType>(
         match run.owner {
             None => {
                 // For ranges we are not updating, insert nulls (column didn't exist before).
-                mutable.extend_nulls(count);
+                mutable
+                    .try_extend_nulls(count)
+                    .map_err(|source| Error::Batching { source })?;
             }
             Some(owner_idx) => {
                 if let Some(active) = &active_sources[owner_idx] {
                     if active.is_scalar {
                         for _ in 0..count {
-                            mutable.extend(active.source_idx, 0, 1);
+                            mutable
+                                .try_extend(active.source_idx, 0, 1)
+                                .map_err(|source| Error::Batching { source })?;
                         }
                     } else {
                         let counter = &mut update_counters[owner_idx];
-                        mutable.extend(active.source_idx, *counter, *counter + count);
+                        mutable
+                            .try_extend(active.source_idx, *counter, *counter + count)
+                            .map_err(|source| Error::Batching { source })?;
                         *counter += count;
                     }
                 } else {
                     // inactive: update must be for a different column. write nulls in this column
-                    mutable.extend_nulls(count);
+                    mutable
+                        .try_extend_nulls(count)
+                        .map_err(|source| Error::Batching { source })?;
                 }
             }
         }
@@ -2037,18 +2085,24 @@ fn create_new_value_column_batched<T: ArrowPrimitiveType>(
         if let Some(active) = &active_sources[upsert_idx] {
             if active.is_scalar {
                 for _ in 0..r.num_inserts {
-                    mutable.extend(active.source_idx, 0, 1);
+                    mutable
+                        .try_extend(active.source_idx, 0, 1)
+                        .map_err(|source| Error::Batching { source })?;
                 }
             } else {
-                mutable.extend(
-                    active.source_idx,
-                    active.num_updates,
-                    active.num_updates + active.num_inserts,
-                );
+                mutable
+                    .try_extend(
+                        active.source_idx,
+                        active.num_updates,
+                        active.num_updates + active.num_inserts,
+                    )
+                    .map_err(|source| Error::Batching { source })?;
             }
         } else {
             // inactive: insert must be for a different column. write nulls in this column
-            mutable.extend_nulls(r.num_inserts);
+            mutable
+                .try_extend_nulls(r.num_inserts)
+                .map_err(|source| Error::Batching { source })?;
         }
     }
 
@@ -2818,6 +2872,24 @@ mod tests {
             .downcast_ref::<StringArray>()
             .unwrap()
             .clone()
+    }
+
+    /// Scenario: `upsert_attributes` is called with an empty upsert list, which happens when
+    /// every attribute an assignment reads is absent from the batch so no upsert resolves.
+    ///
+    /// Guarantees: the call returns the input batch unchanged instead of panicking while
+    /// indexing the empty resolved-upsert slice.
+    #[test]
+    fn test_upsert_attributes_no_upserts_returns_input_unchanged() {
+        let existing = build_attrs_batch(&[(0, "x", 1, "a"), (1, "y", 1, "b")]);
+
+        let result = upsert_attributes::<UInt16Type>(&existing, &[]).unwrap();
+
+        assert_eq!(result.num_rows(), existing.num_rows());
+        assert_eq!(result.schema(), existing.schema());
+        let keys = decode_to_utf8(result.column_by_name(consts::ATTRIBUTE_KEY).unwrap());
+        assert_eq!(keys.value(0), "x");
+        assert_eq!(keys.value(1), "y");
     }
 
     #[test]
